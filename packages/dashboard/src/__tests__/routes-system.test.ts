@@ -108,12 +108,12 @@ vi.mock("@fusion/core", async (importOriginal) => {
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
     isQmdAvailable: vi.fn().mockResolvedValue(false),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
       close: mockCentralClose,
       listProjects: mockCentralListProjects,
       reconcileProjectStatuses: mockCentralReconcileProjectStatuses,
-    })),
+    }; }),
   });
 });
 
@@ -529,6 +529,8 @@ describe("GET /api/system-stats", () => {
     );
     const initSpy = vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
     const listAgentsSpy = vi.spyOn(AgentStore.prototype, "listAgents").mockResolvedValue([]);
+    initSpy.mockClear();
+    listAgentsSpy.mockClear();
 
     const res = await GET(buildApp(defaultStore), `/api/system-stats?projectId=${projectId}`);
 
@@ -710,6 +712,7 @@ describe("routes/context project scoping helpers", () => {
     const store = createMockStore();
     const req = { query: {}, body: {} } as unknown as express.Request;
     const getOrCreateSpy = vi.spyOn(projectStoreResolver, "getOrCreateProjectStore");
+    getOrCreateSpy.mockClear();
 
     const scopedStore = await resolveRouteScopedStore(req, store);
 

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractRuntimeHint,
+  extractRuntimeModel,
+  resolveExecutorSessionModel,
   resolveHeartbeatSessionModels,
   resolveMergerSessionModel,
+  resolvePlanningSessionModel,
+  resolveValidatorSessionModel,
 } from "../agent-session-helpers.js";
 
 const { resolveRuntimeMock } = vi.hoisted(() => ({
@@ -39,29 +43,71 @@ describe("extractRuntimeHint", () => {
   });
 });
 
-describe("resolveHeartbeatSessionModels", () => {
-  it("uses agent runtime model as primary and execution settings as fallback", () => {
-    expect(resolveHeartbeatSessionModels(
-      {
-        executionProvider: "openai",
-        executionModelId: "gpt-4.1",
-      },
-      { model: "anthropic/claude-sonnet-4-5" },
-    )).toEqual({
-      defaultProvider: "anthropic",
-      defaultModelId: "claude-sonnet-4-5",
-      fallbackProvider: "openai",
-      fallbackModelId: "gpt-4.1",
+describe("extractRuntimeModel", () => {
+  it("parses combined and separate runtime model pairs", () => {
+    expect(extractRuntimeModel({ model: " anthropic/claude-sonnet-4-5 " })).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(extractRuntimeModel({ modelProvider: " openai ", modelId: " gpt-4.1 " })).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
     });
   });
 
-  it("uses execution settings model when runtime override is missing", () => {
+  it("does not turn malformed combined strings into complete model pairs", () => {
+    expect(extractRuntimeModel({ model: "gpt 5.3" })).toEqual({
+      provider: undefined,
+      modelId: undefined,
+    });
+  });
+});
+
+describe("resolve session model parity", () => {
+  const settings = {
+    executionProvider: "openai",
+    executionModelId: "gpt-4.1",
+    planningProvider: "anthropic",
+    planningModelId: "claude-sonnet-4-5",
+    defaultProviderOverride: "google",
+    defaultModelIdOverride: "gemini-2.5-pro",
+    defaultProvider: "zai",
+    defaultModelId: "glm-5.1",
+  };
+
+  it("uses the same fresh settings model for executor and heartbeat when runtimeConfig is absent", () => {
+    const executor = resolveExecutorSessionModel(undefined, undefined, settings);
+    const heartbeat = resolveHeartbeatSessionModels(settings);
+
+    expect(executor).toEqual({ provider: "openai", modelId: "gpt-4.1" });
+    expect(heartbeat).toEqual({
+      defaultProvider: executor.provider,
+      defaultModelId: executor.modelId,
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+  });
+
+  it("ignores partial runtimeConfig pairs without mixing runtime and settings fields", () => {
     expect(resolveHeartbeatSessionModels(
       {
         executionProvider: "openai",
         executionModelId: "gpt-4.1",
       },
-      {},
+      { modelProvider: "stale-provider" },
+    )).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+
+    expect(resolveHeartbeatSessionModels(
+      {
+        executionProvider: "openai",
+        executionModelId: "gpt-4.1",
+      },
+      { modelId: "gpt 5.3" },
     )).toEqual({
       defaultProvider: "openai",
       defaultModelId: "gpt-4.1",
@@ -70,16 +116,297 @@ describe("resolveHeartbeatSessionModels", () => {
     });
   });
 
-  it("does not duplicate fallback when runtime and execution model are the same", () => {
-    expect(resolveHeartbeatSessionModels(
-      {
-        executionProvider: "openai",
-        executionModelId: "gpt-4.1",
-      },
-      { modelProvider: "openai", modelId: "gpt-4.1" },
-    )).toEqual({
+  it("does not let a stale complete runtime model mask newer task or settings models", () => {
+    const staleRuntimeConfig = { model: "openai-codex/gpt-5.3-codex" };
+
+    expect(resolveExecutorSessionModel("task-provider", "task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "task-provider",
+      modelId: "task-model",
+    });
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, staleRuntimeConfig)).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel("planning-task-provider", "planning-task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "planning-task-provider",
+      modelId: "planning-task-model",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, staleRuntimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveHeartbeatSessionModels(settings, staleRuntimeConfig)).toEqual({
       defaultProvider: "openai",
       defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+    expect(resolveValidatorSessionModel("validator-task-provider", "validator-task-model", settings, staleRuntimeConfig)).toEqual({
+      provider: "validator-task-provider",
+      modelId: "validator-task-model",
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, {
+      ...settings,
+      validatorProvider: "google",
+      validatorModelId: "gemini-2.5-pro",
+    }, staleRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveMergerSessionModel(settings, staleRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("does not leak malformed gpt 5.3-style runtimeConfig into any automatic lane", () => {
+    const malformedRuntimeConfig = { modelId: "gpt 5.3" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveHeartbeatSessionModels(settings, malformedRuntimeConfig)).toEqual({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4.1",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, settings, malformedRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveMergerSessionModel(settings, malformedRuntimeConfig)).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("falls back through project override and global defaults before runtimeConfig", () => {
+    const staleRuntimeConfig = { model: "stale-provider/stale-model" };
+
+    expect(resolveMergerSessionModel({
+      defaultProviderOverride: "google",
+      defaultModelIdOverride: "gemini-2.5-pro",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    }, staleRuntimeConfig)).toEqual({ provider: "google", modelId: "gemini-2.5-pro" });
+    expect(resolveMergerSessionModel({
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    }, staleRuntimeConfig)).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+  });
+
+  it("uses a complete runtime model only when no lane/task/default model is configured", () => {
+    const runtimeConfig = { modelProvider: "anthropic", modelId: "claude-opus-4" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolveHeartbeatSessionModels(undefined, runtimeConfig)).toEqual({
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-opus-4",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+    expect(resolveMergerSessionModel(undefined, runtimeConfig)).toEqual({
+      provider: "anthropic",
+      modelId: "claude-opus-4",
+    });
+  });
+
+  it("covers backend-only surfaces; desktop and mobile breakpoints are not applicable", () => {
+    expect(resolveExecutorSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "openai",
+      modelId: "gpt-4.1",
+    });
+    expect(resolvePlanningSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(resolveValidatorSessionModel(undefined, undefined, settings, { model: "stale/old" })).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveMergerSessionModel(settings, { model: "stale/old" })).toEqual({
+      provider: "google",
+      modelId: "gemini-2.5-pro",
+    });
+  });
+});
+
+describe("project model override precedence invariant", () => {
+  const staleRuntimeConfig = { model: "stale-provider/stale-model" };
+  const partialRuntimeConfigs: Array<Record<string, unknown>> = [
+    { modelProvider: "stale-provider" },
+    { modelId: "stale-model" },
+    { model: "stale-provider" },
+  ];
+
+  const sessionCases = [
+    {
+      label: "executor",
+      settings: { executionProvider: "project-exec-provider", executionModelId: "project-exec-model" },
+      resolve: (runtimeConfig?: Record<string, unknown>) =>
+        resolveExecutorSessionModel(undefined, undefined, {
+          executionProvider: "project-exec-provider",
+          executionModelId: "project-exec-model",
+        }, runtimeConfig),
+      expected: { provider: "project-exec-provider", modelId: "project-exec-model" },
+    },
+    {
+      label: "planning",
+      settings: { planningProvider: "project-plan-provider", planningModelId: "project-plan-model" },
+      resolve: (runtimeConfig?: Record<string, unknown>) =>
+        resolvePlanningSessionModel(undefined, undefined, {
+          planningProvider: "project-plan-provider",
+          planningModelId: "project-plan-model",
+        }, runtimeConfig),
+      expected: { provider: "project-plan-provider", modelId: "project-plan-model" },
+    },
+    {
+      label: "validator",
+      settings: { validatorProvider: "project-validator-provider", validatorModelId: "project-validator-model" },
+      resolve: (runtimeConfig?: Record<string, unknown>) =>
+        resolveValidatorSessionModel(undefined, undefined, {
+          validatorProvider: "project-validator-provider",
+          validatorModelId: "project-validator-model",
+        }, runtimeConfig),
+      expected: { provider: "project-validator-provider", modelId: "project-validator-model" },
+    },
+    {
+      label: "heartbeat execution lane",
+      settings: { executionProvider: "project-heartbeat-provider", executionModelId: "project-heartbeat-model" },
+      resolve: (runtimeConfig?: Record<string, unknown>) => {
+        const resolved = resolveHeartbeatSessionModels({
+          executionProvider: "project-heartbeat-provider",
+          executionModelId: "project-heartbeat-model",
+        }, runtimeConfig);
+        return { provider: resolved.defaultProvider, modelId: resolved.defaultModelId };
+      },
+      expected: { provider: "project-heartbeat-provider", modelId: "project-heartbeat-model" },
+    },
+    {
+      label: "merger default lane",
+      settings: { defaultProviderOverride: "project-default-provider", defaultModelIdOverride: "project-default-model" },
+      resolve: (runtimeConfig?: Record<string, unknown>) =>
+        resolveMergerSessionModel({
+          defaultProviderOverride: "project-default-provider",
+          defaultModelIdOverride: "project-default-model",
+        }, runtimeConfig),
+      expected: { provider: "project-default-provider", modelId: "project-default-model" },
+    },
+  ];
+
+  it.each(sessionCases)("$label project override wins when runtimeConfig is absent, complete, or partial", ({ resolve, expected }) => {
+    expect(resolve()).toEqual(expected);
+    expect(resolve(staleRuntimeConfig)).toEqual(expected);
+    for (const partialRuntimeConfig of partialRuntimeConfigs) {
+      expect(resolve(partialRuntimeConfig)).toEqual(expected);
+    }
+  });
+
+  it("per-task overrides still outrank saved project lane overrides", () => {
+    const runtimeConfig = { model: "stale-provider/stale-model" };
+
+    expect(resolveExecutorSessionModel("task-provider", "task-model", {
+      executionProvider: "project-provider",
+      executionModelId: "project-model",
+    }, runtimeConfig)).toEqual({ provider: "task-provider", modelId: "task-model" });
+    expect(resolvePlanningSessionModel("task-planning-provider", "task-planning-model", {
+      planningProvider: "project-planning-provider",
+      planningModelId: "project-planning-model",
+    }, runtimeConfig)).toEqual({ provider: "task-planning-provider", modelId: "task-planning-model" });
+    expect(resolveValidatorSessionModel("task-validator-provider", "task-validator-model", {
+      validatorProvider: "project-validator-provider",
+      validatorModelId: "project-validator-model",
+    }, runtimeConfig)).toEqual({ provider: "task-validator-provider", modelId: "task-validator-model" });
+  });
+
+  it("falls back to global lanes and global defaults only when project lanes are unset", () => {
+    const runtimeConfig = { model: "stale-provider/stale-model" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, {
+      executionGlobalProvider: "global-exec-provider",
+      executionGlobalModelId: "global-exec-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    }, runtimeConfig)).toEqual({ provider: "global-exec-provider", modelId: "global-exec-model" });
+    expect(resolvePlanningSessionModel(undefined, undefined, {
+      planningGlobalProvider: "global-plan-provider",
+      planningGlobalModelId: "global-plan-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    }, runtimeConfig)).toEqual({ provider: "global-plan-provider", modelId: "global-plan-model" });
+    expect(resolveValidatorSessionModel(undefined, undefined, {
+      validatorGlobalProvider: "global-validator-provider",
+      validatorGlobalModelId: "global-validator-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    }, runtimeConfig)).toEqual({ provider: "global-validator-provider", modelId: "global-validator-model" });
+    expect(resolveMergerSessionModel({
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    }, runtimeConfig)).toEqual({ provider: "global-default-provider", modelId: "global-default-model" });
+  });
+
+  it("uses complete runtimeConfig only after project defaults and globals are absent", () => {
+    const runtimeConfig = { model: "runtime-provider/runtime-model" };
+
+    expect(resolveExecutorSessionModel(undefined, undefined, {
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    }, runtimeConfig)).toEqual({ provider: "project-default-provider", modelId: "project-default-model" });
+    expect(resolvePlanningSessionModel(undefined, undefined, {
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    }, runtimeConfig)).toEqual({ provider: "global-default-provider", modelId: "global-default-model" });
+    expect(resolveValidatorSessionModel(undefined, undefined, undefined, runtimeConfig)).toEqual({
+      provider: "runtime-provider",
+      modelId: "runtime-model",
+    });
+    expect(resolveHeartbeatSessionModels(undefined, runtimeConfig)).toEqual({
+      defaultProvider: "runtime-provider",
+      defaultModelId: "runtime-model",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    });
+  });
+
+  it("forces mock/scripted across session surfaces when testMode or mock default is active", () => {
+    const runtimeConfig = { model: "runtime-provider/runtime-model" };
+    const testModeSettings = {
+      testMode: true,
+      executionProvider: "project-exec-provider",
+      executionModelId: "project-exec-model",
+      planningProvider: "project-plan-provider",
+      planningModelId: "project-plan-model",
+      validatorProvider: "project-validator-provider",
+      validatorModelId: "project-validator-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    };
+
+    expect(resolveExecutorSessionModel("task-provider", "task-model", testModeSettings, runtimeConfig)).toEqual({ provider: "mock", modelId: "scripted" });
+    expect(resolvePlanningSessionModel("task-plan-provider", "task-plan-model", testModeSettings, runtimeConfig)).toEqual({ provider: "mock", modelId: "scripted" });
+    expect(resolveValidatorSessionModel("task-validator-provider", "task-validator-model", testModeSettings, runtimeConfig)).toEqual({ provider: "mock", modelId: "scripted" });
+    expect(resolveMergerSessionModel(testModeSettings, runtimeConfig)).toEqual({ provider: "mock", modelId: "scripted" });
+    expect(resolveHeartbeatSessionModels({ defaultProvider: "mock", defaultModelId: "global-default-model" }, runtimeConfig)).toEqual({
+      defaultProvider: "mock",
+      defaultModelId: "scripted",
       fallbackProvider: undefined,
       fallbackModelId: undefined,
     });
@@ -220,15 +547,10 @@ describe("createResolvedAgentSession", () => {
 });
 
 describe("resolveMergerSessionModel", () => {
-  it("uses assigned agent runtime model when both provider and modelId are present", () => {
+  it("uses assigned agent runtime model only when no default model pair is configured", () => {
     expect(
       resolveMergerSessionModel(
-        {
-          defaultProviderOverride: "openai",
-          defaultModelIdOverride: "gpt-4.1",
-          defaultProvider: "anthropic",
-          defaultModelId: "claude-3-5-sonnet",
-        },
+        {},
         { model: "  anthropic/claude-3-5-sonnet-20241022  " },
       ),
     ).toEqual({

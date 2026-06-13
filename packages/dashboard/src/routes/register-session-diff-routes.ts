@@ -313,6 +313,41 @@ function parseNameStatusLine(line: string): { statusCode: string; path: string; 
   return oldPath ? { statusCode, path, oldPath } : { statusCode, path };
 }
 
+async function restrictActiveCommittedFilesToOwnTask<T>(
+  fileMap: Map<string, T>,
+  input: {
+    taskId: string;
+    diffBase?: string;
+    worktreePath: string;
+    runGit: (args: string[]) => Promise<string>;
+  },
+): Promise<void> {
+  if (!input.diffBase || fileMap.size === 0) return;
+
+  try {
+    const attribution = await filterFilesToOwnTaskCommits({
+      worktreePath: input.worktreePath,
+      baseRef: input.diffBase,
+      taskId: input.taskId,
+      runGit: input.runGit,
+    });
+
+    if (attribution.foreignCommitCount === 0 || attribution.ownCommitShas.length === 0 || attribution.files.length === 0) {
+      return;
+    }
+
+    const ownFiles = new Set(attribution.files);
+    for (const filePath of fileMap.keys()) {
+      if (!ownFiles.has(filePath)) {
+        fileMap.delete(filePath);
+      }
+    }
+  } catch {
+    // Display-only attribution. If git metadata is unavailable, preserve the
+    // existing broad diff rather than hiding task files.
+  }
+}
+
 async function collectDoneRangeFiles(range: string, rootDir: string): Promise<AggregatedDoneTaskFile[]> {
   const nameStatus = (await runGitCommand(["diff", "--name-status", "-M", range], rootDir, 10000)).trim();
   const files: AggregatedDoneTaskFile[] = [];
@@ -892,6 +927,13 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         }
       }
 
+      await restrictActiveCommittedFilesToOwnTask(fileMap, {
+        taskId: task.id,
+        diffBase,
+        worktreePath: cwd,
+        runGit: (args) => runGitCommand(args, cwd, 10000),
+      });
+
       try {
         const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status", "-M"], cwd, 10000)).trim();
         for (const line of stagedOutput.split("\n").filter(Boolean)) {
@@ -1130,6 +1172,13 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
           // continue with working-tree-only changes
         }
       }
+
+      await restrictActiveCommittedFilesToOwnTask(fileMap, {
+        taskId: task.id,
+        diffBase,
+        worktreePath: cwd,
+        runGit: (args) => runGitCommand(args, cwd, 5000),
+      });
 
       try {
         const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status", "-M"], cwd, 5000)).trim();

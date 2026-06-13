@@ -610,6 +610,9 @@ export class InProcessRuntime
                 runtimeLog.warn(`resumeTaskForAgent failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
               });
             }
+            void this.triggerScheduler?.drainPendingAssignment(agentId).catch((err) => {
+              runtimeLog.warn(`drainPendingAssignment failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
+            });
           },
         });
         this.heartbeatMonitor.start();
@@ -794,6 +797,7 @@ export class InProcessRuntime
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
         leaseManager: this.leaseManager,
         hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
+        resumeAssignedTaskForAgent: (agentId: string) => this.executor.resumeTaskForAgent(agentId),
         recoverActiveMissionValidations: async () => {
           if (!this.missionExecutionLoop) {
             return { recoveredCount: 0 };

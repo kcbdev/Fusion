@@ -11,6 +11,7 @@ function createSSERequest(): Request {
   const emitter = new EventEmitter();
   emitter.setMaxListeners(50);
   (emitter as any).query = {};  // required: routes read req.query.projectId
+  (emitter as any).headers = {};  // required: routes read req.headers["last-event-id"]
   return emitter as unknown as Request;
 }
 
@@ -1204,6 +1205,15 @@ describe("Chat API Routes", () => {
     });
 
     describe("SSE stream lifecycle", () => {
+      beforeEach(() => {
+        mockSendMessage.mockResolvedValue(undefined);
+        mockChatStreamManager.reset();
+        mockChatStreamManager.getBufferedEvents.mockClear();
+        mockChatStreamManager.subscribe.mockClear();
+        mockChatStreamManager.broadcast.mockClear();
+        mockChatStreamManager.cleanupSession.mockClear();
+      });
+
       /**
        * Helper to invoke the chat SSE route handler directly.
        * Tests the SSE route behavior by calling the handler with mock req/res.

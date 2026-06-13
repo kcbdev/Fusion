@@ -1,28 +1,78 @@
 /**
  * Vitest globalSetup hook.
  *
- * We only publish the shared worker-root env var here. Teardown is intentionally
- * a no-op because deleting shared temp roots during teardown can race with
- * still-running suites in some Vitest pool modes and trigger uv_cwd failures.
- * Worker dirs are cleaned by vitest-setup.ts on process exit.
+ * We publish a per-invocation worker-root env var. Teardown removes that private
+ * root after the project finishes so workspace isolation checks do not report
+ * the run-local worker/home directories as leaks.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");
+export const WORKER_ROOT_OWNER_FILE = ".fusion-test-worker-root-owner";
+
+let workerRootRmSync = rmSync;
+let workerRootSleepMsSync = sleepMsSync;
+
+export function __setWorkerRootRmSyncForTests(nextRmSync: typeof rmSync): void {
+  workerRootRmSync = typeof nextRmSync === "function" ? nextRmSync : rmSync;
+}
+
+export function __setWorkerRootSleepMsSyncForTests(nextSleep: (ms: number) => void): void {
+  workerRootSleepMsSync = typeof nextSleep === "function" ? nextSleep : sleepMsSync;
+}
+
+function sleepMsSync(ms: number): void {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isEnoent(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+}
+
+export function removeWorkerRootWithRetry(workerRoot: string, retries = 3, delayMs = 75): void {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      workerRootRmSync(workerRoot, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (isEnoent(error)) return;
+      lastError = error;
+      if (attempt < retries) {
+        workerRootSleepMsSync(delayMs);
+      }
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  console.warn(`[vitest-teardown] failed to remove worker root ${workerRoot} after ${retries} attempts: ${message}`);
+}
 
 export default function setup(): () => Promise<void> {
-  // Set the env var here too so vitest-setup.ts workers pick it up even if
-  // their own mkdir runs after globalSetup.
-  process.env.FUSION_TEST_WORKER_ROOT = WORKER_ROOT;
+  // Use a fresh root for each Vitest invocation. A static shared root makes the
+  // setup-time redirect sweep proportional to stale directories left by every
+  // prior interrupted run.
+  const workerRoot = resolve(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
+  try {
+    writeFileSync(join(workerRoot, WORKER_ROOT_OWNER_FILE), `${process.pid}\n`);
+  } catch {
+    // Best effort only. The marker protects active roots from external orphan
+    // pruning; teardown still owns this root by absolute path.
+  }
+  process.env.FUSION_TEST_WORKER_ROOT = workerRoot;
 
   return async function teardown() {
-    // Intentionally no-op.
-    //
-    // Worker temp dirs are cleaned by vitest-setup.ts using process.on("exit")
-    // after first chdir-ing out of the worker dir. Deleting shared temp roots
-    // from global teardown is unsafe under some Vitest pool modes because it
-    // can run while other suites are still active, causing ENOENT uv_cwd.
+    try {
+      process.chdir(tmpdir());
+    } catch {
+      // Ignore — cleanup below is best-effort and uses an absolute path.
+    }
+    // FN-6360: macOS can report transient EBUSY/ENOTEMPTY while SQLite WALs or
+    // redirected temp dirs are still closing. Retry boundedly so a brief busy-fd
+    // race does not leak the per-invocation fusion-test-workers-* root.
+    removeWorkerRootWithRetry(workerRoot);
   };
 }

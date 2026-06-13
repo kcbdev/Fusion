@@ -428,8 +428,13 @@
   }
 }
 
-/* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140) === */
+/* === Quick Entry Mobile Touch + Overflow Fixes (FN-1140, FN-6153, FN-6160) === */
 @media (max-width: 768px) {
+  .quick-entry-actions,
+  .quick-entry-actions * {
+    touch-action: manipulation;
+  }
+
   .quick-entry-actions .btn {
     min-height: 36px;
   }

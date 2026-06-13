@@ -1568,15 +1568,17 @@ describe("SettingsModal", () => {
       });
     }
 
-    it("renders the workflow model save actions inside the default workflow lane section", async () => {
+    it("renders only advanced workflow actions inside the default workflow lane section", async () => {
       const onOpenWorkflowSettings = vi.fn();
       await setupWorkflowModelLaneTest({ renderProps: { onOpenWorkflowSettings } });
 
       const workflowHeading = screen.getByRole("heading", { name: "Default workflow model lanes" });
-      const saveButton = screen.getByTestId("save-workflow-model-lanes");
-      const actionRow = saveButton.closest(".settings-model-lane-actions");
+      const advancedButton = screen.getByRole("button", { name: "Advanced workflow policy" });
+      const actionRow = advancedButton.closest(".settings-model-lane-actions");
       const presetsHeading = screen.getByRole("heading", { name: "Model Presets" });
 
+      expect(screen.queryByTestId("save-workflow-model-lanes")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save workflow models" })).not.toBeInTheDocument();
       expect(actionRow).toBeInTheDocument();
       expect(actionRow).toHaveAttribute("aria-label", "Default workflow model lane actions");
       expect(within(actionRow as HTMLElement).getByRole("button", { name: "Advanced workflow policy" })).toBeInTheDocument();
@@ -1588,17 +1590,18 @@ describe("SettingsModal", () => {
       ["Plan/Triage Model", { planningProvider: "openai", planningModelId: "gpt-4o" }],
       ["Executor Model", { executionProvider: "openai", executionModelId: "gpt-4o" }],
       ["Reviewer Model", { validatorProvider: "openai", validatorModelId: "gpt-4o" }],
-    ])("proxy-edits %s through workflow setting values for the default workflow", async (laneLabel, expectedPatch) => {
+    ])("persists %s edits through the primary Settings Save", async (laneLabel, expectedPatch) => {
       mockUpdateWorkflowSettingValues.mockResolvedValue({
         stored: expectedPatch,
         effective: expectedPatch,
         orphaned: [],
       });
-      await setupWorkflowModelLaneTest();
+      const onClose = vi.fn();
+      await setupWorkflowModelLaneTest({ renderProps: { onClose } });
 
       await userEvent.click(screen.getByLabelText(laneLabel));
       await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByTestId("save-workflow-model-lanes"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -1607,10 +1610,22 @@ describe("SettingsModal", () => {
           "proj-1",
         );
       });
-      expect(mockUpdateSettings).not.toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
     });
 
-    it("resets workflow model lanes by sending null patches", async () => {
+    it("does not write workflow settings when the primary Save has no pending workflow edits", async () => {
+      const onClose = vi.fn();
+      await setupWorkflowModelLaneTest({ renderProps: { onClose } });
+
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalled();
+      });
+      expect(mockUpdateWorkflowSettingValues).not.toHaveBeenCalled();
+    });
+
+    it("resets workflow model lanes by sending null patches from the primary Settings Save", async () => {
       await setupWorkflowModelLaneTest({
         stored: { executionProvider: "anthropic", executionModelId: "claude-sonnet-4-5" },
         effective: { executionProvider: "anthropic", executionModelId: "claude-sonnet-4-5" },
@@ -1618,7 +1633,7 @@ describe("SettingsModal", () => {
 
       const lane = screen.getByTestId("workflow-model-lane-execution");
       await userEvent.click(within(lane).getByRole("button", { name: "Reset" }));
-      await userEvent.click(screen.getByTestId("save-workflow-model-lanes"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -1646,7 +1661,7 @@ describe("SettingsModal", () => {
 
       await userEvent.click(screen.getByLabelText("Plan/Triage Model"));
       await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByTestId("save-workflow-model-lanes"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -1657,22 +1672,26 @@ describe("SettingsModal", () => {
       });
     });
 
-    it("shows typed workflow model lane rejections without clearing pending edits", async () => {
+    it("shows typed workflow model lane rejections without closing or clearing pending edits", async () => {
+      const addToast = vi.fn();
+      const onClose = vi.fn();
       mockUpdateWorkflowSettingValues.mockRejectedValueOnce(
         new ApiRequestError("rejected", 400, {
           rejections: [{ code: "unknown-setting", settingId: "planningProvider", message: "planningProvider is not declared" }],
         }),
       );
-      await setupWorkflowModelLaneTest();
+      await setupWorkflowModelLaneTest({ renderProps: { addToast, onClose } });
 
       await userEvent.click(screen.getByLabelText("Plan/Triage Model"));
       await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByTestId("save-workflow-model-lanes"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(screen.getByTestId("workflow-model-lane-error-planning")).toHaveTextContent("planningProvider is not declared");
       });
-      expect(screen.getByTestId("save-workflow-model-lanes")).not.toBeDisabled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(addToast).not.toHaveBeenCalledWith("Settings saved", "success");
+      expect(within(screen.getByTestId("workflow-model-lane-planning")).getByText("GPT-4o")).toBeInTheDocument();
     });
 
     it("does not fetch or write workflow model lanes without an active project", async () => {
@@ -1688,6 +1707,9 @@ describe("SettingsModal", () => {
       expect(screen.getByText(/Open a project to edit workflow model lanes/i)).toBeInTheDocument();
       expect(mockFetchWorkflowSettingValues).not.toHaveBeenCalled();
       expect(screen.queryByTestId("save-workflow-model-lanes")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(mockUpdateWorkflowSettingValues).not.toHaveBeenCalled();
     });
   });
 
@@ -2625,6 +2647,72 @@ describe("SettingsModal", () => {
 
       const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
       expect(payload.heartbeatScopeDiscipline).toBe("off");
+    });
+
+    it.each([
+      ["undefined", undefined, false],
+      ["false", false, false],
+      ["true", true, true],
+    ] as const)("renders engineer backlog auto-claim from %s project setting", async (_label, engineerBacklogAutoClaim, expectedChecked) => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        ...(engineerBacklogAutoClaim === undefined ? {} : { engineerBacklogAutoClaim }),
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      expect((screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement).checked).toBe(expectedChecked);
+    });
+
+    it("routes enabled engineer backlog auto-claim through the project settings save payload", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        engineerBacklogAutoClaim: false,
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.engineerBacklogAutoClaim).toBe(true);
+    });
+
+    it("routes disabled engineer backlog auto-claim through the project settings save payload", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        engineerBacklogAutoClaim: true,
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
+      expect(toggle.checked).toBe(true);
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.engineerBacklogAutoClaim).toBe(false);
     });
   });
 

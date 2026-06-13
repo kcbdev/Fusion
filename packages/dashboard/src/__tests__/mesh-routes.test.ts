@@ -42,7 +42,7 @@ vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockInit,
       close: mockClose,
       mergePeers: mockMergePeers,
@@ -55,7 +55,7 @@ vi.mock("@fusion/core", async () => {
       getLocalMeshSnapshot: mockGetLocalMeshSnapshot,
       getSettingsForSync: mockGetSettingsForSync,
       applyRemoteSettings: mockApplyRemoteSettings,
-    })),
+    }; }),
   };
 });
 

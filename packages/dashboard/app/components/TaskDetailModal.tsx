@@ -34,6 +34,7 @@ import { ModelSelectorTab } from "./ModelSelectorTab";
 import { PrPanel } from "./PrPanel";
 import { PrCreateModal } from "./PrCreateModal";
 import { TaskComments } from "./TaskComments";
+import { TaskChatTab } from "./TaskChatTab";
 import { TaskReviewTab } from "./TaskReviewTab";
 import { MergeDetails } from "./MergeDetails";
 import { TaskChangesTab } from "./TaskChangesTab";
@@ -283,7 +284,7 @@ function formatDurationCompact(ageMs: number): string {
   return `${minutes}m`;
 }
 
-type TabId = "definition" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
+type TabId = "definition" | "chat" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
 
 // Lazy-load the terminal so xterm + addons stay out of the main bundle (U11).
 const LazySessionTerminal = lazy(() =>
@@ -321,17 +322,19 @@ type CliTabVisibility =
  *  - dead/needsAttention (PTY reaped) → replay "session ended"
  *  - no recorded session → hidden
  */
+export function isCliSessionLive(session: CliSessionSummaryRecord | null): boolean {
+  return session?.agentState === "starting"
+    || session?.agentState === "ready"
+    || session?.agentState === "busy"
+    || session?.agentState === "waitingOnInput";
+}
+
 export function deriveCliTabVisibility(
   session: CliSessionSummaryRecord | null,
   opts: { oneShot?: boolean; genericIdle?: boolean } = {},
 ): CliTabVisibility {
   if (!session) return { kind: "hidden" };
-  const live =
-    session.agentState === "starting" ||
-    session.agentState === "ready" ||
-    session.agentState === "busy" ||
-    session.agentState === "waitingOnInput";
-  if (live) {
+  if (isCliSessionLive(session)) {
     return {
       kind: "live",
       readOnly: Boolean(opts.oneShot),
@@ -368,6 +371,7 @@ export interface TaskDetailModalProps {
   onTaskUpdated?: (task: Task) => void;
   addToast: (message: string, type?: ToastType) => void;
   prAuthAvailable?: boolean;
+  autoMergeEnabled?: boolean;
   onOpenWorkflowEditor?: () => void;
   /** Open the modal with this tab active instead of "definition" */
   initialTab?: TabId;
@@ -549,6 +553,7 @@ export function TaskDetailContent({
   onTaskUpdated,
   addToast,
   prAuthAvailable,
+  autoMergeEnabled: autoMergeEnabledProp,
   onOpenWorkflowEditor,
   initialTab = "definition",
   mobileHeaderMode = "close",
@@ -559,6 +564,7 @@ export function TaskDetailContent({
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
   const [activeTab, setActiveTab] = useState<TabId>(initialTab === "retries" ? "definition" : initialTab);
+  const [chatExpanded, setChatExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -619,6 +625,13 @@ export function TaskDetailContent({
       prompt: fullDetail.prompt,
       log: fullDetail.log,
       githubTracking: task.githubTracking ?? fullDetail.githubTracking,
+      assignedAgentId: task.assignedAgentId === undefined ? fullDetail.assignedAgentId : task.assignedAgentId,
+      checkedOutBy: task.checkedOutBy === undefined ? fullDetail.checkedOutBy : task.checkedOutBy,
+      status: task.status === undefined ? fullDetail.status : task.status,
+      column: task.column === undefined ? fullDetail.column : task.column,
+      paused: task.paused === undefined ? fullDetail.paused : task.paused,
+      userPaused: task.userPaused === undefined ? fullDetail.userPaused : task.userPaused,
+      pausedReason: task.pausedReason === undefined ? fullDetail.pausedReason : task.pausedReason,
     } as TaskDetail)
     : ({ ...task, prompt: "" } as TaskDetail);
   const canRetryTask =
@@ -765,6 +778,13 @@ export function TaskDetailContent({
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "chat" || isEditing) {
+      setChatExpanded(false);
+    }
+  }, [activeTab, isEditing]);
+
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
   const [editDependencies, setEditDependencies] = useState<string[]>(task.dependencies || []);
@@ -1760,7 +1780,7 @@ export function TaskDetailContent({
   const handleDelete = useCallback(async () => {
     let allowResurrection = false;
 
-    if (task.column === "done" && onArchiveTask) {
+    if (task.column !== "archived" && onArchiveTask) {
       const deleteChoice = await confirmWithChoice({
         title: t("taskDetail.delete.title", "Delete Task"),
         message: t("taskDetail.delete.message", "Delete {{id}}?", { id: task.id }),
@@ -2511,6 +2531,11 @@ export function TaskDetailContent({
     overlapBlockerTask && (overlapBlockerTask.column === "in-progress" || overlapBlockerTask.column === "in-review"),
   );
 
+  const handleChatTaskUpdated = useCallback((updatedTask: Task) => {
+    setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : (updatedTask as TaskDetail));
+    onTaskUpdated?.(updatedTask);
+  }, [onTaskUpdated]);
+
   const assignedAgentLabel = assignedAgent?.name ?? task.assignedAgentId ?? null;
   const detailProviders = useMemo(() => {
     const providers: string[] = [];
@@ -2605,9 +2630,10 @@ export function TaskDetailContent({
   };
   const prAutomationLabel = task.status ? prAutomationStatusLabels[task.status] : undefined;
   const mergeStrategy = settings?.mergeStrategy ?? "direct";
-  const autoMergeEnabled = settings?.autoMerge ?? false;
+  const autoMergeEnabled = autoMergeEnabledProp ?? (settings?.autoMerge ?? false);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
   const isManualPrFlow = mergeStrategy === "pull-request" && !autoMergeEnabled;
+  const isChatExpanded = chatExpanded && activeTab === "chat" && !isEditing;
 
   const isCheckPrStatusAction = isManualPrFlow && !prAutomationLabel && task.prInfo?.status === "open";
   let manualReviewActionLabel = t("taskDetail.pr.mergeAndClose", "Merge & Close");
@@ -2623,7 +2649,7 @@ export function TaskDetailContent({
 
   return (
     <div
-      className={embedded ? "task-detail-content task-detail-content--embedded" : "task-detail-content"}
+      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isChatExpanded ? " task-detail-content--chat-expanded" : ""}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -2663,7 +2689,7 @@ export function TaskDetailContent({
             )}
           </div>
         </div>
-        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}`}>
+        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && !isEditing ? " detail-body--chat" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -2998,6 +3024,12 @@ export function TaskDetailContent({
               {t("taskDetail.tabs.definition", "Definition")}
             </button>
             <button
+              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              {t("taskDetail.tabs.chat", "Chat")}
+            </button>
+            <button
               className={`detail-tab${activeTab === "logs" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("logs")}
             >
@@ -3111,6 +3143,19 @@ export function TaskDetailContent({
           ) : activeTab === "model" ? (
             <div className="detail-section">
               <ModelSelectorTab task={task} addToast={addToast} onTaskUpdated={onTaskUpdated} settings={settings} />
+            </div>
+          ) : activeTab === "chat" ? (
+            <div className="detail-section detail-section--chat">
+              <TaskChatTab
+                task={workingTask}
+                projectId={projectId}
+                active={activeTab === "chat"}
+                addToast={addToast}
+                sessionLive={isCliSessionLive(cliSession)}
+                onTaskUpdated={handleChatTaskUpdated}
+                expanded={chatExpanded}
+                onToggleExpanded={() => setChatExpanded((value) => !value)}
+              />
             </div>
           ) : activeTab === "logs" ? (
             <div className={`detail-section${logSubview === "agent-log" ? " detail-section--agent-log" : ""}`}>
@@ -3507,143 +3552,6 @@ export function TaskDetailContent({
               )}
             </div>
           )}
-          {showGithubTrackingSection && (
-            <div className="detail-section detail-github-tracking-section">
-              <div className="detail-source-header">
-                <div className="detail-source-summary">
-                  <span className="detail-source-label">{t("taskDetail.githubTracking.label", "GitHub tracking")}</span>
-                  <span className="detail-source-provider-badge" aria-label={t("taskDetail.githubTracking.statusAriaLabel", "GitHub tracking status")}>
-                    <GitBranch aria-hidden="true" />
-                    <span>{githubTrackingStatus}</span>
-                  </span>
-                  {!githubTrackedIssue && (
-                    <span className="detail-source-empty">
-                      {githubTrackingDetailPending
-                        ? t("taskDetail.githubTracking.checking", "Checking tracking status")
-                        : githubTrackingEnabled
-                          ? t("taskDetail.githubTracking.notYetCreated", "Issue not yet created")
-                          : t("taskDetail.githubTracking.disabled", "Tracking is currently disabled")}
-                    </span>
-                  )}
-                </div>
-                {showInlineGithubTrackingEnableButton && (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary detail-github-tracking-enable"
-                    aria-label={t("taskDetail.githubTracking.enableAriaLabel", "Enable GitHub tracking")}
-                    disabled={isSavingGithubTracking}
-                    onClick={() => void handleToggleGithubTracking()}
-                  >
-                    {t("taskDetail.githubTracking.enableBtn", "Enable")}
-                  </button>
-                )}
-                {showGithubTrackingSpinner && (
-                  <span
-                    className="detail-github-tracking-spinner"
-                    role="status"
-                    aria-live="polite"
-                    aria-label={isSavingGithubTracking ? t("taskDetail.githubTracking.enablingAriaLabel", "Enabling GitHub tracking") : t("taskDetail.githubTracking.loadingAriaLabel", "Loading GitHub tracking status")}
-                  >
-                    <Loader2 size={16} className="spin" aria-hidden="true" />
-                    <span className="visually-hidden">
-                      {isSavingGithubTracking ? t("taskDetail.githubTracking.enabling", "Enabling GitHub tracking…") : t("taskDetail.githubTracking.loading", "Loading GitHub tracking status…")}
-                    </span>
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className="detail-source-toggle"
-                  aria-expanded={githubTrackingExpanded}
-                  aria-label={githubTrackingExpanded ? t("taskDetail.githubTracking.collapse", "Collapse GitHub tracking details") : t("taskDetail.githubTracking.expand", "Expand GitHub tracking details")}
-                  onClick={() => setGithubTrackingExpanded((expanded) => !expanded)}
-                >
-                  <ChevronRight
-                    size={16}
-                    className={githubTrackingExpanded ? "detail-source-chevron--expanded" : undefined}
-                  />
-                </button>
-              </div>
-              {githubTrackingExpanded && (
-                <div className="detail-github-tracking-content">
-                  {githubTrackedIssue && (
-                    <dl className="detail-source-grid detail-github-tracking-grid">
-                      <div>
-                        <dt>{t("taskDetail.githubTracking.issue", "Issue")}</dt>
-                        <dd>
-                          {githubTrackedIssue.url ? (
-                            <a className="detail-source-link" href={githubTrackedIssue.url} target="_blank" rel="noopener noreferrer">
-                              {`${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
-                            </a>
-                          ) : (
-                            <span>{`${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}</span>
-                          )}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>{t("taskDetail.githubTracking.state", "State")}</dt>
-                        <dd>
-                          <span className={`detail-github-issue-state ${task.issueInfo?.state === "closed" ? "detail-github-issue-state--closed" : "detail-github-issue-state--open"}`}>
-                            {task.issueInfo?.state ?? "open"}
-                          </span>
-                        </dd>
-                      </div>
-                    </dl>
-                  )}
-                  <div className="detail-github-tracking-controls">
-                    {!githubTrackedIssue && githubTrackingEnabled && (
-                      <>
-                        <button
-                          className="btn btn-sm touch-target"
-                          onClick={() => void handleRetryGithubTrackingIssueCreate()}
-                          disabled={isSavingGithubTracking || !canCreateTrackingIssue}
-                          title={!canCreateTrackingIssue ? t("taskDetail.githubTracking.createIssueDisabledTitle", "Add a title or description so a tracking issue can be created.") : undefined}
-                        >
-                          {t("taskDetail.githubTracking.createIssueBtn", "Create tracking issue")}
-                        </button>
-                        {!canCreateTrackingIssue && (
-                          <small className="detail-github-tracking-helper">{t("taskDetail.githubTracking.createIssueHelper", "Tracking issue will be created once this task has a title or description to summarize.")}</small>
-                        )}
-                      </>
-                    )}
-                    {canEditGithubTracking && (
-                      <>
-                        <label className="checkbox-label" htmlFor="detail-github-tracking-toggle">
-                          <input
-                            id="detail-github-tracking-toggle"
-                            type="checkbox"
-                            checked={githubTrackingEnabled}
-                            disabled={isSavingGithubTracking}
-                            onChange={() => void handleToggleGithubTracking()}
-                          />
-                          {t("taskDetail.githubTracking.enableCheckboxLabel", "Enable GitHub tracking")}
-                        </label>
-                        <div className="detail-github-tracking-repo-row">
-                          <input
-                            className="input"
-                            value={githubRepoOverrideDraft}
-                            onChange={(event) => {
-                              setGithubRepoOverrideDraft(event.target.value);
-                              setGithubRepoOverrideError(null);
-                            }}
-                            placeholder={effectiveGithubRepoDefault || "owner/repo"}
-                          />
-                          <button className="btn btn-sm" onClick={() => void handleSaveGithubRepoOverride()} disabled={isSavingGithubTracking}>
-                            {t("common.save", "Save")}
-                          </button>
-                        </div>
-                        {githubRepoOverrideError && <small className="detail-github-tracking-error">{githubRepoOverrideError}</small>}
-                        {githubTrackedIssue && (
-                          <button className="btn btn-sm touch-target" onClick={() => void handleUnlinkGithubIssue()} disabled={isSavingGithubTracking}>
-                            {t("taskDetail.githubTracking.unlinkBtn", "Unlink GitHub issue")}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
           <div className="detail-section detail-agent-section">
             <div className="detail-meta-row">
               <div className="detail-meta-left">
@@ -3809,6 +3717,143 @@ export function TaskDetailContent({
               <div className="detail-prompt">{t("taskDetail.spec.noPrompt", "(no prompt)")}</div>
             )}
           </div>
+          {showGithubTrackingSection && (
+            <div className="detail-section detail-github-tracking-section">
+              <div className="detail-source-header">
+                <div className="detail-source-summary">
+                  <span className="detail-source-label">{t("taskDetail.githubTracking.label", "GitHub tracking")}</span>
+                  <span className="detail-source-provider-badge" aria-label={t("taskDetail.githubTracking.statusAriaLabel", "GitHub tracking status")}>
+                    <GitBranch aria-hidden="true" />
+                    <span>{githubTrackingStatus}</span>
+                  </span>
+                  {!githubTrackedIssue && (
+                    <span className="detail-source-empty">
+                      {githubTrackingDetailPending
+                        ? t("taskDetail.githubTracking.checking", "Checking tracking status")
+                        : githubTrackingEnabled
+                          ? t("taskDetail.githubTracking.notYetCreated", "Issue not yet created")
+                          : t("taskDetail.githubTracking.disabled", "Tracking is currently disabled")}
+                    </span>
+                  )}
+                </div>
+                {showInlineGithubTrackingEnableButton && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary detail-github-tracking-enable"
+                    aria-label={t("taskDetail.githubTracking.enableAriaLabel", "Enable GitHub tracking")}
+                    disabled={isSavingGithubTracking}
+                    onClick={() => void handleToggleGithubTracking()}
+                  >
+                    {t("taskDetail.githubTracking.enableBtn", "Enable")}
+                  </button>
+                )}
+                {showGithubTrackingSpinner && (
+                  <span
+                    className="detail-github-tracking-spinner"
+                    role="status"
+                    aria-live="polite"
+                    aria-label={isSavingGithubTracking ? t("taskDetail.githubTracking.enablingAriaLabel", "Enabling GitHub tracking") : t("taskDetail.githubTracking.loadingAriaLabel", "Loading GitHub tracking status")}
+                  >
+                    <Loader2 size={16} className="spin" aria-hidden="true" />
+                    <span className="visually-hidden">
+                      {isSavingGithubTracking ? t("taskDetail.githubTracking.enabling", "Enabling GitHub tracking…") : t("taskDetail.githubTracking.loading", "Loading GitHub tracking status…")}
+                    </span>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="detail-source-toggle"
+                  aria-expanded={githubTrackingExpanded}
+                  aria-label={githubTrackingExpanded ? t("taskDetail.githubTracking.collapse", "Collapse GitHub tracking details") : t("taskDetail.githubTracking.expand", "Expand GitHub tracking details")}
+                  onClick={() => setGithubTrackingExpanded((expanded) => !expanded)}
+                >
+                  <ChevronRight
+                    size={16}
+                    className={githubTrackingExpanded ? "detail-source-chevron--expanded" : undefined}
+                  />
+                </button>
+              </div>
+              {githubTrackingExpanded && (
+                <div className="detail-github-tracking-content">
+                  {githubTrackedIssue && (
+                    <dl className="detail-source-grid detail-github-tracking-grid">
+                      <div>
+                        <dt>{t("taskDetail.githubTracking.issue", "Issue")}</dt>
+                        <dd>
+                          {githubTrackedIssue.url ? (
+                            <a className="detail-source-link" href={githubTrackedIssue.url} target="_blank" rel="noopener noreferrer">
+                              {`${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}
+                            </a>
+                          ) : (
+                            <span>{`${githubTrackedIssue.owner}/${githubTrackedIssue.repo}#${githubTrackedIssue.number}`}</span>
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{t("taskDetail.githubTracking.state", "State")}</dt>
+                        <dd>
+                          <span className={`detail-github-issue-state ${task.issueInfo?.state === "closed" ? "detail-github-issue-state--closed" : "detail-github-issue-state--open"}`}>
+                            {task.issueInfo?.state ?? "open"}
+                          </span>
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                  <div className="detail-github-tracking-controls">
+                    {!githubTrackedIssue && githubTrackingEnabled && (
+                      <>
+                        <button
+                          className="btn btn-sm touch-target"
+                          onClick={() => void handleRetryGithubTrackingIssueCreate()}
+                          disabled={isSavingGithubTracking || !canCreateTrackingIssue}
+                          title={!canCreateTrackingIssue ? t("taskDetail.githubTracking.createIssueDisabledTitle", "Add a title or description so a tracking issue can be created.") : undefined}
+                        >
+                          {t("taskDetail.githubTracking.createIssueBtn", "Create tracking issue")}
+                        </button>
+                        {!canCreateTrackingIssue && (
+                          <small className="detail-github-tracking-helper">{t("taskDetail.githubTracking.createIssueHelper", "Tracking issue will be created once this task has a title or description to summarize.")}</small>
+                        )}
+                      </>
+                    )}
+                    {canEditGithubTracking && (
+                      <>
+                        <label className="checkbox-label" htmlFor="detail-github-tracking-toggle">
+                          <input
+                            id="detail-github-tracking-toggle"
+                            type="checkbox"
+                            checked={githubTrackingEnabled}
+                            disabled={isSavingGithubTracking}
+                            onChange={() => void handleToggleGithubTracking()}
+                          />
+                          {t("taskDetail.githubTracking.enableCheckboxLabel", "Enable GitHub tracking")}
+                        </label>
+                        <div className="detail-github-tracking-repo-row">
+                          <input
+                            className="input"
+                            value={githubRepoOverrideDraft}
+                            onChange={(event) => {
+                              setGithubRepoOverrideDraft(event.target.value);
+                              setGithubRepoOverrideError(null);
+                            }}
+                            placeholder={effectiveGithubRepoDefault || "owner/repo"}
+                          />
+                          <button className="btn btn-sm" onClick={() => void handleSaveGithubRepoOverride()} disabled={isSavingGithubTracking}>
+                            {t("common.save", "Save")}
+                          </button>
+                        </div>
+                        {githubRepoOverrideError && <small className="detail-github-tracking-error">{githubRepoOverrideError}</small>}
+                        {githubTrackedIssue && (
+                          <button className="btn btn-sm touch-target" onClick={() => void handleUnlinkGithubIssue()} disabled={isSavingGithubTracking}>
+                            {t("taskDetail.githubTracking.unlinkBtn", "Unlink GitHub issue")}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="detail-section detail-no-commits-expected-section">
             <div className="form-group">
               <label className="checkbox-label" htmlFor="detail-no-commits-expected-toggle">

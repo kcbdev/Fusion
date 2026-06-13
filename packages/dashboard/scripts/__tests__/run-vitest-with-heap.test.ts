@@ -49,6 +49,10 @@ function registerGroupLeader(pid: number) {
   registerPid(pid);
 }
 
+function expectProcessGroupLeader(pid: number) {
+  expect(() => process.kill(-pid, 0)).not.toThrow();
+}
+
 function createStubProcessTree() {
   const tempDir = mkdtempSync(join(tmpdir(), "fusion-run-vitest-"));
   tempDirs.add(tempDir);
@@ -97,6 +101,10 @@ async function spawnWrapperTree(signal: NodeJS.Signals) {
     },
   );
   activeWrappers.add(wrapper);
+  let stderr = "";
+  wrapper.stderr?.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
 
   let pids: { childPid: number; grandchildPid: number } | null = null;
   await waitFor(() => {
@@ -116,6 +124,7 @@ async function spawnWrapperTree(signal: NodeJS.Signals) {
 
   registerGroupLeader(pids!.childPid);
   registerPid(pids!.grandchildPid);
+  expectProcessGroupLeader(pids!.childPid);
 
   wrapper.kill(signal);
   await new Promise<void>((resolve, reject) => {
@@ -125,6 +134,7 @@ async function spawnWrapperTree(signal: NodeJS.Signals) {
   activeWrappers.delete(wrapper);
 
   await waitFor(() => !isProcessAlive(pids!.childPid) && !isProcessAlive(pids!.grandchildPid));
+  return { stderr };
 }
 
 async function spawnWrapperTreeUntilTimeout() {
@@ -147,6 +157,10 @@ async function spawnWrapperTreeUntilTimeout() {
     },
   );
   activeWrappers.add(wrapper);
+  let stderr = "";
+  wrapper.stderr?.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
 
   let pids: { childPid: number; grandchildPid: number } | null = null;
   await waitFor(() => {
@@ -166,6 +180,7 @@ async function spawnWrapperTreeUntilTimeout() {
 
   registerGroupLeader(pids!.childPid);
   registerPid(pids!.grandchildPid);
+  expectProcessGroupLeader(pids!.childPid);
 
   const exitCode = await new Promise<number | null>((resolve, reject) => {
     wrapper.once("error", reject);
@@ -175,6 +190,7 @@ async function spawnWrapperTreeUntilTimeout() {
 
   expect(exitCode).toBe(124);
   await waitFor(() => !isProcessAlive(pids!.childPid) && !isProcessAlive(pids!.grandchildPid));
+  return { stderr };
 }
 
 afterEach(async () => {
@@ -213,14 +229,17 @@ afterEach(async () => {
 
 describe("run-vitest-with-heap", () => {
   it("reaps the spawned process group on SIGTERM", async () => {
-    await spawnWrapperTree("SIGTERM");
+    const { stderr } = await spawnWrapperTree("SIGTERM");
+    expect(stderr).toContain("[dashboard-vitest] received SIGTERM; forwarding to vitest process group");
   });
 
   it("reaps the spawned process group on SIGINT", async () => {
-    await spawnWrapperTree("SIGINT");
+    const { stderr } = await spawnWrapperTree("SIGINT");
+    expect(stderr).toContain("[dashboard-vitest] received SIGINT; forwarding to vitest process group");
   });
 
   it("times out and reaps the spawned process group", async () => {
-    await spawnWrapperTreeUntilTimeout();
+    const { stderr } = await spawnWrapperTreeUntilTimeout();
+    expect(stderr).toContain("[dashboard-vitest] timeout after 100ms");
   });
 });

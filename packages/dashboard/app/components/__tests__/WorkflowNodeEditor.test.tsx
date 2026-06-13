@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, within } from "@testing-library/react";
 import type { WorkflowDefinition, Settings } from "@fusion/core";
@@ -82,6 +83,16 @@ import { beforeEach as viBeforeEach } from "vitest";
 import { WorkflowNodeEditor } from "../WorkflowNodeEditor";
 import { ConfirmDialogProvider } from "../../hooks/useConfirm";
 import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
+
+function getPromptFullscreenOverlay() {
+  return document.body.querySelector(".wf-prompt-editor--fullscreen") as HTMLElement | null;
+}
+
+function getPromptFullscreenTextarea() {
+  const overlay = getPromptFullscreenOverlay();
+  expect(overlay).not.toBeNull();
+  return within(overlay!).getByLabelText("Prompt") as HTMLTextAreaElement;
+}
 
 function mockWorkflowEditorViewport(mode: "desktop" | "mobile" | "tablet" = "desktop") {
   Object.defineProperty(window, "matchMedia", {
@@ -169,7 +180,7 @@ function builtinDef(): WorkflowDefinition {
 function builtinPrDef(): WorkflowDefinition {
   return {
     id: "builtin:pr-workflow",
-    kind: "workflow",
+    kind: "fragment",
     name: "PR lifecycle (built-in)",
     description: "Ships with Fusion",
     ir: BUILTIN_PR_WORKFLOW_IR,
@@ -177,6 +188,15 @@ function builtinPrDef(): WorkflowDefinition {
     createdAt: "2026-06-03T00:00:00.000Z",
     updatedAt: "2026-06-03T00:00:00.000Z",
   };
+}
+
+async function selectBuiltinExecutePromptNode() {
+  await screen.findByTestId("wf-readonly-banner");
+  const promptNodes = await screen.findAllByTestId("wf-node-prompt");
+  const executeNode = promptNodes.find((node) => within(node).queryByText("Execute"));
+  expect(executeNode).toBeTruthy();
+  fireEvent.click(executeNode!);
+  return executeNode!;
 }
 
 function edgeRenderableAssertion(definition: WorkflowDefinition) {
@@ -241,6 +261,35 @@ function def(): WorkflowDefinition {
   };
 }
 
+function scriptDef(): WorkflowDefinition {
+  return {
+    id: "WF-SCRIPT",
+    kind: "workflow",
+    name: "Script workflow",
+    description: "",
+    ir: {
+      version: "v2",
+      name: "Script workflow",
+      columns: [
+        { id: "triage", name: "Triage", traits: [{ trait: "intake" }] },
+        { id: "done", name: "Done", traits: [{ trait: "complete" }] },
+      ],
+      nodes: [
+        { id: "start", kind: "start", column: "triage" },
+        { id: "run", kind: "script", column: "triage", config: { scriptName: "test" } },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "run", condition: "success" },
+        { from: "run", to: "end", condition: "success" },
+      ],
+    },
+    layout: { start: { x: 0, y: 20 }, run: { x: 120, y: 60 }, end: { x: 360, y: 240 } },
+    createdAt: "2026-06-03T00:00:00.000Z",
+    updatedAt: "2026-06-03T00:00:00.000Z",
+  };
+}
+
 describe("workflow-flow-mapping", () => {
   it("round-trips IR through flow and back, preserving structure and layout", () => {
     const original = def();
@@ -271,6 +320,7 @@ describe("workflow-flow-mapping", () => {
     expect(BUILTIN_WORKFLOWS.map((workflow) => workflow.id).sort()).toEqual(
       expect.arrayContaining(["builtin:coding", "builtin:stepwise-coding", "builtin:pr-workflow"]),
     );
+    expect(BUILTIN_WORKFLOWS.find((workflow) => workflow.id === "builtin:pr-workflow")?.kind).toBe("fragment");
 
     for (const workflow of BUILTIN_WORKFLOWS) {
       edgeRenderableAssertion(workflow);
@@ -295,7 +345,7 @@ describe("workflow-flow-mapping", () => {
     const failuresToEnd = edges.filter((edge) => edge.target === "end" && edge.data?.condition === "failure");
     expect(failuresToEnd.map((edge) => edge.source).sort()).toEqual([
       "execute",
-      "merge",
+      "merge-attempt",
       "planning",
       "review",
       "workflow-step",
@@ -360,6 +410,58 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.getByTestId("wf-layout-toggle")).toHaveTextContent("Show simple editor");
   });
 
+  it("surfaces the full styled simple-editor affordance set at desktop width", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+
+    const shell = await screen.findByTestId("wf-mobile-shell");
+    for (const panel of ["graph", "add", "settings", "fields", "columns", "actions"]) {
+      expect(within(shell).getByTestId(`wf-mobile-tab-${panel}`)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-actions"));
+    expect(screen.getByTestId("wf-mobile-save")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-ai-edit")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-auto-layout")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-export")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-delete")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-add"));
+    expect(screen.getByTestId("wf-mobile-add-prompt-prompt")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-add-script-script")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-add-gate-gate")).toBeInTheDocument();
+  });
+
+  it("surfaces built-in simple-editor actions at desktop width", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Default coding workflow");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+    await screen.findByTestId("wf-mobile-shell");
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-actions"));
+    expect(screen.getByTestId("wf-mobile-export")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-duplicate")).toBeInTheDocument();
+    expect(screen.queryByTestId("wf-mobile-save")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wf-mobile-delete")).not.toBeInTheDocument();
+  });
+
+  it("keeps simple-editor shell styling outside the mobile media query", () => {
+    const css = readFileSync("app/components/WorkflowNodeEditor.css", "utf8");
+    const mobileMediaIndex = css.indexOf("@media (max-width: 768px)");
+
+    expect(css.indexOf("--wf-editor-touch-target")).toBeGreaterThanOrEqual(0);
+    expect(css.indexOf("--wf-editor-touch-target")).toBeLessThan(mobileMediaIndex);
+    expect(css.indexOf(".wf-mobile-tab {")).toBeLessThan(mobileMediaIndex);
+    expect(css.indexOf(".wf-mobile-actions .wf-editor-action")).toBeLessThan(mobileMediaIndex);
+  });
+
   it("lets tablet users switch to the simple graph layout", async () => {
     mockWorkflowEditorViewport("tablet");
     vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
@@ -371,6 +473,40 @@ describe("WorkflowNodeEditor", () => {
 
     expect(await screen.findByTestId("wf-mobile-shell")).toBeInTheDocument();
     expect(screen.getByTestId("wf-mobile-tab-actions")).toBeInTheDocument();
+  });
+
+  it("preselects the matching initial workflow id on desktop", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-002" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Custom");
+    expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "QA" })).not.toHaveClass("active");
+    expect(screen.getAllByRole("button", { name: "Custom" })[0]).toHaveClass("active");
+  });
+
+  it("falls back to the first workflow on desktop when the initial workflow id is missing", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-missing" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Custom" })).not.toHaveClass("active");
+  });
+
+  it("skips the mobile workflow list stage when the initial workflow id is valid", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def(), v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} initialWorkflowId="WF-002" />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Custom");
+    expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "QA" })).not.toHaveClass("active");
+    expect(screen.getAllByRole("button", { name: "Custom" })[0]).toHaveClass("active");
   });
 
   it("opens populated mobile workflows on the list with no preselected workflow", async () => {
@@ -416,21 +552,54 @@ describe("WorkflowNodeEditor", () => {
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "QA" }));
-    fireEvent.click(await screen.findByTestId("wf-node-gate"));
+    const mobileGateRow = await screen.findByTestId("mobile-wf-node-lint");
+    fireEvent.click(within(mobileGateRow).getByRole("button"));
 
     const inspector = await screen.findByTestId("wf-node-inspector");
     expect(within(inspector).getByLabelText("Prompt")).toBeInTheDocument();
+    expect(inspector.closest(".wf-editor-body")).toHaveClass("wf-editor-body--mobile-node-detail");
 
     fireEvent.click(screen.getByTestId("wf-inspector-toggle"));
 
     await waitFor(() => expect(screen.queryByTestId("wf-node-inspector")).not.toBeInTheDocument());
     expect(screen.queryByLabelText("Prompt")).not.toBeInTheDocument();
-    expect(screen.getByTestId("wf-inspector-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByTestId("mobile-wf-graph")).toBeVisible();
 
-    fireEvent.click(screen.getByTestId("wf-inspector-toggle"));
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-lint")).getByRole("button"));
 
     expect(await screen.findByTestId("wf-node-inspector")).toBeInTheDocument();
     expect(screen.getByTestId("wf-inspector-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens selected edge details as a dismissible full-screen mobile stage", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    await screen.findByText("Save");
+    await screen.findByTestId("mobile-wf-graph");
+
+    const mobileEdgeChip = await screen.findByTestId("mobile-wf-edge-e-step-end-1");
+    fireEvent.click(mobileEdgeChip);
+
+    const edgeInspector = await screen.findByTestId("wf-edge-inspector");
+    const editorBody = edgeInspector.closest(".wf-editor-body");
+    expect(editorBody).toHaveClass("wf-editor-body--mobile-edge-detail");
+    expect(editorBody).not.toHaveClass("wf-editor-body--mobile-node-detail");
+    expect(within(edgeInspector).getByRole("button", { name: /delete edge/i })).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-shell").closest(".wf-editor-canvas-wrap")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-edge-inspector-close"));
+    await waitFor(() => expect(screen.queryByTestId("wf-edge-inspector")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("mobile-wf-graph")).toBeVisible();
+
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-step")).getByRole("button"));
+
+    const nodeInspector = await screen.findByTestId("wf-node-inspector");
+    expect(nodeInspector.closest(".wf-editor-body")).toHaveClass("wf-editor-body--mobile-node-detail");
+    expect(nodeInspector.closest(".wf-editor-body")).not.toHaveClass("wf-editor-body--mobile-edge-detail");
   });
 
   it("auto-expands the mobile inspector when selecting another node", async () => {
@@ -440,17 +609,235 @@ describe("WorkflowNodeEditor", () => {
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "QA" }));
-    fireEvent.click(await screen.findByTestId("wf-node-gate"));
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-lint")).getByRole("button"));
     expect(await screen.findByTestId("wf-node-inspector")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("wf-inspector-toggle"));
     await waitFor(() => expect(screen.queryByTestId("wf-node-inspector")).not.toBeInTheDocument());
 
-    fireEvent.click(await screen.findByTestId("wf-node-merge"));
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-merge")).getByRole("button"));
 
     const inspector = await screen.findByTestId("wf-node-inspector");
     expect(within(inspector).getByLabelText("Name")).toBeInTheDocument();
     expect(screen.getByTestId("wf-inspector-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows a prompt expand button and toggles fullscreen for prompt nodes", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+
+    const expand = await screen.findByRole("button", { name: "Expand prompt editor" });
+    expect(expand).toBeInTheDocument();
+
+    const inlinePromptEditor = expand.closest(".wf-prompt-editor");
+    expect(inlinePromptEditor).not.toBeNull();
+    expect(inlinePromptEditor).not.toHaveClass("wf-prompt-editor--fullscreen");
+    expect(getPromptFullscreenOverlay()).toBeNull();
+
+    fireEvent.click(expand);
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(inlinePromptEditor).not.toHaveClass("wf-prompt-editor--fullscreen");
+    expect(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" })).toBeVisible();
+    expect(getPromptFullscreenTextarea()).not.toHaveAttribute("rows");
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand prompt editor" })).toBeInTheDocument();
+  });
+
+  it("collapses the fullscreen prompt editor on Escape", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const promptEditor = getPromptFullscreenOverlay();
+    expect(promptEditor).toBeInTheDocument();
+
+    fireEvent.keyDown(promptEditor!, { key: "Escape" });
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand prompt editor" })).toBeInTheDocument();
+  });
+
+  it("shows the prompt expand button for gate nodes with an empty prompt", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "QA" }));
+    fireEvent.click(await screen.findByTestId("wf-node-gate"));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    expect(within(inspector).getByLabelText("Prompt")).toHaveValue("");
+    expect(within(inspector).getByRole("button", { name: "Expand prompt editor" })).toBeInTheDocument();
+  });
+
+  it("opens the fullscreen prompt editor from the mobile prompt inspector", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" })).toBeVisible();
+    expect(getPromptFullscreenTextarea()).toHaveFocus();
+  });
+
+  it("closes the fullscreen prompt editor with the mobile collapse button", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("closes the fullscreen prompt editor with Escape on mobile", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+
+    fireEvent.keyDown(fullscreenPromptEditor!, { key: "Escape" });
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("shows a non-disabled expand button and read-only prompt for builtin workflow prompt nodes", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    expect(within(inspector).getByLabelText("Prompt")).toHaveAttribute("readonly");
+
+    const expand = within(inspector).getByRole("button", { name: "Expand prompt editor" });
+    expect(expand).toBeInTheDocument();
+    expect(expand).not.toBeDisabled();
+  });
+
+  it("opens and collapses the fullscreen prompt editor for builtin workflows", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(fullscreenPromptEditor).toHaveClass("wf-prompt-editor--fullscreen");
+    expect(getPromptFullscreenTextarea()).toHaveAttribute("readonly");
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("opens and collapses the fullscreen prompt editor for builtin workflows on mobile", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Default coding workflow" }));
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(fullscreenPromptEditor).toHaveClass("wf-prompt-editor--fullscreen");
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("persists mobile fullscreen prompt edits back to the inline textarea", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    fireEvent.click(await screen.findByTestId("wf-node-prompt"));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+
+    fireEvent.change(getPromptFullscreenTextarea(), { target: { value: "mobile edit" } });
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    expect(within(inspector).getByLabelText("Prompt")).toHaveValue("mobile edit");
+  });
+
+  it("opens the fullscreen prompt editor for empty mobile gate prompts", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "QA" }));
+    fireEvent.click(await screen.findByTestId("wf-node-gate"));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    fireEvent.click(within(inspector).getByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    expect(within(fullscreenPromptEditor!).getByLabelText("Prompt")).toHaveValue("");
+  });
+
+  it("does not show the prompt expand button for non-prompt nodes", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([scriptDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-script"));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    expect(within(inspector).getByLabelText("Script name")).toBeInTheDocument();
+    expect(within(inspector).queryByRole("button", { name: "Expand prompt editor" })).not.toBeInTheDocument();
   });
 
   it("renders nothing when closed", () => {
@@ -807,7 +1194,7 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     // cold-transform shard load (observed intermittently in CI-like runs).
     await waitFor(() => expect(screen.getByTestId("wf-node-foreach")).toBeInTheDocument(), { timeout: 5000 });
     // The foreach inspector shows the Mode select (KTD-3).
-    expect(screen.getByText("Mode")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Mode")).toBeInTheDocument());
     // No empty-state hint because the palette seeded a step-execute child.
     expect(screen.queryByTestId("wf-foreach-empty")).not.toBeInTheDocument();
 
@@ -962,11 +1349,16 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     await screen.findByText("Save");
+    // Wait for graph/column hydration before driving the palette — clicking
+    // mid-hydration races the flow-state seeding and the added node may never
+    // render (same flake class as foreach palette add, 86867c57b).
+    expect(await screen.findByTestId("wf-column-panel")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Code").closest("button")!);
+    await waitFor(() => expect(screen.getByTestId("wf-node-code")).toBeInTheDocument(), { timeout: 5000 });
     const source = (await screen.findByText("Source (TypeScript)")).parentElement!.querySelector("textarea")! as HTMLTextAreaElement;
     fireEvent.change(source, { target: { value: "export default async()=>({outcome:'success'})" } });
     expect(source.value).toContain("outcome:'success'");
-    const timeout = screen.getByText("Timeout (ms)").parentElement!.querySelector("input")! as HTMLInputElement;
+    const timeout = (await screen.findByText("Timeout (ms)")).parentElement!.querySelector("input")! as HTMLInputElement;
     fireEvent.change(timeout, { target: { value: "12000" } });
     expect(timeout.value).toBe("12000");
   });
@@ -1548,8 +1940,10 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
     const onClose = vi.fn();
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     renderWithConfirm(<WorkflowNodeEditor isOpen onClose={onClose} addToast={() => {}} />);
+    await screen.findByText("Save");
+    await waitFor(() => expect(screen.getAllByLabelText(/Column name/i).length).toBeGreaterThan(0));
     // Make an edit: inline rename.
-    fireEvent.click(await screen.findByTestId("wf-workflow-name"));
+    fireEvent.click(screen.getByTestId("wf-workflow-name"));
     const input = await screen.findByTestId("wf-workflow-name-input");
     fireEvent.change(input, { target: { value: "Edited" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -1574,8 +1968,10 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
       { ...v2Def(), id: "WF-OTHER", name: "Other" },
     ]);
     renderWithConfirm(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    await waitFor(() => expect(screen.getAllByLabelText(/Column name/i).length).toBeGreaterThan(0));
     // Edit the active workflow.
-    fireEvent.click(await screen.findByTestId("wf-workflow-name"));
+    fireEvent.click(screen.getByTestId("wf-workflow-name"));
     const input = await screen.findByTestId("wf-workflow-name-input");
     fireEvent.change(input, { target: { value: "Edited" } });
     fireEvent.keyDown(input, { key: "Enter" });

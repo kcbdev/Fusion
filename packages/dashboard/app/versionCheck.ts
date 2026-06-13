@@ -4,6 +4,7 @@ declare const __BUILD_VERSION__: string;
 
 const RELOAD_FLAG = "fusion:version-reload";
 const VERSION_UPDATE_FLAG = "fusion:version-update";
+const RELOADED_REMOTE_VERSION_FLAG = "fusion:version-reloaded-remote";
 
 /**
  * Module-level guard for auto-reload behavior.
@@ -25,11 +26,20 @@ export function _isAutoReloadEnabled(): boolean {
   return autoReloadEnabled;
 }
 
-/** Exported for testing — resets internal state. */
+/** Exported for testing — resets internal state and clears installed polling. */
 export function _resetState(): void {
   lastCheckTime = 0;
   checkInFlight = false;
   autoReloadEnabled = true;
+  try {
+    sessionStorage.removeItem(RELOADED_REMOTE_VERSION_FLAG);
+  } catch {
+    // ignore
+  }
+  if (pollIntervalId !== null) {
+    window.clearInterval(pollIntervalId);
+    pollIntervalId = null;
+  }
   _resetMismatchState();
 }
 
@@ -59,6 +69,30 @@ export function reloadOnce(reason: string): void {
   }
   console.info("[versionCheck] reloading:", reason);
   window.location.reload();
+}
+
+function getReloadedRemoteVersion(): string | null {
+  try {
+    return sessionStorage.getItem(RELOADED_REMOTE_VERSION_FLAG);
+  } catch {
+    return null;
+  }
+}
+
+function setReloadedRemoteVersion(version: string): void {
+  try {
+    sessionStorage.setItem(RELOADED_REMOTE_VERSION_FLAG, version);
+  } catch {
+    // ignore
+  }
+}
+
+function clearReloadedRemoteVersion(): void {
+  try {
+    sessionStorage.removeItem(RELOADED_REMOTE_VERSION_FLAG);
+  } catch {
+    // ignore
+  }
 }
 
 export function isStaleChunkError(error: unknown): boolean {
@@ -121,10 +155,15 @@ async function bootstrapAutoReloadSetting(): Promise<void> {
 }
 
 export const MIN_CHECK_INTERVAL_MS = 60_000; // 1 minute
+export const POLL_INTERVAL_MS = 5 * 60_000; // 5 minutes
+
+type VersionCheckTrigger = "visibilitychange" | "focus" | "initial" | "poll";
+
 let lastCheckTime = 0;
 let checkInFlight = false;
 let lastMismatchedRemote: string | null = null;
 let lastMismatchAt = 0;
+let pollIntervalId: number | null = null;
 
 /** Exported for testing — resets internal cooldown state */
 export function _resetCheckState(): void {
@@ -138,7 +177,7 @@ export function _resetMismatchState(): void {
   lastMismatchAt = 0;
 }
 
-export async function checkVersion(trigger: "visibilitychange" | "focus" | "initial" = "initial"): Promise<void> {
+export async function checkVersion(trigger: VersionCheckTrigger = "initial"): Promise<void> {
   if (checkInFlight || document.visibilityState !== "visible") return;
   if (Date.now() - lastCheckTime < MIN_CHECK_INTERVAL_MS) return;
   lastCheckTime = Date.now();
@@ -156,6 +195,7 @@ export async function checkVersion(trigger: "visibilitychange" | "focus" | "init
 
     if (remote === __BUILD_VERSION__) {
       lastMismatchedRemote = null;
+      clearReloadedRemoteVersion();
       return;
     }
 
@@ -184,10 +224,24 @@ export async function checkVersion(trigger: "visibilitychange" | "focus" | "init
       trigger,
       elapsedMs: Date.now() - lastMismatchAt,
     });
+
+    if (getReloadedRemoteVersion() === remote) {
+      pushTrace("versionCheck", "reload-suppressed", {
+        remote,
+        trigger,
+        reason: "already-reloaded-remote-version",
+      });
+      console.info("[versionCheck] reload already attempted for remote version", remote);
+      return;
+    }
+
     try {
       sessionStorage.setItem(VERSION_UPDATE_FLAG, "1");
     } catch {
       // ignore
+    }
+    if (autoReloadEnabled) {
+      setReloadedRemoteVersion(remote);
     }
     reloadOnce(`build version changed: ${__BUILD_VERSION__} -> ${remote}`);
   } finally {
@@ -195,6 +249,15 @@ export async function checkVersion(trigger: "visibilitychange" | "focus" | "init
   }
 }
 
+/**
+ * Install production version-change detection.
+ *
+ * The checker runs on initial load, tab visibility/focus events, and a
+ * lightweight periodic poll so foreground tabs detect newly deployed bundles
+ * even when the user never switches away. `checkVersion()` applies visibility
+ * and cooldown guards, so the interval does not fetch for hidden tabs or more
+ * frequently than the minimum check interval.
+ */
 export function installVersionCheck(): void {
   if (!import.meta.env.PROD) return;
   // Fetch settings to apply auto-reload guard before first version check.
@@ -209,4 +272,9 @@ export function installVersionCheck(): void {
   });
   // Initial check after load to catch tabs restored from bfcache.
   window.setTimeout(() => void checkVersion("initial"), 2_000);
+  if (pollIntervalId === null) {
+    pollIntervalId = window.setInterval(() => {
+      void checkVersion("poll");
+    }, POLL_INTERVAL_MS);
+  }
 }

@@ -7,12 +7,14 @@ import {
   handleChunkLoadError,
   reloadOnce,
   checkVersion,
+  installVersionCheck,
   consumeVersionUpdateFlag,
   _resetCheckState,
   _resetState,
   setAutoReloadEnabled,
   _isAutoReloadEnabled,
   MIN_CHECK_INTERVAL_MS,
+  POLL_INTERVAL_MS,
   _resetMismatchState,
 } from "../versionCheck";
 import { clearTraces, getTraces } from "../utils/dashboardTraceBuffer";
@@ -216,6 +218,34 @@ describe("checkVersion cooldown + mismatch gating", () => {
     vi.useRealTimers();
   });
 
+  it("does not reload repeatedly for the same remote version after returning to the tab", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ version: "different-version" }),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await checkVersion("initial");
+    vi.advanceTimersByTime(MIN_CHECK_INTERVAL_MS + 1);
+    await checkVersion("visibilitychange");
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+
+    window.sessionStorage.removeItem("fusion:version-reload");
+
+    vi.advanceTimersByTime(MIN_CHECK_INTERVAL_MS + 1);
+    await checkVersion("focus");
+
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+    const suppressedTrace = getTraces().find((entry) => entry.event === "reload-suppressed");
+    expect(suppressedTrace?.detail).toMatchObject({
+      remote: "different-version",
+      reason: "already-reloaded-remote-version",
+    });
+    vi.useRealTimers();
+  });
+
   it("mismatch then match resets gating", async () => {
     vi.useFakeTimers();
     const fetchSpy = vi.fn()
@@ -256,6 +286,119 @@ describe("checkVersion cooldown + mismatch gating", () => {
       .map((entry) => entry.detail.trigger);
     expect(mismatchTriggers).toEqual(expect.arrayContaining(["initial", "visibilitychange", "focus"]));
     vi.useRealTimers();
+  });
+});
+
+describe("installVersionCheck periodic polling", () => {
+  const reloadSpy = vi.fn();
+
+  function versionResponse(version: string) {
+    return {
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ version }),
+    };
+  }
+
+  function settingsResponse() {
+    return {
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ autoReloadOnVersionChange: true }),
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv("PROD", true);
+    vi.stubGlobal("location", { reload: reloadSpy });
+    window.sessionStorage.clear();
+    reloadSpy.mockClear();
+    _resetState();
+    clearTraces();
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+  });
+
+  afterEach(() => {
+    _resetState();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("sets up a periodic interval that calls checkVersion with the poll trigger", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(settingsResponse())
+      .mockResolvedValueOnce(versionResponse("test-build-abc123"))
+      .mockResolvedValueOnce(versionResponse("different-version"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    installVersionCheck();
+    await vi.advanceTimersByTimeAsync(2_000);
+    clearTraces();
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 2_000);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    const mismatchTrace = getTraces().find((entry) => entry.event === "mismatch");
+    expect(mismatchTrace?.detail).toMatchObject({ trigger: "poll", remote: "different-version" });
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  it("polling detects a confirmed version mismatch and triggers reload", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(settingsResponse())
+      .mockResolvedValueOnce(versionResponse("test-build-abc123"))
+      .mockResolvedValueOnce(versionResponse("different-version"))
+      .mockResolvedValueOnce(versionResponse("different-version"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    installVersionCheck();
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    expect(reloadSpy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+    expect(window.sessionStorage.getItem("fusion:version-update")).toBe("1");
+    const confirmedTrace = getTraces().find((entry) => entry.event === "mismatch-confirmed");
+    expect(confirmedTrace?.detail).toMatchObject({ trigger: "poll", remote: "different-version" });
+  });
+
+  it("cleans up the polling interval when state is reset", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(settingsResponse())
+      .mockResolvedValueOnce(versionResponse("test-build-abc123"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    installVersionCheck();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+
+    _resetState();
+    fetchSpy.mockClear();
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("polling respects MIN_CHECK_INTERVAL_MS cooldown", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(settingsResponse())
+      .mockResolvedValue(versionResponse("test-build-abc123"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    installVersionCheck();
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2); // settings + initial check
+
+    await checkVersion("focus");
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(reloadSpy).not.toHaveBeenCalled();
   });
 });
 

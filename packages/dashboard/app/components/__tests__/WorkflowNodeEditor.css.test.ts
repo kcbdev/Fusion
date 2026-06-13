@@ -54,6 +54,53 @@ describe("WorkflowNodeEditor edge visibility CSS contract", () => {
   });
 });
 
+describe("WorkflowNodeEditor sidebar overflow CSS contract", () => {
+  it("FN-6379 clamps horizontal overflow on desktop and list-stage sidebars", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+    const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
+
+    const desktopSidebarRule = findRule([editorCss], /\.wf-editor-sidebar\s*\{(?=[^}]*width\s*:\s*300px)[^}]*\}/);
+    expect(desktopSidebarRule).toMatch(/width\s*:\s*300px\s*;/);
+    expect(desktopSidebarRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(desktopSidebarRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(desktopSidebarRule).toMatch(/overflow-y\s*:\s*auto\s*;/);
+
+    const listStageSidebarRule = findRule(mobileBlocks, /\.wf-editor-body--list-stage \.wf-editor-sidebar\s*\{[^}]*\}/);
+    expect(listStageSidebarRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(listStageSidebarRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(listStageSidebarRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(listStageSidebarRule).toMatch(/overflow-y\s*:\s*auto\s*;/);
+  });
+
+  it("FN-6379 keeps sidebar children from forcing horizontal scroll", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+
+    const listRule = findRule([editorCss], /\.wf-editor-list\s*\{[^}]*\}/);
+    expect(listRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const listItemRule = findRule([editorCss], /\.wf-editor-list-item\s*\{[^}]*\}/);
+    expect(listItemRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(listItemRule).toMatch(/overflow\s*:\s*hidden\s*;/);
+    expect(listItemRule).toMatch(/text-overflow\s*:\s*ellipsis\s*;/);
+    expect(listItemRule).toMatch(/white-space\s*:\s*nowrap\s*;/);
+
+    const paletteRule = findRule([editorCss], /\.wf-editor-palette\s*\{[^}]*\}/);
+    expect(paletteRule).toMatch(/min-width\s*:\s*0\s*;/);
+
+    const paletteButtonRule = findRule(
+      [editorCss],
+      /\.wf-palette-btn,\s*\.wf-editor-action,\s*\.wf-editor-delete,\s*\.wf-editor-save\s*\{[^}]*\}/,
+    );
+    expect(paletteButtonRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(paletteButtonRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
+
+    const sidebarCodeRule = findRule([editorCss], /\.wf-editor-sidebar \.wf-code-source\s*\{[^}]*\}/);
+    expect(sidebarCodeRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
+    expect(sidebarCodeRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
+    expect(sidebarCodeRule).toMatch(/white-space\s*:\s*pre-wrap\s*;/);
+  });
+});
+
 describe("WorkflowNodeEditor mobile CSS contract", () => {
   it("FN-5992 preserves desktop editor min-width while adding full-screen mobile overrides", () => {
     const baseCss = loadAllAppCssBaseOnly();
@@ -96,7 +143,29 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
 
     const inspectorRule = findRule(mobileBlocks, /\.wf-editor-body--editor-stage \.wf-editor-inspector\s*\{[^}]*\}/);
     expect(inspectorRule).toMatch(/width\s*:\s*100%\s*;/);
-    expect(inspectorRule).toMatch(/max-height\s*:\s*45vh\s*;/);
+    expect(inspectorRule).toMatch(/max-height\s*:\s*none\s*;/);
+    expect(inspectorRule).toMatch(/flex\s*:\s*1 1 auto\s*;/);
+    expect(inspectorRule).toMatch(/min-height\s*:\s*0\s*;/);
+
+    const mobileDetailCanvasRule = findRule(mobileBlocks, /\.wf-editor-body--mobile-node-detail \.wf-editor-canvas-wrap\s*\{[^}]*\}/);
+    expect(mobileDetailCanvasRule).toMatch(/display\s*:\s*none\s*;/);
+
+    const mobileDetailInspectorRule = findRule(mobileBlocks, /\.wf-editor-body--mobile-node-detail \.wf-editor-inspector\s*\{[^}]*\}/);
+    expect(mobileDetailInspectorRule).toMatch(/display\s*:\s*flex\s*;/);
+    expect(mobileDetailInspectorRule).toMatch(/flex\s*:\s*1 1 auto\s*;/);
+    expect(mobileDetailInspectorRule).toMatch(/min-height\s*:\s*0\s*;/);
+    expect(mobileDetailInspectorRule).toMatch(/max-height\s*:\s*none\s*;/);
+
+    const mobileEdgeDetailCanvasRule = findRule(mobileBlocks, /\.wf-editor-body--mobile-edge-detail \.wf-editor-canvas-wrap\s*\{[^}]*\}/);
+    expect(mobileEdgeDetailCanvasRule).toMatch(/display\s*:\s*none\s*;/);
+
+    const mobileEdgeDetailInspectorRule = findRule(mobileBlocks, /\.wf-editor-body--mobile-edge-detail \.wf-editor-inspector\s*\{[^}]*\}/);
+    expect(mobileEdgeDetailInspectorRule).toMatch(/display\s*:\s*flex\s*;/);
+    expect(mobileEdgeDetailInspectorRule).toMatch(/flex\s*:\s*1 1 auto\s*;/);
+    expect(mobileEdgeDetailInspectorRule).toMatch(/max-height\s*:\s*none\s*;/);
+
+    const mobileTabsRule = findRule(mobileBlocks, /\.wf-mobile-tabs\s*\{[^}]*\}/);
+    expect(mobileTabsRule).toMatch(/flex\s*:\s*0 0 auto\s*;/);
 
     const collapsedToggleRule = findRule([editorCss], /\.wf-inspector-toggle--collapsed\s*\{[^}]*\}/);
     expect(collapsedToggleRule).toMatch(/position\s*:\s*absolute\s*;/);
@@ -131,6 +200,7 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
     expect(editorBodyRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
 
     const editorStageWrapRule = findRule(mobileBlocks, /\.wf-editor-body--editor-stage \.wf-editor-canvas-wrap\s*\{[^}]*\}/);
+    expect(editorStageWrapRule).toMatch(/flex\s*:\s*0 1 auto\s*;/);
     expect(editorStageWrapRule).toMatch(/width\s*:\s*100%\s*;/);
     expect(editorStageWrapRule).toMatch(/min-width\s*:\s*0\s*;/);
     expect(editorStageWrapRule).toMatch(/overflow\s*:\s*hidden\s*;/);
@@ -244,7 +314,7 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
 
     const manageRule = findRule(
       selectorMobile,
-      /\.workflow-selector select,\s*\.workflow-selector-manage,\s*\.workflow-selector-collapsed-button\s*\{[^}]*\}/,
+      /\.workflow-selector select,\s*\.workflow-selector-manage\s*\{[^}]*\}/,
     );
     expect(manageRule).toMatch(/width\s*:\s*100%\s*;/);
   });

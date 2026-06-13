@@ -85,7 +85,9 @@ describe("GET /tasks/board-workflows", () => {
   const get = (path: string) => REQUEST(app, "GET", path);
 
   it("flag OFF → { flagEnabled: false } legacy shape", async () => {
-    // Even with tasks on the board, flag-OFF returns the empty single-lane shape.
+    // Even with tasks on the board, an explicitly-disabled flag returns the empty
+    // single-lane shape regardless of the project's default feature policy.
+    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: false } });
     await store.createTask({ description: "card" });
     const res = await get("/api/tasks/board-workflows");
     expect(res.status).toBe(200);
@@ -187,16 +189,17 @@ describe("GET /tasks/board-workflows", () => {
     expect((customLane?.columns.length ?? 0)).toBeGreaterThan(0);
   });
 
-  it("REGRESSION (FN-1414 finding): non-watching store + stale slim memo → route reports empty taskWorkflowIds for a populated board", async () => {
+  it("REGRESSION (FN-1414 finding): non-watching store slim memo never exceeds the full board snapshot", async () => {
     // PRODUCTION BUG CAPTURED (report only — prod owned by another agent):
     // TaskStore.listTasks({ slim: true }) is memoized for 2.5s whenever the store
     // is NOT watching (startupSlimListMemo, store.ts ~L4902). The board-workflows
     // route reads listTasks({ slim: true, includeArchived: false }); if an earlier
-    // slim read memoized an empty/stale list, the route returns an empty
-    // taskWorkflowIds even though the board has cards. A watching dashboard store
-    // disables the memo, so this primarily bites non-watching contexts (and the
-    // 2.5s window right after boot). We assert the OBSERVED behavior so the suite
-    // stays green and the discrepancy is documented.
+    // slim read memoized an empty/stale list, the route can return stale
+    // taskWorkflowIds even though the board has newer cards. A watching dashboard
+    // store disables the memo, so this primarily bites non-watching contexts (and
+    // the 2.5s window right after boot). The exact cache-expiry boundary is
+    // wall-clock based, so assert the deterministic invariant instead: slim reads
+    // may be stale or fresh, but they must never report more cards than full reads.
     await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
     await store.createTask({ description: "card" });
     // Prime the slim memo with the current (single-card) snapshot, then add a card.
@@ -205,9 +208,12 @@ describe("GET /tasks/board-workflows", () => {
     const slimAfter = await store.listTasks({ slim: true, includeArchived: false });
     const fullAfter = await store.listTasks({ includeArchived: false });
 
-    // The non-slim read sees both cards; the memoized slim read is stale.
+    // The non-slim read sees both cards. Depending on wall-clock cache expiry,
+    // the second slim read can be stale (matching slimBefore) or fresh (matching
+    // fullAfter), but it must remain bounded by the full source of truth.
+    expect(slimBefore.length).toBe(1);
     expect(fullAfter.length).toBe(2);
-    expect(slimAfter.length).toBe(slimBefore.length); // stale — second card not visible
-    expect(slimAfter.length).toBeLessThan(fullAfter.length);
+    expect(slimAfter.length).toBeGreaterThanOrEqual(slimBefore.length);
+    expect(slimAfter.length).toBeLessThanOrEqual(fullAfter.length);
   });
 });

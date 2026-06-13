@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { AgentStore } from "../agent-store.js";
@@ -24,16 +25,47 @@ describe("TaskStore Archive and Search", () => {
   afterAll(harness.afterAll);
 
   describe("archiveTask", () => {
-    it("archives a done task (moves done → archived)", async () => {
-      const task = await store.createTask({ description: "Test task" });
-      await store.moveTask(task.id, "todo");
-      await store.moveTask(task.id, "in-progress");
-      await store.moveTask(task.id, "in-review");
-      await store.moveTask(task.id, "done");
+    it("archives tasks from every live column and emits the real source column", async () => {
+      const liveColumns = ["triage", "todo", "in-progress", "in-review", "done"] as const;
 
-      const archived = await store.archiveTask(task.id);
+      for (const column of liveColumns) {
+        const task = await store.createTask({ description: `Archive from ${column}` });
+        if (column === "todo") {
+          await store.moveTask(task.id, "todo");
+        } else if (column === "in-progress") {
+          await store.moveTask(task.id, "todo");
+          await store.moveTask(task.id, "in-progress");
+        } else if (column === "in-review") {
+          await store.moveTask(task.id, "todo");
+          await store.moveTask(task.id, "in-progress");
+          await store.moveTask(task.id, "in-review");
+        } else if (column === "done") {
+          await store.moveTask(task.id, "todo");
+          await store.moveTask(task.id, "in-progress");
+          await store.moveTask(task.id, "in-review");
+          await store.moveTask(task.id, "done");
+        }
+
+        const events: any[] = [];
+        store.on("task:moved", (data) => events.push(data));
+        const archived = await store.archiveTask(task.id, false);
+
+        expect(archived.column).toBe("archived");
+        expect(archived.preArchiveColumn).toBe(column);
+        expect(events).toHaveLength(1);
+        expect(events[0].from).toBe(column);
+        expect(events[0].to).toBe("archived");
+      }
+    });
+
+    it("archives a non-done task with cleanup enabled", async () => {
+      const task = await store.createTask({ description: "Cleanup archive from todo" });
+      await store.moveTask(task.id, "todo");
+
+      const archived = await store.archiveTask(task.id, true);
 
       expect(archived.column).toBe("archived");
+      expect(archived.preArchiveColumn).toBe("todo");
     });
 
     it("adds log entry 'Task archived'", async () => {
@@ -78,11 +110,11 @@ describe("TaskStore Archive and Search", () => {
       expect(fetched.column).toBe("archived");
     });
 
-    it("throws error when task is not in 'done' column", async () => {
+    it("throws error when task is already archived", async () => {
       const task = await store.createTask({ description: "Test task" });
-      // Task starts in triage, not done
+      await store.archiveTask(task.id, false);
 
-      await expect(store.archiveTask(task.id)).rejects.toThrow("must be in 'done'");
+      await expect(store.archiveTask(task.id)).rejects.toThrow("already archived");
     });
 
     it("updates columnMovedAt timestamp", async () => {
@@ -141,13 +173,27 @@ describe("TaskStore Archive and Search", () => {
   });
 
   describe("unarchiveTask", () => {
-    it("unarchives an archived task (moves archived → done)", async () => {
-      const task = await store.createTask({ description: "Test task" });
-      await store.moveTask(task.id, "todo");
-      await store.moveTask(task.id, "in-progress");
-      await store.moveTask(task.id, "in-review");
-      await store.moveTask(task.id, "done");
+    it("unarchives to the pre-archive column, downgrading active execution columns to todo", async () => {
+      const todoTask = await store.createTask({ description: "Todo round trip" });
+      await store.moveTask(todoTask.id, "todo");
+      await store.archiveTask(todoTask.id, false);
+      await expect(store.unarchiveTask(todoTask.id)).resolves.toMatchObject({ column: "todo" });
+
+      const inProgressTask = await store.createTask({ description: "In progress round trip" });
+      await store.moveTask(inProgressTask.id, "todo");
+      await store.moveTask(inProgressTask.id, "in-progress");
+      await store.archiveTask(inProgressTask.id, false);
+      await expect(store.unarchiveTask(inProgressTask.id)).resolves.toMatchObject({ column: "todo" });
+    });
+
+    it("falls back to done for legacy archives without a pre-archive column", async () => {
+      const task = await store.createTask({ description: "Legacy archive" });
       await store.archiveTask(task.id, false);
+      const dir = join(harness.rootDir(), ".fusion", "tasks", task.id);
+      const raw = await readFile(join(dir, "task.json"), "utf-8");
+      const parsed = JSON.parse(raw);
+      delete parsed.preArchiveColumn;
+      await writeFile(join(dir, "task.json"), JSON.stringify(parsed));
 
       const unarchived = await store.unarchiveTask(task.id);
 

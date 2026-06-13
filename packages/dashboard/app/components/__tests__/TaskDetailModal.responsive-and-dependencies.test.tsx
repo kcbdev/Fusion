@@ -61,7 +61,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-timestamps")).toBeTruthy();
       expect(container.querySelectorAll(".detail-timestamp-item").length).toBe(2);
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(10);
+      expect(tabs.length).toBe(11);
       expect(tabs[0].classList.contains("detail-tab-active")).toBe(true);
       expect(Array.from(tabs).slice(1).every((t) => !t.classList.contains("detail-tab-active"))).toBe(true);
       // Responsive CSS controls sizing — no inline padding/fontSize/borderBottom leaks
@@ -422,6 +422,32 @@ describe("TaskDetailModal", () => {
           allowResurrection: false,
         });
       });
+    });
+
+    it("offers archive instead when deleting a non-done live task", async () => {
+      const onArchiveTask = vi.fn().mockResolvedValue({} as Task);
+      mockConfirmWithChoice.mockResolvedValueOnce("tertiary");
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ column: "todo" as any })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onArchiveTask={onArchiveTask}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+      await waitFor(() => {
+        expect(onArchiveTask).toHaveBeenCalledWith("FN-099");
+      });
+      expect(noopDelete).not.toHaveBeenCalled();
     });
 
     it("retries archive after lineage-conflict confirmation", async () => {

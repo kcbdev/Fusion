@@ -8,9 +8,9 @@ const { mockCommentOnIssue } = vi.hoisted(() => ({
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     commentOnIssue: (...args: unknown[]) => mockCommentOnIssue(...args),
-  })),
+  }; }),
 }));
 
 class MockStore extends EventEmitter {

@@ -32,7 +32,13 @@ function recordingPrimitives(
   overrides: Partial<Record<"prepare" | "execute" | "workflowStep", WorkflowNodeResult>> & {
     prepareData?: PreparedWorktree | null;
   } = {},
-  observed: { prepared?: PreparedWorktree; mergeAttempt?: number; mergeRunId?: string; mergeWorkflowId?: string } = {},
+  observed: {
+    prepared?: PreparedWorktree;
+    executedTasks?: TaskDetail[];
+    mergeAttempt?: number;
+    mergeRunId?: string;
+    mergeWorkflowId?: string;
+  } = {},
 ): WorkflowRuntimePrimitives {
   const prepared: PreparedWorktree = { worktreePath: "/tmp/fusion-worktree" };
   return {
@@ -58,6 +64,7 @@ function recordingPrimitives(
     runCodingSession: async (_ctx, _task, preparedWorktree) => {
       calls.push("execute");
       observed.prepared = preparedWorktree;
+      observed.executedTasks?.push(_task);
       const override = overrides.execute;
       return {
         outcome: override?.outcome ?? "success",
@@ -154,6 +161,97 @@ describe("WorkflowTaskRuntime", () => {
     expect(workflowSelectionReads).toBe(1);
   });
 
+  it("preserves attachments through selected workflow execution", async () => {
+    const calls: string[] = [];
+    const attachments = [
+      {
+        filename: "abc-shot.png",
+        originalName: "shot.png",
+        mimeType: "image/png",
+        size: 1024,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        filename: "def-context.txt",
+        originalName: "context.txt",
+        mimeType: "text/plain",
+        size: 256,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const attachmentTask = { ...task, attachments } as TaskDetail;
+    const observed: { executedTasks: TaskDetail[] } = { executedTasks: [] };
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTaskWorkflowSelection: () => ({ workflowId: "WF-001", stepIds: [] }),
+        getWorkflowDefinition: async () => ({ ir: selectedIr() }),
+      },
+      primitives: recordingPrimitives(calls, undefined, observed),
+      runCustomNode: async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success" };
+      },
+    });
+
+    const result = await runtime.run(attachmentTask, flagOff);
+
+    expect(result.disposition).toBe("completed");
+    expect(calls).toEqual(["custom:prepare", "prepare-worktree", "execute"]);
+    expect(observed.executedTasks).toHaveLength(1);
+    expect(observed.executedTasks[0]?.attachments).toEqual(attachments);
+  });
+
+  it("preserves attachments through built-in workflow execution", async () => {
+    const calls: string[] = [];
+    const attachments = [
+      {
+        filename: "abc-shot.png",
+        originalName: "shot.png",
+        mimeType: "image/png",
+        size: 1024,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const attachmentTask = { ...task, attachments } as TaskDetail;
+    const observed: { executedTasks: TaskDetail[] } = { executedTasks: [] };
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTaskWorkflowSelection: () => undefined,
+        getWorkflowDefinition: async () => undefined,
+      },
+      primitives: recordingPrimitives(calls, undefined, observed),
+      runCustomNode: async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success" };
+      },
+    });
+
+    const result = await runtime.run(attachmentTask, flagOff);
+
+    expect(result.disposition).toBe("completed");
+    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "workflow-step", "review", "merge"]);
+    expect(observed.executedTasks).toHaveLength(1);
+    expect(observed.executedTasks[0]?.attachments).toEqual(attachments);
+  });
+
+  it("passes undefined attachments through built-in workflow execution when absent", async () => {
+    const observed: { executedTasks: TaskDetail[] } = { executedTasks: [] };
+    const runtime = new WorkflowTaskRuntime({
+      store: {
+        getTaskWorkflowSelection: () => undefined,
+        getWorkflowDefinition: async () => undefined,
+      },
+      primitives: recordingPrimitives([], undefined, observed),
+      runCustomNode: async () => ({ outcome: "success" }),
+    });
+
+    const result = await runtime.run(task, flagOff);
+
+    expect(result.disposition).toBe("completed");
+    expect(observed.executedTasks).toHaveLength(1);
+    expect(observed.executedTasks[0]?.attachments).toBeUndefined();
+  });
+
   it("fails execute instead of skipping coding when prepare succeeds without worktree data", async () => {
     const calls: string[] = [];
     const runtime = new WorkflowTaskRuntime({
@@ -196,17 +294,7 @@ describe("WorkflowTaskRuntime", () => {
 
     expect(result.disposition).toBe("completed");
     expect(calls).toEqual(["planning", "prepare-worktree", "execute", "workflow-step", "review", "merge"]);
-    expect(result.visitedNodeIds).toEqual([
-      "start",
-      "planning",
-      "execute",
-      "workflow-step",
-      "review",
-      "merge-gate",
-      "branch-group-member-integration",
-      "branch-group-promotion",
-      "merge-attempt",
-    ]);
+    expect(result.visitedNodeIds).toEqual(["start", "planning", "execute", "workflow-step", "review", "merge"]);
   });
 
   it("stops the built-in workflow before review when workflow-step remediation is scheduled", async () => {

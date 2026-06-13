@@ -7,9 +7,9 @@ const RECONCILE_CONCURRENCY_LIMIT = 4;
 
 export class GitHubTrackingReconciler {
   async reconcile(store: TaskStore): Promise<{ scanned: number; closed: number; skipped: number; errors: number }> {
-    const listedTasks = await store.listTasks({ slim: true, includeArchived: false });
+    const listedTasks = await store.listTasks({ slim: true, includeArchived: true });
     const tasks = (Array.isArray(listedTasks) ? listedTasks : [])
-      .filter((task) => task.column === "done")
+      .filter((task) => task.column === "done" || task.column === "archived")
       .slice(0, RECONCILE_SCAN_LIMIT);
 
     const projectSettings = ((await store.getSettings()) ?? {}) as Pick<ProjectSettings, "githubAuthMode" | "githubAuthToken">;
@@ -44,7 +44,8 @@ export class GitHubTrackingReconciler {
           return;
         }
 
-        await client.setIssueState(issue.owner, issue.repo, issue.number, "closed", "completed");
+        const stateReason = task.column === "archived" && !task.executionCompletedAt ? "not_planned" : "completed";
+        await client.setIssueState(issue.owner, issue.repo, issue.number, "closed", stateReason);
         closed += 1;
       } catch (error) {
         errors += 1;
@@ -60,9 +61,9 @@ export class GitHubTrackingReconciler {
   }
 
   async reconcileSourceIssues(store: TaskStore): Promise<{ scanned: number; closed: number; skipped: number; errors: number }> {
-    const listedTasks = await store.listTasks({ slim: false, includeArchived: false });
+    const listedTasks = await store.listTasks({ slim: false, includeArchived: true });
     const tasks = (Array.isArray(listedTasks) ? listedTasks : [])
-      .filter((task) => task.column === "done" && task.sourceIssue?.provider === "github")
+      .filter((task) => (task.column === "done" || task.column === "archived") && task.sourceIssue?.provider === "github")
       .slice(0, RECONCILE_SCAN_LIMIT);
 
     const projectSettings = ((await store.getSettings()) ?? {}) as Pick<ProjectSettings, "githubCloseSourceIssueOnDone" | "githubAuthMode" | "githubAuthToken">;
@@ -105,7 +106,8 @@ export class GitHubTrackingReconciler {
           return;
         }
 
-        await client.setIssueState(owner, repo, issueNumberValue, "closed", "completed");
+        const stateReason = task.column === "archived" && !task.executionCompletedAt ? "not_planned" : "completed";
+        await client.setIssueState(owner, repo, issueNumberValue, "closed", stateReason);
         closed += 1;
       } catch (error) {
         errors += 1;

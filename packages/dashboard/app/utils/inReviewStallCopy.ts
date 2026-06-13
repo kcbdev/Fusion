@@ -22,6 +22,7 @@ const BADGE_LABEL_BY_CODE: Record<InReviewStallCode, string> = {
   "transient-merge-status-no-owner": "Merge stalled",
   "merge-retries-exhausted": "Retries exhausted",
   "no-worktree-no-merge-confirmed": "No worktree",
+  "non-retryable-provider-error": "Provider error",
 };
 
 const COPY_BY_CODE: Record<InReviewStallCode, Omit<InReviewStallCopy, "badgeLabel" | "counter" | "code">> = {
@@ -49,6 +50,13 @@ const COPY_BY_CODE: Record<InReviewStallCode, Omit<InReviewStallCopy, "badgeLabe
       "The task's working tree is gone but the merge was never confirmed. Either the worktree was removed prematurely or the merge metadata is incomplete.",
     suggestedAction:
       "Check the Changes tab and Git history; if the work landed, mark the merge confirmed, otherwise re-create the worktree.",
+  },
+  "non-retryable-provider-error": {
+    headline: "Terminal provider error",
+    description:
+      "The provider rejected the task with a non-retryable error such as an invalid model, unsupported request, or permission denial. Self-healing will pause the task instead of retrying the same failure.",
+    suggestedAction:
+      "Fix the model/provider configuration or permissions, then unpause and retry the task once the provider can accept the request.",
   },
 };
 

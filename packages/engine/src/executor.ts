@@ -9,7 +9,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode } from "@fusion/core";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -231,6 +231,67 @@ export {
 
 const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
 
+function getPromptSection(prompt: string, heading: string): string {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = prompt.match(new RegExp(`^##\\s+${escapedHeading}\\s*$([\\s\\S]*?)(?=^##\\s+|$(?![\\s\\S]))`, "im"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function promptDeclaresReviewLevelOnePlanOnly(prompt: string): boolean {
+  return /^##\s+Review Level:\s*1\b[^\n]*\bPlan Only\b/im.test(prompt);
+}
+
+function promptDeclaresNoSourceChangeIntent(prompt: string): boolean {
+  const normalized = prompt.toLowerCase();
+  return [
+    /should\s+not\s+change\s+(?:product\s+)?source/,
+    /do\s+not\s+(?:edit|modify|change)\s+(?:product\s+)?source/,
+    /no\s+(?:source|code)\s+changes?\s+(?:are\s+)?(?:expected|required|needed|allowed)/,
+    /must\s+not\s+(?:edit|modify|change)\s+(?:product\s+)?(?:source|code)/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function promptLooksCoordinationOnly(prompt: string): boolean {
+  const titleMatch = prompt.match(/^#\s+Task:\s+[^\n]+/im)?.[0] ?? "";
+  const mission = getPromptSection(prompt, "Mission");
+  const assessment = prompt.match(/^\*\*Assessment:\*\*\s*([^\n]+)/im)?.[1] ?? "";
+  const coordinationText = `${titleMatch}\n${mission}\n${assessment}`.toLowerCase();
+  const hasCoordinationIntent = /\b(coordination|routing|route|handoff|assign(?:ment)?|owner|triage|select exactly one|record (?:the )?intentional block)\b/.test(coordinationText);
+  const missionLower = mission.toLowerCase()
+    .replace(/do\s+not\s+(?:edit|modify|change)\s+(?:product\s+)?source/g, "")
+    .replace(/should\s+not\s+change\s+(?:product\s+)?source/g, "")
+    .replace(/must\s+not\s+(?:edit|modify|change)\s+(?:product\s+)?(?:source|code)/g, "");
+  const hasImplementationDirective = /\b(implement|fix|add|change|modify|refactor|build|create|delete|remove)\b/.test(missionLower);
+  return hasCoordinationIntent && !hasImplementationDirective;
+}
+
+function promptFileScopeIsBoardOnly(prompt: string): boolean {
+  const fileScope = getPromptSection(prompt, "File Scope");
+  if (!fileScope.trim()) return false;
+  const normalized = fileScope.toLowerCase();
+  const sourcePathPattern = /(?:^|[\s`'"(])(?:packages|src|source|sources|app|apps|lib|libs|components|scripts|docs|\.github|config|test|tests|__tests__)\//m;
+  const sourceExtensionPattern = /\.(?:ts|tsx|js|jsx|mjs|cjs|swift|kt|java|py|go|rs|rb|php|cs|cpp|c|h|hpp|json|ya?ml|toml|mdx?|css|scss|html|sql|sh)\b/m;
+  if (sourcePathPattern.test(normalized) || sourceExtensionPattern.test(normalized)) return false;
+  const allowedBoardOnlyPattern = /(?:^|[^\w/])(?:task[- ]?board|board task|task document|task documents|task metadata|task logs|fusion task tools|fn_task_[\w-]*|\.fusion\/tasks|attachments?)(?=$|[^\w/-])/;
+  return allowedBoardOnlyPattern.test(normalized);
+}
+
+function getNoCommitEligibilityReason(task: Task): "explicit noCommitsExpected=true" | "prompt-derived coordination-only no-source scope" | null {
+  if (task.noCommitsExpected === true) return "explicit noCommitsExpected=true";
+  const rawPrompt = task.prompt;
+  const prompt = typeof rawPrompt === "string" ? rawPrompt : "";
+  if (!prompt.trim()) return null;
+  if (
+    promptDeclaresReviewLevelOnePlanOnly(prompt) &&
+    promptLooksCoordinationOnly(prompt) &&
+    promptDeclaresNoSourceChangeIntent(prompt) &&
+    promptFileScopeIsBoardOnly(prompt)
+  ) {
+    return "prompt-derived coordination-only no-source scope";
+  }
+  return null;
+}
+
 /**
  * How long to wait after engine startup before spawning AI agent sessions for
  * orphaned in-progress tasks. The work itself (worktree setup, pi-coding-agent
@@ -275,6 +336,13 @@ const MAX_WORKFLOW_STEP_RETRIES = 3;
 const MAX_TASK_DONE_SESSION_RETRIES = 3;
 /** Maximum todo requeues after exhausting in-session fn_task_done retries. */
 const MAX_TASK_DONE_REQUEUE_RETRIES = 3;
+/**
+ * Maximum bounded retries for the narrow resume-after-restart graph transient.
+ * Budget exhaustion falls through to terminal status:"failed" so FN-5704's
+ * self-healing anti-loop exemption remains intact for genuine graph failures.
+ */
+const MAX_TRANSIENT_GRAPH_RESUME_RETRIES = 2;
+const TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS = process.env.VITEST || process.env.NODE_ENV === "test" ? 0 : 1_000;
 /** How long to wait before recovering a completed task still stuck in in-progress. */
 const COMPLETED_TASK_WATCHDOG_MS = 60_000;
 /** How long to wait before retrying a workflow rerun handoff that never reached in-progress. */
@@ -579,6 +647,111 @@ export function workflowPathMatchesDeclaredScope(filePath: string, scopePatterns
 export function parseReviewLevelFromPrompt(prompt: string): number {
   const reviewMatch = prompt.match(/##\s*Review Level[:\s]*(\d)/);
   return reviewMatch ? parseInt(reviewMatch[1], 10) : 0;
+}
+
+function extractPromptSection(prompt: string, heading: string): string {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headingPattern = new RegExp(`^##\\s+${escaped}\\s*:?\\s*$`, "i");
+  const nextHeadingPattern = /^##\s+/;
+  const lines = prompt.split(/\r?\n/);
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start === -1) return "";
+
+  const sectionLines: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (nextHeadingPattern.test(line.trim())) break;
+    sectionLines.push(line);
+  }
+  return sectionLines.join("\n").trim();
+}
+
+function extractPromptListEntries(section: string): string[] {
+  return section
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*]\s+/, "").replace(/^`([^`]+)`.*$/, "$1").trim())
+    .filter(Boolean);
+}
+
+function isNoSourceScopeEntry(entry: string): boolean {
+  const normalized = entry.toLowerCase();
+  return (
+    normalized.includes("no source") ||
+    normalized.includes("no product-source") ||
+    normalized.includes("no code") ||
+    normalized.includes("no file mutations") ||
+    normalized.includes("task document") ||
+    normalized.includes("task log") ||
+    normalized.includes("agent log") ||
+    normalized.includes("read-only evidence") ||
+    normalized.startsWith(".fusion/tasks/") ||
+    normalized.startsWith("<rootdir>/.fusion/tasks/")
+  );
+}
+
+function hasSourceChangingScopeEntry(entry: string): boolean {
+  const normalized = entry.toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith(".fusion/tasks/") || normalized.startsWith("<rootdir>/.fusion/tasks/")) return false;
+  if (/\b(source|sources|packages|tests|src|app|scripts|\.changeset)\b/.test(normalized)) return true;
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|swift|kt|java|py|rs|go|rb|md|json|ya?ml|toml|css|scss|html)\b/.test(normalized)) return true;
+  if (normalized.includes("read-only") || isNoSourceScopeEntry(normalized)) return false;
+  return false;
+}
+
+function getTaskTextForNoCommitEligibility(task: Task, promptContent: string): string {
+  const logText = (task.log ?? [])
+    .map((entry) => `${entry.action ?? ""}\n${entry.outcome ?? ""}`)
+    .join("\n");
+  const sourceMetadata = task.sourceMetadata ? JSON.stringify(task.sourceMetadata) : "";
+  return [task.title, task.description, promptContent, sourceMetadata, logText]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\n");
+}
+
+function evaluatePromptDerivedNoCommitEligibility(task: Task, promptContent: string): { eligible: boolean; reason?: string } {
+  const combined = getTaskTextForNoCommitEligibility(task, promptContent).toLowerCase();
+  const reviewLevel = typeof task.reviewLevel === "number" ? task.reviewLevel : parseReviewLevelFromPrompt(promptContent);
+  const isPlanOnly = reviewLevel === 1 && (/plan\s*only/.test(combined) || combined.includes("plan-only"));
+  if (!isPlanOnly) return { eligible: false };
+
+  const explicitNoSourceIntent = [
+    "no expected product-source changes",
+    "no product-source changes",
+    "no source changes expected",
+    "no source files expected",
+    "no code changes expected",
+    "no expected source changes",
+    "no file mutations",
+    "no source/config/file mutations",
+  ].some((phrase) => combined.includes(phrase));
+  if (!explicitNoSourceIntent) return { eligible: false };
+
+  const excludedImplementationIntent = /\b(investigate and fix|fix if needed|implement|source-changing|code change|docs\/tests changes|documentation change|bug[- ]fix|feature)\b/.test(combined);
+  const operationalIntent = /\b(operational|routing|route|assign|assignment|owner|handoff|coordination|coordinate|no-route|triage)\b/.test(combined);
+  if (!operationalIntent || excludedImplementationIntent) return { eligible: false };
+
+  const promptScopeEntries = extractPromptListEntries(extractPromptSection(promptContent, "File Scope"));
+  const metadataScope = Array.isArray(task.sourceMetadata?.fileScope)
+    ? task.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const declaredScope = [...promptScopeEntries, ...metadataScope];
+  if (declaredScope.length === 0) return { eligible: false };
+  if (declaredScope.some(hasSourceChangingScopeEntry)) return { eligible: false };
+  if (!declaredScope.every(isNoSourceScopeEntry)) return { eligible: false };
+
+  const stepsComplete = Array.isArray(task.steps) && task.steps.length > 0
+    ? task.steps.every((step) => step.status === "done" || step.status === "skipped")
+    : false;
+  const logText = (task.log ?? [])
+    .map((entry) => `${entry.action ?? ""}\n${entry.outcome ?? ""}`)
+    .join("\n")
+    .toLowerCase();
+  const hasOperationalEvidence = /\b(evidence|recorded|documented|no-route|routed|assigned|handoff|decision)\b/.test(logText);
+  if (!stepsComplete && !hasOperationalEvidence) return { eligible: false };
+
+  return { eligible: true, reason: "prompt/source metadata derived operational no-commit contract" };
 }
 
 export function partitionWorkflowRevisionFeedback(
@@ -936,7 +1109,7 @@ PROMPT.md is captured at task-creation time; HEAD may have moved on since then. 
 3. Mark every remaining step skipped with a one-line reason: \`fn_task_update(step=N, status="skipped")\`.
 4. Call \`fn_task_done\` with a summary that begins \`PREMISE STALE:\` followed by the concrete reason (e.g. \`PREMISE STALE: targeted reproduction passes unchanged on HEAD; PROMPT claimed MOBILE_MEDIA_QUERY had been expanded but useViewportMode.ts:9 still exports the legacy value\`).
 
-This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work.
+This path exists specifically to prevent the executor from looping when PROMPT.md is out of sync with HEAD. Use it only after running the actual reproduction — do not invoke it to dodge real work. If a task is verified as a no-op, duplicate, or redundant for the same reason (the requested behavior is already present on HEAD), \`fn_task_done\` may also use a leading sentinel summary of \`NO-OP:\`, \`NOOP:\`, \`DUPLICATE: FN-NNNN ...\`, or \`REDUNDANT:\`. These sentinels are audit-logged and allow a verified zero-commit completion; ordinary zero-commit implementation completions without a recognized leading sentinel are still refused.
 
 **Logging important actions:** \`fn_task_log(message="what happened")\`
 
@@ -1184,6 +1357,17 @@ export interface CliAgentRuntime {
   hookDirRoot?: string;
 }
 
+interface ActiveExecutorSessionState {
+  session: AgentSession;
+  seenSteeringIds: Set<string>;
+  lastResolvedModelProvider?: string;
+  lastResolvedModelId?: string;
+  lastTaskModelProvider?: string | null;
+  lastTaskModelId?: string | null;
+  lastAssignedAgentId?: string | null;
+  lastEffectiveColumnAgentId?: string | null;
+}
+
 export class TaskExecutor {
   private activeWorktrees = new Map<string, string>();
   private executing = new Set<string>();
@@ -1201,24 +1385,11 @@ export class TaskExecutor {
    *  session being fully reaped before creating/acquiring a new worktree. */
   private pendingTaskDisposals = new Map<string, Promise<void>>();
   /** Active agent sessions per task, used to terminate on pause and inject steering. */
-  private activeSessions = new Map<string, {
-    session: AgentSession;
-    seenSteeringIds: Set<string>;
-    lastResolvedModelProvider?: string;
-    lastResolvedModelId?: string;
-    lastTaskModelProvider?: string | null;
-    lastTaskModelId?: string | null;
-    lastAssignedAgentId?: string | null;
-    // Column-agent restart-invalidation (plan U5, R7/KTD-4). The effective
-    // column-agent id governing this session's seam (undefined when no binding
-    // governs — the legacy path). Tracked so the watcher can detect a workflow-
-    // definition edit or agent runtimeConfig change that re-keys the column-
-    // effective agent/model mid-flight and trigger the same restart path a
-    // task.modelProvider change does today.
-    lastEffectiveColumnAgentId?: string | null;
-  }>();
+  private activeSessions = new Map<string, ActiveExecutorSessionState>();
   /** Active step-session executors per task (mutually exclusive with activeSessions). */
   private activeStepExecutors = new Map<string, StepSessionExecutor>();
+  /** Steering comments already observed for active step-session executor runs. */
+  private activeStepExecutorSeenSteeringIds = new Map<string, Set<string>>();
   /** Column-agent principal alignment (plan U5, R6): the EFFECTIVE column-agent id
    *  currently running each executing task's coding/step session, when an
    *  override/defer binding governs the in-flight seam. Keyed by task id, populated
@@ -1231,6 +1402,8 @@ export class TaskExecutor {
   private effectiveColumnAgentByTask = new Map<string, string>();
   /** Active pre-merge workflow step sessions per task. */
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
+  /** Steering comments already observed for active workflow step sessions. */
+  private activeWorkflowStepSessionSeenSteeringIds = new Map<string, Set<string>>();
   /** Active configured-command abort controllers keyed by task. */
   private activeConfiguredCommandControllers = new Map<string, Set<AbortController>>();
   /**
@@ -1275,16 +1448,7 @@ export class TaskExecutor {
   /** Set of ephemeral spawned agent IDs with in-flight cleanup (prevents duplicate deletion attempts). */
   private pendingEphemeralDeletions = new Set<string>();
 
-  private setActiveSession(taskId: string, sessionState: {
-    session: AgentSession;
-    seenSteeringIds: Set<string>;
-    lastResolvedModelProvider?: string;
-    lastResolvedModelId?: string;
-    lastTaskModelProvider?: string | null;
-    lastTaskModelId?: string | null;
-    lastAssignedAgentId?: string | null;
-    lastEffectiveColumnAgentId?: string | null;
-  }, worktreePath: string): void {
+  private setActiveSession(taskId: string, sessionState: ActiveExecutorSessionState, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
   }
@@ -1299,13 +1463,15 @@ export class TaskExecutor {
     }
   }
 
-  private setActiveStepExecutor(taskId: string, stepExecutor: StepSessionExecutor, worktreePath: string): void {
+  private setActiveStepExecutor(taskId: string, stepExecutor: StepSessionExecutor, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeStepExecutors.set(taskId, stepExecutor);
+    this.activeStepExecutorSeenSteeringIds.set(taskId, seenSteeringIds);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "step-session", ownerKey: `${taskId}#step-session` });
   }
 
   private deleteActiveStepExecutor(taskId: string, worktreePath?: string): void {
     this.activeStepExecutors.delete(taskId);
+    this.activeStepExecutorSeenSteeringIds.delete(taskId);
     // U5: drop the effective column-agent principal for this task's step session.
     this.effectiveColumnAgentByTask.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
@@ -1314,17 +1480,27 @@ export class TaskExecutor {
     }
   }
 
-  private setActiveWorkflowStepSession(taskId: string, session: AgentSession, worktreePath: string): void {
+  private setActiveWorkflowStepSession(taskId: string, session: AgentSession, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeWorkflowStepSessions.set(taskId, session);
+    this.activeWorkflowStepSessionSeenSteeringIds.set(taskId, seenSteeringIds);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "workflow-step", ownerKey: `${taskId}#workflow-step` });
   }
 
   private deleteActiveWorkflowStepSession(taskId: string, worktreePath?: string): void {
     this.activeWorkflowStepSessions.delete(taskId);
+    this.activeWorkflowStepSessionSeenSteeringIds.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
     if (resolvedWorktreePath) {
       activeSessionRegistry.unregisterPath(resolvedWorktreePath);
     }
+  }
+
+  private createSeenSteeringIds(task: { comments?: Array<{ id: string }>; steeringComments?: Array<{ id: string }> }): Set<string> {
+    const seenSteeringIds = new Set<string>();
+    for (const comment of task.steeringComments ?? task.comments ?? []) {
+      seenSteeringIds.add(comment.id);
+    }
+    return seenSteeringIds;
   }
 
   private registerConfiguredCommandController(taskId: string, controller: AbortController): void {
@@ -1946,7 +2122,6 @@ export class TaskExecutor {
     }
 
     this.loopRecoveryState.delete(taskId);
-    this.spawnedAgents.delete(taskId);
     this.stuckAborted.delete(taskId);
 
     if (hadActiveSurface) {
@@ -2372,56 +2547,117 @@ export class TaskExecutor {
           }
         }
 
-        // Handle steering comments - inject new ones into the running session
-        // Only process if session is active (activeSessions check is sufficient
-        // since entries are only added when a task is in-progress)
-        if (this.activeSessions.has(task.id) && task.steeringComments) {
-          const activeSession = this.activeSessions.get(task.id)!;
-          const { session, seenSteeringIds } = activeSession;
+        // Handle steering comments - inject new ones into whichever execution
+        // surface currently owns the task: legacy single-session, step-session
+        // executor (including graph-pinned/workflow stepwise runs), or an
+        // individual workflow step AgentSession.
+        if (task.steeringComments) {
+          const injectionTargets: Array<{
+            kind: "legacy" | "step-session" | "workflow-step";
+            seenSteeringIds: Set<string>;
+            inject: (message: string) => Promise<void>;
+            legacySession?: AgentSession;
+            legacyState?: ActiveExecutorSessionState;
+          }> = [];
 
-          // Find new steering comments that haven't been seen yet
-          const newComments = task.steeringComments.filter(c => !seenSteeringIds.has(c.id));
+          const activeSession = this.activeSessions.get(task.id);
+          if (activeSession) {
+            injectionTargets.push({
+              kind: "legacy",
+              seenSteeringIds: activeSession.seenSteeringIds,
+              inject: (message) => activeSession.session.steer(message),
+              legacySession: activeSession.session,
+              legacyState: activeSession,
+            });
+          }
 
-          if (newComments.length > 0) {
+          const stepExecutor = this.activeStepExecutors.get(task.id);
+          if (stepExecutor) {
+            const seenSteeringIds = this.activeStepExecutorSeenSteeringIds.get(task.id) ?? this.createSeenSteeringIds(task);
+            this.activeStepExecutorSeenSteeringIds.set(task.id, seenSteeringIds);
+            injectionTargets.push({
+              kind: "step-session",
+              seenSteeringIds,
+              inject: (message) => stepExecutor.steerActiveSessions(message),
+            });
+          }
+
+          const workflowSession = this.activeWorkflowStepSessions.get(task.id);
+          if (workflowSession) {
+            const seenSteeringIds = this.activeWorkflowStepSessionSeenSteeringIds.get(task.id) ?? this.createSeenSteeringIds(task);
+            this.activeWorkflowStepSessionSeenSteeringIds.set(task.id, seenSteeringIds);
+            injectionTargets.push({
+              kind: "workflow-step",
+              seenSteeringIds,
+              inject: (message) => workflowSession.steer(message),
+            });
+          }
+
+          const loggedCommentIds = new Set<string>();
+          let legacyReviewHandoff: {
+            comments: import("@fusion/core").SteeringComment[];
+            session: AgentSession;
+            state: ActiveExecutorSessionState;
+          } | undefined;
+
+          for (const target of injectionTargets) {
+            // Find new steering comments that haven't been seen by this running surface yet.
+            const newComments = task.steeringComments.filter(c => !target.seenSteeringIds.has(c.id));
+            if (newComments.length === 0) continue;
+
             for (const comment of newComments) {
               const summary = comment.text.length > 80
                 ? comment.text.slice(0, 80) + "..."
                 : comment.text;
 
-              // Mark as seen BEFORE attempting injection to prevent retry loops on failure
-              seenSteeringIds.add(comment.id);
+              // Mark as seen BEFORE attempting injection to prevent retry loops on failure.
+              target.seenSteeringIds.add(comment.id);
 
-              // Format and inject the comment
               const commentMessage = formatCommentForInjection(comment);
               try {
-                executorLog.log(`Injecting comment into ${task.id}: ${summary}`);
-                await session.steer(commentMessage);
-                executorLog.log(`Successfully injected comment into ${task.id}`);
+                executorLog.log(`Injecting comment into ${task.id} (${target.kind}): ${summary}`);
+                await target.inject(commentMessage);
+                executorLog.log(`Successfully injected comment into ${task.id} (${target.kind})`);
 
-                // Log to the task that comment was received
-                await this.store.logEntry(
-                  task.id,
-                  `Comment received mid-execution: ${summary}`,
-                  `by ${comment.author}`
-                );
+                // Log to the task once per comment/tick even if multiple active surfaces exist.
+                if (!loggedCommentIds.has(comment.id)) {
+                  await this.store.logEntry(
+                    task.id,
+                    `Comment received mid-execution: ${summary}`,
+                    `by ${comment.author}`
+                  );
+                  loggedCommentIds.add(comment.id);
+                }
               } catch (err) {
-                executorLog.error(`Failed to inject comment for ${task.id}:`, err);
+                executorLog.error(`Failed to inject comment for ${task.id} (${target.kind}):`, err);
                 // Comment is already marked as seen - we won't retry to avoid spamming
                 // the agent with failed injections. The error is logged for debugging.
               }
             }
 
-            // After injecting comments, check for review handoff intent
+            if (target.kind === "legacy" && target.legacySession && target.legacyState) {
+              legacyReviewHandoff = {
+                comments: newComments,
+                session: target.legacySession,
+                state: target.legacyState,
+              };
+            }
+          }
+
+          // After injecting comments, check for review handoff intent on the legacy
+          // session path. Step-session/workflow-step runs do not have the legacy
+          // review handoff state required by executeReviewHandoff.
+          if (legacyReviewHandoff) {
             // Only detect handoff in agent-authored comments when policy is enabled.
             // Merge per-task effective workflow settings (U3, KTD-3) so
             // reviewHandoffPolicy resolves from the workflow. Behavior-inert by default.
             const settings = await mergeEffectiveSettings(this.store, task, await this.store.getSettings());
             if (settings.reviewHandoffPolicy === "comment-triggered") {
-              const agentComments = newComments.filter(c => c.author !== "user");
+              const agentComments = legacyReviewHandoff.comments.filter(c => c.author !== "user");
               for (const comment of agentComments) {
                 if (detectReviewHandoffIntent(comment.text)) {
                   executorLog.log(`Review handoff detected in ${task.id}: ${comment.text.slice(0, 50)}...`);
-                  await this.executeReviewHandoff(task, session, activeSession);
+                  await this.executeReviewHandoff(task, legacyReviewHandoff.session, legacyReviewHandoff.state);
                   return; // Exit early - handoff handles session disposal
                 }
               }
@@ -3833,6 +4069,11 @@ export class TaskExecutor {
       }
       if (result.disposition === "failed") {
         await this.handleGraphFailure(task, result);
+      } else if (result.disposition === "completed") {
+        const live = await this.store.getTask(task.id).catch(() => task);
+        if ((live.graphResumeRetryCount ?? 0) !== 0) {
+          await this.store.updateTask(task.id, { graphResumeRetryCount: 0 }, this.getRunContextFor(task.id));
+        }
       }
       return true;
     } finally {
@@ -4446,11 +4687,15 @@ export class TaskExecutor {
         stageByNodeId.set(node.id, seam);
       }
     }
-    // Stop the shadow walk at the live terminal seam. The graph walker visits a
-    // node *before* invoking its seam, so even a failing merge seam (the case
-    // when the live task is parked in-review with autoMerge off) still records a
-    // "merge" stage. The legacy side never reports merge for an in-review task,
-    // so that phantom stage manufactures stageTransitions drift on healthy runs.
+    // The built-in coding IR now enters an interpreter-owned merge-policy
+    // primitive region after review; graph execution collapses that region to a
+    // synthetic legacy merge seam recorded as `merge` until merge-policy cutover.
+    stageByNodeId.set("merge", "merge");
+    // Stop the shadow walk at the live terminal seam. The graph walker records a
+    // merge stage before/while invoking its seam, so even a failing merge seam
+    // (the case when the live task is parked in-review with autoMerge off) still
+    // records a "merge" stage. The legacy side never reports merge for an
+    // in-review task, so that phantom stage manufactures stageTransitions drift.
     // Truncate the visited-stage sequence at the stage the live task actually
     // reached: merged → merge, reachedReview → review, else → execute.
     const terminalStage: WorkflowStage = merged ? "merge" : reachedReview ? "review" : "execute";
@@ -5606,6 +5851,22 @@ export class TaskExecutor {
       return this.runCliAgentNode(node, live, cfg);
     }
 
+    // Fast mode bypasses pre-merge automated review/validation gates. Custom
+    // graph prompt/script/gate nodes are implemented by synthesizing pre-merge
+    // WorkflowStep executions below, so skip them here before worktree or CLI
+    // approval gates can fire. Human waits (`awaitInput`) and implementation
+    // CLI-agent nodes are handled above and remain enforced.
+    if (live.executionMode === "fast" && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
+      executorLog.log(`${live.id}: fast mode — skipping custom graph node '${node.id}'`);
+      await this.store.logEntry(
+        live.id,
+        `Fast mode — custom graph node '${node.id}' skipped`,
+        undefined,
+        this.getRunContextFor(live.id),
+      );
+      return { outcome: "success", value: "workflow-step-skipped" };
+    }
+
     const scriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim() ? cfg.scriptName : undefined;
     const rawCliCommand = executorKind === "cli" && typeof cfg.cliCommand === "string" && cfg.cliCommand.trim()
       ? cfg.cliCommand.trim()
@@ -5954,12 +6215,25 @@ export class TaskExecutor {
     }
   }
 
+  private isTransientResumeAfterRestartGraphFailure(live: Task, result: WorkflowGraphTaskRunResult): boolean {
+    if ((result.reason ?? "").trim().length > 0) return false;
+
+    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+    if (failedNode !== undefined && failedNode !== "execute") return false;
+
+    if (live.steps.some((step) => step.status === "done")) return false;
+
+    const failureState = live as Task & { lastError?: unknown; failureReason?: unknown };
+    if (failureState.lastError != null || failureState.failureReason != null) return false;
+
+    const latestAction = live.log.at(-1)?.action;
+    return latestAction === "Resumed after engine restart"
+      || latestAction === "Resuming execution after unpause";
+  }
+
   /** Terminal failure of a graph run: record the error and park the task in
    *  review so a human can act — never leave it invisible in in-progress. */
   private async handleGraphFailure(task: Task, result: WorkflowGraphTaskRunResult): Promise<void> {
-    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
-    const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
-    executorLog.warn(`${task.id}: ${message}`);
     this.clearCompletedTaskWatchdog(task.id);
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
@@ -5967,22 +6241,46 @@ export class TaskExecutor {
       // A paused/aborted implementation is not a graph failure — leave the
       // pause machinery in charge instead of parking the task in review.
       if (live.paused || this.pausedAborted.has(task.id)) {
-        executorLog.log(`${task.id}: graph run ended while task is paused — leaving pause state untouched`);
-        await this.store.logEntry(task.id, `${message} (task paused — not parked)`, undefined, this.getRunContextFor(task.id));
+        const benignMessage = "Workflow graph run ended while task is paused — pause state preserved";
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
       if (live.column !== "in-progress") {
-        executorLog.log(
-          `${task.id}: graph run ended after task moved to '${live.column}' - preserving recovered lifecycle state`,
-        );
-        await this.store.logEntry(
-          task.id,
-          `${message} (task already ${live.column} - preserving recovered lifecycle state)`,
-          undefined,
-          this.getRunContextFor(task.id),
-        );
+        const benignMessage = `Workflow graph run ended after task already advanced to '${live.column}' — no further action needed`;
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
+      const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+      if (this.isTransientResumeAfterRestartGraphFailure(live, result)) {
+        const priorRetries = live.graphResumeRetryCount ?? 0;
+        if (priorRetries < MAX_TRANSIENT_GRAPH_RESUME_RETRIES) {
+          const nextRetries = priorRetries + 1;
+          const benignMessage = `Transient resume-after-restart graph failure — auto-retrying (${nextRetries}/${MAX_TRANSIENT_GRAPH_RESUME_RETRIES}) instead of parking`;
+          executorLog.warn(`${task.id}: ${benignMessage}`);
+          await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+          await this.store.updateTask(task.id, {
+            graphResumeRetryCount: nextRetries,
+            status: null,
+            error: null,
+          }, this.getRunContextFor(task.id));
+          const scheduleRetry = () => {
+            this.execute(live).catch((err) =>
+              executorLog.error(`Failed transient graph resume retry for ${task.id}:`, err),
+            );
+          };
+          if (TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS > 0) {
+            const handle = setTimeout(scheduleRetry, TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS);
+            handle.unref?.();
+          } else {
+            setTimeout(scheduleRetry, 0).unref?.();
+          }
+          return;
+        }
+      }
+      const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
+      executorLog.warn(`${task.id}: ${message}`);
       await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
       // status "failed" doubles as the self-healing exemption: review-task
       // revival sweeps skip tasks carrying a non-null status, preventing the
@@ -6704,7 +7002,7 @@ export class TaskExecutor {
             });
           },
         });
-        this.setActiveStepExecutor(task.id, stepExecutor, worktreePath);
+        this.setActiveStepExecutor(task.id, stepExecutor, worktreePath, this.createSeenSteeringIds(detail));
 
         const stepWork = async () => {
           const results = await stepExecutor.executeAll();
@@ -7428,14 +7726,10 @@ export class TaskExecutor {
         // Make session available to custom tools (fn_task_update checkpoint capture, fn_review_step rewind)
         sessionRef.current = session;
 
-        // Register session so the pause listener can terminate it
-        // Initialize with empty set of seen comments
-        const seenSteeringIds = new Set<string>();
-        if (detail.comments) {
-          for (const comment of detail.comments) {
-            seenSteeringIds.add(comment.id);
-          }
-        }
+        // Register session so the pause listener can terminate it.
+        // Initialize with all existing steering comments so only mid-flight
+        // comments are injected into the running session.
+        const seenSteeringIds = this.createSeenSteeringIds(detail);
         this.setActiveSession(task.id, {
           session,
           seenSteeringIds,
@@ -9275,6 +9569,7 @@ export class TaskExecutor {
     task: Task,
     worktreePathOverride?: string,
     allowReanchor = true,
+    options?: { noOpCompletion?: boolean; noOpCompletionReason?: string },
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
     const settings = await this.store.getSettings();
     const branchName = resolveTaskWorkingBranch(task);
@@ -9338,7 +9633,7 @@ export class TaskExecutor {
               executorLog.log(`${task.id}: re-anchored nested task.worktree ${worktreePath} -> ${reanchor.root}`);
               await this.store.logEntry(task.id, `Re-anchored nested task.worktree from ${worktreePath} to ${reanchor.root}`, undefined, this.getRunContextFor(task.id));
               await this.emitWorktreeReanchoredAudit(task.id, worktreePath, reanchor.root, "verify-worktree-invariants");
-              return this.verifyWorktreeInvariants(task, reanchor.root, false);
+              return this.verifyWorktreeInvariants(task, reanchor.root, false, options);
             }
           }
           return {
@@ -9408,8 +9703,33 @@ export class TaskExecutor {
       };
     }
 
-    if (task.noCommitsExpected === true) {
-      executorLog.log(`${task.id}: fn_task_done no_commits guard skipped (noCommitsExpected=true)`);
+    const promptContent = (task as Task & { prompt?: unknown }).prompt;
+    const promptDerivedEligibility = evaluatePromptDerivedNoCommitEligibility(
+      task,
+      typeof promptContent === "string" ? promptContent : "",
+    );
+    const noCommitEligibilityReason =
+      getNoCommitEligibilityReason(task) ??
+      (options?.noOpCompletion
+        ? options.noOpCompletionReason ?? "verified no-op/duplicate completion sentinel"
+        : null) ??
+      (promptDerivedEligibility.eligible
+        ? promptDerivedEligibility.reason ?? "prompt-derived no-commit eligibility"
+        : null);
+    if (noCommitEligibilityReason) {
+      executorLog.log(`${task.id}: fn_task_done no_commits guard skipped (${noCommitEligibilityReason})`);
+      try {
+        await this.store.logEntry(
+          task.id,
+          `fn_task_done no_commits guard skipped (${noCommitEligibilityReason})`,
+          undefined,
+          this.getRunContextFor(task.id),
+        );
+      } catch (error) {
+        executorLog.warn(
+          `${task.id}: failed to write no_commits guard skip audit log: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return { ok: true };
     }
 
@@ -9622,7 +9942,13 @@ export class TaskExecutor {
           };
         }
 
-        const invariantCheck = await this.verifyWorktreeInvariants(task, worktreePath);
+        const noOpMarker = parseNoOpCompletionMarker(params.summary);
+        const invariantCheck = await this.verifyWorktreeInvariants(task, worktreePath, true, {
+          noOpCompletion: Boolean(noOpMarker),
+          noOpCompletionReason: noOpMarker
+            ? `verified ${noOpMarker.kind} completion sentinel${noOpMarker.canonicalId ? ` (${noOpMarker.canonicalId})` : ""}`
+            : undefined,
+        });
         if (!invariantCheck.ok) {
           const refusalMessage = `fn_task_done refused: ${invariantCheck.reason} — observed=${invariantCheck.observed}, expected=${invariantCheck.expected}`;
           await store.logEntry(taskId, refusalMessage, undefined, this.getRunContextFor(task.id));
@@ -9757,6 +10083,52 @@ export class TaskExecutor {
               error: scopeLeakCheck.message,
             },
           };
+        }
+
+        if (noOpMarker) {
+          const runContext = this.getRunContextFor(taskId);
+          await store.updateTask(taskId, { noCommitsExpected: true });
+          await store.logEntry(
+            taskId,
+            `Verified ${noOpMarker.kind} completion sentinel accepted; no commits expected for terminal handoff`,
+            JSON.stringify({
+              kind: noOpMarker.kind,
+              reason: noOpMarker.reason,
+              canonicalId: noOpMarker.canonicalId,
+              summary: params.summary,
+              runId: runContext?.runId,
+              agentId: runContext?.agentId,
+            }),
+            runContext,
+          );
+          const recordActivity = (store as typeof store & {
+            recordActivity?: (entry: {
+              type: "task:updated";
+              taskId: string;
+              taskTitle?: string;
+              details: string;
+              metadata?: Record<string, unknown>;
+            }) => Promise<unknown>;
+          }).recordActivity;
+          if (recordActivity) {
+            await recordActivity.call(store, {
+              type: "task:updated",
+              taskId,
+              taskTitle: task.title,
+              details: `Task marked as verified ${noOpMarker.kind}; no commits expected`,
+              metadata: {
+                taskId,
+                kind: noOpMarker.kind,
+                reason: noOpMarker.reason,
+                canonicalId: noOpMarker.canonicalId,
+                summary: params.summary,
+                runId: runContext?.runId,
+                agentId: runContext?.agentId,
+              },
+            }).catch((error: unknown) => {
+              executorLog.warn(`${taskId}: failed to record no-op completion activity: ${error instanceof Error ? error.message : String(error)}`);
+            });
+          }
         }
 
         onDone();
@@ -11609,7 +11981,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         task.id,
         `Workflow step '${workflowStep.name}' using model: ${describeModel(session)}${useOverride && attemptLabel === "primary" ? " (workflow step override)" : ""}${attemptLabel === "fallback" ? " (fallback after timeout)" : ""}`,
       );
-      this.setActiveWorkflowStepSession(task.id, session, worktreePath);
+      this.setActiveWorkflowStepSession(task.id, session, worktreePath, this.createSeenSteeringIds(task));
 
       let output = "";
       const deltaNormalizer = createStreamingDeltaNormalizer();
@@ -13802,6 +14174,51 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         try {
           const settings = await this.store.getSettings();
           const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
+          const latestTask = await this.store.getTask(taskId);
+          const worktreePath = this.getWorktreePath(taskId) ?? latestTask.worktree;
+          await this.store.logEntry(
+            taskId,
+            `Force-kill cleanup starting after stuck-kill unwind timeout — reaping in-flight surfaces and worktree`,
+          );
+
+          // Spawned children must be terminated before the canonical reaper clears
+          // spawnedAgents bookkeeping; otherwise child agent sessions would be orphaned.
+          await this.terminateAllChildren(taskId).catch((err: unknown) => {
+            executorLog.warn(`${taskId}: spawned child cleanup failed during force-requeue: ${err instanceof Error ? err.message : String(err)}`);
+          });
+          await this.awaitAbortInFlightTaskWork(taskId, "force-requeue after stuck-kill unwind timeout");
+          // awaitAbortInFlightTaskWork marks pausedAborted as a generic hard-cancel
+          // signal. The force-requeue path has already handled the task move, so
+          // clear it to prevent a later subprocess unwind from logging/moving as a pause.
+          this.pausedAborted.delete(taskId);
+
+          if (!preserveProgress) {
+            await this.resetStepsIfWorkLost(latestTask);
+          }
+
+          let cleanupFailed = false;
+          if (worktreePath && existsSync(worktreePath)) {
+            try {
+              await removeWorktree({
+                worktreePath,
+                rootDir: this.rootDir,
+                settings,
+                taskId,
+                reason: RemovalReason.ExecutorStuckKilled,
+                expectedOwnerTaskId: taskId,
+                liveOwnerProbe: (path, ownerTaskId) => this.hasActiveWorktreeBinding(ownerTaskId, path),
+              });
+              executorLog.log(`${taskId}: removed worktree during force-requeue cleanup: ${worktreePath}`);
+            } catch (cleanupErr: unknown) {
+              cleanupFailed = true;
+              const cleanupErrMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+              executorLog.warn(`${taskId}: worktree removal failed during force-requeue cleanup (${worktreePath}): ${cleanupErrMessage}`);
+              await this.store.logEntry(taskId, `Force-kill cleanup failed to remove worktree ${worktreePath}: ${cleanupErrMessage}`);
+            }
+          }
+
+          this.activeWorktrees.delete(taskId);
+
           await this.store.logEntry(
             taskId,
             `Force-requeued after stuck-kill: executor did not unwind within ${FORCE_REQUEUE_GRACE_MS / 1000}s (hung subprocess)${preserveProgress ? " — progress preserved" : ""}`,
@@ -13813,16 +14230,23 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
             branch: null,
           });
           await this.store.moveTask(taskId, "todo", preserveProgress ? { preserveProgress: true } : undefined);
-          // Remove from executing so the scheduler can re-dispatch normally.
-          // The old Promise is still running but the executing guard is cleared so
-          // a fresh execute() call won't be blocked.
+          // Remove from executing only after the hung surfaces and worktree have
+          // been reaped, preventing a scheduler re-dispatch onto stale resources.
           this.executing.delete(taskId);
           executingTaskLock.release(taskId);
           this.stuckAborted.delete(taskId);
-          executorLog.log(`${taskId} force-requeued to todo`);
+          this.loopRecoveryState.delete(taskId);
+          await this.store.logEntry(
+            taskId,
+            cleanupFailed
+              ? "Force-kill cleanup completed with non-fatal worktree removal failure — task requeued"
+              : "Force-kill cleanup completed — in-flight surfaces reaped and task requeued",
+          );
+          executorLog.log(`${taskId} force-requeued to todo after stuck-kill cleanup`);
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
           executorLog.error(`Failed to force-requeue stuck task ${taskId}: ${errorMessage}`);
+          await this.store.logEntry(taskId, `Force-kill cleanup failed during stuck-kill force-requeue: ${errorMessage}`).catch(() => undefined);
         }
       }, FORCE_REQUEUE_GRACE_MS);
     }

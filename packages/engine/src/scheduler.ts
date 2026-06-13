@@ -502,10 +502,6 @@ export class Scheduler {
   private wasPermanentAgentUnavailable = new Set<string>();
   /** Tracks dispatch-queued reason signatures to avoid per-tick log spam. */
   private wasDispatchQueuedReasonLogged = new Set<string>();
-  /** Tracks the last overlap blocker that emitted a priority inversion audit for a task. */
-  private overlapPriorityInversionMemo = new Map<string, string>();
-  /** Tracks the last stable concurrency-block signature emitted for a task. */
-  private dispatchQueuedConcurrencyAuditMemo = new Map<string, string>();
   /** Tracks per-task candidacy fingerprints for task:updated auto-claim invalidation gating. */
   private lastAutoClaimFingerprint = new Map<string, string>();
   /** Tracks recent engine-sourced in-progress → todo requeues to prevent immediate re-dispatch races. */
@@ -793,8 +789,6 @@ export class Scheduler {
       this.wasNodeBlocked.delete(task.id);
       this.wasPermanentAgentUnavailable.delete(task.id);
       this.clearDispatchQueuedReasonMemo(task.id);
-      this.clearOverlapPriorityInversionMemo(task.id);
-      this.clearDispatchQueuedConcurrencyAuditMemo(task.id);
 
       void (async () => {
         try {
@@ -939,8 +933,6 @@ export class Scheduler {
     this.wasNodeDispatchValidationBlocked.clear();
     this.wasPermanentAgentUnavailable.clear();
     this.wasDispatchQueuedReasonLogged.clear();
-    this.overlapPriorityInversionMemo.clear();
-    this.dispatchQueuedConcurrencyAuditMemo.clear();
     schedulerLog.log("Stopped");
   }
 
@@ -959,38 +951,9 @@ export class Scheduler {
     }
 
     this.clearDispatchQueuedReasonMemo(taskId);
-    if (!key.includes(":queued-concurrency:")) {
-      this.clearDispatchQueuedConcurrencyAuditMemo(taskId);
-    }
     this.wasDispatchQueuedReasonLogged.add(key);
     await this.store.logEntry(taskId, reason);
     return true;
-  }
-
-  private shouldEmitOverlapPriorityInversion(taskId: string, blockerId: string): boolean {
-    const lastBlockerId = this.overlapPriorityInversionMemo.get(taskId);
-    if (lastBlockerId === blockerId) {
-      return false;
-    }
-    this.overlapPriorityInversionMemo.set(taskId, blockerId);
-    return true;
-  }
-
-  private clearOverlapPriorityInversionMemo(taskId: string): void {
-    this.overlapPriorityInversionMemo.delete(taskId);
-  }
-
-  private shouldEmitDispatchQueuedConcurrencyAudit(taskId: string, signature: string): boolean {
-    const lastSignature = this.dispatchQueuedConcurrencyAuditMemo.get(taskId);
-    if (lastSignature === signature) {
-      return false;
-    }
-    this.dispatchQueuedConcurrencyAuditMemo.set(taskId, signature);
-    return true;
-  }
-
-  private clearDispatchQueuedConcurrencyAuditMemo(taskId: string): void {
-    this.dispatchQueuedConcurrencyAuditMemo.delete(taskId);
   }
 
   private emitDependencyParityDiff(diff: SchedulingDependencyParityDiff): void {
@@ -1007,33 +970,6 @@ export class Scheduler {
         markerResult: diff.markerSatisfied,
       },
     });
-  }
-
-  private async emitDispatchQueuedConcurrencyAudit(task: Task, diagnostic: ConcurrencyGateDiagnostic): Promise<void> {
-    try {
-      await this.store.recordRunAuditEvent?.({
-        taskId: task.id,
-        agentId: "scheduler",
-        runId: generateSyntheticRunId("scheduler", task.id),
-        domain: "database",
-        mutationType: "scheduler:dispatch-queued-concurrency",
-        target: task.id,
-        metadata: {
-          bindingGates: diagnostic.bindingGates,
-          maxConcurrent: diagnostic.maxConcurrentGate,
-          maxWorktrees: diagnostic.maxWorktreesGate,
-          semaphore: diagnostic.semaphoreGate,
-          holders: diagnostic.holders,
-          available: diagnostic.available,
-          // U6: additive per-column capacity gates (present only flag-ON).
-          ...(diagnostic.perColumnGates ? { perColumnGates: diagnostic.perColumnGates } : {}),
-        },
-      });
-    } catch (error) {
-      schedulerLog.warn(
-        `Task ${task.id} failed to emit dispatch queued concurrency audit: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   private async emitNodeUnreachableRecoveryAudit(
@@ -1398,6 +1334,23 @@ export class Scheduler {
         );
       }
 
+      const mergeShadowEnabled = settings.mergeRequestContractShadowEnabled === true;
+      const markerAcceptedByTaskId = new Map<string, boolean>();
+      if (mergeShadowEnabled) {
+        const dependencyIds = new Set(tasks.flatMap((candidate) => candidate.dependencies));
+        for (const depId of dependencyIds) {
+          markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+        }
+      }
+      const schedulingDependencyOptions = mergeShadowEnabled
+        ? {
+          markerAcceptedByTaskId,
+          onParityDiff: (diff: SchedulingDependencyParityDiff) => {
+            this.emitDependencyParityDiff(diff);
+          },
+        }
+        : undefined;
+
       /**
        * Pre-compute file scopes for all currently active tasks (in-progress
        * AND in-review with unmerged worktrees) so that todo tasks are never
@@ -1437,7 +1390,11 @@ export class Scheduler {
         for (const t of inProgress) {
           const filteredScope = await getFilteredFileScope(t.id);
           if (isCoordinationOnlyTask(t, filteredScope)) continue;
-          if (filteredScope.length > 0) setActiveScopeLease(t.id, filteredScope, "in-progress");
+          if (filteredScope.length === 0) continue;
+          // FN-6292: a holder waiting on scheduling deps must not lease files
+          // that can block its own dependency and create a circular wait.
+          if (getUnmetSchedulingDependencies(t, tasks, schedulingDependencyOptions).length > 0) continue;
+          setActiveScopeLease(t.id, filteredScope, "in-progress");
         }
         // Only live in-review tasks with a worktree belong in activeScopes.
         // Paused in-review tasks (e.g., failed-merge tasks awaiting human triage) cannot
@@ -1506,14 +1463,6 @@ export class Scheduler {
 
       // Resolve dependency order among todo tasks
       const ordered = resolveDependencyOrder(todo);
-      const mergeShadowEnabled = settings.mergeRequestContractShadowEnabled === true;
-      const markerAcceptedByTaskId = new Map<string, boolean>();
-      if (mergeShadowEnabled) {
-        const dependencyIds = new Set(todo.flatMap((candidate) => candidate.dependencies));
-        for (const depId of dependencyIds) {
-          markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
-        }
-      }
       let started = 0;
       let loggedMissingAgentStoreThisPass = false;
 
@@ -1535,14 +1484,7 @@ export class Scheduler {
         }
 
         // Check all deps are satisfied (done, in-review, or archived)
-        const unmetDeps = getUnmetSchedulingDependencies(task, tasks, mergeShadowEnabled
-          ? {
-            markerAcceptedByTaskId,
-            onParityDiff: (diff) => {
-              this.emitDependencyParityDiff(diff);
-            },
-          }
-          : undefined);
+        const unmetDeps = getUnmetSchedulingDependencies(task, tasks, schedulingDependencyOptions);
 
         if (unmetDeps.length > 0) {
           await this.store.updateTask(task.id, {
@@ -1663,37 +1605,6 @@ export class Scheduler {
               }
 
               const overlapBlockerTask = tasks.find((candidate) => candidate.id === overlappingTaskId);
-              if (
-                overlapBlockerTask
-                && this.shouldEmitOverlapPriorityInversion(task.id, overlappingTaskId)
-                && compareTasksByPriorityThenAgeAndId(task, overlapBlockerTask) < 0
-              ) {
-                try {
-                  await this.store.recordRunAuditEvent?.({
-                    taskId: task.id,
-                    agentId: "scheduler",
-                    runId: generateSyntheticRunId("scheduler", task.id),
-                    domain: "database",
-                    mutationType: "scheduler:overlap-priority-inversion",
-                    target: task.id,
-                    metadata: {
-                      candidateId: task.id,
-                      candidatePriority: task.priority ?? null,
-                      candidateCreatedAt: task.createdAt ?? null,
-                      blockerId: overlapBlockerTask.id,
-                      blockerPriority: overlapBlockerTask.priority ?? null,
-                      blockerCreatedAt: overlapBlockerTask.createdAt ?? null,
-                      blockerColumn: activeScopeColumns.get(overlappingTaskId) ?? overlapBlockerTask.column,
-                      source: "scheduler.overlap-priority-inversion",
-                    },
-                  });
-                } catch (error) {
-                  schedulerLog.warn(
-                    `Task ${task.id} failed to emit overlap priority inversion audit: ${error instanceof Error ? error.message : String(error)}`,
-                  );
-                }
-              }
-
               await this.rollbackRunningAgentsForQueuedTodoTask(task.id);
               const activeLeaseColumn = activeScopeColumns.get(overlappingTaskId) ?? overlapBlockerTask?.column ?? "unknown";
               await this.logDispatchQueuedReason(
@@ -1706,10 +1617,8 @@ export class Scheduler {
             if (task.overlapBlockedBy) {
               await this.store.updateTask(task.id, { overlapBlockedBy: null });
             }
-            this.clearOverlapPriorityInversionMemo(task.id);
           } else if (coordinationOnlyTask && task.overlapBlockedBy) {
             await this.store.updateTask(task.id, { overlapBlockedBy: null });
-            this.clearOverlapPriorityInversionMemo(task.id);
             await this.store.logEntry(
               task.id,
               "coordination/no-commit task bypassed non-implementation overlap lease",
@@ -1726,9 +1635,6 @@ export class Scheduler {
             reason,
             concurrencySignature,
           );
-          if (this.shouldEmitDispatchQueuedConcurrencyAudit(task.id, concurrencySignature)) {
-            await this.emitDispatchQueuedConcurrencyAudit(task, concurrencyGateDiagnostic);
-          }
           continue;
         }
 
@@ -2064,8 +1970,6 @@ export class Scheduler {
         this.wasNodeDispatchValidationBlocked.delete(task.id);
         this.wasPermanentAgentUnavailable.delete(task.id);
         this.clearDispatchQueuedReasonMemo(task.id);
-        this.clearOverlapPriorityInversionMemo(task.id);
-        this.clearDispatchQueuedConcurrencyAuditMemo(task.id);
         await this.store.logEntry(task.id, `Node routing resolved: ${effectiveNode.nodeId ?? "local"} (source: ${effectiveNode.source})`);
         this.options.onSchedule?.(task);
         started++;
@@ -2139,15 +2043,34 @@ export class Scheduler {
         return filteredScope;
       };
 
+      const mergeShadowEnabled = settings.mergeRequestContractShadowEnabled === true;
+      const markerAcceptedByTaskId = new Map<string, boolean>();
+      if (mergeShadowEnabled) {
+        const dependencyIds = new Set(tasks.flatMap((candidate) => candidate.dependencies));
+        for (const depId of dependencyIds) {
+          markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+        }
+      }
+      const schedulingDependencyOptions = mergeShadowEnabled
+        ? {
+          markerAcceptedByTaskId,
+          onParityDiff: (diff: SchedulingDependencyParityDiff) => {
+            this.emitDependencyParityDiff(diff);
+          },
+        }
+        : undefined;
+
       if (settings.groupOverlappingFiles) {
         for (const task of tasks) {
           if (task.column !== "in-progress") continue;
           const filteredScope = await getFilteredFileScope(task.id);
           if (isCoordinationOnlyTask(task, filteredScope)) continue;
-          if (filteredScope.length > 0) {
-            activeScopes.set(task.id, filteredScope);
-            activeScopeColumns.set(task.id, task.column);
-          }
+          if (filteredScope.length === 0) continue;
+          // FN-6292: do not let a task with unmet deps lease files that can
+          // keep those deps queued behind their own dependent.
+          if (getUnmetSchedulingDependencies(task, tasks, schedulingDependencyOptions).length > 0) continue;
+          activeScopes.set(task.id, filteredScope);
+          activeScopeColumns.set(task.id, task.column);
         }
 
         const inReviewWithWorktree = tasks.filter(

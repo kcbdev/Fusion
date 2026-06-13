@@ -655,7 +655,8 @@
 .mailbox-view .mailbox-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: var(--space-xl);
   max-height: none;
 }

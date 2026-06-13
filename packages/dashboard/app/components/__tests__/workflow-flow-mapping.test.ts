@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorkflowDefinition } from "@fusion/core";
+import type { WorkflowDefinition, WorkflowIrNodeKind } from "@fusion/core";
 import { parseWorkflowIr } from "@fusion/core";
 import type { Node as FlowNode } from "@xyflow/react";
 import {
@@ -32,7 +32,7 @@ import {
   FOREACH_CHILD_X,
   FOREACH_CHILD_Y,
 } from "../workflow-flow-mapping";
-import type { WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
+import type { WorkflowEditorNodeKind, WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
 import type { TraitCatalogEntry } from "../../api";
 
 function makeDef(ir: WorkflowDefinition["ir"]): WorkflowDefinition {
@@ -198,6 +198,55 @@ describe("workflow-flow-mapping v2 round-trip", () => {
     expect(byId.j1.config?.onBranchFailure).toBe("fail-fast");
   });
 
+
+  it("preserves aliased IR node kinds when round-tripping through editor render kinds", () => {
+    const ir: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "merge aliases",
+      columns: [{ id: "in-progress", name: "In progress", traits: [] }],
+      nodes: [
+        { id: "gate", kind: "merge-gate", column: "in-progress", config: { name: "Gate" } },
+        { id: "attempt", kind: "merge-attempt", column: "in-progress" },
+        { id: "hold", kind: "manual-merge-hold", column: "in-progress", config: { release: "manual" } },
+        {
+          id: "retry",
+          kind: "retry-backoff",
+          column: "in-progress",
+          config: {
+            maxIterations: 2,
+            template: {
+              nodes: [{ id: "retry-step", kind: "prompt", config: { prompt: "try again" } }],
+              edges: [{ from: "retry-step", to: "retry-step", condition: "retry", kind: "rework" }],
+            },
+          },
+        },
+      ] as WorkflowDefinition["ir"]["nodes"],
+      edges: [],
+    };
+
+    const { nodes, edges } = irToFlow(v2Def(ir));
+    expect(nodes.find((node) => node.id === "gate")?.type).toBe("gate");
+    expect(nodes.find((node) => node.id === "hold")?.type).toBe("hold");
+    expect(nodes.find((node) => node.id === "retry")?.type).toBe("hold");
+
+    const { ir: out } = flowToIr("merge aliases", nodes, edges, columnsOf(v2Def(ir)));
+    if (out.version !== "v2") throw new Error("expected v2");
+    const byId = Object.fromEntries(out.nodes.map((node) => [node.id, node]));
+    expect(byId.gate.kind).toBe("merge-gate");
+    expect(byId.gate.config?.name).toBe("Gate");
+    expect(byId.attempt.kind).toBe("merge-attempt");
+    expect(byId.hold.kind).toBe("manual-merge-hold");
+    expect(byId.hold.config?.release).toBe("manual");
+    expect(byId.retry.kind).toBe("retry-backoff");
+    expect(byId.retry.config).toEqual({
+      maxIterations: 2,
+      template: {
+        nodes: [{ id: "retry-step", kind: "prompt", config: { prompt: "try again" } }],
+        edges: [{ from: "retry-step", to: "retry-step", condition: "retry", kind: "rework" }],
+      },
+    });
+  });
+
   it("emits swimlane band group nodes that flowToIr strips back out", () => {
     const { nodes } = irToFlow(v2Def(ir));
     const bands = nodes.filter((n) => isColumnBandNode(n.id));
@@ -357,6 +406,103 @@ describe("workflow-flow-mapping validation helpers", () => {
 
   it("band height stays positive (geometry sanity)", () => {
     expect(COLUMN_BAND_HEIGHT).toBeGreaterThan(0);
+  });
+});
+
+// ── IR-only graph node kinds map to existing editor node shapes ─────────────
+
+const VALID_EDITOR_NODE_KINDS: readonly WorkflowEditorNodeKind[] = [
+  "start",
+  "end",
+  "prompt",
+  "script",
+  "gate",
+  "merge",
+  "hold",
+  "split",
+  "join",
+  "foreach",
+  "loop",
+  "step-review",
+  "parse-steps",
+  "code",
+  "notify",
+];
+
+const IR_ONLY_EDITOR_KIND = {
+  "merge-gate": "gate",
+  "merge-attempt": "merge",
+  "manual-merge-hold": "hold",
+  "retry-backoff": "hold",
+  "recovery-router": "gate",
+  "branch-group-member-integration": "merge",
+  "branch-group-promotion": "merge",
+} satisfies Partial<Record<WorkflowIrNodeKind, WorkflowEditorNodeKind>>;
+
+describe("workflow-flow-mapping editor kind mapping", () => {
+  it("maps workflow-owned IR-only node kinds to valid editor kinds", () => {
+    const irOnlyKinds = Object.keys(IR_ONLY_EDITOR_KIND) as (keyof typeof IR_ONLY_EDITOR_KIND)[];
+    const ir: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "policy-nodes",
+      columns: [{ id: "work", name: "Work", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start", column: "work" },
+        ...irOnlyKinds.map((kind) => ({ id: kind, kind, column: "work" as const })),
+        { id: "foreach", kind: "foreach", column: "work", config: {
+          source: "task-steps",
+          template: {
+            nodes: [{ id: "template-merge-gate", kind: "merge-gate" }],
+            edges: [],
+          },
+        } },
+        { id: "end", kind: "end", column: "work" },
+      ],
+      edges: [],
+    };
+
+    const { nodes } = irToFlow(makeDef(ir));
+    const stepNodes = nodes.filter((node) => !isColumnBandNode(node.id));
+    expect(stepNodes.every((node) => VALID_EDITOR_NODE_KINDS.includes(node.data.kind))).toBe(true);
+    expect(stepNodes.every((node) => VALID_EDITOR_NODE_KINDS.includes(node.type as WorkflowEditorNodeKind))).toBe(true);
+
+    for (const rawKind of irOnlyKinds) {
+      const flowNode = stepNodes.find((node) => node.id === rawKind);
+      const expectedKind = IR_ONLY_EDITOR_KIND[rawKind];
+      expect(flowNode?.type).toBe(expectedKind);
+      expect(flowNode?.data.kind).toBe(expectedKind);
+      expect(flowNode?.type).not.toBe(rawKind);
+      expect(flowNode?.data.kind).not.toBe(rawKind);
+    }
+
+    const templateChild = stepNodes.find((node) => node.id === foreachChildFlowId("foreach", "template-merge-gate"));
+    expect(templateChild?.type).toBe("gate");
+    expect(templateChild?.data.kind).toBe("gate");
+    expect(templateChild?.type).not.toBe("merge-gate");
+  });
+
+  it("keeps merge seam and PR graph-node special cases mapped to existing editor kinds", () => {
+    const ir: WorkflowDefinition["ir"] = {
+      version: "v1",
+      name: "special-cases",
+      nodes: [
+        { id: "merge-seam", kind: "prompt", config: { seam: "merge" } },
+        { id: "pr-merge", kind: "pr-merge" },
+        { id: "pr-create", kind: "pr-create" },
+        { id: "pr-respond", kind: "pr-respond" },
+      ],
+      edges: [],
+    };
+
+    const byId = Object.fromEntries(irToFlow(makeDef(ir)).nodes.map((node) => [node.id, node]));
+    expect(byId["merge-seam"]?.type).toBe("merge");
+    expect(byId["merge-seam"]?.data.kind).toBe("merge");
+    expect(byId["pr-merge"]?.type).toBe("merge");
+    expect(byId["pr-merge"]?.data.kind).toBe("merge");
+    expect(byId["pr-create"]?.type).toBe("prompt");
+    expect(byId["pr-create"]?.data.kind).toBe("prompt");
+    expect(byId["pr-respond"]?.type).toBe("prompt");
+    expect(byId["pr-respond"]?.data.kind).toBe("prompt");
   });
 });
 

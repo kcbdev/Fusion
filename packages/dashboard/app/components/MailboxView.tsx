@@ -232,6 +232,8 @@ export function MailboxView({
   const isSplitPane = !isMobile;
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readMailboxSidebarWidth(projectId));
   const splitLayoutRef = useRef<HTMLDivElement>(null);
+  const mailboxContentRef = useRef<HTMLDivElement>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   const containerKeyboardStyle = useMemo<CSSProperties | undefined>(() => {
     if (!keyboardOpen) {
@@ -314,9 +316,45 @@ export function MailboxView({
     }
   }, [isSplitPane, sidebarWidth]);
 
+  const captureMailboxScroll = useCallback(() => {
+    if (!isMobile) {
+      return;
+    }
+
+    const content = mailboxContentRef.current;
+    if (!content) {
+      return;
+    }
+
+    pendingScrollTopRef.current = content.scrollTop;
+  }, [isMobile]);
+
+  const restoreMailboxScroll = useCallback(() => {
+    const scrollTop = pendingScrollTopRef.current;
+    if (scrollTop === null) {
+      return;
+    }
+
+    const restore = () => {
+      const content = mailboxContentRef.current;
+      if (content) {
+        content.scrollTop = scrollTop;
+      }
+      pendingScrollTopRef.current = null;
+    };
+
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(restore);
+      return;
+    }
+
+    restore();
+  }, []);
+
   // ── Data fetching ─────────────────────────────────────────────────────
 
   const loadInbox = useCallback(async () => {
+    captureMailboxScroll();
     setIsLoading(true);
     try {
       const data = await fetchInbox({ limit: 50 }, projectId);
@@ -328,9 +366,10 @@ export function MailboxView({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, onUnreadCountChange]);
+  }, [projectId, onUnreadCountChange, captureMailboxScroll]);
 
   const loadOutbox = useCallback(async () => {
+    captureMailboxScroll();
     setIsLoading(true);
     try {
       const data = await fetchOutbox({ limit: 50 }, projectId);
@@ -340,9 +379,10 @@ export function MailboxView({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, captureMailboxScroll]);
 
   const loadAgentMailbox = useCallback(async (agentId: string) => {
+    captureMailboxScroll();
     setIsLoading(true);
     try {
       const data = await fetchAgentMailbox(agentId, projectId);
@@ -352,9 +392,10 @@ export function MailboxView({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, captureMailboxScroll]);
 
   const loadAllAgentsMailbox = useCallback(async () => {
+    captureMailboxScroll();
     setIsLoading(true);
     try {
       const data = await fetchAllAgentMailbox(projectId);
@@ -364,7 +405,11 @@ export function MailboxView({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, captureMailboxScroll]);
+
+  useEffect(() => {
+    restoreMailboxScroll();
+  }, [inbox, outbox, agentMailbox, allAgentsMailbox, approvals, selectedApproval, restoreMailboxScroll]);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -387,6 +432,7 @@ export function MailboxView({
   }, [projectId, onUnreadCountChange]);
 
   const loadApprovals = useCallback(async (status: "pending" | "history") => {
+    captureMailboxScroll();
     setIsLoading(true);
     try {
       const list = await fetchApprovals({ status: status === "pending" ? "pending" : undefined, limit: 100 }, projectId);
@@ -406,7 +452,7 @@ export function MailboxView({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, captureMailboxScroll]);
 
   // Load data on tab change
   useEffect(() => {
@@ -1219,7 +1265,7 @@ export function MailboxView({
         </button>
       </div>
 
-      <div className="mailbox-content" data-testid="mailbox-content">
+      <div className="mailbox-content" data-testid="mailbox-content" ref={mailboxContentRef}>
         {isSplitPane ? (
           <div className="mailbox-split-layout" data-testid="mailbox-split-layout" ref={splitLayoutRef}>
             <div

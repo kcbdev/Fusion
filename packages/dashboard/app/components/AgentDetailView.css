@@ -241,6 +241,13 @@
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
   flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.agent-detail-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .agent-detail-tab {
@@ -255,6 +262,7 @@
   font-size: calc(var(--space-sm) + var(--space-xs) + var(--space-xs) * 0.25);
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
 }
 
 .agent-detail-tab:hover {

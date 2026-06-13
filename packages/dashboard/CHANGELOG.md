@@ -1,5 +1,85 @@
 # @fusion/dashboard
 
+## 0.42.0
+
+### Patch Changes
+
+- Updated dependencies [630b2a8]
+  - @fusion/engine@0.42.0
+  - @fusion/core@0.42.0
+  - @fusion/i18n@0.39.4
+  - @fusion-plugin-examples/cli-printing-press@0.1.21
+  - @fusion-plugin-examples/compound-engineering@0.1.4
+  - @fusion-plugin-examples/dependency-graph@0.1.35
+  - @fusion-plugin-examples/roadmap@0.1.23
+  - @fusion-plugin-examples/cursor-runtime@0.1.23
+  - @fusion-plugin-examples/droid-runtime@0.1.30
+  - @fusion-plugin-examples/hermes-runtime@0.2.54
+  - @fusion-plugin-examples/openclaw-runtime@0.2.54
+  - @fusion-plugin-examples/paperclip-runtime@0.2.54
+
+## 0.41.0
+
+### Patch Changes
+
+- @fusion/core@0.41.0
+- @fusion/engine@0.41.0
+- @fusion/i18n@0.39.3
+- @fusion-plugin-examples/cli-printing-press@0.1.20
+- @fusion-plugin-examples/compound-engineering@0.1.3
+- @fusion-plugin-examples/dependency-graph@0.1.34
+- @fusion-plugin-examples/roadmap@0.1.22
+- @fusion-plugin-examples/cursor-runtime@0.1.22
+- @fusion-plugin-examples/droid-runtime@0.1.29
+- @fusion-plugin-examples/hermes-runtime@0.2.53
+- @fusion-plugin-examples/openclaw-runtime@0.2.53
+- @fusion-plugin-examples/paperclip-runtime@0.2.53
+
+## 0.40.1
+
+### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/engine@0.40.1
+- @fusion/i18n@0.39.2
+- @fusion-plugin-examples/cli-printing-press@0.1.19
+- @fusion-plugin-examples/compound-engineering@0.1.2
+- @fusion-plugin-examples/dependency-graph@0.1.33
+- @fusion-plugin-examples/roadmap@0.1.21
+- @fusion-plugin-examples/cursor-runtime@0.1.21
+- @fusion-plugin-examples/droid-runtime@0.1.28
+- @fusion-plugin-examples/hermes-runtime@0.2.52
+- @fusion-plugin-examples/openclaw-runtime@0.2.52
+- @fusion-plugin-examples/paperclip-runtime@0.2.52
+
+## 0.40.0
+
+### Patch Changes
+
+- 2d2024f: Unfreeze dashboard spinners and pulse/enter animations. Transition tokens
+  (`--transition-slow: 0.3s ease`) bundle a duration and an easing; 15 animation
+  declarations reused them as bare durations, which made the whole `animation`
+  declaration invalid at computed-value time and silently resolved it to
+  `animation: none`. Animation rules now use new duration-only tokens
+  (`--duration-instant/fast/normal/slow`), with the transition tokens derived
+  from them, and a repo-wide CSS regression test forbids the pattern.
+- 784f308: Fix first tap of GitHub tracking icon in quick task entry on mobile (FN-6148).
+
+  The delegated touch handler on `.quick-entry-actions` now uses `closest("button")` to resolve taps that land on child SVG elements, so the GitHub tracking toggle responds correctly on the first touch — identical root-cause fix as FN-6145.
+
+  - @fusion/core@0.40.0
+  - @fusion/engine@0.40.0
+  - @fusion/i18n@0.39.1
+  - @fusion-plugin-examples/cli-printing-press@0.1.18
+  - @fusion-plugin-examples/compound-engineering@0.1.1
+  - @fusion-plugin-examples/dependency-graph@0.1.32
+  - @fusion-plugin-examples/roadmap@0.1.20
+  - @fusion-plugin-examples/cursor-runtime@0.1.20
+  - @fusion-plugin-examples/droid-runtime@0.1.27
+  - @fusion-plugin-examples/hermes-runtime@0.2.51
+  - @fusion-plugin-examples/openclaw-runtime@0.2.51
+  - @fusion-plugin-examples/paperclip-runtime@0.2.51
+
 ## 0.39.0
 
 ### Patch Changes

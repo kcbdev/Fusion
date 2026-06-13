@@ -4,9 +4,10 @@
  * `MOVED_SETTINGS_KEYS` is the single, authoritative record of the settings keys
  * that left `DEFAULT_PROJECT_SETTINGS` and now live exclusively as **workflow
  * setting values** per `(workflowId, projectId)`. It is derived directly from the
- * built-in workflow declaration catalog (`BUILTIN_WORKFLOW_SETTINGS`) so the move
- * has exactly one source of truth — a key is "moved" iff a built-in workflow
- * declares it. Adding/removing a key from the catalog automatically reflows the
+ * moved workflow declaration catalog (`BUILTIN_MOVED_WORKFLOW_SETTINGS`) so the move
+ * has exactly one source of truth. Workflow-native declarations (for example
+ * triage policy thresholds) are deliberately excluded from this tombstone.
+ * Adding/removing a key from the moved catalog automatically reflows the
  * tombstone list, the migration write target, and the stale-writer guard.
  *
  * What the tombstone shields (KTD-5, R8):
@@ -35,7 +36,7 @@
  * setting and is intentionally ABSENT from this list.
  */
 
-import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
+import { BUILTIN_MOVED_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 
 /**
  * The version of the per-project settings hard-move migration. Persisted per
@@ -49,11 +50,11 @@ export const SETTINGS_MIGRATION_VERSION = 1;
 export const SETTINGS_MIGRATION_MARKER_KEY = "settingsMigrationVersion";
 
 /**
- * The definitive moved-key catalog — derived from the built-in workflow
+ * The definitive moved-key catalog — derived from the moved workflow
  * declarations so it cannot drift from them. Frozen so callers cannot mutate it.
  */
 export const MOVED_SETTINGS_KEYS: readonly string[] = Object.freeze(
-  BUILTIN_WORKFLOW_SETTINGS.map((s) => s.id),
+  BUILTIN_MOVED_WORKFLOW_SETTINGS.map((s) => s.id),
 );
 
 /** Set form for O(1) membership checks on the hot write path. */

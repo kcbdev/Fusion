@@ -7,12 +7,14 @@ const maxWorkers = computeMaxWorkers();
 export default defineConfig({
   resolve: {
     alias: {
+      "@fusion/core": resolve(__dirname, "./src/index.ts"),
       "@fusion/test-utils": resolve(__dirname, "./src/__test-utils__/workspace.ts"),
       "@fusion/plugin-sdk": resolve(__dirname, "../plugin-sdk/src/index.ts"),
     },
   },
   test: {
     include: ["src/**/*.test.ts"],
+    exclude: [],
     setupFiles: [
       "./src/__test-utils__/vitest-setup.ts",
     ],

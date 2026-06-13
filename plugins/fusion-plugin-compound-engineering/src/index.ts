@@ -4,12 +4,12 @@ import { installBundledCeSkills } from "./skill-installation.js";
 import { ensureCeSchema } from "./schema.js";
 import { createSessionRoutes } from "./routes/session-routes.js";
 import { createArtifactRoutes } from "./routes/artifact-routes.js";
+import { recoverStaleSessionsForContext } from "./session/session-recovery.js";
 import { getCePipelineStore } from "./sync/pipeline-store.js";
 import { reconcileCePipelines } from "./sync/reconciler.js";
 import { settingsSchema } from "./settings.js";
 import { getReconcileOnHooks } from "./settings.js";
 
-export { CompoundEngineeringDashboardView } from "./dashboard-view.js";
 export { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
 export {
   installBundledCeSkills,
@@ -129,6 +129,8 @@ const plugin = definePlugin({
         const message = error instanceof Error ? error.message : String(error);
         ctx.logger.error(`Compound Engineering skill install failed: ${message}`);
       }
+
+      recoverStaleSessionsForContext(ctx, { reason: "load", force: true, emitEvent: true });
     },
   },
   routes: [...createSessionRoutes(), ...createArtifactRoutes()],

@@ -51,7 +51,6 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   BranchConflictError,
-  BranchCrossContaminationError,
   assertCleanBranchAtBase,
   inspectBranchConflict,
   listUniqueBranchCommits,
@@ -443,100 +442,19 @@ describe("branch-conflicts", () => {
   it.each([
     {
       name: "passes when attribution comes from subject token",
-      log: "aaa111\u001ffeat(FN-4068): own\u001f\n",
-      expectForeign: false,
     },
     {
       name: "passes when attribution comes from trailer token",
-      log: "aaa111\u001ffeat: own\u001fFusion-Task-Id: FN-4068\n",
-      expectForeign: false,
     },
     {
-      name: "throws when commit is attributed to a foreign task",
-      log: "bbb222\u001ffeat(FN-4386): foreign\u001fFusion-Task-Id: FN-4386\n",
-      expectForeign: true,
+      name: "passes when commit is attributed to a foreign task",
     },
-  ])("assertCleanBranchAtBase $name", async ({ log, expectForeign }) => {
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      const command = typeof cmd === "string" ? cmd : cmd[0];
-      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
-        return Buffer.from(log);
-      }
-      throw new Error(`Unexpected command: ${command}`);
+  ])("assertCleanBranchAtBase $name", async () => {
+    mockedExecSync.mockImplementation(() => {
+      throw new Error("assertCleanBranchAtBase should not inspect commit attribution");
     });
 
-    const assertion = assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068");
-    if (expectForeign) {
-      await expect(assertion).rejects.toBeInstanceOf(BranchCrossContaminationError);
-      return;
-    }
-    await expect(assertion).resolves.toBeUndefined();
-  });
-
-  // FN-5475 / option-2 promotion check: a commit attributed to another
-  // task that's already reachable from the integration target was integrated
-  // via fast-forward and shouldn't be treated as contamination on a
-  // downstream branch that briefly inherited it.
-  it("assertCleanBranchAtBase treats foreign-attributed commits that are ancestors of main as promoted", async () => {
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      const command = typeof cmd === "string" ? cmd : cmd[0];
-      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
-        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
-      }
-      if (command.includes("git merge-base --is-ancestor 'bbb222' 'main'")) {
-        // Simulate the FN-5475 case: foreign commit is already on local main.
-        return Buffer.from("");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    });
-
-    await expect(
-      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
-    ).resolves.toBeUndefined();
-  });
-
-  it("assertCleanBranchAtBase treats foreign-attributed commits that are only ancestors of origin/main as promoted", async () => {
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      const command = typeof cmd === "string" ? cmd : cmd[0];
-      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
-        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
-      }
-      if (command.includes("git merge-base --is-ancestor 'bbb222' 'main'")) {
-        // Local main is stale and does not yet contain the promoted dependency.
-        const err = new Error("not an ancestor") as Error & { stderr?: string };
-        err.stderr = "";
-        throw err;
-      }
-      if (command.includes("git merge-base --is-ancestor 'bbb222' 'origin/main'")) {
-        // Remote-tracking integration branch already contains it.
-        return Buffer.from("");
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    });
-
-    await expect(
-      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
-    ).resolves.toBeUndefined();
-  });
-
-  it("assertCleanBranchAtBase still throws when foreign-attributed commits are NOT on any integration ref", async () => {
-    mockedExecSync.mockImplementation((cmd: string | string[]) => {
-      const command = typeof cmd === "string" ? cmd : cmd[0];
-      if (command.includes("git log --format=%H%x1f%s%x1f%b 'main..fusion/fn-4068'")) {
-        return Buffer.from("bbb222feat(FN-4386): foreignFusion-Task-Id: FN-4386\n");
-      }
-      if (command.includes("git merge-base --is-ancestor")) {
-        // Not on any integration ref — exits non-zero.
-        const err = new Error("not an ancestor") as Error & { stderr?: string };
-        err.stderr = "";
-        throw err;
-      }
-      throw new Error(`Unexpected command: ${command}`);
-    });
-
-    await expect(
-      assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068"),
-    ).rejects.toBeInstanceOf(BranchCrossContaminationError);
+    await expect(assertCleanBranchAtBase("/tmp/repo", "fusion/fn-4068", "main", "FN-4068")).resolves.toBeUndefined();
   });
 
   describe("reportBranchAttribution", () => {

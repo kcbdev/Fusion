@@ -18,7 +18,7 @@ vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockInit,
       close: mockClose,
       isDiscoveryActive: mockIsDiscoveryActive,
@@ -28,7 +28,7 @@ vi.mock("@fusion/core", async () => {
       getDiscoveredNodes: mockGetDiscoveredNodes,
       registerNode: mockRegisterNode,
       checkNodeHealth: mockCheckNodeHealth,
-    })),
+    }; }),
   };
 });
 

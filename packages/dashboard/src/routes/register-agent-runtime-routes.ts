@@ -465,29 +465,12 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
             }
           }
 
-          if (nextState === "paused") {
-            const assignedTasks = await scopedStore.getTasksByAssignedAgent(agentId, { excludeArchived: true });
-            const toPause = assignedTasks.filter((task) => task.paused !== true);
-            const results = await Promise.allSettled(
-              toPause.map((task) => scopedStore.pauseTask(task.id, true, undefined, { pausedByAgentId: agentId })),
-            );
-            results.forEach((result, index) => {
-              if (result.status === "rejected") {
-                runtimeLogger.child("agent-state").warn("Failed to auto-pause assigned task", {
-                  agentId,
-                  taskId: toPause[index]?.id,
-                  error: String(result.reason),
-                });
-              }
-            });
-          }
-
           if (nextState === "active") {
             const pausedTasks = await scopedStore.getTasksByAssignedAgent(agentId, {
               pausedOnly: true,
               excludeArchived: true,
             });
-            const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId);
+            const toUnpause = pausedTasks.filter((task) => task.pausedByAgentId === agentId && !task.userPaused);
             const results = await Promise.allSettled(
               toUnpause.map((task) => scopedStore.pauseTask(task.id, false)),
             );

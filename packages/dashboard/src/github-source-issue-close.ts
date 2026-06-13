@@ -1,7 +1,7 @@
 import type { GlobalSettings, ProjectSettings, TaskStore } from "@fusion/core";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 import { GitHubClient } from "./github.js";
-import { delay, isTransientGitHubError } from "./github-tracking-state.js";
+import { decideIssueAction, delay, isTransientGitHubError } from "./github-tracking-state.js";
 
 interface TaskMovedEvent {
   task: {
@@ -66,14 +66,16 @@ export class GitHubSourceIssueCloseService {
   }
 
   private async handleTaskMoved(store: TaskStore, event: TaskMovedEvent): Promise<void> {
-    if (event.to !== "done" || event.from === "done") {
-      return;
-    }
-
     const settings = ((await store.getSettings()) ?? {}) as Pick<ProjectSettings, "githubCloseSourceIssueOnDone" | "githubAuthMode" | "githubAuthToken">;
     if (settings.githubCloseSourceIssueOnDone !== true) {
       return;
     }
+
+    const action = decideIssueAction(event.from, event.to);
+    if (!action) {
+      return;
+    }
+    const state = action.action === "close" ? "closed" : "open";
 
     const sourceIssue = event.task.sourceIssue;
     if (!sourceIssue || sourceIssue.provider !== "github") {
@@ -107,26 +109,34 @@ export class GitHubSourceIssueCloseService {
         : new GitHubClient({ forceMode: "gh-cli" });
 
       const existing = await client.getIssue(owner, repo, issueNumberValue);
-      if (!existing || existing.state === "closed") {
-        await store.logEntry(event.task.id, "Skipped closing GitHub source issue - issue not found or already closed", `${owner}/${repo}#${issueNumberValue}`);
+      if (!existing || existing.state === state) {
+        await store.logEntry(
+          event.task.id,
+          `Skipped ${action.action === "close" ? "closing" : "reopening"} GitHub source issue - issue not found or already ${state}`,
+          `${owner}/${repo}#${issueNumberValue}`,
+        );
         return;
       }
 
-      const closeIssue = async () => {
-        await client.setIssueState(owner, repo, issueNumberValue, "closed", "completed");
+      const applyIssueAction = async () => {
+        await client.setIssueState(owner, repo, issueNumberValue, state, action.stateReason);
       };
 
       try {
-        await closeIssue();
+        await applyIssueAction();
       } catch (error) {
         if (!isTransientGitHubError(error)) {
           throw error;
         }
         await delay(25);
-        await closeIssue();
+        await applyIssueAction();
       }
 
-      await store.logEntry(event.task.id, "Closed linked GitHub source issue", `${owner}/${repo}#${issueNumberValue}`);
+      await store.logEntry(
+        event.task.id,
+        `${action.action === "close" ? "Closed" : "Reopened"} linked GitHub source issue`,
+        `${owner}/${repo}#${issueNumberValue}`,
+      );
     } catch (error) {
       await store.logEntry(
         event.task.id,

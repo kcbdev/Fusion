@@ -99,12 +99,12 @@ vi.mock("@fusion/core", async (importOriginal) => {
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
     isQmdAvailable: vi.fn().mockResolvedValue(false),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
       close: mockCentralClose,
       listProjects: mockCentralListProjects,
       reconcileProjectStatuses: mockCentralReconcileProjectStatuses,
-    })),
+    }; }),
   });
 });
 
@@ -308,6 +308,92 @@ afterEach(() => {
 });
 
 
+describe("POST /tasks/:id/steer", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue("/fake/root/.fusion"),
+    } as Partial<TaskStore>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function buildApp(heartbeatMonitor?: NonNullable<Parameters<typeof createApiRoutes>[1]>["heartbeatMonitor"]) {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, heartbeatMonitor ? { heartbeatMonitor } : undefined));
+    return app;
+  }
+
+  it("records user steering comments and wakes the assigned immediate-response agent", async () => {
+    const updatedTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress" as const,
+      assignedAgentId: "agent-1",
+      steeringComments: [{ id: "steer-1", text: "Please continue", author: "user" as const, createdAt: "2026-06-12T00:00:00.000Z" }],
+    };
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const heartbeatMonitor = {
+      rootDir: "/fake/root",
+      startRun: vi.fn(),
+      executeHeartbeat,
+      stopRun: vi.fn(),
+    };
+    vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+    vi.spyOn(AgentStore.prototype, "getAgent").mockResolvedValue({
+      id: "agent-1",
+      name: "Executor",
+      role: "executor",
+      runtimeConfig: { messageResponseMode: "immediate" },
+    } as Awaited<ReturnType<AgentStore["getAgent"]>>);
+    vi.spyOn(AgentStore.prototype, "getActiveHeartbeatRun").mockResolvedValue(null);
+    (store.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(buildApp(heartbeatMonitor), "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text: "Please continue" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.addSteeringComment).toHaveBeenCalledWith("FN-001", "Please continue", "user");
+    expect(res.body.steeringComments).toEqual(updatedTask.steeringComments);
+    await vi.waitFor(() => {
+      expect(executeHeartbeat).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        source: "on_demand",
+        taskId: "FN-001",
+        triggerDetail: "steering-comment",
+        triggeringCommentIds: ["steer-1"],
+        triggeringCommentType: "steering",
+        contextSnapshot: expect.objectContaining({
+          taskId: "FN-001",
+          triggerDetail: "steering-comment",
+          triggeringCommentIds: ["steer-1"],
+          triggeringCommentType: "steering",
+          wakeReason: "on_demand",
+        }),
+      }));
+    });
+  });
+
+  it.each([
+    ["", "text is required and must be a string"],
+    ["x".repeat(2001), "text must be between 1 and 2000 characters"],
+  ])("rejects invalid steering text %#", async (text, expectedError) => {
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain(expectedError);
+    expect(store.addSteeringComment).not.toHaveBeenCalled();
+  });
+});
+
+
 describe("POST /tasks/:id/retry", () => {
   let store: TaskStore;
 
@@ -468,6 +554,140 @@ describe("POST /tasks/:id/retry", () => {
     );
     const updateCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
     expect(updateCall).not.toHaveProperty("mergeRetries");
+  });
+
+  it("retries status-none in-review task with incomplete steps by moving to todo", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review" as const,
+      status: null,
+      mergeRetries: 4,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "in-progress" },
+        { name: "Step 2", status: "pending" },
+      ],
+    };
+    const movedTask = { ...reviewTask, column: "todo" as const, status: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(reviewTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(reviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: null,
+      error: null,
+      ...buildManualRetryResetPatch(),
+    });
+    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (stranded in-review execution retry → todo, preserving progress)",
+    );
+  });
+
+  it("retries status-none zero-step in-review task with no merge attempts by moving to todo", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review" as const,
+      status: null,
+      steps: [],
+      mergeRetries: 0,
+    };
+    const movedTask = { ...reviewTask, column: "todo" as const, status: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(reviewTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(reviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (stranded in-review execution retry → todo, preserving progress)",
+    );
+  });
+
+  it("retries status-none in-review task with prior merge attempts by staying in-review", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review" as const,
+      status: null,
+      mergeRetries: 2,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "done" },
+      ],
+    };
+    (store.getTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(reviewTask)
+      .mockResolvedValueOnce({ ...reviewTask, status: undefined, mergeRetries: 0 });
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(reviewTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: null,
+      error: null,
+      ...buildManualRetryResetPatch({ resetMergeRetries: true }),
+    });
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (in-review merge retry, mergeRetries reset)",
+    );
+  });
+
+  it("returns 400 for status-none in-review task with completed steps and no merge attempts", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review" as const,
+      status: null,
+      mergeRetries: 0,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "done" },
+      ],
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(reviewTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("not in a retryable state");
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for non-review task with status none", async () => {
+    const task = {
+      ...FAKE_TASK_DETAIL,
+      column: "todo" as const,
+      status: null,
+      steps: [{ name: "Step 0", status: "pending" }],
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(task);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("not in a retryable state");
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
   });
 
   it("preserves worktree/branch when retrying in-review task", async () => {
@@ -1353,7 +1573,7 @@ describe("POST /tasks/:id/archive", () => {
     return app;
   }
 
-  it("archives a done task and returns the updated task", async () => {
+  it("archives a task from any live column and returns the updated task", async () => {
     const archivedTask = { ...FAKE_TASK_DETAIL, column: "archived" };
     (store.archiveTask as ReturnType<typeof vi.fn>).mockResolvedValue(archivedTask);
 
@@ -1403,15 +1623,15 @@ describe("POST /tasks/:id/archive", () => {
     });
   });
 
-  it("returns 400 when task is not in done column", async () => {
-    (store.archiveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Cannot archive FN-001: task is in 'triage', must be in 'done'"));
+  it("returns 400 when task is already archived", async () => {
+    (store.archiveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Cannot archive FN-001: task is already archived"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/archive", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain("must be in 'done'");
+    expect(res.body.error).toContain("already archived");
   });
 
   it("returns 500 on unexpected errors", async () => {

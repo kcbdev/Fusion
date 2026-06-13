@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -36,6 +36,26 @@ describe("getProjectRootFromWorktree", () => {
         worktreesDirCandidates: ["/tmp/repo.worktrees"],
       }),
     ).toBe("/tmp");
+  });
+
+  it("returns null without throwing when child_process partial mocks omit spawnSync", async () => {
+    vi.resetModules();
+    vi.doMock("node:child_process", () => ({
+      execSync: vi.fn(),
+    }));
+
+    try {
+      const { getProjectRootFromWorktree: getProjectRootFromWorktreeWithPartialMock } = await import(
+        "../pi-extensions.js"
+      );
+      const unmatchedPath = join(tmpdir(), "fn-6102-not-a-worktree");
+
+      expect(() => getProjectRootFromWorktreeWithPartialMock(unmatchedPath)).not.toThrow();
+      expect(getProjectRootFromWorktreeWithPartialMock(unmatchedPath)).toBe(null);
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
   });
 
   it("detects arbitrary Git linked worktree paths when the parent has Fusion metadata", () => {

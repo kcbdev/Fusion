@@ -15,10 +15,51 @@ export class WorkflowCompileError extends Error {
   }
 }
 
+export const WORKFLOW_INTERPRETER_DEFERRED_SUFFIX = "require the workflow interpreter (deferred)";
+
+export function isInterpreterDeferredWorkflowCompileError(error: unknown): boolean {
+  return error instanceof WorkflowCompileError && error.message.includes(WORKFLOW_INTERPRETER_DEFERRED_SUFFIX);
+}
+
+/** Workflow-owned merge/retry/recovery policy primitives. The WorkflowStep
+ * compiler treats this region as a terminal engine-owned boundary: these nodes
+ * may branch internally, are not emitted as steps, and are not walked by the
+ * linear step compiler. */
+export const MERGE_REGION_NODE_KINDS: ReadonlySet<WorkflowIrNode["kind"]> = new Set([
+  "merge-gate",
+  "merge-attempt",
+  "manual-merge-hold",
+  "retry-backoff",
+  "recovery-router",
+  "branch-group-member-integration",
+  "branch-group-promotion",
+]);
+
+function isMergeRegionKind(node: WorkflowIrNode): boolean {
+  return MERGE_REGION_NODE_KINDS.has(node.kind);
+}
+
 /** Seam anchor kinds, encoded on IR nodes as `config.seam`. These map to the
  *  fixed planning → execute → workflow-step → review → merge pipeline and are
  *  not emitted as steps. */
 const SEAM_NAMES = new Set(["planning", "execute", "workflow-step", "review", "merge"]);
+
+const ENGINE_PRIMITIVE_NODE_KINDS = new Set<WorkflowIrNode["kind"]>([
+  "merge-gate",
+  "merge-attempt",
+  "manual-merge-hold",
+  "retry-backoff",
+  "recovery-router",
+  "branch-group-member-integration",
+  "branch-group-promotion",
+  "pr-create",
+  "pr-respond",
+  "pr-merge",
+]);
+
+function isEnginePrimitive(node: WorkflowIrNode): boolean {
+  return ENGINE_PRIMITIVE_NODE_KINDS.has(node.kind);
+}
 
 function seamOf(node: WorkflowIrNode): string | undefined {
   const seam = node.config?.seam;
@@ -49,9 +90,11 @@ function mainEdge(edges: WorkflowIrEdge[]): WorkflowIrEdge | undefined {
  * post-merge chain the WorkflowStep engine can run. Returns a
  * WorkflowCompileError describing the first problem, or null when compilable.
  *
- * Allowed shape: a single path from start to end. Seam nodes may carry an extra
- * `failure` edge to the end node; every other non-terminal node has exactly one
- * outgoing edge. Anything else (true branching) requires the deferred interpreter.
+ * Allowed shape: a single path from start to end or to the engine-owned merge
+ * policy region. Seam nodes may carry an extra `failure` edge to the end node;
+ * merge-policy primitives are terminal and may fan out internally; every other
+ * non-terminal node has exactly one outgoing edge. Anything else (true
+ * branching) requires the deferred interpreter.
  */
 export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
   const nodesById = new Map(ir.nodes.map((node) => [node.id, node]));
@@ -72,6 +115,13 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
     const outs = outgoing.get(node.id) ?? [];
     if (node.kind === "end") {
       if (outs.length > 0) return new WorkflowCompileError("end node must have no outgoing edges");
+      continue;
+    }
+    if (isEnginePrimitive(node)) {
+      continue;
+    }
+
+    if (isMergeRegionKind(node)) {
       continue;
     }
 
@@ -101,12 +151,12 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
       return new WorkflowCompileError(`node '${node.id}' has no outgoing edge`);
     }
     if (outs.length > 1) {
-      // NOTE: the `require the workflow interpreter (deferred)` suffix is matched
-      // by the dashboard editor (WorkflowNodeEditor handleSave, KTD-4) to render
-      // an info-tone "interpreter-only" banner instead of an error. Keep both
-      // interpreter-deferred messages carrying this exact suffix in sync.
+      // NOTE: WORKFLOW_INTERPRETER_DEFERRED_SUFFIX is matched by the dashboard
+      // editor/routes (KTD-4) to render an info-tone "interpreter-only" banner
+      // instead of an error. Keep interpreter-deferred messages carrying this
+      // exact suffix in sync.
       return new WorkflowCompileError(
-        `node '${node.id}' branches into ${outs.length} edges — graphs with branches require the workflow interpreter (deferred)`,
+        `node '${node.id}' branches into ${outs.length} edges — graphs with branches ${WORKFLOW_INTERPRETER_DEFERRED_SUFFIX}`,
       );
     }
   }
@@ -121,10 +171,15 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
   const seenSeams = new Set<string>();
   let nextExpectedSeamIndex = 0;
   const visited = new Set<string>();
+  let reachedTerminal = false;
   let cursor: string | undefined = startNode.id;
   while (cursor && !visited.has(cursor)) {
     visited.add(cursor);
     const node = nodesById.get(cursor);
+    if (node && isMergeRegionKind(node)) {
+      reachedTerminal = true;
+      break;
+    }
     const seam = node ? seamOf(node) : undefined;
     if (seam) {
       if (seenSeams.has(seam)) {
@@ -144,16 +199,19 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
       seenSeams.add(seam);
       nextExpectedSeamIndex += 1;
     }
-    if (cursor === endNode.id) break;
+    if (cursor === endNode.id || (node && isEnginePrimitive(node))) {
+      reachedTerminal = true;
+      break;
+    }
     cursor = mainEdge(outgoing.get(cursor) ?? [])?.to;
   }
-  if (!visited.has(endNode.id)) {
+  if (!reachedTerminal) {
     return new WorkflowCompileError("workflow main path does not reach the end node");
   }
-  const unreached = ir.nodes.filter((node) => !visited.has(node.id));
+  const unreached = ir.nodes.filter((node) => !visited.has(node.id) && node.kind !== "end" && !isEnginePrimitive(node));
   if (unreached.length > 0) {
     return new WorkflowCompileError(
-      `node '${unreached[0].id}' is not on the main path — disconnected nodes require the workflow interpreter (deferred)`,
+      `node '${unreached[0].id}' is not on the main path — disconnected nodes ${WORKFLOW_INTERPRETER_DEFERRED_SUFFIX}`,
     );
   }
 
@@ -212,7 +270,9 @@ function nodeToStepInput(node: WorkflowIrNode, phase: "pre-merge" | "post-merge"
  * Compile a workflow graph into an ordered list of WorkflowStep inputs ready to
  * persist and run on the existing engine. User prompt/script/gate nodes become
  * steps; execute/review seams are skipped; the merge seam is the pre-/post-merge
- * boundary. Throws WorkflowCompileError for non-linear graphs.
+ * boundary; merge-policy primitives form a terminal engine-owned region that is
+ * skipped and never emitted as steps. Throws WorkflowCompileError for non-linear
+ * graphs.
  *
  * The returned array order is the execution order (it maps directly onto a
  * task's `enabledWorkflowSteps`).
@@ -236,7 +296,15 @@ export function compileWorkflowToSteps(ir: WorkflowIr): WorkflowStepInput[] {
     const node = nodesById.get(cursor);
     if (!node) break;
 
+    if (isMergeRegionKind(node)) {
+      break;
+    }
+
     const seam = seamOf(node);
+    if (isEnginePrimitive(node)) {
+      break;
+    }
+
     if (seam === "merge") {
       phase = "post-merge";
     } else if (!seam && node.kind !== "start" && node.kind !== "end") {

@@ -12,11 +12,11 @@ const mockTerm = {
   cols: 80,
   rows: 24,
 };
-vi.mock("@xterm/xterm", () => ({ Terminal: vi.fn(() => mockTerm) }));
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: vi.fn(() => ({ fit: vi.fn() })) }));
-vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: vi.fn(() => ({})) }));
+vi.mock("@xterm/xterm", () => ({ Terminal: vi.fn(function Terminal() { return mockTerm; }) }));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: vi.fn(function FitAddon() { return { fit: vi.fn() }; }) }));
+vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: vi.fn(function Unicode11Addon() { return {}; }) }));
 vi.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: vi.fn(() => ({ onContextLoss: vi.fn(), dispose: vi.fn() })),
+  WebglAddon: vi.fn(function WebglAddon() { return { onContextLoss: vi.fn(), dispose: vi.fn() }; }),
 }));
 
 const apiMock = vi.fn();
@@ -43,7 +43,7 @@ class FakeWS {
     this.readyState = 3;
   }
 }
-(globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
+let originalWebSocket: typeof WebSocket | undefined;
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
   observe() {}
   disconnect() {}
@@ -53,6 +53,8 @@ import { SessionTerminal } from "../SessionTerminal";
 
 beforeEach(() => {
   FakeWS.instances = [];
+  originalWebSocket = (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket;
+  (globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
   mockTerm.onData.mockReset();
   mockTerm.write.mockClear();
   apiMock.mockReset();
@@ -60,6 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket = originalWebSocket;
   vi.clearAllMocks();
 });
 

@@ -109,6 +109,11 @@ async function requestFileDiffs(app: Parameters<typeof import("../test-request.j
   return get(app, `/api/tasks/${taskId}/file-diffs`);
 }
 
+async function requestTaskDiff(app: Parameters<typeof import("../test-request.js").get>[0], taskId = "KB-651"): Promise<{ status: number; body: any }> {
+  const { get } = await import("../test-request.js");
+  return get(app, `/api/tasks/${taskId}/diff`);
+}
+
 describe("GET /api/tasks/:id/file-diffs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -262,6 +267,69 @@ describe("GET /api/tasks/:id/file-diffs", () => {
       expect(response.status).toBe(200);
       expect(response.body).toHaveLength(1);
       expect(response.body[0]).toMatchObject({ path: "new.ts", status: "renamed", oldPath: "old.ts" });
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("restricts active stacked branch diffs to commits attributed to the task", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "fn-active-stacked-branch-diff-"));
+
+    try {
+      execFileSync("git", ["init", "-b", "main", repoDir], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.email", "stacked@example.com"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "config", "user.name", "Stacked Test"], { stdio: "pipe" });
+
+      writeFileSync(join(repoDir, "README.md"), "# stacked\n");
+      execFileSync("git", ["-C", repoDir, "add", "README.md"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "initial"], { stdio: "pipe" });
+      const forkPoint = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+
+      writeFileSync(join(repoDir, "foreign-upstream.ts"), "upstream\n");
+      execFileSync("git", ["-C", repoDir, "add", "foreign-upstream.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "FN-6118: upstream landed"], { stdio: "pipe" });
+      const recordedBase = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+
+      execFileSync("git", ["-C", repoDir, "checkout", "-b", "fusion/fn-6117", forkPoint], { stdio: "pipe" });
+      writeFileSync(join(repoDir, "foreign-copy.ts"), "copied foreign work\n");
+      execFileSync("git", ["-C", repoDir, "add", "foreign-copy.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "FN-6118: upstream landed"], { stdio: "pipe" });
+
+      writeFileSync(join(repoDir, "own-a.ts"), "own a\n");
+      execFileSync("git", ["-C", repoDir, "add", "own-a.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "test(FN-6117): add own a"], { stdio: "pipe" });
+
+      writeFileSync(join(repoDir, "own-b.ts"), "own b\n");
+      execFileSync("git", ["-C", repoDir, "add", "own-b.ts"], { stdio: "pipe" });
+      execFileSync("git", ["-C", repoDir, "commit", "-m", "feat(FN-6117): add own b"], { stdio: "pipe" });
+
+      const rawBranchFiles = execFileSync("git", ["-C", repoDir, "diff", "--name-only", "main...fusion/fn-6117"], {
+        encoding: "utf-8",
+        stdio: "pipe",
+      }).trim().split("\n").filter(Boolean);
+      expect(rawBranchFiles).toHaveLength(3);
+
+      const store = new RepoBackedStore(repoDir);
+      store.addTask(createTask({
+        id: "FN-6117",
+        column: "in-review",
+        worktree: repoDir,
+        branch: "fusion/fn-6117",
+        baseBranch: "main",
+        baseCommitSha: recordedBase,
+      }));
+
+      const app = createServer(store as any);
+      const diffResponse = await requestTaskDiff(app, "FN-6117");
+      const fileDiffsResponse = await requestFileDiffs(app, "FN-6117");
+
+      expect(diffResponse.status).toBe(200);
+      expect(diffResponse.body.stats.filesChanged).toBe(2);
+      expect(diffResponse.body.files.map((file: { path: string }) => file.path).sort()).toEqual(["own-a.ts", "own-b.ts"]);
+      expect(diffResponse.body.files.map((file: { path: string }) => file.path)).not.toContain("foreign-copy.ts");
+
+      expect(fileDiffsResponse.status).toBe(200);
+      expect(fileDiffsResponse.body.map((file: { path: string }) => file.path).sort()).toEqual(["own-a.ts", "own-b.ts"]);
     } finally {
       rmSync(repoDir, { recursive: true, force: true });
     }

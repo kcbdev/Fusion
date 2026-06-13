@@ -14,7 +14,7 @@ import { join, relative, resolve } from "node:path";
 import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus } from "@fusion/core";
 import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
-import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, resolveTitleSummarizerSettingsModel, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh, summarizeTitle } from "@fusion/core";
+import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ResearchProviderRegistry } from "./research/provider-registry.js";
 import { ResearchStepRunner } from "./research-step-runner.js";
@@ -41,6 +41,13 @@ export const taskCreateParams = Type.Object({
   priority: Type.Optional(
     Type.Union(TASK_CREATE_PRIORITY_VALUES.map((priority) => Type.Literal(priority)), {
       description: "Task priority (low, normal, high, urgent)",
+    }),
+  ),
+  workflow_id: Type.Optional(
+    Type.String({
+      description:
+        "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+        "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
     }),
   ),
 });
@@ -211,6 +218,13 @@ export const delegateTaskParams = Type.Object({
   description: Type.String({ description: "What needs to be done" }),
   dependencies: Type.Optional(
     Type.Array(Type.String(), { description: "Task IDs this new task depends on (e.g. [\"KB-001\"])" }),
+  ),
+  workflow_id: Type.Optional(
+    Type.String({
+      description:
+        "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+        "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
+    }),
   ),
   override: Type.Optional(Type.Boolean({ description: "Set true to bypass executor-role assignment policy" })),
 });
@@ -765,6 +779,7 @@ export async function createAgentTask(
       input.githubTracking?.enabled !== false && resolvedTracking.enabled;
     const createInput: TaskCreateInput = {
       ...input,
+      summarize: !input.title?.trim() ? true : undefined,
       source: nextSource,
       githubTracking: shouldPrefillGithubTrackingEnabled
         ? {
@@ -778,13 +793,7 @@ export async function createAgentTask(
     };
 
     const createdTask = await store.createTask(createInput, {
-      settings: { autoSummarizeTitles: settings.autoSummarizeTitles === true },
-      onSummarize: rootDir
-        ? async (description: string) => {
-          const resolved = resolveTitleSummarizerSettingsModel(settings);
-          return summarizeTitle(description, rootDir, resolved.provider, resolved.modelId);
-        }
-        : undefined,
+      settings,
     });
 
     const reconcile = await reconcileDeterministicDuplicate(store, {
@@ -819,15 +828,19 @@ export function createTaskCreateTool(
       "Before creating, scan existing open tasks for similar work — if an open task " +
       "already covers this, do not create a duplicate. " +
       "Optionally set dependencies (e.g., the new task depends on the current one, " +
-      "or the current task should wait for the new one).",
+      "or the current task should wait for the new one). " +
+      "Optionally pass workflow_id to select a workflow at creation time; use " +
+      "fn_workflow_list to discover valid IDs.",
     parameters: taskCreateParams,
     execute: async (_id: string, params: Static<typeof taskCreateParams>) => {
       try {
+        const workflowId = params.workflow_id?.trim() || undefined;
         const { task, wasDuplicate } = await createAgentTask(store, {
           description: params.description,
           dependencies: params.dependencies,
           column: "triage",
           priority: params.priority,
+          ...(workflowId ? { workflowId } : {}),
           source: provenance ? {
             sourceType: provenance.sourceType,
             sourceAgentId: provenance.sourceAgentId,
@@ -836,10 +849,11 @@ export function createTaskCreateTool(
           } : undefined,
         }, options);
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
         return {
           content: [{
             type: "text" as const,
-            text: `${wasDuplicate ? "Linked existing" : "Created"} ${task.id}: ${params.description}${deps}`,
+            text: `${wasDuplicate ? "Linked existing" : "Created"} ${task.id}: ${params.description}${deps}${workflow}`,
           }],
           details: { taskId: task.id },
         };
@@ -2787,7 +2801,9 @@ export function createDelegateTaskTool(
     description:
       "Create a new task and assign it to a specific agent for execution. The task goes to " +
       "'todo' and will be picked up by the target agent on their next heartbeat cycle. " +
-      "Use fn_list_agents first to find available agents and their capabilities.",
+      "Use fn_list_agents first to find available agents and their capabilities. " +
+      "Optionally pass workflow_id to select a workflow at creation time; use " +
+      "fn_workflow_list to discover valid IDs.",
     parameters: delegateTaskParams,
     execute: async (_id: string, params: Static<typeof delegateTaskParams>) => {
       // Validate target agent exists
@@ -2817,12 +2833,14 @@ export function createDelegateTaskTool(
       }
 
       try {
+        const workflowId = params.workflow_id?.trim() || undefined;
         // Create task assigned to the target agent
         const { task, wasDuplicate } = await createAgentTask(taskStore, {
           description: params.description,
           dependencies: params.dependencies,
           column: "todo",
           assignedAgentId: params.agent_id,
+          ...(workflowId ? { workflowId } : {}),
           source: {
             sourceType: "api",
             ...(override ? { sourceMetadata: { executorRoleOverride: true } } : {}),
@@ -2830,10 +2848,11 @@ export function createDelegateTaskTool(
         }, options);
 
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
         return {
           content: [{
             type: "text" as const,
-            text: `Delegated to ${agent.name} (${agent.id}): ${wasDuplicate ? "Linked existing" : "Created"} ${task.id}${deps}. ` +
+            text: `Delegated to ${agent.name} (${agent.id}): ${wasDuplicate ? "Linked existing" : "Created"} ${task.id}${deps}${workflow}. ` +
               `The task will be picked up by ${agent.name} on their next heartbeat cycle.`,
           }],
           details: { taskId: task.id, agentId: agent.id, agentName: agent.name },

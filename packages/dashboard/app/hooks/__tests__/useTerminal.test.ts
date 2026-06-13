@@ -402,6 +402,56 @@ describe("useTerminal", () => {
       expect(onData).toHaveBeenCalledTimes(1);
     });
 
+    it("clears scrollback buffer after direct delivery to subscribers", () => {
+      const { result } = renderHook(() => useTerminal("test-session-123"));
+      const firstSubscription = vi.fn();
+      const secondSubscription = vi.fn();
+
+      let unsubscribeFirst: (() => void) | undefined;
+      act(() => {
+        unsubscribeFirst = result.current.onScrollback(firstSubscription);
+      });
+
+      act(() => {
+        MockWebSocket.instances[0].emitMessage({ type: "scrollback", data: "initial prompt$ " });
+      });
+
+      expect(firstSubscription).toHaveBeenCalledTimes(1);
+      expect(firstSubscription).toHaveBeenCalledWith("initial prompt$ ");
+
+      act(() => {
+        unsubscribeFirst?.();
+        result.current.onScrollback(secondSubscription);
+      });
+
+      expect(secondSubscription).not.toHaveBeenCalled();
+    });
+
+    it("clears connected buffer after direct delivery to subscribers", () => {
+      const { result } = renderHook(() => useTerminal("test-session-123"));
+      const firstSubscription = vi.fn();
+      const secondSubscription = vi.fn();
+
+      let unsubscribeFirst: (() => void) | undefined;
+      act(() => {
+        unsubscribeFirst = result.current.onConnect(firstSubscription);
+      });
+
+      act(() => {
+        MockWebSocket.instances[0].emitMessage({ type: "connected", shell: "/bin/bash", cwd: "/project" });
+      });
+
+      expect(firstSubscription).toHaveBeenCalledTimes(1);
+      expect(firstSubscription).toHaveBeenCalledWith({ shell: "/bin/bash", cwd: "/project" });
+
+      act(() => {
+        unsubscribeFirst?.();
+        result.current.onConnect(secondSubscription);
+      });
+
+      expect(secondSubscription).not.toHaveBeenCalled();
+    });
+
     it("clears buffered scrollback after first replay to prevent duplicate delivery", () => {
       const { result } = renderHook(() => useTerminal("test-session-123"));
 

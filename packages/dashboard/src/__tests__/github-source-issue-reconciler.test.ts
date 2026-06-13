@@ -12,10 +12,10 @@ const { mockResolveGithubTrackingAuth } = vi.hoisted(() => ({
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     getIssue: (...args: unknown[]) => mockGetIssue(...args),
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({

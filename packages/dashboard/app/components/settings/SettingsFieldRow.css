@@ -33,7 +33,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
-  background: var(--surface-muted, rgba(255, 255, 255, 0.04));
+  background: var(--surface-muted, color-mix(in srgb, #ffffff 4%, transparent));
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 1px 6px;

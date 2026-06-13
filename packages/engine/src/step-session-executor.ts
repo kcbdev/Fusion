@@ -416,6 +416,10 @@ export function buildStepPrompt(
         lines.push(`- **${att.originalName}** (${att.mimeType}): \`${absPath}\` — read for context`);
       }
     }
+    lines.push(
+      "",
+      `> **Note:** Attachment files are at the project root under \`.fusion/tasks/${id}/attachments/\` — you may read them even when working in a worktree.`,
+    );
     attachmentsSection = "\n" + lines.join("\n") + "\n";
   }
 
@@ -553,11 +557,12 @@ function escapeRegex(str: string): string {
  * @param stepIndex - The 0-based step index.
  * @returns A reduced prompt string focused on the current step only.
  */
-function buildReducedStepPrompt(taskDetail: TaskDetail, stepIndex: number): string {
-  const { prompt, id, title } = taskDetail;
+export function buildReducedStepPrompt(taskDetail: TaskDetail, stepIndex: number): string {
+  const { prompt, id, title, attachments } = taskDetail;
 
   // Extract the step-specific section
   const stepSection = extractStepSection(prompt, stepIndex);
+  const hasAttachments = Boolean(attachments && attachments.length > 0);
 
   // Build a minimal prompt that focuses on the step without excessive context
   const parts: string[] = [
@@ -567,6 +572,10 @@ function buildReducedStepPrompt(taskDetail: TaskDetail, stepIndex: number): stri
     "Focus on completing this step efficiently:",
     "",
     stepSection,
+    "",
+    hasAttachments
+      ? `${attachments?.length ?? 0} attachment(s) available at .fusion/tasks/${id}/attachments/ — ask for context if needed.`
+      : "",
     "",
     "IMPORTANT: Your previous attempt hit the context window limit.",
     "Do NOT repeat work that's already been done.",
@@ -593,6 +602,8 @@ interface SessionHandle {
    *  is killed via pi-coding-agent's killProcessTree. dispose() alone only
    *  disconnects listeners and leaves bash subtrees orphaned. */
   abortBash: () => void;
+  /** Inject mid-flight steering into the live step session. */
+  steer: (message: string) => Promise<void>;
 }
 
 
@@ -755,6 +766,16 @@ export class StepSessionExecutor {
         handle.abortBash();
       } catch (err) {
         stepExecLog.warn(`Failed to abort bash for step ${stepIdx}: ${err}`);
+      }
+    }
+  }
+
+  async steerActiveSessions(message: string): Promise<void> {
+    for (const [stepIdx, handle] of this.activeSessions) {
+      try {
+        await handle.steer(message);
+      } catch (err) {
+        stepExecLog.warn(`Failed to steer active session for step ${stepIdx}: ${err}`);
       }
     }
   }
@@ -1089,6 +1110,10 @@ Follow instructions precisely and avoid unrelated changes.`,
           const handle: SessionHandle = {
             dispose: () => session?.dispose(),
             abortBash: () => session?.abortBash(),
+            steer: async (message) => {
+              if (!session) return;
+              await session.steer(message);
+            },
           };
           this.registerActiveStepSession(stepIndex, handle, worktreePath);
           stuckTaskDetector?.trackTask(trackingKey, { dispose: () => session?.dispose() }, taskDetail.id);

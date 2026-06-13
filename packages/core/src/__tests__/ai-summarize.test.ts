@@ -22,6 +22,7 @@ import {
   MERGE_COMMIT_SUMMARIZE_SYSTEM_PROMPT,
   COMMIT_BODY_SYSTEM_PROMPT,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TITLE_SUMMARIZE_INPUT_LENGTH,
   MIN_DESCRIPTION_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_MERGE_COMMIT_SUMMARY_LENGTH,
@@ -53,6 +54,7 @@ describe("ai-summarize", () => {
     it("should have correct length limits", () => {
       expect(MIN_DESCRIPTION_LENGTH).toBe(201);
       expect(MAX_DESCRIPTION_LENGTH).toBe(2000);
+      expect(MAX_TITLE_SUMMARIZE_INPUT_LENGTH).toBe(4000);
       expect(MAX_TITLE_LENGTH).toBe(60);
     });
 
@@ -89,19 +91,19 @@ describe("ai-summarize", () => {
       expect(() => validateDescription(desc)).toThrow("at least 201 characters");
     });
 
-    it("should throw for description too long", () => {
-      const desc = "a".repeat(2001);
-      expect(() => validateDescription(desc)).toThrow(ValidationError);
-      expect(() => validateDescription(desc)).toThrow("not exceed 2000 characters");
-    });
-
     it("should accept description at minimum boundary", () => {
       const desc = "a".repeat(201);
       expect(validateDescription(desc)).toBe(desc);
     });
 
-    it("should accept description at maximum boundary", () => {
+    it("should accept description at historical maximum boundary", () => {
       const desc = "a".repeat(2000);
+      expect(validateDescription(desc)).toBe(desc);
+    });
+
+    it("should accept descriptions longer than the historical maximum", () => {
+      const desc = "a".repeat(5000);
+      expect(() => validateDescription(desc)).not.toThrow();
       expect(validateDescription(desc)).toBe(desc);
     });
   });
@@ -206,6 +208,33 @@ describe("ai-summarize", () => {
       expect(prompt.mock.calls[0][0]).toContain("Do not call any tools");
     });
 
+    it("summarizes long descriptions with bounded prompt input", async () => {
+      const prompt = vi.fn().mockResolvedValue(undefined);
+      getFnAgentMock.mockResolvedValue(() =>
+        Promise.resolve({
+          session: {
+            prompt,
+            dispose: vi.fn(),
+            state: {
+              messages: [
+                { role: "assistant", content: "Summarize long description" },
+              ],
+            },
+          },
+        })
+      );
+      const description = "a".repeat(MAX_TITLE_SUMMARIZE_INPUT_LENGTH) + "tail".repeat(250);
+
+      const title = await summarizeTitle(description, "/tmp");
+
+      expect(title).toBe("Summarize long description");
+      expect(prompt).toHaveBeenCalledTimes(1);
+      const promptText = prompt.mock.calls[0][0] as string;
+      expect(promptText).toContain("…(truncated)");
+      expect(promptText).not.toContain("tail");
+      expect(promptText.length).toBeLessThanOrEqual(MAX_TITLE_SUMMARIZE_INPUT_LENGTH + 250);
+    });
+
     it("strips chatty preamble + markdown from AI response (FN-3057 regression)", async () => {
       // Reproduces the FN-3057 incident: model wrote a chat-style reply
       // ("Created **FN-3058** with the full spec…") that was sliced mid-word
@@ -254,6 +283,108 @@ describe("ai-summarize", () => {
       );
       const title = await summarizeTitle("a".repeat(201), "/tmp");
       expect(title).toBe("Refactor merger title fallback");
+    });
+
+    it("retries stale configured model ids with automatic resolution and logs the stale id", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const createFnAgent = vi
+        .fn()
+        .mockRejectedValueOnce(new Error(
+          "Configured model fireworksai/accounts/fireworks/routers/kimi-k2p5-turbo (primary selection) "
+          + "was not found in the pi model registry.",
+        ))
+        .mockResolvedValueOnce({
+          session: {
+            prompt: vi.fn().mockResolvedValue(undefined),
+            dispose: vi.fn(),
+            state: {
+              messages: [{ role: "assistant", content: "Fix pi upgrade regressions" }],
+            },
+          },
+        });
+      getFnAgentMock.mockResolvedValue(createFnAgent);
+
+      const title = await summarizeTitle(
+        "a".repeat(201),
+        "/tmp",
+        "fireworksai",
+        "accounts/fireworks/routers/kimi-k2p5-turbo",
+      );
+
+      expect(title).toBe("Fix pi upgrade regressions");
+      expect(createFnAgent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        defaultProvider: "fireworksai",
+        defaultModelId: "accounts/fireworks/routers/kimi-k2p5-turbo",
+      }));
+      expect(createFnAgent).toHaveBeenNthCalledWith(2, expect.not.objectContaining({
+        defaultProvider: expect.any(String),
+        defaultModelId: expect.any(String),
+      }));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("fireworksai/accounts/fireworks/routers/kimi-k2p5-turbo"));
+      warnSpy.mockRestore();
+    });
+
+    it("keeps valid configured model ids on the primary summarizer path", async () => {
+      const createFnAgent = vi.fn().mockResolvedValue({
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: {
+            messages: [{ role: "assistant", content: "Keep configured model" }],
+          },
+        },
+      });
+      getFnAgentMock.mockResolvedValue(createFnAgent);
+
+      const title = await summarizeTitle("a".repeat(201), "/tmp", "anthropic", "claude-sonnet-4-5");
+
+      expect(title).toBe("Keep configured model");
+      expect(createFnAgent).toHaveBeenCalledTimes(1);
+      expect(createFnAgent).toHaveBeenCalledWith(expect.objectContaining({
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      }));
+    });
+
+    it("returns null when stale-model automatic resolution also fails", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const createFnAgent = vi
+        .fn()
+        .mockRejectedValueOnce(new Error(
+          "Configured model fireworksai/accounts/fireworks/routers/kimi-k2p5-turbo (primary selection) "
+          + "was not found in the pi model registry.",
+        ))
+        .mockRejectedValueOnce(new Error("No model selected"));
+      getFnAgentMock.mockResolvedValue(createFnAgent);
+
+      await expect(summarizeTitle(
+        "a".repeat(201),
+        "/tmp",
+        "fireworksai",
+        "accounts/fireworks/routers/kimi-k2p5-turbo",
+      )).resolves.toBeNull();
+      expect(createFnAgent).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("retrying with automatic model resolution"));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Automatic title summarizer fallback"));
+      warnSpy.mockRestore();
+    });
+
+    it("does not mask genuine AI service errors", async () => {
+      getFnAgentMock.mockResolvedValue(() =>
+        Promise.resolve({
+          session: {
+            prompt: vi.fn().mockResolvedValue(undefined),
+            dispose: vi.fn(),
+            state: {
+              error: "authentication failed",
+              messages: [],
+            },
+          },
+        })
+      );
+
+      await expect(summarizeTitle("a".repeat(201), "/tmp", "anthropic", "claude-sonnet-4-5"))
+        .rejects.toThrow("AI session error: authentication failed");
     });
   });
 

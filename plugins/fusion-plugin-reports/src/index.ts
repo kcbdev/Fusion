@@ -16,7 +16,6 @@ import {
 } from "./settings.js";
 import type { ReportCadence, ReportCreateInput } from "./store/report-types.js";
 import { ReportStore } from "./store/report-store.js";
-export { ReportsDashboardView } from "./dashboard-view.js";
 
 const plugin = definePlugin({
   manifest: {

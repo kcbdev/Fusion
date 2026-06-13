@@ -16,7 +16,7 @@ const mockClose = vi.fn().mockResolvedValue(undefined);
 vi.mock("@fusion/core", async (importOriginal) => {
   const { createCoreMock } = await import("../test/mockCoreEngine.js");
   return createCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockInit,
       close: mockClose,
       getLocalNode: vi.fn().mockResolvedValue({
@@ -40,7 +40,7 @@ vi.mock("@fusion/core", async (importOriginal) => {
         },
       ]),
       updateNode: vi.fn().mockResolvedValue(undefined),
-    })),
+    }; }),
   });
 });
 

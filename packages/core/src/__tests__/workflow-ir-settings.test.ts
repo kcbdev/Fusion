@@ -7,7 +7,10 @@ import {
 } from "../workflow-ir.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { getBuiltinWorkflow } from "../builtin-workflows.js";
-import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
+import {
+  BUILTIN_MOVED_WORKFLOW_SETTINGS,
+  BUILTIN_WORKFLOW_SETTINGS,
+} from "../builtin-workflow-settings.js";
 import { DEFAULT_PROJECT_SETTINGS } from "../types.js";
 import type {
   WorkflowIrV2,
@@ -208,7 +211,7 @@ describe("parseWorkflowIr — workflow settings declarations (U1)", () => {
 });
 
 describe("built-in workflow settings parity anchor (U1, R4)", () => {
-  it("the built-in coding workflow declares the full moved-key catalog", () => {
+  it("the built-in coding workflow declares the full workflow settings catalog", () => {
     const builtin = BUILTIN_CODING_WORKFLOW_IR as WorkflowIrV2;
     const declaredIds = new Set((builtin.settings ?? []).map((s) => s.id));
     for (const setting of BUILTIN_WORKFLOW_SETTINGS) {
@@ -224,7 +227,7 @@ describe("built-in workflow settings parity anchor (U1, R4)", () => {
     // Post-U4 hard-move: every catalog key has been REMOVED from
     // DEFAULT_PROJECT_SETTINGS (the type-vs-schema split keeps the type field but
     // drops the default literal), so the legacy object no longer carries them.
-    for (const setting of BUILTIN_WORKFLOW_SETTINGS) {
+    for (const setting of BUILTIN_MOVED_WORKFLOW_SETTINGS) {
       expect(Object.prototype.hasOwnProperty.call(legacy, setting.id)).toBe(false);
     }
     // The declaration defaults are now the single source of truth; pin the legacy
@@ -249,7 +252,7 @@ describe("built-in workflow settings parity anchor (U1, R4)", () => {
       reflectionEnabled: false,
       // Per-phase model lanes have undefined legacy defaults → declaration omits default.
     };
-    for (const setting of BUILTIN_WORKFLOW_SETTINGS) {
+    for (const setting of BUILTIN_MOVED_WORKFLOW_SETTINGS) {
       if (Object.prototype.hasOwnProperty.call(expectedDefaults, setting.id)) {
         expect(setting.default).toStrictEqual(expectedDefaults[setting.id]);
       } else {

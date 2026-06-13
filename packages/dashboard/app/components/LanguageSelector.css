@@ -37,6 +37,6 @@
 
 .language-option.active {
   border-color: var(--accent-color, #4a9eff);
-  background: var(--accent-color-subtle, rgba(74, 158, 255, 0.12));
+  background: var(--accent-color-subtle, color-mix(in srgb, #4a9eff 12%, transparent));
   font-weight: 600;
 }

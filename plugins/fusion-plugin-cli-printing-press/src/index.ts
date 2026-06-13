@@ -54,9 +54,6 @@ const plugin = definePlugin({
 });
 
 export default plugin;
-export { CliPrintingPressWizardView } from "./dashboard-view.js";
-export { CliPrintingPressManageView } from "./manage-view.js";
-export { CliPrintingPressTestRunner } from "./run/TestRunnerPanel.js";
 export { createCliPressStore, ensureCliPressSchema } from "./store/cli-press-store.js";
 export { CLI_PRINTING_PRESS_WORKFLOW_STEPS } from "./workflow-steps.js";
 export * from "./store/cli-press-types.js";

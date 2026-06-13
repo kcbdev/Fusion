@@ -112,8 +112,8 @@
 }
 
 .settings-sync-log__badge--conflict {
-  background: color-mix(in srgb, #d29922 14%, transparent);
-  color: #d29922;
+  background: color-mix(in srgb, var(--color-warning, #d29922) 14%, transparent);
+  color: var(--color-warning, #d29922);
 }
 
 .settings-sync-log__badge--error {

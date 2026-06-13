@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock external dependencies
@@ -764,6 +765,161 @@ describe("aiMergeTask — post-merge workflow steps", () => {
 
     expect(worktreeAddCall).toBeDefined();
     expect(worktreeRemoveCall).toBeDefined();
+  });
+
+  it("runs configured worktreeInitCommand in the temporary post-merge worktree", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      worktreeInitCommand: "pnpm install",
+    });
+    store.getTask = vi.fn().mockResolvedValue({
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      prompt: "# test",
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const initSpawnCall = mockedSpawn.mock.calls.find((call: any) => String(call[0]) === "pnpm install");
+    expect(initSpawnCall).toBeDefined();
+    expect(initSpawnCall?.[2]?.cwd).toMatch(/\.worktrees\/post-merge-FN-050-[a-z0-9]+/);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("Post-merge worktree init command completed"),
+      "pnpm install",
+    );
+  });
+
+  it("skips post-merge worktree init when worktreeInitCommand is not configured", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    store.getTask = vi.fn().mockResolvedValue({
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      prompt: "# test",
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const initSpawnCall = mockedSpawn.mock.calls.find((call: any) => String(call[0]) === "pnpm install");
+    expect(initSpawnCall).toBeUndefined();
+    expect(store.logEntry).not.toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("Post-merge worktree init command completed"),
+      expect.anything(),
+    );
+  });
+
+  it("keeps post-merge steps non-fatal when post-merge worktree init fails", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+      worktreeInitCommand: "pnpm install",
+    });
+    store.getTask = vi.fn().mockResolvedValue({
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      prompt: "# test",
+    });
+    mockedSpawn.mockImplementation(((cmd: string) => {
+      const child = new EventEmitter() as any;
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.pid = 12345;
+      child.exitCode = null;
+      child.signalCode = null;
+      child.kill = vi.fn();
+      queueMicrotask(() => {
+        if (cmd === "pnpm install") {
+          child.stderr.emit("data", Buffer.from("install failed"));
+          child.exitCode = 1;
+          child.emit("close", 1, null);
+        } else {
+          child.exitCode = 0;
+          child.emit("close", 0, null);
+        }
+      });
+      return child;
+    }) as any);
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const postMergeAgentCall = mockedCreateFnAgent.mock.calls.find(
+      (c: any) => c[0]?.systemPrompt?.includes("post-merge workflow step agent"),
+    );
+    expect(postMergeAgentCall).toBeDefined();
+    expect(result.merged).toBe(true);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("Post-merge worktree init command failed"),
+      expect.stringContaining("install failed"),
+    );
   });
 
   it("falls back to rootDir when worktree creation fails", async () => {

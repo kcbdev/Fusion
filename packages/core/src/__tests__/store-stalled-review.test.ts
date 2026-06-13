@@ -56,4 +56,18 @@ describe("TaskStore stalledReview hydration", () => {
     expect(detail.stalledReview?.heuristic).toBe("reenqueue-churn");
     expect(detail.stalledReview?.matchCount).toBe(3);
   });
+
+  it("omits stalledReview for tasks already queued for merge", async () => {
+    const task = await seedStalledInReviewTask();
+    await store.enqueueMergeQueue(task.id);
+
+    const slimTasks = await store.listTasks({ slim: true, column: "in-review" });
+    expect(slimTasks.find((entry) => entry.id === task.id)?.stalledReview).toBeUndefined();
+
+    const fullTasks = await store.listTasks({ slim: false, column: "in-review" });
+    expect(fullTasks.find((entry) => entry.id === task.id)?.stalledReview).toBeUndefined();
+
+    const detail = await store.getTask(task.id);
+    expect(detail.stalledReview).toBeUndefined();
+  });
 });

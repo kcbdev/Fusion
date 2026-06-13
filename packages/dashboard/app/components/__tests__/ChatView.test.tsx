@@ -22,6 +22,7 @@ import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
 import { SWR_CACHE_KEYS, writeCache } from "../../utils/swrCache";
 import * as useChatRoomsModule from "../../hooks/useChatRooms";
 import type { UseChatRoomsResult } from "../../hooks/useChatRooms";
+import * as mobileScrollLock from "../../hooks/useMobileScrollLock";
 
 // Mock the hooks
 vi.mock("../../hooks/useChat");
@@ -2830,6 +2831,53 @@ describe("ChatView CSS — failure bubble contracts", () => {
   });
 });
 
+describe("ChatView CSS — active state edge highlights", () => {
+  const css = loadAllAppCss();
+
+  function findRule(selector: string): string {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+    expect(match).toBeTruthy();
+    return match?.[1] ?? "";
+  }
+
+  function mobileRuleContains(selector: string, propertyPattern: RegExp): boolean {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const mobileRegex = /@media[^{}]*\(max-width:\s*768px\)[^{]*\{([\s\S]*?)\n\}/g;
+    let match;
+    while ((match = mobileRegex.exec(css)) !== null) {
+      const ruleMatch = match[1].match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+      if (ruleMatch && propertyPattern.test(ruleMatch[1])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  it("keeps scope-tab active tint without the removed bottom underline", async () => {
+    const activeScopeRule = findRule(".chat-sidebar-scope-btn--active");
+
+    expect(activeScopeRule).toContain("background: var(--card)");
+    expect(activeScopeRule).toContain("color: var(--text)");
+    expect(activeScopeRule).not.toContain("box-shadow");
+    expect(activeScopeRule).not.toContain("inset");
+  });
+
+  it("keeps active chat-row background without the removed left edge or offset", async () => {
+    const activeSessionRule = findRule(".chat-session-item--active");
+
+    expect(activeSessionRule).toContain("background: color-mix(in srgb, var(--todo) 12%, transparent)");
+    expect(activeSessionRule).not.toContain("border-left");
+    expect(activeSessionRule).not.toContain("padding-left: calc(var(--space-md) - (var(--btn-border-width) * 3))");
+  });
+
+  it("does not reintroduce either removed highlight in mobile rules", async () => {
+    expect(mobileRuleContains(".chat-sidebar-scope-btn--active", /box-shadow\s*:\s*inset/)).toBe(false);
+    expect(mobileRuleContains(".chat-session-item--active", /border-left\s*:/)).toBe(false);
+    expect(mobileRuleContains(".chat-session-item--active", /padding-left\s*:\s*calc\(var\(--space-md\)\s*-\s*\(var\(--btn-border-width\)\s*\*\s*3\)\)/)).toBe(false);
+  });
+});
+
 describe("FN-3911 chat session list layout", () => {
   const css = loadAllAppCss();
 
@@ -3869,6 +3917,50 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
+  it("mobile mode: iOS first tap focuses direct composer without blocking native focus, then sends", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(true);
+    const sendMessage = vi.fn();
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [],
+        sendMessage,
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const input = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+      input.blur();
+      expect(document.activeElement).not.toBe(input);
+
+      const touchEvent = new TouchEvent("touchstart", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(touchEvent, "preventDefault");
+      fireEvent(input, touchEvent);
+      // jsdom has no soft keyboard/native touch-focus default action; mirror
+      // the browser focus that iOS only performs when touchstart is not canceled.
+      if (!touchEvent.defaultPrevented) {
+        input.focus();
+      }
+
+      expect(preventDefaultSpy).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(input);
+
+      fireEvent.change(input, { target: { value: "Hello mobile" } });
+      const sendButton = screen.getByTestId("chat-send-btn");
+      fireEvent.touchStart(sendButton);
+      fireEvent.click(sendButton);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage).toHaveBeenCalledWith("Hello mobile", []);
+      expect(document.activeElement).toBe(input);
+    } finally {
+      isIOSSpy.mockRestore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
   it("mobile mode: send button sends on first touch and keeps composer focused", async () => {
     const restoreMatchMedia = mockMobileViewport();
     const sendMessage = vi.fn();
@@ -4577,9 +4669,10 @@ describe("ChatView mobile behavior", () => {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       fireEvent(document, new Event("visibilitychange"));
 
-      await waitFor(() => {
-        expect(scrollTopValue).toBe(1180);
-      });
+      // Regression guard: visibility restore must explicitly re-anchor when pinned.
+      // Without that, this only passed when leftover anchorToBottom rAF callbacks
+      // happened to run after the visibility event.
+      expect(scrollTopValue).toBe(1180);
     } finally {
       restoreMatchMedia.mockRestore();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });

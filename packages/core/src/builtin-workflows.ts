@@ -14,8 +14,22 @@ export function isBuiltinWorkflowId(id: string): boolean {
   return id.startsWith(BUILTIN_WORKFLOW_ID_PREFIX);
 }
 
+const PLUGIN_GATED_BUILTIN_WORKFLOWS: ReadonlyMap<string, string> = new Map([
+  ["builtin:compound-engineering", "fusion-plugin-compound-engineering"],
+]);
+
+export function isBuiltinWorkflowPluginGated(id: string): boolean {
+  return PLUGIN_GATED_BUILTIN_WORKFLOWS.has(id);
+}
+
+export function getRequiredPluginIdForBuiltinWorkflow(id: string): string | undefined {
+  return PLUGIN_GATED_BUILTIN_WORKFLOWS.get(id);
+}
+
 export function defaultEnabledBuiltinWorkflowIds(): string[] {
-  return BUILTIN_WORKFLOWS.map((workflow) => workflow.id);
+  return BUILTIN_WORKFLOWS.filter(
+    (workflow) => workflow.kind !== "fragment" && !PLUGIN_GATED_BUILTIN_WORKFLOWS.has(workflow.id),
+  ).map((workflow) => workflow.id);
 }
 
 export function isBuiltinWorkflowEnabled(id: string, enabledIds?: readonly string[]): boolean {
@@ -69,7 +83,8 @@ function linear(spec: BuiltinSpec): WorkflowDefinition {
     id: spec.id,
     name: spec.name,
     description: spec.description,
-    // Built-ins are always selectable workflows, never fragments (KTD-1).
+    // Linear built-ins remain selectable workflows; catalog entries authored
+    // directly below may opt into fragment kind when they are palette templates.
     kind: "workflow",
     ir,
     layout,
@@ -95,8 +110,14 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
       start: { x: 60, y: 160 },
       execute: { x: 230, y: 160 },
       review: { x: 400, y: 160 },
-      merge: { x: 570, y: 160 },
-      end: { x: 740, y: 160 },
+      "merge-gate": { x: 570, y: 160 },
+      "branch-group-member-integration": { x: 740, y: 80 },
+      "branch-group-promotion": { x: 910, y: 80 },
+      "merge-attempt": { x: 1080, y: 160 },
+      "merge-retry": { x: 1250, y: 80 },
+      "recovery-router": { x: 1250, y: 240 },
+      "merge-manual-hold": { x: 740, y: 240 },
+      end: { x: 1420, y: 160 },
     },
     createdAt: BUILTIN_TS,
     updatedAt: BUILTIN_TS,
@@ -215,7 +236,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     name: "PR lifecycle (built-in)",
     description:
       "The unified PR lifecycle as graph nodes: create the PR, await review, respond to changes (bounded rework loop), gate on auto-merge, then merge — with GitHub reconciliation advancing the await holds. Requires the workflow graph executor.",
-    kind: "workflow",
+    kind: "fragment",
     ir: BUILTIN_PR_WORKFLOW_IR,
     layout: {
       start: { x: 60, y: 160 },

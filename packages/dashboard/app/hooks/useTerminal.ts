@@ -353,18 +353,25 @@ export function useTerminal(sessionId: string | null, projectId?: string): UseTe
             break;
           case "scrollback":
             if (msg.data) {
-              // Buffer scrollback for late subscribers
-              buffer.scrollback = msg.data;
-              onScrollbackCallbacksRef.current.forEach((cb) => cb(msg.data!));
+              // Buffer scrollback only when no subscribers are registered yet
+              if (onScrollbackCallbacksRef.current.size === 0) {
+                buffer.scrollback = msg.data;
+              } else {
+                onScrollbackCallbacksRef.current.forEach((cb) => cb(msg.data!));
+                buffer.scrollback = null;
+              }
             }
             break;
           case "connected":
             if (msg.shell && msg.cwd) {
-              // Buffer connected info for late subscribers
-              buffer.connected = { shell: msg.shell!, cwd: msg.cwd! };
-              onConnectCallbacksRef.current.forEach((cb) => 
-                cb({ shell: msg.shell!, cwd: msg.cwd! })
-              );
+              const connectedInfo = { shell: msg.shell!, cwd: msg.cwd! };
+              // Buffer connected info only when no subscribers are registered yet
+              if (onConnectCallbacksRef.current.size === 0) {
+                buffer.connected = connectedInfo;
+              } else {
+                onConnectCallbacksRef.current.forEach((cb) => cb(connectedInfo));
+                buffer.connected = null;
+              }
             }
             break;
           case "exit":

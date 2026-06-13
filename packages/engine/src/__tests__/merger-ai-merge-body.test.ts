@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../pi.js", () => ({
   createFnAgent: vi.fn(),
@@ -16,7 +16,14 @@ vi.mock("node:child_process", () => ({
 import {
   composeMergeCommitBody,
   __testOnlyBuildDeterministicMergeMessage as buildDeterministicMergeMessage,
+  __testOnlyResolveSafeCommitBody as resolveSafeCommitBody,
 } from "../merger.js";
+import * as core from "@fusion/core";
+import { DEFAULT_SETTINGS } from "@fusion/core";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("composeMergeCommitBody", () => {
   const commitLog = "- feat: one";
@@ -55,6 +62,82 @@ describe("composeMergeCommitBody", () => {
   it("keeps AI bullet body with files changed when narrative is absent", () => {
     expect(composeMergeCommitBody({ branch: "fusion/FN-1", commitLog, diffStat, aiBody: "- bullet one" }))
       .toBe("- bullet one\n\nFiles changed:\n1 file changed");
+  });
+});
+
+describe("resolveSafeCommitBody", () => {
+  async function resolveWithSettings(settings: Partial<typeof DEFAULT_SETTINGS>) {
+    const summarySpy = vi.spyOn(core, "summarizeCommitBody").mockResolvedValue("- ai body");
+
+    await expect(resolveSafeCommitBody({
+      rootDir: "/tmp/project",
+      taskId: "FN-6228",
+      branch: "fusion/FN-6228",
+      commitLog: "",
+      diffStat: "1 file changed",
+      settings: {
+        ...DEFAULT_SETTINGS,
+        useAiMergeCommitSummary: true,
+        ...settings,
+      },
+    })).resolves.toBe("- ai body");
+
+    return summarySpy.mock.calls[0];
+  }
+
+  it("uses the project title summarizer lane before all fallbacks", async () => {
+    const call = await resolveWithSettings({
+      titleSummarizerProvider: "project-title-provider",
+      titleSummarizerModelId: "project-title-model",
+      titleSummarizerGlobalProvider: "global-title-provider",
+      titleSummarizerGlobalModelId: "global-title-model",
+      planningProvider: "planning-provider",
+      planningModelId: "planning-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    });
+
+    expect(call?.[2]).toBe("project-title-provider");
+    expect(call?.[3]).toBe("project-title-model");
+  });
+
+  it("uses title-summarizer global, planning, project default, then global default fallbacks", async () => {
+    await expect(resolveWithSettings({
+      titleSummarizerGlobalProvider: "global-title-provider",
+      titleSummarizerGlobalModelId: "global-title-model",
+      planningProvider: "planning-provider",
+      planningModelId: "planning-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).resolves.toMatchObject({ 2: "global-title-provider", 3: "global-title-model" });
+
+    vi.restoreAllMocks();
+    await expect(resolveWithSettings({
+      planningProvider: "planning-provider",
+      planningModelId: "planning-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).resolves.toMatchObject({ 2: "planning-provider", 3: "planning-model" });
+
+    vi.restoreAllMocks();
+    await expect(resolveWithSettings({
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).resolves.toMatchObject({ 2: "project-default-provider", 3: "project-default-model" });
+
+    vi.restoreAllMocks();
+    await expect(resolveWithSettings({
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).resolves.toMatchObject({ 2: "global-default-provider", 3: "global-default-model" });
   });
 });
 

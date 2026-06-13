@@ -8,6 +8,7 @@ describe("inReviewStallCopy", () => {
     ["transient-merge-status-no-owner", "Merge stalled"],
     ["merge-retries-exhausted", "Retries exhausted"],
     ["no-worktree-no-merge-confirmed", "No worktree"],
+    ["non-retryable-provider-error", "Provider error"],
   ] as const)("returns populated copy for %s", (code, badgeLabel) => {
     const copy = getInReviewStallCopy({
       code,
@@ -57,7 +58,7 @@ describe("inReviewStallCopy", () => {
     expect(copy.counter).toBeUndefined();
   });
 
-  it.each(["merge-blocker", "transient-merge-status-no-owner", "no-worktree-no-merge-confirmed"] as const)(
+  it.each(["merge-blocker", "transient-merge-status-no-owner", "no-worktree-no-merge-confirmed", "non-retryable-provider-error"] as const)(
     "does not render counter for non-retry stall code %s",
     (code) => {
       const copy = getInReviewStallCopy(
@@ -98,6 +99,8 @@ describe("inReviewStallCopy", () => {
     ["merge-blocker", undefined, true],
     ["merge-retries-exhausted", "merging", true],
     ["transient-merge-status-no-owner", "merging", true],
+    ["non-retryable-provider-error", undefined, true],
+    ["non-retryable-provider-error", "merging", true],
     ["no-worktree-no-merge-confirmed", undefined, false],
     ["no-worktree-no-merge-confirmed", "merging", false],
   ] as const)("badge visibility for %s with status %s is %s", (code, status, expected) => {

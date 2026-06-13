@@ -115,6 +115,159 @@ describe("reliability interactions: in-review stall deadlock disposition", () =>
     manager.stop();
   });
 
+  it("FN-6113: terminal provider errors dispose in a single stall cycle", async () => {
+    const task = {
+      id: "FN-6113-TERMINAL",
+      column: "in-review",
+      paused: false,
+      userPaused: false,
+      status: "failed",
+      error: "HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported",
+      branch: "fusion/fn-6113-terminal",
+      worktree: "/tmp/fn-6113-terminal",
+      mergeDetails: {},
+      mergeRetries: 0,
+      steps: [{ name: "merge", status: "done" }],
+      workflowStepResults: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      log: [],
+    } as any satisfies Task;
+
+    const store = createStore(task);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
+
+    vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(1);
+
+    expect(task.paused).toBe(true);
+    expect(task.pausedReason).toBe("non-retryable-provider-error");
+    expect(task.status).toBe("failed");
+    expect(task.error).toBe(
+      "Terminal provider error (non-retryable): Terminal provider error: HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported",
+    );
+    expect(task.log.filter((entry: { action: string }) => entry.action.startsWith("In-review stall terminal disposed [non-retryable-provider-error]:"))).toHaveLength(1);
+    expect(task.log.some((entry: { action: string }) => entry.action.startsWith("In-review stall auto-disposed ["))).toBe(false);
+    expect(task.log.some((entry: { action: string }) => entry.action.startsWith("In-review stall surfaced ["))).toBe(false);
+
+    const auditEvents = (store as any).__auditEvents as any[];
+    const terminalAuditEvents = auditEvents.filter((event) => event.mutationType === "task:in-review-stall-terminal-provider-error");
+    expect(terminalAuditEvents).toHaveLength(1);
+    expect(terminalAuditEvents[0]).toMatchObject({
+      domain: "database",
+      taskId: "FN-6113-TERMINAL",
+      target: "FN-6113-TERMINAL",
+      metadata: expect.objectContaining({
+        code: "non-retryable-provider-error",
+        reason: "Terminal provider error: HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported",
+        branch: "fusion/fn-6113-terminal",
+        worktree: "/tmp/fn-6113-terminal",
+      }),
+    });
+
+    manager.stop();
+  });
+
+  it("FN-6113: terminal provider errors are ignored when autoMerge is disabled", async () => {
+    const task = {
+      id: "FN-6113-AUTOMERGE-OFF",
+      column: "in-review",
+      paused: false,
+      userPaused: false,
+      status: "failed",
+      error: "HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported",
+      branch: "fusion/fn-6113-automerge-off",
+      worktree: "/tmp/fn-6113-automerge-off",
+      mergeDetails: {},
+      mergeRetries: 0,
+      steps: [{ name: "merge", status: "done" }],
+      workflowStepResults: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      log: [],
+    } as any satisfies Task;
+
+    const store = createStore(task, { autoMerge: false });
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
+
+    vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(0);
+    expect(task.paused).toBe(false);
+    expect((store.updateTask as any).mock.calls.length).toBe(0);
+    expect(task.log).toHaveLength(0);
+
+    manager.stop();
+  });
+
+  it("FN-6113: terminal provider errors do not auto-dispose userPaused tasks", async () => {
+    const task = {
+      id: "FN-6113-USER-PAUSED",
+      column: "in-review",
+      paused: false,
+      userPaused: true,
+      status: "failed",
+      error: "HTTP 403 forbidden for model access",
+      branch: "fusion/fn-6113-user-paused",
+      worktree: "/tmp/fn-6113-user-paused",
+      mergeDetails: {},
+      mergeRetries: 0,
+      steps: [{ name: "merge", status: "done" }],
+      workflowStepResults: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      log: [],
+    } as any satisfies Task;
+
+    const store = createStore(task);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
+
+    vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(1);
+    expect(task.paused).toBe(false);
+    expect(task.pausedReason).toBeUndefined();
+    expect((store.updateTask as any).mock.calls.length).toBe(0);
+    expect(task.log.some((entry: { action: string }) => entry.action.startsWith("In-review stall terminal disposed ["))).toBe(false);
+    expect(((store as any).__auditEvents as any[]).some((event) => event.mutationType === "task:in-review-stall-terminal-provider-error")).toBe(false);
+
+    manager.stop();
+  });
+
+  it("FN-6113: retryable provider errors still use repeated-stall deadlock disposition", async () => {
+    const task = {
+      id: "FN-6113-RETRYABLE",
+      column: "in-review",
+      paused: false,
+      userPaused: false,
+      status: "failed",
+      error: "HTTP 503 service unavailable",
+      branch: "fusion/fn-6113-retryable",
+      worktree: "/tmp/fn-6113-retryable",
+      mergeDetails: {},
+      mergeRetries: 0,
+      steps: [{ name: "merge", status: "done" }],
+      workflowStepResults: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      log: [],
+    } as any satisfies Task;
+
+    const store = createStore(task);
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
+
+    vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(1);
+    expect(task.paused).toBe(false);
+    vi.setSystemTime(new Date("2026-01-01T00:12:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(1);
+    expect(task.paused).toBe(false);
+    vi.setSystemTime(new Date("2026-01-01T00:14:00.000Z"));
+    expect(await manager.surfaceInReviewStalls()).toBe(1);
+
+    expect(task.paused).toBe(true);
+    expect(task.pausedReason).toBe("in-review-stall-deadlock");
+    expect(task.log.filter((entry: { action: string }) => entry.action.startsWith("In-review stall surfaced [merge-blocker]:"))).toHaveLength(2);
+    expect(task.log.filter((entry: { action: string }) => entry.action.startsWith("In-review stall auto-disposed [merge-blocker]:"))).toHaveLength(1);
+    expect(task.log.some((entry: { action: string }) => entry.action.startsWith("In-review stall terminal disposed ["))).toBe(false);
+
+    manager.stop();
+  });
+
   it("FN-6070: rejected limbo requeues do not increment into deadlock disposition", async () => {
     const task = {
       id: "FN-6070-REJECTED",

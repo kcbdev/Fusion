@@ -13,10 +13,10 @@ const { mockResolveGithubTrackingAuth } = vi.hoisted(() => ({
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
     getIssue: (...args: unknown[]) => mockGetIssue(...args),
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({
@@ -121,6 +121,65 @@ describe("GitHubSourceIssueCloseService", () => {
     expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Closed linked GitHub source issue", "owner/repo#42");
   });
 
+  it.each([
+    ["todo", "not_planned"],
+    ["in-progress", "not_planned"],
+    ["done", "completed"],
+  ])("closes source issue when archived from %s", async (from, stateReason) => {
+    service.start();
+    store.emit("task:moved", { ...createEvent(), from, to: "archived" });
+    await flushAsync();
+    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "closed", stateReason);
+    expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Closed linked GitHub source issue", "owner/repo#42");
+  });
+
+  it("reopens source issue when unarchived to done", async () => {
+    mockGetIssue.mockResolvedValueOnce({ state: "closed" });
+    service.start();
+    store.emit("task:moved", { ...createEvent(), from: "archived", to: "done" });
+    await flushAsync();
+    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "open", "reopened");
+    expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Reopened linked GitHub source issue", "owner/repo#42");
+  });
+
+  it("reopens source issue when moved out of done", async () => {
+    mockGetIssue.mockResolvedValueOnce({ state: "closed" });
+    service.start();
+    store.emit("task:moved", { ...createEvent(), from: "done", to: "todo" });
+    await flushAsync();
+    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "open", "reopened");
+    expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Reopened linked GitHub source issue", "owner/repo#42");
+  });
+
+  it("does nothing for archived source issue transition when setting is disabled", async () => {
+    store.getSettings.mockResolvedValueOnce({ githubCloseSourceIssueOnDone: false });
+    service.start();
+    store.emit("task:moved", { ...createEvent(), to: "archived" });
+    await flushAsync();
+    expect(mockGetIssue).not.toHaveBeenCalled();
+    expect(mockSetIssueState).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalled();
+  });
+
+  it("ignores archived transitions without sourceIssue", async () => {
+    service.start();
+    store.emit("task:moved", { ...createEvent({ sourceIssue: undefined }), to: "archived" });
+    await flushAsync();
+    expect(mockGetIssue).not.toHaveBeenCalled();
+    expect(mockSetIssueState).not.toHaveBeenCalled();
+  });
+
+  it("ignores archived transitions for non-github provider", async () => {
+    service.start();
+    store.emit("task:moved", {
+      ...createEvent({ sourceIssue: { provider: "jira", repository: "owner/repo", issueNumber: 42 } }),
+      to: "archived",
+    });
+    await flushAsync();
+    expect(mockGetIssue).not.toHaveBeenCalled();
+    expect(mockSetIssueState).not.toHaveBeenCalled();
+  });
+
   it("retries transient close failures once", async () => {
     service.start();
     mockSetIssueState.mockRejectedValueOnce(new Error("ECONNRESET"));
@@ -138,16 +197,23 @@ describe("GitHubSourceIssueCloseService", () => {
     expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Failed to close linked GitHub source issue", "bad request");
   });
 
-  it("no-ops when to is not done", async () => {
+  it("no-ops for non-actionable transitions", async () => {
     service.start();
     store.emit("task:moved", { ...createEvent(), to: "in-review" });
     await flushAsync();
     expect(mockSetIssueState).not.toHaveBeenCalled();
   });
 
-  it("no-ops when from is done", async () => {
+  it("no-ops when remaining done", async () => {
     service.start();
     store.emit("task:moved", { ...createEvent(), from: "done", to: "done" });
+    await flushAsync();
+    expect(mockSetIssueState).not.toHaveBeenCalled();
+  });
+
+  it("no-ops when remaining archived", async () => {
+    service.start();
+    store.emit("task:moved", { ...createEvent(), from: "archived", to: "archived" });
     await flushAsync();
     expect(mockSetIssueState).not.toHaveBeenCalled();
   });

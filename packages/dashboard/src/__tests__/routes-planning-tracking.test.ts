@@ -170,6 +170,7 @@ describe("planning routes github tracking background dispatch", () => {
     });
 
     createIssueSpy = vi.spyOn(GitHubClient.prototype, "createIssue");
+    createIssueSpy.mockReset();
   });
 
   afterEach(() => {

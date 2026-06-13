@@ -104,7 +104,9 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [isDisclosureExpanded, setIsDisclosureExpanded] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const touchButtonRef = useRef<HTMLButtonElement | null>(null);
   const justResetRef = useRef(false);
+  const justSubmittedRef = useRef(false);
   const previousProjectIdRef = useRef(projectId);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const pendingImagesRef = useRef<PendingImage[]>([]);
@@ -319,17 +321,20 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     }
   }, [description, isExpanded, autoResize]);
 
-  // Restore focus after submission completes (when textarea is re-enabled)
+  // Restore focus after an in-component submission completes (when textarea is re-enabled).
   useEffect(() => {
-    if (!isSubmitting && description === "" && textareaRef.current) {
-      // Use setTimeout to ensure focus happens after React re-enables the textarea
-      const focusTimeout = setTimeout(() => {
-        if (typeof window !== "undefined" && window.innerWidth > MOBILE_BREAKPOINT_PX) {
-          textareaRef.current?.focus();
-        }
-      }, 0);
-      return () => clearTimeout(focusTimeout);
+    if (!justSubmittedRef.current || isSubmitting || description !== "" || !textareaRef.current) {
+      return;
     }
+
+    justSubmittedRef.current = false;
+    // Use setTimeout to ensure focus happens after React re-enables the textarea.
+    const focusTimeout = setTimeout(() => {
+      if (typeof window !== "undefined" && window.innerWidth > MOBILE_BREAKPOINT_PX) {
+        textareaRef.current?.focus();
+      }
+    }, 0);
+    return () => clearTimeout(focusTimeout);
   }, [isSubmitting, description]);
 
   // Clear dep search when dropdown closes
@@ -455,8 +460,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     setActiveModelSubmenu(null);
     setIsRefineMenuOpen(false);
     setIsRefining(false);
-    setIsExpanded(false); // Collapse textarea height on reset
-    setIsDisclosureExpanded(false); // Always reset controls to collapsed after creation
     justResetRef.current = true;
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -541,6 +544,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         }
       }
       resetForm();
+      justSubmittedRef.current = true;
     } catch (err) {
       setDescription(originalDescription);
       addToast(getErrorMessage(err) || t("tasks.createFailed", "Failed to create task"), "error");
@@ -1480,7 +1484,140 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       >
         {/* All quick-create actions behind single disclosure toggle */}
         {showExpandedControls && !isSubmitting && (
-          <div className="quick-entry-actions" data-testid="quick-entry-actions">
+          <div
+            className="quick-entry-actions"
+            data-testid="quick-entry-actions"
+            onTouchStart={(e: React.TouchEvent) => {
+              const target = e.target;
+              if (!(target instanceof Element)) return;
+              const button = target.closest("button");
+              if (button && !button.disabled) {
+                if (document.activeElement === textareaRef.current) {
+                  e.preventDefault();
+                }
+                touchButtonRef.current = button;
+              }
+            }}
+            onTouchEnd={() => {
+              touchButtonRef.current = null;
+            }}
+            onTouchCancel={() => {
+              touchButtonRef.current = null;
+            }}
+          >
+            <button
+              type="button"
+              className="btn btn-task-create btn-sm"
+              onClick={handleSaveClick}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={!description.trim() || isSubmitting}
+              data-testid="quick-entry-save"
+              title={t("tasks.createTaskTitle", "Create task")}
+            >
+              <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+              {t("tasks.save", "Save")}
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
+              onClick={() => setIsFastMode((prev) => !prev)}
+              onMouseDown={(e) => e.preventDefault()}
+              aria-pressed={isFastMode}
+              data-testid="quick-entry-fast-toggle"
+              title={t("tasks.toggleFastMode", "Toggle fast execution mode")}
+            >
+              {t("tasks.fast", "Fast")}
+            </button>
+
+            <button
+              type="button"
+              className={`btn btn-sm ${githubTrackingProjectEnabled && effectiveGithubTracking ? "btn-primary" : ""}`}
+              onClick={() => {
+                if (!githubTrackingProjectEnabled) {
+                  return;
+                }
+                setGithubTrackingOverride((prev) => (prev ?? true) ? false : true);
+              }}
+              onMouseDown={(e) => e.preventDefault()}
+              disabled={!githubTrackingProjectEnabled}
+              aria-pressed={effectiveGithubTracking}
+              aria-disabled={!githubTrackingProjectEnabled || undefined}
+              data-testid="quick-entry-github-toggle"
+              title={githubToggleLabel}
+              aria-label={githubToggleLabel}
+            >
+              <ProviderIcon provider="github" size="sm" />
+            </button>
+
+            <div className="priority-trigger-wrap" ref={priorityPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                className="btn btn-sm dep-trigger"
+                data-testid="quick-entry-priority-button"
+                onClick={() => {
+                  setShowDeps(false);
+                  setShowAgentPicker(false);
+                  setAgentPickerPosition(null);
+                  setShowNodePicker(false);
+                  setNodePickerPosition(null);
+                  setIsModelMenuOpen(false);
+                  setModelMenuPosition(null);
+                  setActiveModelSubmenu(null);
+                  setShowPriorityPicker((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      updatePriorityPickerPosition();
+                    } else {
+                      setPriorityPickerPosition(null);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <Flag size={12} style={{ verticalAlign: "middle" }} />
+                {` ${priority[0].toUpperCase()}${priority.slice(1)}`}
+              </button>
+            </div>
+
+            {showPriorityPicker && portalRoot && priorityPickerPosition && createPortal(
+              <div
+                ref={priorityPickerPortalRef}
+                className="dep-dropdown priority-picker-dropdown priority-picker-dropdown--portal"
+                onMouseDown={(e) => e.preventDefault()}
+                style={{
+                  position: "fixed",
+                  top: `${priorityPickerPosition.top}px`,
+                  left: `${priorityPickerPosition.left}px`,
+                  width: `${priorityPickerPosition.width}px`,
+                  maxHeight: priorityPickerPosition.maxHeight ? `${priorityPickerPosition.maxHeight}px` : undefined,
+                  overflowY: priorityPickerPosition.maxHeight ? "auto" : undefined,
+                }}
+              >
+                <div className="dep-dropdown-search-header">{t("tasks.selectPriority", "Select priority")}</div>
+                {TASK_PRIORITIES.map((taskPriority) => {
+                  const label = `${taskPriority[0].toUpperCase()}${taskPriority.slice(1)}`;
+                  return (
+                    <div
+                      key={taskPriority}
+                      className={`dep-dropdown-item${priority === taskPriority ? " selected" : ""}`}
+                      data-testid={`quick-entry-priority-option-${taskPriority}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setPriority(taskPriority);
+                        setShowPriorityPicker(false);
+                        setPriorityPickerPosition(null);
+                      }}
+                    >
+                      <span className="dep-dropdown-title">{label}</span>
+                    </div>
+                  );
+                })}
+              </div>,
+              portalRoot,
+            )}
+
             <button
               type="button"
               className="btn btn-sm"
@@ -1509,6 +1646,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               <button
                 type="button"
                 className={`btn btn-sm refine-button ${isRefining ? "refine-button--loading" : ""}`}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   setIsRefineMenuOpen((prev) => {
                     const next = !prev;
@@ -1580,6 +1718,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               <button
                 ref={depTriggerRef}
                 type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 className="btn btn-sm dep-trigger"
                 data-testid="quick-entry-deps"
                 onClick={() => {
@@ -1642,7 +1781,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                   <input
                     className="dep-dropdown-search"
                     placeholder={t("tasks.searchTasksPlaceholder", "Search tasks…")}
-                    autoFocus
+                    autoFocus={typeof document === "undefined" || document.activeElement !== textareaRef.current}
                     value={depSearch}
                     onChange={(e) => setDepSearch(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
@@ -1669,6 +1808,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               className="btn btn-sm"
               data-testid="quick-entry-attach"
               onClick={() => fileInputRef.current?.click()}
@@ -1680,6 +1820,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             <button
               ref={modelTriggerRef}
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               className="btn btn-sm"
               data-testid="quick-entry-models"
               onClick={() => {
@@ -1702,6 +1843,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             <div className="node-trigger-wrap" ref={nodePickerRef}>
               <button
                 type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 className="btn btn-sm dep-trigger"
                 data-testid="quick-entry-node-button"
                 onClick={() => {
@@ -1790,6 +1932,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             <div className="agent-trigger-wrap" ref={agentPickerRef}>
               <button
                 type="button"
+                onMouseDown={(e) => e.preventDefault()}
                 className="btn btn-sm dep-trigger"
                 onClick={() => {
                   if (showAgentPicker) {
@@ -1861,117 +2004,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               portalRoot,
             )}
 
-            <div className="priority-trigger-wrap" ref={priorityPickerRef}>
-              <button
-                type="button"
-                className="btn btn-sm dep-trigger"
-                data-testid="quick-entry-priority-button"
-                onClick={() => {
-                  setShowDeps(false);
-                  setShowAgentPicker(false);
-                  setAgentPickerPosition(null);
-                  setShowNodePicker(false);
-                  setNodePickerPosition(null);
-                  setIsModelMenuOpen(false);
-                  setModelMenuPosition(null);
-                  setActiveModelSubmenu(null);
-                  setShowPriorityPicker((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      updatePriorityPickerPosition();
-                    } else {
-                      setPriorityPickerPosition(null);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <Flag size={12} style={{ verticalAlign: "middle" }} />
-                {` ${priority[0].toUpperCase()}${priority.slice(1)}`}
-              </button>
-            </div>
-
-            {showPriorityPicker && portalRoot && priorityPickerPosition && createPortal(
-              <div
-                ref={priorityPickerPortalRef}
-                className="dep-dropdown priority-picker-dropdown priority-picker-dropdown--portal"
-                onMouseDown={(e) => e.preventDefault()}
-                style={{
-                  position: "fixed",
-                  top: `${priorityPickerPosition.top}px`,
-                  left: `${priorityPickerPosition.left}px`,
-                  width: `${priorityPickerPosition.width}px`,
-                  maxHeight: priorityPickerPosition.maxHeight ? `${priorityPickerPosition.maxHeight}px` : undefined,
-                  overflowY: priorityPickerPosition.maxHeight ? "auto" : undefined,
-                }}
-              >
-                <div className="dep-dropdown-search-header">{t("tasks.selectPriority", "Select priority")}</div>
-                {TASK_PRIORITIES.map((taskPriority) => {
-                  const label = `${taskPriority[0].toUpperCase()}${taskPriority.slice(1)}`;
-                  return (
-                    <div
-                      key={taskPriority}
-                      className={`dep-dropdown-item${priority === taskPriority ? " selected" : ""}`}
-                      data-testid={`quick-entry-priority-option-${taskPriority}`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setPriority(taskPriority);
-                        setShowPriorityPicker(false);
-                        setPriorityPickerPosition(null);
-                      }}
-                    >
-                      <span className="dep-dropdown-title">{label}</span>
-                    </div>
-                  );
-                })}
-              </div>,
-              portalRoot,
-            )}
-
-            <button
-              type="button"
-              className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
-              onClick={() => setIsFastMode((prev) => !prev)}
-              onMouseDown={(e) => e.preventDefault()}
-              aria-pressed={isFastMode}
-              data-testid="quick-entry-fast-toggle"
-              title={t("tasks.toggleFastMode", "Toggle fast execution mode")}
-            >
-              {t("tasks.fast", "Fast")}
-            </button>
-
-            <button
-              type="button"
-              className={`btn btn-sm ${githubTrackingProjectEnabled && effectiveGithubTracking ? "btn-primary" : ""}`}
-              onClick={() => {
-                if (!githubTrackingProjectEnabled) {
-                  return;
-                }
-                setGithubTrackingOverride((prev) => (prev ?? true) ? false : true);
-              }}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!githubTrackingProjectEnabled}
-              aria-pressed={effectiveGithubTracking}
-              aria-disabled={!githubTrackingProjectEnabled || undefined}
-              data-testid="quick-entry-github-toggle"
-              title={githubToggleLabel}
-              aria-label={githubToggleLabel}
-            >
-              <ProviderIcon provider="github" size="sm" />
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-task-create btn-sm"
-              onClick={handleSaveClick}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!description.trim() || isSubmitting}
-              data-testid="quick-entry-save"
-              title={t("tasks.createTaskTitle", "Create task")}
-            >
-              <Save size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-              {t("tasks.save", "Save")}
-            </button>
           </div>
         )}
 

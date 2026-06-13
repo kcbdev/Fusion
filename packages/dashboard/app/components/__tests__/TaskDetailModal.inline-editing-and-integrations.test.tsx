@@ -2205,6 +2205,34 @@ describe("TaskDetailModal", () => {
       return screen.findByRole("button", { name: "Collapse GitHub tracking details" });
     };
 
+    it("renders after the prompt/spec section in read mode", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            id: "FN-001",
+            column: "todo",
+            prompt: "# FN-001\n\nPrompt content before tracking metadata.",
+            githubTracking: {
+              enabled: true,
+            },
+          })}
+          onClose={noop}
+          onOpenDetail={noopOpenDetail}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          addToast={noop}
+        />,
+      );
+
+      const promptContent = screen.getByText("Prompt content before tracking metadata.");
+      const githubTrackingLabel = screen.getByText("GitHub tracking");
+
+      expect(
+        promptContent.compareDocumentPosition(githubTrackingLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+
     it("renders linked issue as link when url exists", async () => {
       render(
         <TaskDetailModal

@@ -57,17 +57,17 @@
   letter-spacing: 0.04em;
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+  background: var(--surface-2, color-mix(in srgb, #7f7f7f 15%, transparent));
   color: var(--text-muted);
 }
 
 .pr-identity-state--failed {
-  background: var(--pr-failed-bg, rgba(229, 83, 75, 0.18));
+  background: var(--pr-failed-bg, color-mix(in srgb, #e5534b 18%, transparent));
   color: var(--danger, #e5534b);
 }
 
 .pr-identity-state--merged {
-  background: var(--pr-merged-bg, rgba(130, 80, 223, 0.18));
+  background: var(--pr-merged-bg, color-mix(in srgb, #8250df 18%, transparent));
 }
 
 /* placeholders / banners / notices */
@@ -80,19 +80,19 @@
   gap: var(--space-xs);
   padding: var(--space-sm) var(--space-md);
   border-radius: 6px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.1));
+  background: var(--surface-2, color-mix(in srgb, #7f7f7f 10%, transparent));
 }
 
 .pr-banner--responding {
-  background: var(--pr-responding-bg, rgba(54, 130, 220, 0.14));
+  background: var(--pr-responding-bg, color-mix(in srgb, #3682dc 14%, transparent));
 }
 
 .pr-notice--unverified {
-  background: var(--pr-unverified-bg, rgba(220, 170, 54, 0.14));
+  background: var(--pr-unverified-bg, color-mix(in srgb, #dcaa36 14%, transparent));
 }
 
 .pr-error-reason {
-  background: var(--pr-error-bg, rgba(229, 83, 75, 0.14));
+  background: var(--pr-error-bg, color-mix(in srgb, #e5534b 14%, transparent));
   color: var(--danger, #e5534b);
 }
 
@@ -129,11 +129,11 @@
 
 .pr-action--merge-confirm {
   background: var(--accent, #2f81f7);
-  color: #fff;
+  color: var(--cta-text);
 }
 
 .pr-action--close {
-  border-color: var(--pr-close-border, rgba(229, 83, 75, 0.4));
+  border-color: var(--pr-close-border, color-mix(in srgb, #e5534b 40%, transparent));
 }
 
 .pr-automerge-toggle {
@@ -148,7 +148,7 @@
 .pr-automerge-gate {
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+  background: var(--surface-2, color-mix(in srgb, #7f7f7f 15%, transparent));
 }
 
 .pr-conflict-link {
@@ -210,7 +210,7 @@
 
 .pr-thread--agent-disagreement {
   border-left: 3px solid var(--warning, #d29922);
-  background: var(--pr-disagreement-bg, rgba(210, 153, 34, 0.08));
+  background: var(--pr-disagreement-bg, color-mix(in srgb, #d29922 8%, transparent));
 }
 
 .pr-thread--pending {

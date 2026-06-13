@@ -47,12 +47,12 @@ vi.mock("@fusion/core", async (importOriginal) => {
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
     isQmdAvailable: vi.fn().mockResolvedValue(false),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       listProjects: vi.fn().mockResolvedValue([]),
       reconcileProjectStatuses: vi.fn().mockResolvedValue(undefined),
-    })),
+    }; }),
   });
 });
 

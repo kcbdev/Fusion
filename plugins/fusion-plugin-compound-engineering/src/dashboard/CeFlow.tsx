@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { PlanningQuestion } from "@fusion/core";
 import type { CeActivityTurn, CeConversationTurn, CeSession } from "../session/session-store.js";
 import { canRenderRichly } from "./ce-question-support.js";
@@ -33,15 +34,18 @@ export interface CeFlowProps {
   onAnswer: (questionId: string, response: unknown) => void;
   /** Resume an interrupted/error session. */
   onResume?: () => void;
+  /** Cancel an in-flight session while preserving it as interrupted. */
+  onCancel?: () => void;
   /** Back to the launcher. */
   onClose?: () => void;
 }
 
 // ── Transcript parsing ───────────────────────────────────────────────────────
 
+const BOTTOM_FOLLOW_THRESHOLD_PX = 50;
+
 type DisplayItem =
   | { kind: "chat"; role: "user" | "agent"; text: string }
-  | { kind: "qa-question"; question: PlanningQuestion }
   | { kind: "qa-answer"; question?: PlanningQuestion; response: unknown }
   | { kind: "activity"; turns: CeActivityTurn[] }
   | { kind: "complete" };
@@ -63,6 +67,10 @@ function tryParseJson(text: string): Record<string, unknown> | undefined {
  * renderable items. Control records are no longer hidden — questions, answers,
  * and working traces are the conversation.
  */
+function isNearTranscriptBottom(container: HTMLOListElement): boolean {
+  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD_PX;
+}
+
 function parseHistory(history: CeConversationTurn[]): DisplayItem[] {
   const items: DisplayItem[] = [];
   const questionsById = new Map<string, PlanningQuestion>();
@@ -72,7 +80,6 @@ function parseHistory(history: CeConversationTurn[]): DisplayItem[] {
       const q = obj.question as PlanningQuestion | undefined;
       if (q && typeof q.id === "string" && typeof q.question === "string") {
         questionsById.set(q.id, q);
-        items.push({ kind: "qa-question", question: q });
         continue;
       }
       const activity = obj.activity as { turns?: CeActivityTurn[] } | undefined;
@@ -152,9 +159,52 @@ function ActivityTrace({ turns, live }: { turns: CeActivityTurn[]; live?: boolea
 /** Render the full conversation: chat, Q&A bubbles, and working traces. */
 function Transcript({ history }: { history: CeConversationTurn[] }) {
   const items = useMemo(() => parseHistory(history), [history]);
+  const transcriptRef = useRef<HTMLOListElement | null>(null);
+  const previousHistoryLengthRef = useRef(0);
+  const previousScrollHeightRef = useRef(0);
+  const [isFollowing, setIsFollowing] = useState(true);
+
+  useLayoutEffect(() => {
+    const container = transcriptRef.current;
+    if (!container) return;
+
+    const previousHistoryLength = previousHistoryLengthRef.current;
+    const previousScrollHeight = previousScrollHeightRef.current || container.scrollHeight;
+    const wasNearBottom = previousScrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD_PX;
+    const firstContentLoad = previousHistoryLength === 0 && history.length > 0;
+    const newContentArrived = history.length !== previousHistoryLength;
+
+    if (firstContentLoad || (newContentArrived && (isFollowing || wasNearBottom))) {
+      container.scrollTop = container.scrollHeight;
+    }
+
+    previousHistoryLengthRef.current = history.length;
+    previousScrollHeightRef.current = container.scrollHeight;
+    setIsFollowing(isNearTranscriptBottom(container));
+  }, [history, isFollowing]);
+
+  const handleScroll = useCallback(() => {
+    const container = transcriptRef.current;
+    if (!container) return;
+    setIsFollowing(isNearTranscriptBottom(container));
+  }, []);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined" || !isFollowing) return;
+    const container = transcriptRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [isFollowing]);
+
   if (items.length === 0) return null;
   return (
-    <ol className="ce-flow-transcript" data-testid="ce-flow-transcript">
+    <ol ref={transcriptRef} className="ce-flow-transcript" data-testid="ce-flow-transcript" onScroll={handleScroll}>
       {items.map((item, i) => {
         switch (item.kind) {
           case "chat":
@@ -162,13 +212,6 @@ function Transcript({ history }: { history: CeConversationTurn[] }) {
               <li key={i} className={`ce-flow-turn ce-flow-turn-${item.role}`} data-role={item.role}>
                 <span className="ce-flow-turn-role">{item.role === "agent" ? "Agent" : "You"}</span>
                 <span className="ce-flow-turn-text">{item.text}</span>
-              </li>
-            );
-          case "qa-question":
-            return (
-              <li key={i} className="ce-flow-turn ce-flow-turn-agent ce-flow-turn-question" data-testid="ce-flow-past-question">
-                <span className="ce-flow-turn-role">Agent asked</span>
-                <span className="ce-flow-turn-text">{item.question.question}</span>
               </li>
             );
           case "qa-answer": {
@@ -466,7 +509,7 @@ function QuestionPanel({
 // ── Flow surface ─────────────────────────────────────────────────────────────
 
 export function CeFlow(props: CeFlowProps) {
-  const { session, busy, error, onAnswer, onResume, onClose } = props;
+  const { session, busy, error, onAnswer, onResume, onCancel, onClose } = props;
 
   const question = session?.currentQuestion ?? undefined;
 
@@ -486,6 +529,7 @@ export function CeFlow(props: CeFlowProps) {
   const status = session.status;
   const settledTerminal = status === "completed";
   const recoverable = status === "interrupted" || status === "error";
+  const cancellable = status === "launching" || status === "active" || status === "awaiting_input";
   const working = status === "active" || status === "launching";
 
   return (
@@ -495,6 +539,19 @@ export function CeFlow(props: CeFlowProps) {
         <span className="ce-flow-status" data-testid="ce-flow-status">
           {status.replace("_", " ")}
         </span>
+        {onCancel && cancellable ? (
+          <button
+            type="button"
+            className="btn-icon ce-flow-cancel"
+            data-testid="ce-flow-cancel"
+            onClick={onCancel}
+            disabled={Boolean(busy)}
+            aria-label="Cancel session"
+            title="Cancel session"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        ) : null}
         {onClose ? (
           <button type="button" className="btn ce-flow-close" onClick={onClose}>
             Close

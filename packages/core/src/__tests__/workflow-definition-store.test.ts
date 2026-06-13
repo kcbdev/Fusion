@@ -227,18 +227,21 @@ describe("TaskStore workflow definitions (U1)", () => {
     await store.createWorkflowDefinition({ name: "W1", ir: makeIr() });
     const frag = await store.createWorkflowDefinition({ name: "F1", ir: fragmentIr(), kind: "fragment" });
     const fragments = await store.listWorkflowDefinitions({ kind: "fragment" });
-    expect(fragments.map((w) => w.id)).toEqual([frag.id]);
+    expect(fragments.map((w) => w.id)).toEqual(["builtin:pr-workflow", frag.id]);
     expect(fragments.every((w) => w.kind === "fragment")).toBe(true);
   });
 
-  it("built-in list entries are kind 'workflow'", async () => {
+  it("built-in list entries are kind 'workflow' or 'fragment'", async () => {
     const all = await store.listWorkflowDefinitions();
     const builtins = all.filter((w) => isBuiltinWorkflowId(w.id));
     expect(builtins.length).toBeGreaterThan(0);
-    expect(builtins.every((w) => w.kind === "workflow")).toBe(true);
-    // The workflow filter includes built-ins; the fragment filter excludes them.
+    const builtinKinds = builtins.map((w) => w.kind);
+    expect(builtinKinds.every((k) => k === "workflow" || k === "fragment")).toBe(true);
+    expect(builtinKinds.filter((k) => k === "fragment")).toEqual(["fragment"]);
+    // The workflow filter still includes non-fragment built-ins.
     expect((await store.listWorkflowDefinitions({ kind: "workflow" })).some((w) => isBuiltinWorkflowId(w.id))).toBe(true);
-    expect((await store.listWorkflowDefinitions({ kind: "fragment" })).some((w) => isBuiltinWorkflowId(w.id))).toBe(false);
+    // The fragment filter now includes the PR lifecycle built-in.
+    expect((await store.listWorkflowDefinitions({ kind: "fragment" })).some((w) => isBuiltinWorkflowId(w.id))).toBe(true);
   });
 
   it("cache regression: filtered then unfiltered (and reverse) are both correct", async () => {
@@ -247,7 +250,7 @@ describe("TaskStore workflow definitions (U1)", () => {
 
     // filtered → unfiltered
     const f1 = await store.listWorkflowDefinitions({ kind: "fragment" });
-    expect(f1.map((w) => w.id)).toEqual([frag.id]);
+    expect(f1.map((w) => w.id)).toEqual(["builtin:pr-workflow", frag.id]);
     const allAfterFiltered = await store.listWorkflowDefinitions();
     expect(allAfterFiltered.filter((w) => !isBuiltinWorkflowId(w.id)).map((w) => w.kind).sort()).toEqual([
       "fragment",
@@ -256,7 +259,7 @@ describe("TaskStore workflow definitions (U1)", () => {
 
     // unfiltered → filtered (cache already populated by the unfiltered call)
     const f2 = await store.listWorkflowDefinitions({ kind: "fragment" });
-    expect(f2.map((w) => w.id)).toEqual([frag.id]);
+    expect(f2.map((w) => w.id)).toEqual(["builtin:pr-workflow", frag.id]);
     const w2 = await store.listWorkflowDefinitions({ kind: "workflow" });
     expect(w2.filter((w) => !isBuiltinWorkflowId(w.id)).every((w) => w.kind === "workflow")).toBe(true);
   });

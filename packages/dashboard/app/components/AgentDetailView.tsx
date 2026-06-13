@@ -3310,6 +3310,10 @@ function deriveAutoClaimRelevantTasksEnabled(runtimeConfig: AgentDetail["runtime
   return runtimeConfig?.autoClaimRelevantTasks !== false;
 }
 
+function deriveEngineerBacklogAutoClaim(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): boolean {
+  return runtimeConfig?.engineerBacklogAutoClaim === true;
+}
+
 function deriveRunMissedHeartbeatOnStartup(runtimeConfig: AgentDetail["runtimeConfig"] | undefined): boolean {
   return runtimeConfig?.runMissedHeartbeatOnStartup === true;
 }
@@ -3692,6 +3696,9 @@ function ConfigTab({
   const [autoClaimRelevantTasksEnabled, setAutoClaimRelevantTasksEnabled] = useState<boolean>(
     () => deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig),
   );
+  const [engineerBacklogAutoClaimEnabled, setEngineerBacklogAutoClaimEnabled] = useState<boolean>(
+    () => deriveEngineerBacklogAutoClaim(agent.runtimeConfig),
+  );
   const [runMissedHeartbeatOnStartup, setRunMissedHeartbeatOnStartup] = useState<boolean>(
     () => deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig),
   );
@@ -3979,6 +3986,7 @@ function ConfigTab({
     const rc = agent.runtimeConfig ?? {};
     if (heartbeatEnabled !== deriveHeartbeatEnabled(agent.runtimeConfig)) return true;
     if (autoClaimRelevantTasksEnabled !== deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig)) return true;
+    if (engineerBacklogAutoClaimEnabled !== deriveEngineerBacklogAutoClaim(agent.runtimeConfig)) return true;
     if (runMissedHeartbeatOnStartup !== deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig)) return true;
     if (allowParallelExecution !== deriveAllowParallelExecution(agent.runtimeConfig)) return true;
     if (skipHeartbeatWhenIdle !== deriveSkipHeartbeatWhenIdle(agent.runtimeConfig)) return true;
@@ -4058,6 +4066,7 @@ function ConfigTab({
     setHeartbeatValues(deriveHeartbeatValues(agent.runtimeConfig));
     setHeartbeatEnabled(deriveHeartbeatEnabled(agent.runtimeConfig));
     setAutoClaimRelevantTasksEnabled(deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig));
+    setEngineerBacklogAutoClaimEnabled(deriveEngineerBacklogAutoClaim(agent.runtimeConfig));
     setRunMissedHeartbeatOnStartup(deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig));
     setAllowParallelExecution(deriveAllowParallelExecution(agent.runtimeConfig));
     setSkipHeartbeatWhenIdle(deriveSkipHeartbeatWhenIdle(agent.runtimeConfig));
@@ -4216,6 +4225,7 @@ function ConfigTab({
     const newRuntimeConfig: Record<string, unknown> = { ...agent.runtimeConfig };
     newRuntimeConfig.enabled = heartbeatEnabled;
     newRuntimeConfig.autoClaimRelevantTasks = autoClaimRelevantTasksEnabled;
+    newRuntimeConfig.engineerBacklogAutoClaim = engineerBacklogAutoClaimEnabled;
     newRuntimeConfig.runMissedHeartbeatOnStartup = runMissedHeartbeatOnStartup;
     newRuntimeConfig.allowParallelExecution = allowParallelExecution;
     newRuntimeConfig.skipHeartbeatWhenIdle = skipHeartbeatWhenIdle;
@@ -4326,7 +4336,7 @@ function ConfigTab({
       runtimeConfig: newRuntimeConfig,
       bundleConfig: newBundleConfig,
     };
-  }, [agent.metadata, agent.runtimeConfig, allowParallelExecution, autoClaimRelevantTasksEnabled, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, formValues, heartbeatEnabled, heartbeatPromptTemplate, heartbeatScopeDiscipline, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runMissedHeartbeatOnStartup, runtimeMode, selectedRuntimeId, selectedSkills, skipHeartbeatWhenIdle, titleValue, validationErrors]);
+  }, [agent.metadata, agent.runtimeConfig, allowParallelExecution, autoClaimRelevantTasksEnabled, budgetValues, bundleEntryFile, bundleExternalPath, bundleFiles, bundleMode, engineerBacklogAutoClaimEnabled, formValues, heartbeatEnabled, heartbeatPromptTemplate, heartbeatScopeDiscipline, heartbeatValues, iconValue, modelValue, nameValue, reportsToValue, roleValue, runMissedHeartbeatOnStartup, runtimeMode, selectedRuntimeId, selectedSkills, skipHeartbeatWhenIdle, titleValue, validationErrors]);
 
   const persistSettings = useCallback(async (showValidationToast: boolean, source: "auto" | "manual") => {
     const payload = buildSavePayload();
@@ -4769,6 +4779,19 @@ function ConfigTab({
               {t("agents.autoClaimRelevantTasks", "Auto-Claim Relevant Tasks")}
             </label>
             <span className="config-hint">{t("agents.autoClaimHint", "When enabled (default), no-task heartbeats scan open unowned work and auto-claim tasks aligned with this agent's role and soul.")}</span>
+            <label className="checkbox-label" htmlFor="hb-engineerBacklogAutoClaim">
+              <input
+                id="hb-engineerBacklogAutoClaim"
+                type="checkbox"
+                checked={engineerBacklogAutoClaimEnabled}
+                onChange={(e) => {
+                  setEngineerBacklogAutoClaimEnabled(e.target.checked);
+                  void scheduleAutoSave();
+                }}
+              />
+              {t("agents.engineerBacklogAutoClaim", "Engineer Backlog Auto-Claim")}
+            </label>
+            <span className="config-hint">{t("agents.engineerBacklogAutoClaimHint", "Per-agent override of the project default. Allows this engineer-role agent to auto-claim unowned backlog tasks; explicit assignment and delegation are unchanged.")}</span>
           </div>
 
           <div className="config-field">

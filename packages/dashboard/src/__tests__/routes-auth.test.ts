@@ -120,12 +120,12 @@ vi.mock("@fusion/core", async (importOriginal) => {
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
     isQmdAvailable: vi.fn().mockResolvedValue(false),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
       close: mockCentralClose,
       listProjects: mockCentralListProjects,
       reconcileProjectStatuses: mockCentralReconcileProjectStatuses,
-    })),
+    }; }),
   });
 });
 
@@ -1177,6 +1177,7 @@ describe("Droid CLI auth routes", () => {
 
   it("POST /auth/cursor-cli disables without probing binary", async () => {
     const probeSpy = vi.spyOn(runtimeProviderProbesModule, "probeCursorCliProvider");
+    probeSpy.mockClear();
     store.updateGlobalSettings = vi.fn().mockResolvedValue({ useCursorCli: false });
 
     const res = await REQUEST(buildApp(), "POST", "/api/auth/cursor-cli", JSON.stringify({ enabled: false }), {
@@ -3757,6 +3758,7 @@ describe("llama.cpp auth routes", () => {
 
   it("disabling works without probing the server", async () => {
     const probeSpy = vi.spyOn(llamaCppProbeModule, "probeLlamaCpp");
+    probeSpy.mockClear();
 
     const res = await REQUEST(buildApp(), "POST", "/api/auth/llama-cpp", JSON.stringify({ enabled: false }), {
       "content-type": "application/json",

@@ -14,11 +14,11 @@ const { mockResolveGithubTrackingAuth } = vi.hoisted(() => ({
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
     deleteIssue: (...args: unknown[]) => mockDeleteIssue(...args),
     getIssue: (...args: unknown[]) => mockGetIssue(...args),
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({
@@ -76,8 +76,12 @@ describe("decideIssueAction", () => {
   const columns = ["triage", "todo", "in-progress", "in-review", "done", "archived"] as const;
   const activeColumns = ["triage", "todo", "in-progress", "in-review"] as const;
 
-  it.each(columns.filter((from) => from !== "done"))("returns close for %s -> done", (from) => {
+  it.each(columns.filter((from) => from !== "done" && from !== "archived"))("returns close for %s -> done", (from) => {
     expect(decideIssueAction(from, "done")).toEqual({ action: "close", stateReason: "completed" });
+  });
+
+  it("returns reopen for archived -> done", () => {
+    expect(decideIssueAction("archived", "done")).toEqual({ action: "reopen", stateReason: "reopened" });
   });
 
   it.each(activeColumns)("returns reopen for done -> %s", (to) => {
@@ -146,13 +150,13 @@ describe("GitHubTrackingStateService", () => {
     expect(store.logEntry).toHaveBeenCalledWith("FN-1", "Closed linked GitHub tracking issue", "owner/repo#42");
   });
 
-  it("closes on archived -> done", async () => {
+  it("reopens on archived -> done", async () => {
     service.start();
 
     store.emit("task:moved", { task: createTask(), from: "archived", to: "done" });
     await flushAsync();
 
-    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "closed", "completed");
+    expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "open", "reopened");
   });
 
   it.each(["todo", "triage", "in-progress", "in-review"] as const)("reopens on done -> %s", async (to) => {

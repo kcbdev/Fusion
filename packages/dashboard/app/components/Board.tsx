@@ -5,12 +5,11 @@ import { Column } from "./Column";
 import "./Lane.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
-import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { subscribeSse } from "../sse-bus";
 import { getBoardCanDropTaskRejection } from "./boardCanDropTask";
 
@@ -83,6 +82,37 @@ function areTaskArraysEqual(previous: Task[], next: Task[]): boolean {
 const EMPTY_WORKFLOW_STEP_NAME_LOOKUP: ReadonlyMap<string, string> = new Map();
 let boardWasPreviouslyInactive = false;
 
+// Real mobile browsers can pan the document horizontally while focusing/clicking
+// an offscreen in-review auto-merge control. Keep that scroll container pinned;
+// the board itself remains the only horizontal scroller.
+function resetDocumentHorizontalScroll() {
+  const scrollingElement = document.scrollingElement as HTMLElement | null;
+  if (window.scrollX !== 0) {
+    window.scrollTo(0, window.scrollY);
+  }
+  if (scrollingElement) {
+    scrollingElement.scrollLeft = 0;
+  }
+  document.documentElement.scrollLeft = 0;
+  if (document.body) {
+    document.body.scrollLeft = 0;
+  }
+}
+
+function scheduleDocumentHorizontalScrollReset() {
+  const run = () => {
+    resetDocumentHorizontalScroll();
+    setTimeout(resetDocumentHorizontalScroll, 0);
+  };
+
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(run);
+    return;
+  }
+
+  setTimeout(run, 0);
+}
+
 function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next: ReadonlyMap<string, string>): boolean {
   if (previous.size !== next.size) return false;
   for (const [key, value] of previous) {
@@ -93,7 +123,6 @@ function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next
 
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
-  const [workflowToolbarCollapsed, setWorkflowToolbarCollapsed] = useState<boolean>(() => getScopedItem("kb-dashboard-board-workflow-collapsed", projectId) === "1");
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
   const boardRef = useRef<HTMLElement | null>(null);
@@ -110,12 +139,6 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     done: [],
     archived: [],
   });
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setScopedItem("kb-dashboard-board-workflow-collapsed", workflowToolbarCollapsed ? "1" : "0", projectId);
-    }
-  }, [workflowToolbarCollapsed, projectId]);
 
   useEffect(() => {
     recordResumeEvent({
@@ -220,6 +243,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       if (!boardEl) return;
       void boardEl.offsetWidth;
       if (mobileQuery.matches) {
+        resetDocumentHorizontalScroll();
         boardEl.scrollLeft = 0;
       }
     };
@@ -356,6 +380,13 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     await promoteTask(taskId, projectId);
   }, [projectId]);
 
+  const handleToggleAutoMerge = useCallback(() => {
+    onToggleAutoMerge();
+    if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
+      scheduleDocumentHorizontalScrollReset();
+    }
+  }, [onToggleAutoMerge]);
+
   const getDraggingTaskId = useCallback(() => draggingTaskIdRef.current, []);
 
   const flagOn = boardWorkflows?.flagEnabled === true;
@@ -473,61 +504,45 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     return (
       <div className="board-workflow-view">
         {(workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor) && (
-          <div className="board-workflow-toolbar" data-collapsed={workflowToolbarCollapsed || undefined}>
-            <button
-              type="button"
-              className="btn btn-icon btn-sm board-workflow-collapse-toggle"
-              onClick={() => setWorkflowToolbarCollapsed((c) => !c)}
-              aria-expanded={!workflowToolbarCollapsed}
-              aria-label={workflowToolbarCollapsed ? "Expand workflow toolbar" : "Collapse workflow toolbar"}
-              data-testid="board-workflow-collapse-toggle"
-            >
-              {workflowToolbarCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-            </button>
-            {workflowToolbarCollapsed ? (
-              <span className="board-workflow-collapsed-label">Workflow</span>
-            ) : (
-              <>
-                {workflowOptions.length > 1 && (
-                  <label className="list-workflow-selector board-workflow-selector">
-                    <span>Workflow</span>
-                    <select
-                      className="select list-workflow-select"
-                      value={selectedWorkflow.id}
-                      onChange={(event) => setSelectedWorkflowId(event.target.value)}
-                      aria-label="Select workflow"
-                    >
-                      {workflowOptions.map((workflow) => (
-                        <option key={workflow.id} value={workflow.id}>
-                          {workflow.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {onOpenWorkflowEditor && (
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-sm board-workflow-edit-btn"
-                    onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
-                    title="Edit workflows"
-                    aria-label="Edit workflows"
-                  >
-                    <Pencil size={15} />
-                  </button>
-                )}
-                {onCreateWorkflow && (
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-sm board-workflow-create-btn"
-                    onClick={onCreateWorkflow}
-                    title="New workflow"
-                    aria-label="New workflow"
-                  >
-                    <Plus size={15} />
-                  </button>
-                )}
-              </>
+          <div className="board-workflow-toolbar">
+            {workflowOptions.length > 1 && (
+              <label className="list-workflow-selector board-workflow-selector">
+                <span>Workflow</span>
+                <select
+                  className="select list-workflow-select"
+                  value={selectedWorkflow.id}
+                  onChange={(event) => setSelectedWorkflowId(event.target.value)}
+                  aria-label="Select workflow"
+                >
+                  {workflowOptions.map((workflow) => (
+                    <option key={workflow.id} value={workflow.id}>
+                      {workflow.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {onOpenWorkflowEditor && (
+              <button
+                type="button"
+                className="btn btn-icon btn-sm board-workflow-edit-btn"
+                onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
+                title="Edit workflows"
+                aria-label="Edit workflows"
+              >
+                <Pencil size={15} />
+              </button>
+            )}
+            {onCreateWorkflow && (
+              <button
+                type="button"
+                className="btn btn-icon btn-sm board-workflow-create-btn"
+                onClick={onCreateWorkflow}
+                title="New workflow"
+                aria-label="New workflow"
+              >
+                <Plus size={15} />
+              </button>
             )}
           </div>
         )}
@@ -587,7 +602,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
                 prAuthAvailable={prAuthAvailable}
                 autoMerge={autoMerge}
                 {...(isCreateColumn ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
-                {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge } : {})}
+                {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
                 {...(columnDef.id === "done" ? { onArchiveAllDone } : {})}
               />
             );
@@ -680,7 +695,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             prAuthAvailable={prAuthAvailable}
             autoMerge={autoMerge}
             {...(col === "triage" ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
-            {...(col === "in-review" ? { onToggleAutoMerge } : {})}
+            {...(col === "in-review" ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
             {...(col === "done" ? { onArchiveAllDone } : {})}
             {...(col === "archived" ? { collapsed: archivedCollapsed, onToggleCollapse: handleToggleArchivedCollapse } : {})}
           />

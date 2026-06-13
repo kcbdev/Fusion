@@ -146,7 +146,7 @@ vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockInit,
       close: mockClose,
       listProjects: mockListProjects,
@@ -166,7 +166,7 @@ vi.mock("@fusion/core", async () => {
       getProjectNodePathMapping: mockGetProjectNodePathMapping,
       upsertProjectNodePathMapping: mockUpsertProjectNodePathMapping,
       removeProjectNodePathMapping: mockRemoveProjectNodePathMapping,
-    })),
+    }; }),
     ensureMemoryFileWithBackend: mockEnsureMemoryFileWithBackend,
     readProjectIdentity: mockReadProjectIdentity,
     writeProjectIdentity: mockWriteProjectIdentity,

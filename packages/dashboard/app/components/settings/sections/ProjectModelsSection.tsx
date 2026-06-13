@@ -28,7 +28,7 @@ import {
 import { CustomModelDropdown } from "../../CustomModelDropdown";
 import { applyPresetToSelection } from "../../../utils/modelPresets";
 import type { ToastType } from "../../../hooks/useToast";
-import type { ModelLane, SectionBaseProps, SettingsFormState } from "./context";
+import type { ModelLane, SectionBaseProps, SectionSaveHandler, SettingsFormState } from "./context";
 
 type LaneStatus = "inherited" | "overridden";
 
@@ -94,12 +94,23 @@ export interface ProjectModelsSectionModelProps {
   confirmDelete: (options: { title: string; message: string; danger?: boolean }) => Promise<boolean>;
 }
 
+export class WorkflowLaneFlushRejection extends Error {
+  readonly rejections: WorkflowSettingRejection[];
+
+  constructor(rejections: WorkflowSettingRejection[]) {
+    super("Workflow model lane settings were rejected");
+    this.name = "WorkflowLaneFlushRejection";
+    this.rejections = rejections;
+  }
+}
+
 export interface ProjectModelsSectionProps extends SectionBaseProps {
   scopeBanner: ReactNode;
   models: ProjectModelsSectionModelProps;
   projectId?: string;
   addToast: (message: string, type?: ToastType) => void;
   onOpenWorkflowSettings?: () => void;
+  registerWorkflowLaneSaver?: (saver: SectionSaveHandler | null) => void;
 }
 
 export function ProjectModelsSection({
@@ -109,6 +120,7 @@ export function ProjectModelsSection({
   models,
   projectId,
   onOpenWorkflowSettings,
+  registerWorkflowLaneSaver,
 }: ProjectModelsSectionProps) {
   const { t } = useTranslation("app");
   const {
@@ -141,7 +153,6 @@ export function ProjectModelsSection({
   const [workflowPayload, setWorkflowPayload] = useState<WorkflowSettingValuesPayload | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [workflowPending, setWorkflowPending] = useState<Record<string, unknown>>({});
-  const [workflowSaving, setWorkflowSaving] = useState(false);
   const [workflowRejections, setWorkflowRejections] = useState<Record<string, WorkflowSettingRejection>>({});
   const workflowReqSeq = useRef(0);
   const workflowDirty = Object.keys(workflowPending).length > 0;
@@ -211,7 +222,6 @@ export function ProjectModelsSection({
 
   const saveWorkflowLanes = useCallback(async () => {
     if (!projectId || !workflowDirty) return;
-    setWorkflowSaving(true);
     try {
       const payload = await updateWorkflowSettingValues(workflowId, workflowPending, projectId);
       setWorkflowPayload(payload);
@@ -222,14 +232,17 @@ export function ProjectModelsSection({
         const rejections = (err.details.rejections as WorkflowSettingRejection[] | undefined) ?? [];
         if (rejections.length > 0) {
           setWorkflowRejections(Object.fromEntries(rejections.map((rejection) => [rejection.settingId, rejection])));
-          return;
+          throw new WorkflowLaneFlushRejection(rejections);
         }
       }
       throw err;
-    } finally {
-      setWorkflowSaving(false);
     }
   }, [projectId, workflowDirty, workflowId, workflowPending]);
+
+  useEffect(() => {
+    registerWorkflowLaneSaver?.(saveWorkflowLanes);
+    return () => registerWorkflowLaneSaver?.(null);
+  }, [registerWorkflowLaneSaver, saveWorkflowLanes]);
 
   // The project DEFAULT lane and restored title-summarizer lane remain editable
   // here. Execution/planning/validator workflow-specific lanes still redirect to
@@ -427,22 +440,13 @@ export function ProjectModelsSection({
               </div>
             );
           })}
-          <div className="settings-model-lane-actions" aria-label="Default workflow model lane actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="save-workflow-model-lanes"
-              onClick={saveWorkflowLanes}
-              disabled={!workflowDirty || workflowSaving}
-            >
-              {workflowSaving ? "Saving…" : "Save workflow models"}
-            </button>
-            {onOpenWorkflowSettings ? (
+          {onOpenWorkflowSettings ? (
+            <div className="settings-model-lane-actions" aria-label="Default workflow model lane actions">
               <button type="button" className="btn btn-ghost btn-sm" onClick={onOpenWorkflowSettings}>
                 Advanced workflow policy
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </>
       )}
 

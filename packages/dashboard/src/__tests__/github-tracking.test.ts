@@ -15,10 +15,10 @@ vi.mock("@fusion/core", async () => {
 });
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     createIssue: createIssueMock,
     searchIssues: searchIssuesMock,
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({

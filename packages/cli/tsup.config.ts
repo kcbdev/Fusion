@@ -130,6 +130,7 @@ async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = fal
 }
 
 const pluginSdkEntry = join(__dirname, "..", "plugin-sdk", "src", "index.ts");
+const pluginSdkCoreRuntimeShim = join(__dirname, "src", "plugin-sdk-core-runtime-shim.ts");
 
 const cliBuildConfig = {
   entry: ["src/bin.ts", "src/extension.ts"],
@@ -321,6 +322,12 @@ const pluginSdkBuildConfig = {
     },
   },
   noExternal: [/^@fusion\//],
+  esbuildOptions(options: { alias?: Record<string, string> }) {
+    options.alias = {
+      ...(options.alias || {}),
+      "@fusion/core": pluginSdkCoreRuntimeShim,
+    };
+  },
   clean: false,
   outDir: "dist",
 };

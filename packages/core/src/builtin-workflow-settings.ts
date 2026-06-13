@@ -1,4 +1,22 @@
+import type { Settings } from "./types.js";
 import type { WorkflowSettingDefinition } from "./workflow-ir-types.js";
+
+/**
+ * Built-in workflow settings catalog.
+ *
+ * `BUILTIN_MOVED_WORKFLOW_SETTINGS` is the U4 moved-key catalog: keys that
+ * formerly lived in `DEFAULT_PROJECT_SETTINGS` and are tombstoned by
+ * `MOVED_SETTINGS_KEYS`. Keep those defaults byte-equal to the legacy literals.
+ *
+ * `BUILTIN_TRIAGE_POLICY_SETTINGS` is workflow-native triage/spec policy. These
+ * keys never lived in `DEFAULT_PROJECT_SETTINGS`, are NOT part of the U4
+ * hard-move migration, must never be added to `MOVED_SETTINGS_KEYS`, and must
+ * not appear in project/global settings schemas. Canonical values are inherited
+ * from the post-FN-6232 planning prompt: subtask step threshold `7` (not the
+ * older engine copy) and packages/modules threshold `3`. Fast-mode policy is
+ * workflow-native here too: `leanPlanning` selects the lean planning variant,
+ * and `autoApproveSpec` skips the independent spec reviewer.
+ */
 
 /**
  * The moved-key catalog declared as workflow settings (U1, R4).
@@ -23,7 +41,7 @@ import type { WorkflowSettingDefinition } from "./workflow-ir-types.js";
  *     in project settings.
  *   - merge-cluster keys + `maxConcurrent` — owned by the columns/traits track.
  */
-export const BUILTIN_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
+export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
   // ── Step execution ─────────────────────────────────────────────────────
   {
     id: "workflowStepTimeoutMs",
@@ -230,3 +248,153 @@ export const BUILTIN_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     description: "Fallback model id for the validation phase.",
   },
 ];
+
+export const BUILTIN_TRIAGE_POLICY_SETTINGS: WorkflowSettingDefinition[] = [
+  {
+    id: "triageSizeSmallMaxHours",
+    name: "Triage size S max hours",
+    type: "number",
+    default: 2,
+    description: "Upper hour boundary for Size S triage guidance (S is below this value).",
+  },
+  {
+    id: "triageSizeMediumMaxHours",
+    name: "Triage size M max hours",
+    type: "number",
+    default: 4,
+    description: "Upper hour boundary for Size M triage guidance.",
+  },
+  {
+    id: "triageSizeLargeMaxHours",
+    name: "Triage size L max hours",
+    type: "number",
+    default: 8,
+    description: "Upper hour boundary for Size L triage guidance; larger work should split as XL.",
+  },
+  {
+    id: "triageSubtaskStepThreshold",
+    name: "Triage subtask step threshold",
+    type: "number",
+    default: 7,
+    description: "Implementation-step count above which triage should consider splitting an M/L task.",
+  },
+  {
+    id: "triageSubtaskLargeStepSignal",
+    name: "Triage large-step signal",
+    type: "number",
+    default: 9,
+    description: "Planned step count that is a broad-scope decomposition signal for Size L tasks.",
+  },
+  {
+    id: "triageSubtaskAdditiveStepSignal",
+    name: "Triage additive step signal",
+    type: "number",
+    default: 12,
+    description: "Implementation-step count that independently signals possible partitioning.",
+  },
+  {
+    id: "triageSubtaskPackageThreshold",
+    name: "Triage package/module threshold",
+    type: "number",
+    default: 3,
+    description: "Distinct package/module count above which triage should consider splitting coherent M/L work.",
+  },
+  {
+    id: "triageSubtaskFileScopeThreshold",
+    name: "Triage file-scope threshold",
+    type: "number",
+    default: 20,
+    description: "File Scope entry count that signals broad work likely needing partitioning.",
+  },
+  {
+    id: "triageSubtaskRemediationBatchThreshold",
+    name: "Triage remediation batch threshold",
+    type: "number",
+    default: 30,
+    description: "Quantified remediation batch size that strongly signals subsystem partitioning.",
+  },
+  {
+    id: "triageNoCommitsDecisionVerbs",
+    name: "Triage no-commits decision verbs",
+    type: "multi-enum",
+    default: ["Decide", "Evaluate", "Verify", "Confirm", "Audit", "Review whether", "Investigate and report"],
+    options: [
+      { value: "Decide", label: "Decide" },
+      { value: "Evaluate", label: "Evaluate" },
+      { value: "Verify", label: "Verify" },
+      { value: "Confirm", label: "Confirm" },
+      { value: "Audit", label: "Audit" },
+      { value: "Review whether", label: "Review whether" },
+      { value: "Investigate and report", label: "Investigate and report" },
+    ],
+    description: "Decision-only title/mission verbs used when deciding whether a task expects no commits.",
+  },
+  {
+    id: "triageDecisionOnlyWorkflowId",
+    name: "Triage decision-only workflow",
+    type: "enum",
+    default: "builtin:quick-fix",
+    options: [
+      { value: "builtin:quick-fix", label: "Quick fix" },
+      { value: "builtin:coding", label: "Coding" },
+    ],
+    description: "Preferred workflow id for decision-only or investigation tasks that expect no code changes.",
+  },
+  {
+    id: "triageDefaultWorkflowId",
+    name: "Triage default workflow",
+    type: "enum",
+    default: "builtin:coding",
+    options: [
+      { value: "builtin:coding", label: "Coding" },
+      { value: "builtin:quick-fix", label: "Quick fix" },
+    ],
+    description: "Default workflow id for standard coding tasks.",
+  },
+  {
+    id: "leanPlanning",
+    name: "Lean planning",
+    type: "boolean",
+    default: false,
+    description: "Use the lean fast-path planning prompt variant instead of the full triage spec prompt.",
+  },
+  {
+    id: "autoApproveSpec",
+    name: "Auto-approve spec",
+    type: "boolean",
+    default: false,
+    description: "Auto-approve the generated PROMPT.md and skip the independent spec reviewer.",
+  },
+];
+
+export const BUILTIN_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
+  ...BUILTIN_MOVED_WORKFLOW_SETTINGS,
+  ...BUILTIN_TRIAGE_POLICY_SETTINGS,
+];
+
+const TRIAGE_POLICY_DEFAULTS = new Map(
+  BUILTIN_TRIAGE_POLICY_SETTINGS.map((setting) => [setting.id, setting.default]),
+);
+
+function formatTriagePolicyValue(id: string, value: unknown): string {
+  if (id === "triageNoCommitsDecisionVerbs") {
+    const verbs = Array.isArray(value) ? value : TRIAGE_POLICY_DEFAULTS.get(id);
+    return (Array.isArray(verbs) ? verbs : []).map((verb) => String(verb)).join(", ");
+  }
+  return String(value ?? TRIAGE_POLICY_DEFAULTS.get(id) ?? "");
+}
+
+export function renderTriagePolicyPlaceholders(prompt: string, settings: Partial<Settings>): string {
+  let rendered = prompt;
+  const values = settings as Record<string, unknown>;
+  for (const setting of BUILTIN_TRIAGE_POLICY_SETTINGS) {
+    const token = new RegExp(`\\{\\{${setting.id}\\}\\}`, "g");
+    rendered = rendered.replace(token, formatTriagePolicyValue(setting.id, values[setting.id] ?? setting.default));
+  }
+  const leftover = rendered.match(/\{\{[^}]+\}\}/);
+  if (leftover) {
+    throw new Error(`Unresolved triage policy placeholder: ${leftover[0]}`);
+  }
+  return rendered;
+}
+

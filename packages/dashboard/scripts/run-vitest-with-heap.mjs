@@ -55,13 +55,15 @@ const heartbeat = setInterval(() => {
 }, 5_000);
 let timeoutExitCode = null;
 let forceKillTimer = null;
+let lastForwardedSignal = null;
+let lastForwardReason = null;
 const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
   ? setTimeout(() => {
       timeoutExitCode = 124;
       console.error(`[dashboard-vitest] timeout after ${timeoutMs}ms: ${vitestArgs.join(" ")}`);
-      forwardSignal("SIGTERM");
+      forwardSignal("SIGTERM", "timeout");
       forceKillTimer = setTimeout(() => {
-        forwardSignal("SIGKILL");
+        forwardSignal("SIGKILL", "timeout-grace-expired");
       }, Math.max(1, forceKillGraceMs));
       forceKillTimer.unref();
     }, timeoutMs)
@@ -78,8 +80,10 @@ function clearTimers() {
   if (forceKillTimer) clearTimeout(forceKillTimer);
 }
 
-function forwardSignal(signal) {
+function forwardSignal(signal, reason = "external-signal") {
   clearHeartbeat();
+  lastForwardedSignal = signal;
+  lastForwardReason = reason;
 
   try {
     process.kill(-child.pid, signal);
@@ -104,7 +108,10 @@ function forwardSignal(signal) {
 }
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(signal, () => forwardSignal(signal));
+  process.on(signal, () => {
+    console.error(`[dashboard-vitest] received ${signal}; forwarding to vitest process group: ${vitestArgs.join(" ")}`);
+    forwardSignal(signal, "wrapper-received-signal");
+  });
 }
 
 process.on("exit", () => {
@@ -134,6 +141,10 @@ child.on("close", (code, signal) => {
     process.exit(timeoutExitCode);
   }
   if (signal) {
+    const forwardedContext = lastForwardedSignal
+      ? ` after forwarding ${lastForwardedSignal} (${lastForwardReason ?? "unknown-reason"})`
+      : " without a wrapper-forwarded signal";
+    console.error(`[dashboard-vitest] child exited via ${signal}${forwardedContext}: ${vitestArgs.join(" ")}`);
     process.kill(process.pid, signal);
     return;
   }

@@ -493,7 +493,8 @@ export default function kbExtension(pi: ExtensionAPI) {
     description:
       "Create a new task on the Fusion task board. The task enters the planning column " +
       "where the AI planning agent will plan it into a full prompt with steps, " +
-      "file scope, and acceptance criteria.",
+      "file scope, and acceptance criteria. Optionally pass workflow_id to select " +
+      "a workflow at creation time; use fn_workflow_list to discover valid IDs.",
     promptSnippet: "Create a task on the Fusion AI-orchestrated task board",
     promptGuidelines: [
       "Use fn_task_create for task tracking — be descriptive so the planning agent can write a good plan.",
@@ -513,6 +514,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       ),
       priority: Type.Optional(
         StringEnum([...TASK_PRIORITIES], { description: "Task priority (low, normal, high, urgent)" }) as unknown as TSchema,
+      ),
+      workflow_id: Type.Optional(
+        Type.String({
+          description:
+            "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+            "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
     }),
 
@@ -541,12 +549,14 @@ export default function kbExtension(pi: ExtensionAPI) {
           projectSettings,
           globalSettings,
         );
+        const workflowId = params.workflow_id?.trim() || undefined;
 
         const task = await store.createTask({
           description: params.description.trim(),
           dependencies: params.depends,
           assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
           priority: params.priority as TaskPriority | undefined,
+          ...(workflowId ? { workflowId } : {}),
           source: { sourceType: "api" },
           githubTracking: resolvedTracking.enabled
             ? {
@@ -568,7 +578,7 @@ export default function kbExtension(pi: ExtensionAPI) {
             {
               type: "text",
               text:
-                `Created ${task.id}: ${label}\n` +
+                `Created ${task.id}: ${label}${workflowId ? ` (workflow: ${workflowId})` : ""}\n` +
                 `Column: triage\n` +
                 (task.dependencies.length
                   ? `Dependencies: ${task.dependencies.join(", ")}\n`
@@ -608,10 +618,12 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Update Task",
     description:
       "Update fields on an existing task. Supports modifying the title, " +
-      "description, dependencies, assigned agent, and priority after task creation.",
+      "description, dependencies, assigned agent, priority, and workflow_id after task creation. " +
+      "Set workflow_id to a workflow ID to select it, or null to clear the workflow selection.",
     promptSnippet: "Update fields on an existing Fusion task",
     promptGuidelines: [
-      "Use fn_task_update to modify task title, description, dependencies, assigned agent, or priority after creation.",
+      "Use fn_task_update to modify task title, description, dependencies, assigned agent, priority, or workflow_id after creation.",
+      "Set workflow_id to null to clear a task's workflow selection and enabled workflow steps.",
       "At least one field must be provided to update.",
     ],
     parameters: Type.Object({
@@ -638,6 +650,14 @@ export default function kbExtension(pi: ExtensionAPI) {
       ),
       priority: Type.Optional(
         StringEnum([...TASK_PRIORITIES], { description: "Task priority (low, normal, high, urgent)" }) as unknown as TSchema,
+      ),
+      workflow_id: Type.Optional(
+        Type.Union([Type.String(), Type.Null()], {
+          description:
+            "Workflow ID to select for this task (e.g. 'WF-003' or 'builtin:coding'), " +
+            "or null to clear the workflow selection and revert to the project default. " +
+            "Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
     }),
 
@@ -704,16 +724,39 @@ export default function kbExtension(pi: ExtensionAPI) {
         updates.priority = params.priority;
         updatedFields.push("priority");
       }
+      if (params.workflow_id !== undefined) {
+        if (params.workflow_id === null) {
+          await store.clearTaskWorkflowSelection(task.id);
+          updatedFields.push("workflowId");
+        } else {
+          const workflowId = params.workflow_id.trim();
+          if (workflowId.length > 0) {
+            try {
+              await store.selectTaskWorkflowAndReconcile(task.id, workflowId);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              return {
+                content: [{ type: "text", text: `ERROR: ${message}` }],
+                isError: true,
+                details: { error: message },
+              };
+            }
+            updatedFields.push("workflowId");
+          }
+        }
+      }
 
       if (updatedFields.length === 0) {
         return {
-          content: [{ type: "text", text: "No fields to update. Provide at least one of: title, description, depends, agentId, nodeId, priority." }],
+          content: [{ type: "text", text: "No fields to update. Provide at least one of: title, description, depends, agentId, nodeId, priority, workflow_id." }],
           isError: true,
           details: { error: "No fields provided" },
         };
       }
 
-      await store.updateTask(params.id, updates);
+      if (Object.keys(updates).length > 0) {
+        await store.updateTask(params.id, updates);
+      }
 
       return {
         content: [
@@ -979,7 +1022,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     promptSnippet: "Retry a failed Fusion task (clears error, moves to todo or stays in in-review)",
     promptGuidelines: [
       "Use when a task has failed and needs to be retried",
-      "Only tasks in 'failed' or 'stuck-killed' state can be retried",
+      "Only tasks in 'failed' or 'stuck-killed' state, plus stranded in-review tasks with incomplete execution or prior merge attempts, can be retried",
       "In-review tasks with incomplete steps (pending/in-progress) move to todo with preserveProgress so execution can resume",
       "In-review tasks with all steps done stay in in-review and reset merge retry state for auto-merge re-attempt",
       "Tasks in other columns are moved to the todo column with error state cleared",
@@ -1003,8 +1046,26 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
       
+      const isInReviewStatusNone =
+        task.column === "in-review" && (task.status === null || task.status === undefined);
+      const hasIncompleteSteps = task.steps.some(
+        (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
+      );
+      // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
+      // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
+      const isExecutionFailureInReview =
+        hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
+      const isInReviewExecutionStall = isInReviewStatusNone && isExecutionFailureInReview;
+      const isInReviewMergeRetryStall = isInReviewStatusNone && (task.mergeRetries ?? 0) > 0;
+      const isInReviewRetry =
+        task.column === "in-review" &&
+        (task.status === "failed" ||
+          task.status === "stuck-killed" ||
+          isInReviewExecutionStall ||
+          isInReviewMergeRetryStall);
+
       // Validate task is in a retryable state
-      if (task.status !== 'failed' && task.status !== 'stuck-killed') {
+      if (task.status !== 'failed' && task.status !== 'stuck-killed' && !isInReviewRetry) {
         return {
           content: [{ type: "text", text: `Task ${params.id} is not in a retryable state (status: ${task.status || 'none'})` }],
           isError: true,
@@ -1017,15 +1078,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const retryLogSuffix = clearedDeadlockAutoPause ? ", cleared deadlock auto-pause" : "";
 
       // In-review retry: distinguish between execution failures and merge failures.
-      if (task.column === 'in-review') {
-        const hasIncompleteSteps = task.steps.some(
-          (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
-        );
-        // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
-        // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
-        const isExecutionFailureInReview =
-          hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
-
+      if (isInReviewRetry) {
         if (isExecutionFailureInReview) {
           await store.updateTask(params.id, {
             status: null,
@@ -1033,7 +1086,12 @@ export default function kbExtension(pi: ExtensionAPI) {
             ...autoPauseClearPatch,
             ...buildManualRetryResetPatch(),
           });
-          await store.logEntry(params.id, `Retry requested via Fusion extension (execution failure in-review → todo, preserving progress${retryLogSuffix})`);
+          await store.logEntry(
+            params.id,
+            isInReviewExecutionStall
+              ? `Retry requested via Fusion extension (stranded in-review execution retry → todo, preserving progress${retryLogSuffix})`
+              : `Retry requested via Fusion extension (execution failure in-review → todo, preserving progress${retryLogSuffix})`,
+          );
           await store.moveTask(params.id, "todo", { preserveProgress: true });
           return {
             content: [{ type: "text", text: `Retried ${params.id} → todo (execution failure, preserving step progress)` }],
@@ -1149,16 +1207,16 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_task_archive",
     label: "fn: Archive Task",
     description:
-      "Archive a done task (move from done → archived). " +
+      "Archive a task from any live column (move to archived). " +
       "Archived tasks are preserved for historical reference but moved out of the main board view.",
-    promptSnippet: "Archive a done Fusion task (moves to archived column)",
+    promptSnippet: "Archive a Fusion task from any live column (moves to archived column)",
     promptGuidelines: [
-      "Use to clean up old completed tasks from the done column",
-      "Only tasks in the 'done' column can be archived",
+      "Use to clean up tasks from any live board column when you want them hidden from active views",
+      "Already archived tasks cannot be archived again",
       "Archived tasks can be unarchived later if needed",
     ],
     parameters: Type.Object({
-      id: Type.String({ description: "Task ID to archive (e.g. FN-001). Must be in 'done' column." }),
+      id: Type.String({ description: "Task ID to archive from any live column (e.g. FN-001)." }),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1178,11 +1236,11 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_task_unarchive",
     label: "fn: Unarchive Task",
     description:
-      "Unarchive an archived task (move from archived → done). " +
-      "Restores the task to the done column.",
-    promptSnippet: "Unarchive a Fusion task (restores to done column)",
+      "Unarchive an archived task (move from archived → its restore column). " +
+      "Restores to the pre-archive column when available, with active execution columns downgraded to todo.",
+    promptSnippet: "Unarchive a Fusion task (restores to its pre-archive column)",
     promptGuidelines: [
-      "Use to restore an archived task back to the done column",
+      "Use to restore an archived task back to its pre-archive column when available",
       "Only tasks in the 'archived' column can be unarchived",
     ],
     parameters: Type.Object({
@@ -3912,7 +3970,9 @@ export default function kbExtension(pi: ExtensionAPI) {
     description:
       "Create a new task and assign it to a specific agent for execution. The task goes to " +
       "'todo' and will be picked up by the target agent on their next heartbeat cycle. " +
-      "Use fn_list_agents first to find available agents and their capabilities.",
+      "Use fn_list_agents first to find available agents and their capabilities. " +
+      "Optionally pass workflow_id to select a workflow at creation time; use " +
+      "fn_workflow_list to discover valid IDs.",
     promptSnippet: "Delegate a task to a specific Fusion agent",
     promptGuidelines: [
       "Use fn_list_agents first to find available agents and their capabilities",
@@ -3926,6 +3986,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       description: Type.String({ description: "What needs to be done" }),
       dependencies: Type.Optional(
         Type.Array(Type.String(), { description: "Task IDs this new task depends on (e.g. [\"KB-001\"]" }),
+      ),
+      workflow_id: Type.Optional(
+        Type.String({
+          description:
+            "Workflow ID to select for the new task (e.g. 'WF-003' or 'builtin:coding'). " +
+            "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
+        }),
       ),
       override: Type.Optional(
         Type.Boolean({ description: "Set true to bypass executor-role assignment policy" }),
@@ -3952,11 +4019,13 @@ export default function kbExtension(pi: ExtensionAPI) {
       try {
         // Create task assigned to the target agent
         const store = await getStore(ctx.cwd);
+        const workflowId = params.workflow_id?.trim() || undefined;
         const task = await store.createTask({
           description: params.description,
           dependencies: params.dependencies,
           column: "todo",
           assignedAgentId: params.agent_id,
+          ...(workflowId ? { workflowId } : {}),
           source: {
             sourceType: "api",
             ...(params.override === true ? { sourceMetadata: { executorRoleOverride: true } } : {}),
@@ -3964,10 +4033,11 @@ export default function kbExtension(pi: ExtensionAPI) {
         });
 
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
+        const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
         return {
           content: [{
             type: "text" as const,
-            text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}. ` +
+            text: `Delegated to ${agent!.name} (${agent!.id}): Created ${task.id}${deps}${workflow}. ` +
               `The task will be picked up by ${agent!.name} on their next heartbeat cycle.`,
           }],
           details: { taskId: task.id, agentId: agent!.id, agentName: agent!.name },

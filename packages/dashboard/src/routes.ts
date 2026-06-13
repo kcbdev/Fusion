@@ -1638,6 +1638,42 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
+  // ── Maintenance Routes ─────────────────────────────────────────────
+
+  /**
+   * GET /api/maintenance/legacy-automerge-stamps
+   * Dry-run the legacy auto-merge stamp cleanup and list candidates.
+   */
+  router.get("/maintenance/legacy-automerge-stamps", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const candidates = await scopedStore.reconcileLegacyAutoMergeStamps();
+      res.json({ candidates, count: candidates.length });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err, "Failed to list legacy auto-merge stamps");
+    }
+  });
+
+  /**
+   * POST /api/maintenance/legacy-automerge-stamps/apply
+   * Apply the legacy auto-merge stamp cleanup via the store-owned reconcile API.
+   */
+  router.post("/maintenance/legacy-automerge-stamps/apply", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const cleared = await scopedStore.reconcileLegacyAutoMergeStamps({ apply: true });
+      res.json({ cleared, count: cleared.length });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err, "Failed to apply legacy auto-merge stamp cleanup");
+    }
+  });
+
   // ── Backup Routes ─────────────────────────────────────────────────
 
   /**
@@ -1848,6 +1884,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Returns: { title: string }
    *
    * Generates a concise title (≤60 characters) from descriptions longer than 200 characters.
+   * Long descriptions are accepted; core truncates model input before prompting.
    * Rate limited: 10 requests per hour per IP
    */
   router.post("/ai/summarize-title", async (req, res) => {
@@ -1863,7 +1900,6 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         summarizeTitle,
         validateDescription,
         MIN_DESCRIPTION_LENGTH,
-        MAX_DESCRIPTION_LENGTH: _MAX_DESCRIPTION_LENGTH,
         RateLimitError: _RateLimitError4,
         ValidationError: _ValidationError2,
         AiServiceError: _AiServiceError2,

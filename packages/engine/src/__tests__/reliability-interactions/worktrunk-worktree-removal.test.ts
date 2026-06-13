@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Settings, TaskStore, Task } from "@fusion/core";
 import { cleanupOrphanedWorktrees } from "../../worktree-pool.js";
@@ -22,6 +22,26 @@ vi.mock("node:fs", async (importOriginal) => {
   return { ...actual, existsSync: existsSpy, readdirSync: readdirSpy };
 });
 
+
+function mockWorktreeRemoveFailure(postMergePath: string, porcelainOutput: string): void {
+  execSpy.mockImplementation((cmd: string, _opts: unknown, cb: (err: any, stdout: string, stderr: string) => void) => {
+    if (cmd.includes("git worktree remove")) {
+      const stderr = `fatal: validation failed, cannot remove working tree: '${postMergePath}/.git' is not a .git file, error code 2`;
+      cb(Object.assign(new Error(stderr), { stderr, status: 2 }), "", stderr);
+      return;
+    }
+    if (cmd === "git worktree prune") {
+      cb(null, "", "");
+      return;
+    }
+    if (cmd === "git worktree list --porcelain") {
+      cb(null, porcelainOutput, "");
+      return;
+    }
+    cb(null, "", "");
+  });
+}
+
 function storeForSelfHealing(settings: Partial<Settings>, task: Partial<Task>): TaskStore & EventEmitter {
   const emitter = new EventEmitter();
   return Object.assign(emitter, {
@@ -41,6 +61,10 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
     existsSpy.mockReturnValue(true);
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("merger post-merge cleanup calls worktrunk backend remove and avoids native git remove", async () => {
     const removeSpy = vi.spyOn(WorktrunkWorktreeBackend.prototype, "remove").mockResolvedValue(undefined);
 
@@ -50,6 +74,36 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
 
     expect(removeSpy).toHaveBeenCalledWith(expect.objectContaining({ rootDir: "/repo", worktreePath: "/repo/.worktrees/post", taskId: "FN-100" }));
     expect(execSpy.mock.calls.some((call) => String(call[0]).includes("git worktree remove"))).toBe(false);
+  });
+
+  it("merger post-merge cleanup logs harmless classified temp residue when porcelain is absent after prune", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const postMergePath = "/repo/.worktrees/post-merge-FN-343-abcd1234";
+    mockWorktreeRemoveFailure(postMergePath, "worktree /repo\nbranch refs/heads/main\n");
+
+    await mergerTestHooks.removePostMergeWorktree("/repo", postMergePath, "FN-343", {});
+
+    expect(execSpy.mock.calls.map((call) => String(call[0]))).toEqual([
+      `git worktree remove --force "${postMergePath}"`,
+      "git worktree prune",
+      "git worktree list --porcelain",
+    ]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("post-merge worktree cleanup classified harmless"),
+    );
+  });
+
+  it("merger post-merge cleanup keeps still-registered temp worktree failures visible", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const postMergePath = "/repo/.worktrees/post-merge-FN-343-abcd1234";
+    mockWorktreeRemoveFailure(postMergePath, `worktree /repo\nbranch refs/heads/main\n\nworktree ${postMergePath}\nbranch refs/heads/fusion/fn-343\n`);
+
+    await mergerTestHooks.removePostMergeWorktree("/repo", postMergePath, "FN-343", {});
+
+    expect(execSpy.mock.calls.map((call) => String(call[0]))).toContain("git worktree list --porcelain");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`failed to remove post-merge worktree ${postMergePath}`),
+    );
   });
 
   it("self-healing recover path calls worktrunk backend remove and not native remove", async () => {

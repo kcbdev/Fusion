@@ -65,6 +65,9 @@ const MAX_ACTIVITY_TURN_CHARS = 16000;
 const MAX_PERSISTED_ACTIVITY_TURNS = 50;
 const MAX_PERSISTED_ACTIVITY_TURN_CHARS = 4000;
 
+const INTERACTIVE_AI_UNAVAILABLE_MESSAGE =
+  "Session cannot be continued in this process: interactive AI sessions are unavailable (no factory on this context). Resume from a route context with the engine loaded.";
+
 /**
  * Observable event names emitted via `ctx.emitEvent`. The no-silent-loss
  * invariant requires that interrupt/error ALWAYS emit one of these AND persist
@@ -445,22 +448,52 @@ export class CeOrchestrator {
       );
     }
     const live = this.live.get(sessionId);
-    if (!live) {
-      throw new Error(`Session ${sessionId} has no live handle in this process; call resume() first.`);
+    if (!live && !this.factory) {
+      throw new Error(INTERACTIVE_AI_UNAVAILABLE_MESSAGE);
     }
+
+    const turn = this.runAnswerTurn(session, questionId, response);
+    if (opts.detach) {
+      // If the process lost its live handle, rehydration can take time. Mirror
+      // resume(detach): mark the row active immediately while the background
+      // turn re-creates the handle and converges through persisted state.
+      if (!live) {
+        this.store.update(sessionId, { status: "active", error: null });
+      }
+      // runAnswerTurn never rejects after the preflight guards above (failures
+      // persist into session state).
+      void turn;
+      return { session: this.requireSession(sessionId) };
+    }
+    return turn;
+  }
+
+  private async runAnswerTurn(session: CeSession, questionId: string, response: unknown): Promise<CeStepResult> {
+    const sessionId = session.id;
+    let live = this.live.get(sessionId);
+    if (!live) {
+      try {
+        await this.rehydrate(session);
+        live = this.live.get(sessionId);
+        if (!live) {
+          throw new Error(`Session ${sessionId} could not be rehydrated with a live handle.`);
+        }
+      } catch (err) {
+        const interrupted = this.interruptSession(sessionId, err);
+        return {
+          session: interrupted,
+          event: { type: "error", data: { message: interrupted.error ?? "interrupted", cause: err } },
+        };
+      }
+    }
+
     this.store.appendHistory(sessionId, {
       role: "user",
       text: JSON.stringify({ answer: response, questionId }),
       at: new Date().toISOString(),
     });
     this.store.update(sessionId, { status: "active", currentQuestion: null });
-    const turn = this.runTurn(sessionId, () => live.answer(questionId, response), live);
-    if (opts.detach) {
-      // runTurn never rejects (all failures persist into session state).
-      void turn;
-      return { session: this.requireSession(sessionId) };
-    }
-    return turn;
+    return this.runTurn(sessionId, () => live.answer(questionId, response), live);
   }
 
   /**
@@ -512,8 +545,7 @@ export class CeOrchestrator {
       const next =
         this.store.update(sessionId, {
           status: "interrupted",
-          error:
-            "Session cannot be continued in this process: interactive AI sessions are unavailable (no factory on this context). Resume from a route context with the engine loaded.",
+          error: INTERACTIVE_AI_UNAVAILABLE_MESSAGE,
         }) ?? session;
       return { session: next };
     }
@@ -617,6 +649,26 @@ export class CeOrchestrator {
   /** Read-through accessor for routes. */
   getState(sessionId: string): CeSession | undefined {
     return this.store.get(sessionId);
+  }
+
+  /**
+   * Cancel a session: stop any live in-process handle but keep the persisted row
+   * for inspection/resume by marking it `interrupted`. Unlike discard(), cancel
+   * preserves the conversation and progress; discard stops the handle AND deletes
+   * the row. Terminal sessions are idempotent no-ops.
+   */
+  cancel(sessionId: string): CeSession | undefined {
+    const session = this.store.get(sessionId);
+    if (!session) return undefined;
+    if (session.status === "completed" || session.status === "error" || session.status === "interrupted") {
+      return session;
+    }
+
+    // Preserve no-silent-loss ordering: interruptSession flushes live activity
+    // before disposeLive clears the transient buffers (same as runTurn failure).
+    const interrupted = this.interruptSession(sessionId, new Error("Cancelled by user"));
+    this.disposeLive(sessionId);
+    return interrupted;
   }
 
   /**

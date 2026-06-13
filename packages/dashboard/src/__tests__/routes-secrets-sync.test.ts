@@ -50,6 +50,7 @@ describe("routes secrets sync", () => {
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    mockedFetchFromRemoteNode.mockClear();
     fixture = await createFixture("fn-secrets-sync-");
     secrets = fixture.secretsStore;
 

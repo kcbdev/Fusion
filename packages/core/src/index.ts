@@ -17,6 +17,7 @@ export type {
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
 export { redactSecrets } from "./redact-secrets.js";
+export * from "./frontend-ux-policy.js";
 export { MOCK_PROVIDER_ID } from "./mock-provider-constants.js";
 export type { MockProviderId, MockSessionPurpose } from "./mock-provider-constants.js";
 export {
@@ -78,6 +79,7 @@ export type {
   WorkflowFieldOption,
   WorkflowFieldRender,
   // Workflow-settings (U1): typed setting declaration IR types.
+  WorkflowOptionalStep,
   WorkflowSettingDefinition,
   WorkflowSettingType,
   WorkflowSettingOption,
@@ -103,9 +105,21 @@ export type {
   EffectiveAgentResult,
 } from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export { resolveWorkflowOptionalSteps } from "./workflow-optional-steps.js";
+export type { ResolvedWorkflowOptionalStep } from "./workflow-optional-steps.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
-export { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
+export {
+  BUILTIN_WORKFLOW_SETTINGS,
+  BUILTIN_MOVED_WORKFLOW_SETTINGS,
+  BUILTIN_TRIAGE_POLICY_SETTINGS,
+  renderTriagePolicyPlaceholders,
+} from "./builtin-workflow-settings.js";
+export {
+  BUILTIN_SEAM_PROMPTS,
+  builtinPromptConfig,
+  builtinSeamPrompt,
+} from "./builtin-workflow-prompts.js";
 export {
   MOVED_SETTINGS_KEYS,
   SETTINGS_MIGRATION_VERSION,
@@ -302,11 +316,17 @@ export {
   BUILTIN_WORKFLOWS,
   BUILTIN_WORKFLOW_ID_PREFIX,
   getBuiltinWorkflow,
+  getRequiredPluginIdForBuiltinWorkflow,
   isBuiltinWorkflowId,
+  isBuiltinWorkflowPluginGated,
 } from "./builtin-workflows.js";
 export {
   resolveWorkflowIrForTask,
   resolveWorkflowIrById,
+  resolveSeamPromptFromIr,
+  resolvePlanningPromptFromIr,
+  resolveTaskSeamPrompt,
+  resolveTaskPlanningPrompt,
   type WorkflowIrResolverStore,
 } from "./workflow-ir-resolver.js";
 export {
@@ -435,6 +455,7 @@ export {
   InvalidMergeQueueLeaseDurationError,
   HandoffInvariantViolationError,
   TransitionRejectionError,
+  type LegacyAutoMergeStampReconcileResult,
 } from "./store.js";
 export {
   STOPWORDS,
@@ -459,6 +480,11 @@ export {
   parseExplicitDuplicateMarker,
   type ExplicitDuplicateMarker,
 } from "./explicit-duplicate-marker.js";
+export {
+  parseNoOpCompletionMarker,
+  type NoOpCompletionMarker,
+  type NoOpCompletionMarkerKind,
+} from "./no-op-completion-marker.js";
 export {
   __getDeterministicGuardMutexSize,
   deterministicGuardLocks,
@@ -630,14 +656,16 @@ export {
   type FindVitestProcessIdsOptions,
 } from "./vitest-processes.js";
 export {
+  classifyProviderError,
   countRecentIdenticalStallEntries,
   getInReviewStallReason,
   IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX,
   IN_REVIEW_STALL_LOG_PREFIX,
+  IN_REVIEW_STALL_TERMINAL_LOG_PREFIX,
   DEFAULT_STALE_MERGING_MIN_AGE_MS,
   DEFAULT_MAX_AUTO_MERGE_RETRIES,
 } from "./in-review-stall.js";
-export type { InReviewStallSignal, InReviewStallCode } from "./in-review-stall.js";
+export type { InReviewStallSignal, InReviewStallCode, ProviderErrorClassification } from "./in-review-stall.js";
 export {
   getStalePausedReviewSignal,
   DEFAULT_STALE_PAUSED_REVIEW_THRESHOLD_MS,
@@ -992,6 +1020,7 @@ export {
   MAX_COMMIT_SUBJECT_LENGTH,
   DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS,
   MAX_DESCRIPTION_LENGTH,
+  MAX_TITLE_SUMMARIZE_INPUT_LENGTH,
   MIN_DESCRIPTION_LENGTH,
   MAX_TITLE_LENGTH,
   MAX_MERGE_COMMIT_SUMMARY_LENGTH,

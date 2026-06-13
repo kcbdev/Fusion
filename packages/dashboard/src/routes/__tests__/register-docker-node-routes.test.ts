@@ -34,9 +34,9 @@ vi.mock("@fusion/core", async () => {
   const actual = await vi.importActual<typeof import("@fusion/core")>("@fusion/core");
   return {
     ...actual,
-    DockerClientService: vi.fn().mockImplementation(() => service),
-    CentralCore: vi.fn().mockImplementation(() => mockCentralInstance),
-    MeshConfigGenerator: vi.fn().mockImplementation(() => mockGeneratorInstance),
+    DockerClientService: vi.fn().mockImplementation(function () { return service; }),
+    CentralCore: vi.fn().mockImplementation(function () { return mockCentralInstance; }),
+    MeshConfigGenerator: vi.fn().mockImplementation(function () { return mockGeneratorInstance; }),
   };
 });
 

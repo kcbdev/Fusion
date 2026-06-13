@@ -48,7 +48,9 @@ export function GeneralSection({
     fetchWorkflows(projectId, { includeDisabledBuiltins: true })
       .then((workflows) => {
         if (!cancelled) {
-          setBuiltinWorkflows(workflows.filter((workflow) => workflow.id.startsWith("builtin:")));
+          setBuiltinWorkflows(
+            workflows.filter((workflow) => workflow.id.startsWith("builtin:") && workflow.kind !== "fragment"),
+          );
         }
       })
       .catch(() => {

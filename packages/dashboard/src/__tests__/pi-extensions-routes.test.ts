@@ -27,7 +27,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     create: vi.fn(() => mockSettingsManager),
   },
   getAgentDir: vi.fn(() => "/fake/agent/dir"),
-  DefaultPackageManager: vi.fn().mockImplementation(() => mockPackageManager),
+  DefaultPackageManager: vi.fn().mockImplementation(function () { return mockPackageManager; }),
 }));
 
 // Minimal store implementation for the test server
@@ -273,10 +273,10 @@ describe("Pi settings routes", () => {
 
     it("returns 500 when install throws", async () => {
       const { DefaultPackageManager } = await import("@earendil-works/pi-coding-agent");
-      vi.mocked(DefaultPackageManager).mockImplementationOnce(() => ({
+      vi.mocked(DefaultPackageManager).mockImplementationOnce(function () { return {
         install: vi.fn().mockRejectedValue(new Error("Install failed")),
         addSourceToSettings: vi.fn().mockReturnValue(true),
-      }));
+      }; });
 
       const res = await request(app, "POST", "/api/pi-settings/packages",
         JSON.stringify({ source: "npm:failing-package" }),
@@ -288,10 +288,10 @@ describe("Pi settings routes", () => {
 
     it("returns success when addSourceToSettings returns false (already configured)", async () => {
       const { DefaultPackageManager } = await import("@earendil-works/pi-coding-agent");
-      vi.mocked(DefaultPackageManager).mockImplementationOnce(() => ({
+      vi.mocked(DefaultPackageManager).mockImplementationOnce(function () { return {
         install: vi.fn().mockResolvedValue(undefined),
         addSourceToSettings: vi.fn().mockReturnValue(false),
-      }));
+      }; });
 
       const res = await request(app, "POST", "/api/pi-settings/packages",
         JSON.stringify({ source: "npm:already-configured" }),

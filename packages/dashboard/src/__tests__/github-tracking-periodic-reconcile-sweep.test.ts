@@ -10,24 +10,24 @@ const reconcileSourceIssues = vi.fn().mockResolvedValue({ scanned: 0, closed: 0,
 
 vi.mock("../github-tracking-reconciler.js", () => ({
   RECONCILE_SCAN_LIMIT: 200,
-  GitHubTrackingReconciler: vi.fn().mockImplementation(() => ({
+  GitHubTrackingReconciler: vi.fn().mockImplementation(function () { return {
     reconcile,
     reconcileDeletedAndArchived,
     reconcileSourceIssues,
-  })),
+  }; }),
 }));
 
 vi.mock("../github-issue-comment.js", () => ({
-  GitHubIssueCommentService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
+  GitHubIssueCommentService: vi.fn().mockImplementation(function () { return { start: vi.fn(), stop: vi.fn() }; }),
 }));
 vi.mock("../github-tracking-comments.js", () => ({
-  GitHubTrackingCommentService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
+  GitHubTrackingCommentService: vi.fn().mockImplementation(function () { return { start: vi.fn(), stop: vi.fn() }; }),
 }));
 vi.mock("../github-source-issue-close.js", () => ({
-  GitHubSourceIssueCloseService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn(), attach: vi.fn(), detach: vi.fn() })),
+  GitHubSourceIssueCloseService: vi.fn().mockImplementation(function () { return { start: vi.fn(), stop: vi.fn(), attach: vi.fn(), detach: vi.fn() }; }),
 }));
 vi.mock("../github-tracking-state.js", () => ({
-  GitHubTrackingStateService: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn(), attach: vi.fn(), detach: vi.fn() })),
+  GitHubTrackingStateService: vi.fn().mockImplementation(function () { return { start: vi.fn(), stop: vi.fn(), attach: vi.fn(), detach: vi.fn() }; }),
 }));
 
 function createStore(): TaskStore {

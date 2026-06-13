@@ -1541,10 +1541,24 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           task.status === "planning" ||
           task.status === "needs-replan" ||
           (task.stuckKillCount ?? 0) > 0);
+      const isInReviewStatusNone =
+        task.column === "in-review" && (task.status === null || task.status === undefined);
+      const hasIncompleteSteps = task.steps.some(
+        (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
+      );
+      // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
+      // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
+      const isExecutionFailureInReview =
+        hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
+      const isInReviewExecutionStall = isInReviewStatusNone && isExecutionFailureInReview;
+      const isInReviewMergeRetryStall = isInReviewStatusNone && (task.mergeRetries ?? 0) > 0;
       const isInReviewRetry =
         task.column === "in-review" &&
-        (task.status === "failed" || task.status === "stuck-killed");
-      if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification) {
+        (task.status === "failed" ||
+          task.status === "stuck-killed" ||
+          isInReviewExecutionStall ||
+          isInReviewMergeRetryStall);
+      if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification && !isInReviewRetry) {
         throw badRequest(`Task is not in a retryable state (current status: ${task.status || 'none'})`);
       }
 
@@ -1555,14 +1569,6 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       // In-review retry: distinguish between execution failures (incomplete steps)
       // and merge failures (all steps done).
       if (isInReviewRetry) {
-        const hasIncompleteSteps = task.steps.some(
-          (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
-        );
-        // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
-        // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
-        const isExecutionFailureInReview =
-          hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
-
         if (isExecutionFailureInReview) {
           await scopedStore.updateTask(req.params.id, {
             status: null,
@@ -1572,7 +1578,9 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           });
           await scopedStore.logEntry(
             req.params.id,
-            `Retry requested from dashboard (execution failure in-review → todo, preserving progress${retryLogSuffix})`,
+            isInReviewExecutionStall
+              ? `Retry requested from dashboard (stranded in-review execution retry → todo, preserving progress${retryLogSuffix})`
+              : `Retry requested from dashboard (execution failure in-review → todo, preserving progress${retryLogSuffix})`,
           );
           const updated = await scopedStore.moveTask(req.params.id, "todo", { preserveProgress: true });
           res.json(updated);
@@ -1777,7 +1785,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
-  // Archive task (done → archived)
+  // Archive task (any live column → archived)
   router.post("/tasks/:id/archive", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -1806,12 +1814,13 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         });
       }
 
-      const status = (err instanceof Error ? err.message : String(err)).includes("must be in") ? 400 : 500;
-      throw new ApiError(status, err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes("must be in") || message.includes("already archived") ? 400 : 500;
+      throw new ApiError(status, message);
     }
   });
 
-  // Unarchive task (archived → done)
+  // Unarchive task (archived → restored column)
   router.post("/tasks/:id/unarchive", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);

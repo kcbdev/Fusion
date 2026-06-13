@@ -39,6 +39,7 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 
 vi.mock("@fusion/engine", () => ({
   listCliAdapterDescriptors: () => [],
+  createWorkflowAuthoringTools: vi.fn(() => []),
   createFnAgent: mockCreateFnAgent,
 }));
 

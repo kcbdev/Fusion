@@ -46,6 +46,22 @@ describe("createReadOnlyProviderSettingsView", () => {
       shared: "fusion",
     });
     expect(view.getNpmCommand()).toEqual(["pnpm"]);
+    expect(view.isProjectTrusted()).toBe(true);
+  });
+
+  it("exposes project trust for pi package-manager discovery consumers", async () => {
+    const root = tempWorkspace("fusion-provider-settings-");
+    const cwd = join(root, "project");
+    const agentDir = join(root, "agent");
+    mkdirSync(agentDir, { recursive: true });
+
+    const view = createReadOnlyProviderSettingsView(cwd, agentDir);
+    const discoveryConsumer = {
+      resolve: vi.fn(async () => view.isProjectTrusted()),
+    };
+
+    await expect(discoveryConsumer.resolve()).resolves.toBe(true);
+    expect(typeof view.isProjectTrusted()).toBe("boolean");
   });
 
   it("returns empty project settings when .fusion/settings.json does not exist", () => {

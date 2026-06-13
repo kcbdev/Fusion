@@ -11,6 +11,7 @@ import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
 vi.mock("../../hooks/useChat");
 vi.mock("../../hooks/useMobileScrollLock", () => ({
   useMobileScrollLock: vi.fn(),
+  useMobileKeyboardViewportLock: vi.fn(),
   isIOS: () => true,
   _resetLockState: vi.fn(),
 }));
@@ -605,20 +606,30 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
     const roomInput = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-    const roomFocusSpy = vi.spyOn(roomInput, "focus");
+    const roomTouchEvent = new TouchEvent("touchstart", { bubbles: true, cancelable: true });
+    const roomPreventDefaultSpy = vi.spyOn(roomTouchEvent, "preventDefault");
     await act(async () => {
-      fireEvent.touchStart(roomInput);
+      fireEvent(roomInput, roomTouchEvent);
+      if (!roomTouchEvent.defaultPrevented) {
+        roomInput.focus();
+      }
     });
-    expect(roomFocusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(roomPreventDefaultSpy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(roomInput);
 
     await userEvent.click(screen.getByTestId("chat-sidebar-scope-direct"));
 
     const directInput = screen.getByTestId("chat-input") as HTMLTextAreaElement;
-    const directFocusSpy = vi.spyOn(directInput, "focus");
+    const directTouchEvent = new TouchEvent("touchstart", { bubbles: true, cancelable: true });
+    const directPreventDefaultSpy = vi.spyOn(directTouchEvent, "preventDefault");
     await act(async () => {
-      fireEvent.touchStart(directInput);
+      fireEvent(directInput, directTouchEvent);
+      if (!directTouchEvent.defaultPrevented) {
+        directInput.focus();
+      }
     });
-    expect(directFocusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(directPreventDefaultSpy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(directInput);
 
     mediaSpy.mockRestore();
   });
@@ -801,9 +812,10 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       fireEvent(document, new Event("visibilitychange"));
 
-      await waitFor(() => {
-        expect(metrics.getScrollTop()).toBe(1180);
-      });
+      // Regression guard: visibility restore must explicitly re-anchor when pinned.
+      // This previously passed only when an old anchorToBottom rAF happened to run
+      // after the visibility event and masked that the handler only captured a snapshot.
+      expect(metrics.getScrollTop()).toBe(1180);
     } finally {
       metrics.restore();
       restoreMatchMedia.mockRestore();
@@ -826,9 +838,9 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       metrics.setScrollTop(300);
       fireEvent(window, new Event("pageshow"));
 
-      await waitFor(() => {
-        expect(metrics.getScrollTop()).toBe(1180);
-      });
+      // Regression guard: pageshow shares the visibility restore path and must not
+      // depend on leftover rAF callbacks from the initial mount anchor.
+      expect(metrics.getScrollTop()).toBe(1180);
     } finally {
       metrics.restore();
       restoreMatchMedia.mockRestore();
@@ -851,9 +863,7 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       fireEvent(document, new Event("visibilitychange"));
 
-      await waitFor(() => {
-        expect(metrics.getScrollTop()).toBe(300);
-      });
+      expect(metrics.getScrollTop()).toBe(300);
     } finally {
       metrics.restore();
       restoreMatchMedia.mockRestore();

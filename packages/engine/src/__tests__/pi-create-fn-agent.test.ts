@@ -30,6 +30,7 @@ const readFileSyncMock = vi.fn((_path?: any) => "{}");
 const realpathSyncNativeMock = vi.fn((path: PathLike) => String(path));
 const readCustomProvidersMock = vi.fn(() => []);
 const packageManagerCwdCapture = vi.fn();
+const packageManagerSettingsCapture = vi.fn();
 
 // Route async `exec` through the `execSync` mock so the promisify bridge works.
 // Use Symbol.for("nodejs.util.promisify.custom") directly to avoid async imports
@@ -107,10 +108,15 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     }
   },
   DefaultPackageManager: class {
+    private readonly settingsManager: any;
+
     constructor(options: any) {
       packageManagerCwdCapture(options?.cwd);
+      packageManagerSettingsCapture(options?.settingsManager);
+      this.settingsManager = options?.settingsManager;
     }
     async resolve() {
+      this.settingsManager.isProjectTrusted();
       return packageManagerResolveMock();
     }
   },
@@ -1272,6 +1278,32 @@ describe("createFnAgent", () => {
     expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
   });
 
+  it("exposes project trust on the read-only pi settings view", async () => {
+    const { createReadOnlyPiSettingsView } = await import("../pi.js");
+
+    const view = createReadOnlyPiSettingsView("/tmp", "/mock-agent-dir");
+
+    expect(() => view.isProjectTrusted()).not.toThrow();
+    expect(view.isProjectTrusted()).toBe(true);
+    expect(typeof view.isProjectTrusted()).toBe("boolean");
+  });
+
+  it("passes a project-trusted settings view through package-manager discovery", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "readonly",
+    });
+
+    const settingsView = packageManagerSettingsCapture.mock.calls.at(-1)?.[0];
+    expect(settingsView).toEqual(expect.objectContaining({ isProjectTrusted: expect.any(Function) }));
+    expect(settingsView.isProjectTrusted()).toBe(true);
+    expect(packageManagerResolveMock).toHaveBeenCalled();
+    expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+  });
+
   it("registers extension providers before resolving configured models", async () => {
     packageManagerResolveMock.mockResolvedValueOnce({
       extensions: [{ enabled: true, path: "/extensions/zai-provider" }],
@@ -2115,7 +2147,7 @@ describe("createFnAgent", () => {
 
     it("diagnostics are logged via structured logger with [skills] context", async () => {
       const { piLog } = await import("../logger.js");
-      const piWarnSpy = vi.spyOn(piLog, "warn").mockImplementation(() => {});
+      const piLogSpy = vi.spyOn(piLog, "log").mockImplementation(() => {});
 
       // Test diagnostics logging by directly calling createSkillsOverrideFromSelection
       const { createSkillsOverrideFromSelection } = await import("../skill-resolver.js");
@@ -2141,7 +2173,7 @@ describe("createFnAgent", () => {
       expect(result.diagnostics.length).toBeGreaterThan(0);
 
       // Check that diagnostics were logged with [skills] context
-      const skillLogs = piWarnSpy.mock.calls.filter(call =>
+      const skillLogs = piLogSpy.mock.calls.filter(call =>
         String(call[0]).includes("[skills]")
       );
       expect(skillLogs.length).toBeGreaterThan(0);
@@ -2150,7 +2182,7 @@ describe("createFnAgent", () => {
       const lastLog = skillLogs[skillLogs.length - 1][0] as string;
       expect(lastLog).toContain("[executor]");
 
-      piWarnSpy.mockRestore();
+      piLogSpy.mockRestore();
     });
   });
 });

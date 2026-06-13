@@ -19,17 +19,17 @@ vi.mock("@fusion/core", async () => {
   return {
     ...actual,
     isGhAuthenticated: vi.fn(),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
       close: mockCentralClose,
       listProjects: mockCentralListProjects,
       getGlobalDir: mockCentralGetGlobalDir,
-    })),
-    FirstRunDetector: vi.fn().mockImplementation(() => ({
+    }; }),
+    FirstRunDetector: vi.fn().mockImplementation(function () { return {
       detectExistingProjects: mockDetectorDetectExistingProjects,
       detectFirstRunState: mockDetectorDetectFirstRunState,
       hasCentralDb: mockDetectorHasCentralDb,
-    })),
+    }; }),
   };
 });
 

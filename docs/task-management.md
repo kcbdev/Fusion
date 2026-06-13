@@ -211,7 +211,7 @@ Expand the creation panel (▼) to access additional controls:
 - **Agent** — Assign an agent to the task
 - **Branch settings** (`branch` / `baseBranch`) remain available in full task forms and task detail editing (not in Quick Entry)
 - **Review** — Set review rigor level (None, Plan Only, Plan and Code, Full)
-- **Browser Verify** — Enable browser verification workflow step
+- **Optional workflow steps** — Enable workflow-declared optional steps for the selected workflow. The built-in coding workflow exposes **Browser Verification** here and keeps it opt-in by default.
 
 ### 6) CLI creation
 
@@ -444,9 +444,12 @@ When `executionMode: "fast"`, the following automated review/validation gates ar
 |------|---------------|-----------|
 | `review_step` tool enforcement | Available to executor agent | **Not injected** |
 | Pre-merge workflow-step execution | Runs configured steps | **Skipped** |
+| Custom graph pre-merge prompt/script/gate nodes | Run in selected custom workflows | **Skipped** |
 | Workflow revision loop | Enabled (feedback → fix → re-review) | **Disabled** |
 
 ### Fast Mode Mandatory Gates
+
+The bypass applies to both the legacy workflow-step path and the workflow graph executor path (including custom non-`builtin:coding` workflows). `undefined` or `null` execution mode is treated as standard mode.
 
 The following quality gates **remain enforced** in fast mode:
 
@@ -461,7 +464,8 @@ The following quality gates **remain enforced** in fast mode:
 | Feature | Standard | Fast |
 |---------|----------|------|
 | Executor agent session | Full prompt + tools | Full prompt (minus review_step) |
-| Pre-merge workflow steps | ✅ Run | ❌ Bypassed |
+| Pre-merge workflow steps (legacy, builtin, and custom graph workflows) | ✅ Run | ❌ Bypassed |
+| Custom graph prompt/script/gate validation nodes | ✅ Run | ❌ Bypassed |
 | `review_step` tool | ✅ Available | ❌ Not available |
 | Post-merge workflow steps | ✅ Run | ✅ Run |
 | Completion blockers (test/build/typecheck) | ✅ Enforced | ✅ Enforced |
@@ -606,8 +610,9 @@ Behavior:
 
 ### Archive behavior
 
-- `fn task archive <id>` moves done task to `archived`
-- Dashboard delete confirmations for `done` tasks now include an **Archive Instead** action so users can preserve history without soft-deleting the task. This option is shown only for `done` tasks because the store-level archive contract only allows archiving from the `done` column.
+- `fn task archive <id>` moves any live-board task (`triage`, `todo`, `in-progress`, `in-review`, or `done`) to `archived`; tasks already in `archived` are rejected.
+- Archive records the task's `preArchiveColumn` so restore can return to the original live column instead of always assuming `done`.
+- Dashboard delete confirmations for live tasks include an **Archive Instead** action so users can preserve history without soft-deleting the task.
 - Cleanup mode can persist compact metadata and remove the task directory
 - Archived tasks are read-only for task log/document writes:
   - `logEntry()` throws `Task <id> is archived — logging is read-only`
@@ -623,7 +628,7 @@ Behavior:
 
 Archive entries preserve key metadata needed for restoration, including:
 
-- `id`, `title`, `description`, `priority`, `column`
+- `id`, `title`, `description`, `priority`, `column`, `preArchiveColumn`
 - `dependencies`, `steps`, `currentStep`
 - `size`, `reviewLevel`, `prInfo` (primary mirror), `prInfos` (canonical linked PR list), `issueInfo`
 - `attachments` metadata
@@ -639,7 +644,7 @@ Archive entries preserve key metadata needed for restoration, including:
 
 - Restores archive entry if directory is missing
 - Rebuilds `PROMPT.md`
-- Moves task to `done`
+- Moves task back to its recorded `preArchiveColumn` when available, falling back to the archived snapshot's prior `column`, then to `done` for legacy archive entries.
 - Logs “Task restored from archive” when recovering from compact archive entry
 
 ### Task-ID collision safety and operator recovery
@@ -851,6 +856,8 @@ Users can apply presets at task creation; manual model selection can override th
 
 When `autoSummarizeTitles` is enabled and a task has a long untitled description, Fusion can auto-generate a concise title. This applies to tasks created from the dashboard/API as well as tasks created by agents and tooling flows (`fn_task_create`, delegated tasks, and triage-created child tasks). GitHub tracking now waits for the `createTask`-level summarizer (explicit or auto-attached from settings) to settle before filing, then uses that resulting title and falls back to deterministic description-derived title generation only when summarization is unavailable.
 
+If a configured title summarizer model is stale after a pi upgrade, Fusion logs a warning naming that provider/model and retries once with automatic model resolution before falling back to deterministic title generation. Genuine AI-service failures are not masked by this retry.
+
 ## Screenshots
 
 ### Board/task cards + quick entry
@@ -869,7 +876,10 @@ Use `noCommitsExpected: true` for tasks where the deliverable is a decision/repo
 
 - Meaning: executor allows `fn_task_done` with zero commits for that task.
 - Triage auto-sets it only when the task is clearly decision-shaped (e.g. "Decide whether...", "Evaluate...", "Verify...", "Audit...") with explicitly observational acceptance criteria and explicit no-code language.
+- Review Level 1 coordination/routing tasks that are board-only, explicitly say not to change source, and scope only task documents/metadata can also complete without commits even if older prompts omitted the explicit flag. This fallback is intentionally narrow and exists to recover plan-only coordination work; it does not bypass wrong-worktree or wrong-branch checks.
 - Ambiguous/forked tasks (e.g. "Investigate..." or "Investigate and fix if needed") leave it unset by default.
+- Implementation, feature, bug-fix, source-docs, test, config, or broad investigation tasks still require commits unless they have an explicit and valid no-commit contract.
+- If a legacy coordination task is stuck with `fn_task_done refused: no_commits`, prefer setting/verifying `noCommitsExpected` and re-running normal no-op finalization rather than editing `.fusion/fusion.db` directly.
 - You can manually set/clear it in Task Detail via **No commits expected (decision-only task)**.
 - Task cards show a **decision-only** badge when enabled.
 - Finalization still uses the existing no-op review/merge path (`mergeDetails.noOpMerge: true`, `mergeConfirmed: true`); no synthetic merge strategy values are introduced.

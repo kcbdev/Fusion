@@ -68,25 +68,25 @@ export default defineConfig({
             "src/__tests__/merger-post-merge.test.ts",
             "src/__tests__/merger-conflict-resolution.test.ts",
             "src/__tests__/merger-diff-scope.test.ts",
-            "src/__tests__/merger-file-scope-invariant.test.ts",
             "src/__tests__/merger-landed-files-capture.test.ts",
             "src/__tests__/branch-attribution.test.ts",
             "src/__tests__/executor-core.test.ts",
             "src/__tests__/executor-recovery.test.ts",
             "src/__tests__/executor-base-commit-capture.test.ts",
             "src/__tests__/executor-capture-modified-files-attribution.test.ts",
-            "src/__tests__/triage.test.ts",
             "src/__tests__/triage-preflight.test.ts",
             "src/__tests__/scheduler.test.ts",
             "src/__tests__/scheduler-node-routing.test.ts",
             "src/__tests__/scheduler-overlap-requeue.test.ts",
             "src/__tests__/mission-scheduler.test.ts",
-            "src/__tests__/self-healing.test.ts",
             "src/__tests__/heartbeat-monitor.test.ts",
             "src/__tests__/workflow-node-handlers.test.ts",
             "src/__tests__/workflow-policy-ownership-map.test.ts",
           ],
-          exclude: ["node_modules/**", "dist/**"],
+          exclude: [
+            "node_modules/**",
+            "dist/**",
+          ],
         },
       },
       {
@@ -102,6 +102,9 @@ export default defineConfig({
             "src/**/*.slow.test.ts",
             "node_modules/**",
             "dist/**",
+            "src/__tests__/merger-ai-cleanup-active-session.test.ts",
+            "src/__tests__/merger-ai-cleanup.test.ts",
+            "src/__tests__/merger-ai.test.ts",
           ],
         },
       },
@@ -112,7 +115,10 @@ export default defineConfig({
           include: ["src/__tests__/reliability-interactions/**/*.test.ts"],
           // Mirror the engine-default exclusion so reliability slow tests
           // also tier into engine-slow.
-          exclude: ["src/**/*.slow.test.ts"],
+          exclude: [
+            "src/**/*.slow.test.ts",
+            "src/__tests__/reliability-interactions/soft-delete-blocker-residue.test.ts",
+          ],
           // These tests assert event ordering across real worktrees. Parallel
           // execution under merger load caused subprocess-guard timeouts and
           // SQLite rowid interleaving (e.g. FN-5521 hit

@@ -1,9 +1,20 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
-import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 const FUSION_DISABLED_EXTENSIONS_KEY = "fusionDisabledExtensions";
+const require = createRequire(import.meta.url);
+
+let cachedSpawnSync: typeof import("node:child_process")["spawnSync"] | undefined;
+let didLoadSpawnSync = false;
+function getSpawnSync(): typeof import("node:child_process")["spawnSync"] | undefined {
+  if (!didLoadSpawnSync) {
+    didLoadSpawnSync = true;
+    cachedSpawnSync = require("node:child_process").spawnSync;
+  }
+  return cachedSpawnSync;
+}
 
 export type PiExtensionSource = "fusion-global" | "pi-global" | "fusion-project" | "pi-project" | "package";
 
@@ -76,6 +87,11 @@ export function getProjectRootFromWorktree(
 }
 
 function getProjectRootFromGitLinkedWorktree(cwd: string): string | null {
+  const spawnSync = getSpawnSync();
+  if (!spawnSync) {
+    return null;
+  }
+
   const resolvedCwd = resolve(cwd);
   const commonDir = spawnSync("git", ["rev-parse", "--git-common-dir"], {
     cwd: resolvedCwd,

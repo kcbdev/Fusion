@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CeSession } from "../../session/session-store.js";
-import { deleteSession as deleteSessionApi, listSessions as listSessionsApi } from "./api.js";
+import { cancelSession as cancelSessionApi, deleteSession as deleteSessionApi, listSessions as listSessionsApi } from "./api.js";
 
 /**
  * Injectable list transport so component tests can drive the session list
@@ -9,11 +9,15 @@ import { deleteSession as deleteSessionApi, listSessions as listSessionsApi } fr
 export interface CeSessionsTransport {
   list(projectId?: string): Promise<CeSession[]>;
   remove(sessionId: string, projectId?: string): Promise<void>;
+  cancel(sessionId: string, projectId?: string): Promise<void>;
 }
 
 const defaultTransport: CeSessionsTransport = {
   list: (projectId) => listSessionsApi({ projectId }),
   remove: (id, projectId) => deleteSessionApi(id, projectId),
+  cancel: async (id, projectId) => {
+    await cancelSessionApi(id, projectId);
+  },
 };
 
 /**
@@ -41,6 +45,8 @@ export interface UseCeSessionsResult {
   refresh(): Promise<void>;
   /** Discard a session and refresh the list. */
   remove(sessionId: string): Promise<void>;
+  /** Cancel an in-flight session and refresh the list. */
+  cancel(sessionId: string): Promise<void>;
 }
 
 /** Statuses with an agent turn in flight — the list keeps polling while any exist. */
@@ -123,5 +129,18 @@ export function useCeSessions(options: UseCeSessionsOptions = {}): UseCeSessions
     [transport, projectId, refresh],
   );
 
-  return { sessions, loading, error, refresh, remove };
+  const cancel = useCallback(
+    async (sessionId: string) => {
+      try {
+        await transport.cancel(sessionId, projectId);
+      } catch (err) {
+        if (mounted.current) setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      await refresh();
+    },
+    [transport, projectId, refresh],
+  );
+
+  return { sessions, loading, error, refresh, remove, cancel };
 }

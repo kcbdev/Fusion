@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { TaskStore, Task, TaskDetail, Settings } from "@fusion/core";
+import { builtinSeamPrompt, renderTriagePolicyPlaceholders, resolveAgentPrompt } from "@fusion/core";
 import {
   TriageProcessor,
-  TRIAGE_SYSTEM_PROMPT,
-  FAST_TRIAGE_SYSTEM_PROMPT,
   buildSpecificationPrompt,
   readAttachmentContents,
   computeUserCommentFingerprint,
@@ -21,6 +20,10 @@ const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
   mockCreateFnAgent: vi.fn(),
 }));
 
+const TRIAGE_POLICY_PROMPT = resolveAgentPrompt("triage");
+const FAST_PLANNING_PROMPT = builtinSeamPrompt("planning-fast");
+const RENDERED_TRIAGE_POLICY_PROMPT = renderTriagePolicyPlaceholders(TRIAGE_POLICY_PROMPT, {});
+
 vi.mock("../reviewer.js", () => ({
   reviewStep: mockReviewStep,
 }));
@@ -33,8 +36,9 @@ vi.mock("../pi.js", () => ({
 
 vi.mock("@fusion/core", async (importOriginal) => {
   const { createEngineCoreMock } = await import("../test/mockCore.js");
-  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
-    resolveAgentPrompt: vi.fn().mockReturnValue(null),
+  const original = await importOriginal<typeof import("@fusion/core")>();
+  return createEngineCoreMock(() => Promise.resolve(original), {
+    resolveAgentPrompt: vi.fn(original.resolveAgentPrompt),
   });
 });
 
@@ -331,7 +335,7 @@ describe("buildSpecificationPrompt", () => {
     );
 
     expect(prompt).toContain("## Subtask Consideration");
-    expect(prompt).toContain("more than 10 implementation steps");
+    expect(prompt).toContain("MORE THAN 7 implementation steps");
     expect(prompt).toContain("GOOD TO SPLIT");
     expect(prompt).not.toContain("## Subtask Breakdown Requested");
   });
@@ -593,55 +597,56 @@ describe("buildSpecificationPrompt", () => {
   });
 });
 
-describe("TRIAGE_SYSTEM_PROMPT", () => {
+describe("canonical triage policy prompt", () => {
   it("does not include unconditional research guidance", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).not.toContain("fn_research_run");
-    expect(TRIAGE_SYSTEM_PROMPT).not.toContain("Keep research bounded");
+    expect(TRIAGE_POLICY_PROMPT).not.toContain("fn_research_run");
+    expect(TRIAGE_POLICY_PROMPT).not.toContain("Keep research bounded");
   });
 
   it("requires specs to keep lint, tests, build, and typecheck green even outside initial file scope", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("If keeping lint/tests/build/typecheck green requires edits outside the initial File Scope");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Run lint check");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Run project typecheck if available");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Lint passing");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Typecheck passing (if available)");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Specs must instruct executors to fix lint failures and quality-gate failures directly");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Refuse necessary fixes just because they touch files outside the initial File Scope");
+    expect(TRIAGE_POLICY_PROMPT).toContain("If keeping lint/tests/build/typecheck green requires edits outside the initial File Scope");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Run lint check");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Run project typecheck if available");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Lint passing");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Typecheck passing (if available)");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Specs must instruct executors to fix lint failures and quality-gate failures directly");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Refuse necessary fixes just because they touch files outside the initial File Scope");
   });
 
   it("includes task-artifact location guidance for forensic/reconciliation tasks", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Task Artifact Location");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(".fusion/fusion.db");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("project root");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("forensic");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Task Artifact Location");
+    expect(TRIAGE_POLICY_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
+    expect(TRIAGE_POLICY_PROMPT).toContain(".fusion/fusion.db");
+    expect(TRIAGE_POLICY_PROMPT).toContain("project root");
+    expect(TRIAGE_POLICY_PROMPT).toContain("forensic");
   });
 });
 
-describe("TRIAGE_SYSTEM_PROMPT", () => {
+describe("canonical triage policy prompt", () => {
   it("includes proactive M/L subtask breakdown guidance", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+    expect(TRIAGE_POLICY_PROMPT).toContain(
       "## Proactive Subtask Breakdown for M/L Tasks",
     );
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+    expect(TRIAGE_POLICY_PROMPT).toContain(
       "Even when `breakIntoSubtasks` is not set to `true`",
     );
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+    expect(TRIAGE_POLICY_PROMPT).toContain(
       "Size S tasks should NOT be split",
     );
   });
 
-  it("includes explicit subtask breakdown thresholds", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("more than 10 implementation steps");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(
-      "more than 5 different packages/modules",
+  it("includes explicit rendered subtask breakdown thresholds", () => {
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain("MORE THAN 7 implementation steps");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
+      "MORE THAN 3 different packages/modules",
     );
+    expect(TRIAGE_POLICY_PROMPT).toContain("MORE THAN {{triageSubtaskStepThreshold}} implementation steps");
   });
 
   it("biases toward keeping tasks whole and acknowledges coordination overhead", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Default to keeping the task whole");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Coordination overhead");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain(
+    expect(TRIAGE_POLICY_PROMPT).toContain("Default to keeping the task whole");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Coordination overhead");
+    expect(TRIAGE_POLICY_PROMPT).toContain(
       "7-10 focused steps within a coherent scope is fine as one unit",
     );
   });
@@ -655,8 +660,8 @@ describe("FN-5893 invariant regression wording", () => {
 
   it("requires invariant-level regression coverage in standard, fast, and core triage prompts", () => {
     for (const prompt of [
-      TRIAGE_SYSTEM_PROMPT,
-      FAST_TRIAGE_SYSTEM_PROMPT,
+      TRIAGE_POLICY_PROMPT,
+      FAST_PLANNING_PROMPT,
       corePromptSource,
     ]) {
       expect(prompt).toContain("invariant across all known surfaces");
@@ -668,14 +673,21 @@ describe("FN-5893 invariant regression wording", () => {
     }
   });
 
-  it("requires a Surface Enumeration section and blocking REVISE guidance for bug-fix specs", () => {
-    for (const prompt of [TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+  it("requires a Surface Enumeration section and proves missing sections are blocking REVISEs for bug-fix specs", () => {
+    const missingSectionRevisePattern =
+      /For bug fixes and UI-affordance add\/remove tasks, the spec MUST include a `## Surface Enumeration` section\. During self-review via `fn_review_spec\(\)`, treat a missing section on a bug-fix or UI-affordance add\/remove spec as a blocking REVISE\./;
+
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
       expect(prompt).toContain("## Surface Enumeration");
-      expect(prompt).toContain("spec MUST include a `## Surface Enumeration` section");
-      expect(prompt).toContain("blocking REVISE");
+      expect(prompt).toMatch(missingSectionRevisePattern);
       expect(prompt).toContain("docs/testing.md");
       expect(prompt).toContain("duplicate / populated data states");
       expect(prompt).toContain("shared hooks/components/modules/helpers");
+      expect(prompt).toContain("UI-affordance add/remove");
+      expect(prompt).toContain("For bug fixes and UI-affordance add/remove tasks");
+      expect(prompt).toContain(
+        "For bug-fix and UI-affordance add/remove tasks, paste and fill in this checklist",
+      );
     }
 
     expect(corePromptSource).toContain("## Surface Enumeration");
@@ -687,14 +699,41 @@ describe("FN-5893 invariant regression wording", () => {
   });
 
   it("requires implementation-step testing guidance to enumerate invariant surfaces in standard and fast prompts", () => {
-    for (const prompt of [TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
       expect(prompt).toContain(
         "Run targeted tests for changed files, asserting the invariant across all known surfaces",
       );
       expect(prompt).toContain(
-        "For bug-fix tasks, paste and fill in this checklist in the `## Surface Enumeration` section",
+        "For bug-fix and UI-affordance add/remove tasks, paste and fill in this checklist in the `## Surface Enumeration` section",
       );
     }
+  });
+
+  it("defines the FN-6229 Symptom Verification contract in standard and fast prompts", () => {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
+      expect(prompt).toContain("## Symptom Verification");
+      expect(prompt).toContain("Use the exact heading `## Symptom Verification`");
+      expect(prompt).toContain("**Original symptom** — what the user/issue reported was broken");
+      expect(prompt).toContain("**Exact reproduction** — the precise steps, inputs, fixture, or automated repro that triggered the failure");
+      expect(prompt).toContain("**Assertion it is gone**");
+      expect(prompt).toContain("final verification must reproduce that original failure condition and assert it no longer occurs");
+      expect(prompt).toContain("Green build/tests alone are insufficient");
+      expect(prompt).toContain("symptom-based acceptance");
+      expect(prompt).toContain("bug-class/bug-fix tasks");
+      expect(prompt).toContain("feature/docs/non-bug tasks do not need this section");
+    }
+  });
+
+  it("requires Surface Enumeration for UI-affordance add/remove tasks regardless of review-level analysis", () => {
+    for (const prompt of [TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
+      expect(prompt).toContain("bug-fix tasks and UI-affordance add/remove tasks");
+      expect(prompt).toContain("every component that renders the affordance");
+      expect(prompt).toContain("searching the codebase for the icon/class/testid");
+      expect(prompt).toContain("leftover shells after removal");
+      expect(prompt).toContain("empty buttons");
+    }
+
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Review Level");
   });
 
   it("pins the canonical docs checklist heading", () => {
@@ -709,26 +748,38 @@ describe("FN-5893 invariant regression wording", () => {
 });
 
 describe("fast-mode triage", () => {
-  it("exports a lean FAST_TRIAGE_SYSTEM_PROMPT", () => {
-    expect(typeof FAST_TRIAGE_SYSTEM_PROMPT).toBe("string");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT.length).toBeGreaterThan(0);
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("This task is running in **fast mode**");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("fn_review_spec()");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("## Review Level");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("## Triage subtask breakdown");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("## Proactive Subtask Breakdown");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("Frontend UX Criteria");
+  it("exports a lean FAST_PLANNING_PROMPT", () => {
+    expect(typeof FAST_PLANNING_PROMPT).toBe("string");
+    expect(FAST_PLANNING_PROMPT.length).toBeGreaterThan(0);
+    expect(FAST_PLANNING_PROMPT).toContain("This task is running in **fast mode**");
+    expect(FAST_PLANNING_PROMPT).toContain("fn_review_spec()");
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Review Level");
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Triage subtask breakdown");
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Proactive Subtask Breakdown");
+    expect(FAST_PLANNING_PROMPT).not.toContain("Frontend UX Criteria");
+  });
+
+  it("documents workflow routing in standard and fast prompts", () => {
+    for (const prompt of [RENDERED_TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
+      expect(prompt).toContain("## Workflow Routing");
+      expect(prompt).toContain("fn_workflow_list");
+      expect(prompt).toContain("fn_workflow_select");
+      expect(prompt).toContain("workflow_id");
+      expect(prompt).toContain("**No commits expected:** true");
+      expect(prompt).toContain("builtin:quick-fix");
+      expect(prompt).toContain("builtin:coding");
+    }
   });
 
   it("includes task-artifact location guidance for forensic/reconciliation tasks", () => {
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("Task Artifact Location");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain(".fusion/fusion.db");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("project root");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("forensic");
+    expect(FAST_PLANNING_PROMPT).toContain("Task Artifact Location");
+    expect(FAST_PLANNING_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
+    expect(FAST_PLANNING_PROMPT).toContain(".fusion/fusion.db");
+    expect(FAST_PLANNING_PROMPT).toContain("project root");
+    expect(FAST_PLANNING_PROMPT).toContain("forensic");
   });
 
-  it("selects FAST_TRIAGE_SYSTEM_PROMPT for fast tasks", async () => {
+  it("selects FAST_PLANNING_PROMPT for fast tasks", async () => {
     const task = createTriageTask({ id: "FN-FAST-001", executionMode: "fast" });
     const store = createMockStore({
       getTask: vi.fn().mockResolvedValue({ ...mockTaskDetail, id: task.id, attachments: [], comments: [] }),
@@ -908,7 +959,7 @@ describe("fast-mode triage", () => {
       expect(mockReviewStep).not.toHaveBeenCalled();
       expect(verdictRef.current).toBe("APPROVE");
       expect(result.content[0]?.text).toBe("APPROVE");
-      expect(store.logEntry).toHaveBeenCalledWith(taskId, "Spec review: APPROVE (auto, fast mode)");
+      expect(store.logEntry).toHaveBeenCalledWith(taskId, "Spec review: APPROVE (auto-approve spec)");
     } finally {
       await cleanupTriageFixtureRoot(rootDir);
     }
@@ -967,7 +1018,7 @@ describe("fast-mode triage", () => {
 
       expect(mockReviewStep).not.toHaveBeenCalled();
       expect(store.moveTask).toHaveBeenCalledWith("FN-FAST-004", "todo");
-      expect(store.logEntry).toHaveBeenCalledWith("FN-FAST-004", "Spec review: APPROVE (auto, fast mode)");
+      expect(store.logEntry).toHaveBeenCalledWith("FN-FAST-004", "Spec review: APPROVE (auto-approve spec)");
     } finally {
       await cleanupTriageFixtureRoot(rootDir);
     }
@@ -1187,6 +1238,32 @@ describe("TriageProcessor", () => {
 
   it("creates processor with default options", () => {
     expect(processor).toBeInstanceOf(TriageProcessor);
+  });
+
+  it("includes workflow discovery and selection tools in the full triage toolset", async () => {
+    const task = createTriageTask({ id: "FN-WORKFLOW-TOOLS" });
+    const detailedTask = { ...mockTaskDetail, id: task.id, attachments: [], comments: [] };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(detailedTask);
+
+    let capturedTools: any[] = [];
+    mockCreateFnAgent.mockImplementationOnce(async (opts: any) => {
+      capturedTools = opts.customTools;
+      return {
+        session: {
+          state: {},
+          sessionManager: { getLeafId: vi.fn().mockReturnValue(null) },
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          navigateTree: vi.fn(),
+        },
+      };
+    });
+
+    await processor.specifyTask(task);
+
+    const toolNames = capturedTools.map((tool) => tool.name);
+    expect(toolNames).toContain("fn_workflow_list");
+    expect(toolNames).toContain("fn_workflow_select");
   });
 
   it("can be started and stopped", () => {
@@ -1709,10 +1786,14 @@ describe("approved triage recovery", () => {
   });
 
   it("includes decision-only noCommitsExpected heuristic instructions in system prompts", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("**No commits expected:** true");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Decide whether FN-XYZ needs a fix");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Investigate FN-XYZ and fix if needed");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("**No commits expected:** true");
+    expect(TRIAGE_POLICY_PROMPT).toContain("**No commits expected:** true");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Decide whether FN-XYZ needs a fix");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Assign ready implementation task to active owner, or record no-route state");
+    expect(TRIAGE_POLICY_PROMPT).toContain("operational routing/coordination");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Investigate FN-XYZ and fix if needed");
+    expect(TRIAGE_POLICY_PROMPT).toContain("Investigate and fix routing if needed");
+    expect(FAST_PLANNING_PROMPT).toContain("**No commits expected:** true");
+    expect(FAST_PLANNING_PROMPT).toContain("operational routing/coordination");
   });
 
   it("preserves imported GitHub issue titles during planning recovery", async () => {
@@ -2027,8 +2108,66 @@ describe("taskCreate tool model inheritance", () => {
         title: "Child Task",
         description: "Child task description",
       }), expect.objectContaining({
-        settings: { autoSummarizeTitles: false },
+        settings: expect.objectContaining({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+        }),
       }));
+    });
+
+    it("fn_task_create passes workflow_id and noCommitsExpected through to child tasks", async () => {
+      const parentTask: Task = {
+        id: "FN-410",
+        description: "Parent task",
+        column: "triage",
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const createdSubtask: Task = {
+        ...parentTask,
+        id: "FN-411",
+        description: "Decision child task",
+        workflowId: "builtin:quick-fix",
+        noCommitsExpected: true,
+      };
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue(parentTask),
+        createTask: vi.fn().mockResolvedValue(createdSubtask),
+      });
+      const processor = new TriageProcessor(store, "/test/root");
+      const createdSubtasksRef = { current: [] };
+
+      const tools = (processor as any).createTriageTools({
+        parentTaskId: "FN-410",
+        allowTaskCreate: true,
+        createdSubtasksRef,
+      });
+      const taskCreateTool = tools.find((t: any) => t.name === "fn_task_create");
+
+      const result = await taskCreateTool.execute("call-1", {
+        description: "Investigate and report the routing decision",
+        workflow_id: "builtin:quick-fix",
+        noCommitsExpected: true,
+      });
+
+      expect(result.content[0].text).toContain("Created child task FN-411");
+      expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        description: "Investigate and report the routing decision",
+        workflowId: "builtin:quick-fix",
+        noCommitsExpected: true,
+      }), expect.objectContaining({
+        settings: expect.objectContaining({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+        }),
+      }));
+      expect(createdSubtasksRef.current).toContain("FN-411");
     });
 
     it("fn_task_create rejects a dependency on the parent task being split", async () => {
@@ -2126,7 +2265,12 @@ describe("taskCreate tool model inheritance", () => {
       // The second createTask call should have the resolved sibling id preserved.
       expect(createTaskMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ dependencies: ["FN-701"] }),
-        expect.objectContaining({ settings: { autoSummarizeTitles: false } }),
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+          }),
+        }),
       );
       expect(createdSubtasksRef.current).toEqual(["FN-701", "FN-702"]);
     });
@@ -2949,7 +3093,7 @@ describe("taskCreate tool model inheritance", () => {
       expect(capturedArgs.systemPrompt).toContain("agent ID: agent-007");
     });
 
-    it("prefers assigned-agent runtime model and falls back when incomplete", async () => {
+    it("prefers planning settings model ahead of assigned-agent runtime model", async () => {
       const completeRuntimeTask = createTriageTask({ id: "FN-AGENT-MODEL-1", assignedAgentId: "agent-model-complete" });
       const incompleteRuntimeTask = createTriageTask({ id: "FN-AGENT-MODEL-2", assignedAgentId: "agent-model-incomplete" });
 
@@ -3017,7 +3161,7 @@ describe("taskCreate tool model inheritance", () => {
       const completeCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-1");
       const fallbackCall = capturedArgs.find((entry) => entry.taskId === "FN-AGENT-MODEL-2");
 
-      expect(completeCall).toMatchObject({ defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" });
+      expect(completeCall).toMatchObject({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
       expect(fallbackCall).toMatchObject({ defaultProvider: "openai", defaultModelId: "gpt-4o" });
     });
 
@@ -4276,33 +4420,33 @@ describe("FN-4774 regression: triage duplicate detection over done/archived task
   });
 
   // Regression: FN-4774 (FN-4827 recovery; supersedes FN-4815) — see docs/triage-duplicate-detection-postmortem.md
-  it("TRIAGE_SYSTEM_PROMPT guides agents to search done/archived before creating", () => {
+  it("canonical triage policy prompt guides agents to search done/archived before creating", () => {
     // Standard prompt mentions fn_task_search in duplicate-check guidance
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("fn_task_search");
+    expect(TRIAGE_POLICY_PROMPT).toContain("fn_task_search");
     // The tool bullet list explicitly states it covers done and archived
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("including done and archived tasks");
+    expect(TRIAGE_POLICY_PROMPT).toContain("including done and archived tasks");
     // Duplicate-check section co-locates fn_task_search with done/archived references
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("done");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("archived");
+    expect(TRIAGE_POLICY_PROMPT).toContain("done");
+    expect(TRIAGE_POLICY_PROMPT).toContain("archived");
     // Defensive regex: duplicate-check guidance must cross-reference fn_task_search with done/archived
     expect(
       /Duplicate check[\s\S]{0,600}fn_task_search[\s\S]{0,400}(done|archived)/i.test(
-        TRIAGE_SYSTEM_PROMPT,
+        TRIAGE_POLICY_PROMPT,
       ),
     ).toBe(true);
   });
 
   // Regression: FN-4774 (FN-4827 recovery; supersedes FN-4815) — see docs/triage-duplicate-detection-postmortem.md
-  it("FAST_TRIAGE_SYSTEM_PROMPT guides agents to search done/archived before creating", () => {
+  it("FAST_PLANNING_PROMPT guides agents to search done/archived before creating", () => {
     // Fast prompt mentions fn_task_search
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("fn_task_search");
+    expect(FAST_PLANNING_PROMPT).toContain("fn_task_search");
     // Duplicate-check section references done and archived
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("done");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("archived");
+    expect(FAST_PLANNING_PROMPT).toContain("done");
+    expect(FAST_PLANNING_PROMPT).toContain("archived");
     // Defensive regex: duplicate-check guidance must cross-reference fn_task_search with done/archived
     expect(
       /Duplicate check[\s\S]{0,600}fn_task_search[\s\S]{0,400}(done|archived)/i.test(
-        FAST_TRIAGE_SYSTEM_PROMPT,
+        FAST_PLANNING_PROMPT,
       ),
     ).toBe(true);
   });

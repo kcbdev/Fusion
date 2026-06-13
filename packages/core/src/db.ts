@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 115;
+const SCHEMA_VERSION = 117;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   baseBranch TEXT,
   branch TEXT,
   autoMerge INTEGER,
+  autoMergeProvenance TEXT,
   executionStartBranch TEXT,
   baseCommitSha TEXT,
   modelPresetId TEXT,
@@ -262,6 +263,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   mergeRetries INTEGER,
   workflowStepRetries INTEGER,
   resumeLimboCount INTEGER DEFAULT 0,
+  graphResumeRetryCount INTEGER DEFAULT 0,
   resumeLimboTipSha TEXT,
   resumeLimboStepSignature TEXT,
   recoveryRetryCount INTEGER,
@@ -4686,6 +4688,20 @@ export class Database {
           CREATE INDEX IF NOT EXISTS idx_workflow_work_items_task_run
             ON workflow_work_items(taskId, runId);
         `);
+      });
+    }
+
+    // Migration 116: Bounded transient resume-after-restart graph retries.
+    if (version < 116) {
+      this.applyMigration(116, () => {
+        this.addColumnIfMissing("tasks", "graphResumeRetryCount", "INTEGER DEFAULT 0");
+      });
+    }
+
+    // Migration 117: Auto-merge override provenance for legacy stamp cleanup.
+    if (version < 117) {
+      this.applyMigration(117, () => {
+        this.addColumnIfMissing("tasks", "autoMergeProvenance", "TEXT");
       });
     }
 

@@ -47,7 +47,6 @@ async function main() {
   const store = new TaskStore(root);
   await store.init();
   await store.updateSettings({ maxConcurrent: 10 } as any);
-  await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
   const browserDemoWorkflow = await store.createWorkflowDefinition({
     name: "Browser Demo Lifecycle",
     description: "Simple board lifecycle for browser demos: Todo → In Progress → In Review → QA → Publish.",

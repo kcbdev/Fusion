@@ -82,6 +82,104 @@ describe("model-resolution", () => {
     ).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
   });
 
+  it("uses project lane overrides for every pure settings lane before global and default fallbacks", () => {
+    expect(resolveExecutionSettingsModel({
+      executionProvider: "project-exec-provider",
+      executionModelId: "project-exec-model",
+      executionGlobalProvider: "global-exec-provider",
+      executionGlobalModelId: "global-exec-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "project-exec-provider", modelId: "project-exec-model" });
+
+    expect(resolvePlanningSettingsModel({
+      planningProvider: "project-plan-provider",
+      planningModelId: "project-plan-model",
+      planningGlobalProvider: "global-plan-provider",
+      planningGlobalModelId: "global-plan-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "project-plan-provider", modelId: "project-plan-model" });
+
+    expect(resolveValidatorSettingsModel({
+      validatorProvider: "project-validator-provider",
+      validatorModelId: "project-validator-model",
+      validatorGlobalProvider: "global-validator-provider",
+      validatorGlobalModelId: "global-validator-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "project-validator-provider", modelId: "project-validator-model" });
+
+    expect(resolveTitleSummarizerSettingsModel({
+      titleSummarizerProvider: "project-title-provider",
+      titleSummarizerModelId: "project-title-model",
+      titleSummarizerGlobalProvider: "global-title-provider",
+      titleSummarizerGlobalModelId: "global-title-model",
+      planningProvider: "project-plan-provider",
+      planningModelId: "project-plan-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "project-title-provider", modelId: "project-title-model" });
+  });
+
+  it("does not mix partial project lane pairs with lower precedence model fields", () => {
+    expect(resolveExecutionSettingsModel({
+      executionProvider: "project-exec-provider",
+      executionGlobalProvider: "global-exec-provider",
+      executionGlobalModelId: "global-exec-model",
+    })).toEqual({ provider: "global-exec-provider", modelId: "global-exec-model" });
+
+    expect(resolvePlanningSettingsModel({
+      planningModelId: "project-plan-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "project-default-provider", modelId: "project-default-model" });
+
+    expect(resolveValidatorSettingsModel({
+      validatorProvider: "project-validator-provider",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).toEqual({ provider: "global-default-provider", modelId: "global-default-model" });
+
+    expect(resolveTitleSummarizerSettingsModel({
+      titleSummarizerModelId: "project-title-model",
+      titleSummarizerGlobalProvider: "global-title-provider",
+      titleSummarizerGlobalModelId: "global-title-model",
+      planningProvider: "project-plan-provider",
+      planningModelId: "project-plan-model",
+    })).toEqual({ provider: "global-title-provider", modelId: "global-title-model" });
+  });
+
+  it("keeps global lane and default fallback order intact when project lanes are unset", () => {
+    expect(resolveExecutionSettingsModel({
+      executionGlobalProvider: "global-exec-provider",
+      executionGlobalModelId: "global-exec-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "global-exec-provider", modelId: "global-exec-model" });
+
+    expect(resolvePlanningSettingsModel({
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).toEqual({ provider: "project-default-provider", modelId: "project-default-model" });
+
+    expect(resolveValidatorSettingsModel({
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).toEqual({ provider: "global-default-provider", modelId: "global-default-model" });
+
+    expect(resolveTitleSummarizerSettingsModel({
+      titleSummarizerGlobalProvider: "global-title-provider",
+      titleSummarizerGlobalModelId: "global-title-model",
+      planningProvider: "project-plan-provider",
+      planningModelId: "project-plan-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+    })).toEqual({ provider: "global-title-provider", modelId: "global-title-model" });
+  });
+
   it("uses task overrides before settings fallbacks", () => {
     expect(
       resolveTaskExecutionModel(
@@ -117,6 +215,46 @@ describe("model-resolution", () => {
         },
       ),
     ).toEqual({ provider: "openai", modelId: "gpt-4.1" });
+  });
+
+  it("ignores partial pairs at every precedence tier", () => {
+    expect(
+      resolveProjectDefaultModel({
+        defaultProviderOverride: "openai",
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+      }),
+    ).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+
+    expect(
+      resolveTaskExecutionModel(
+        { modelProvider: "task-provider" },
+        {
+          executionProvider: "openai",
+          executionModelId: "gpt-4.1",
+        },
+      ),
+    ).toEqual({ provider: "openai", modelId: "gpt-4.1" });
+
+    expect(
+      resolveTaskPlanningModel(
+        { planningModelId: "task-planning-model" },
+        {
+          planningGlobalProvider: "anthropic",
+          planningGlobalModelId: "claude-sonnet-4-5",
+        },
+      ),
+    ).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+
+    expect(
+      resolveTaskValidatorModel(
+        { validatorModelProvider: "validator-task-provider" },
+        {
+          defaultProviderOverride: "google",
+          defaultModelIdOverride: "gemini-2.5-pro",
+        },
+      ),
+    ).toEqual({ provider: "google", modelId: "gemini-2.5-pro" });
   });
 
   it("forces every lane to mock when testMode is true", () => {

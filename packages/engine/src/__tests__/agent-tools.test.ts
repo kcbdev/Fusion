@@ -144,10 +144,10 @@ describe("createTaskCreateTool", () => {
       dependencies: ["PROJ-001"],
       column: "triage",
       priority: undefined,
+      summarize: true,
       source: undefined,
     }, {
       settings: { autoSummarizeTitles: false },
-      onSummarize: undefined,
     });
     expect(result.details).toEqual({ taskId: "PROJ-042" });
     const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -167,7 +167,44 @@ describe("createTaskCreateTool", () => {
 
     expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
       priority: "high",
+      summarize: true,
     }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+  });
+
+  it("passes workflow_id through as workflowId", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-099", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+    const result = await tool.execute(
+      "call-1",
+      { description: "Test", workflow_id: " WF-003 " } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: "WF-003",
+    }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+    const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(responseText).toContain("(workflow: WF-003)");
+  });
+
+  it("omits workflowId when workflow_id is not provided", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-100", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+    await tool.execute("call-1", { description: "Test" } as any, undefined, undefined, {} as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowId: expect.anything(),
+    }), expect.anything());
   });
 
   it("passes explicit provenance to store.createTask", async () => {
@@ -184,6 +221,7 @@ describe("createTaskCreateTool", () => {
     await tool.execute("call-1", { description: "Test" } as any, undefined, undefined, {} as any);
 
     expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      summarize: true,
       source: {
         sourceType: "agent_heartbeat",
         sourceAgentId: "agent-123",
@@ -209,6 +247,7 @@ describe("createTaskCreateTool", () => {
     await tool.execute("call-1", { description: "spawn follow-up" } as any, undefined, undefined, {} as any);
 
     expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      summarize: true,
       source: {
         sourceType: "agent_heartbeat",
         sourceAgentId: "agent-123",
@@ -261,6 +300,70 @@ describe("createTaskCreateTool", () => {
     expect(second.wasDuplicate).toBe(true);
     expect(store.createTask).toHaveBeenCalledTimes(1);
   });
+
+  it("passes summarize: true and full settings when no title provided", async () => {
+    const created = { id: "FN-201", description: "untitled follow-up", dependencies: [], column: "triage" };
+    const settings = {
+      autoSummarizeTitles: false,
+      titleSummarizerProvider: "openai",
+      titleSummarizerModelId: "gpt-4o-mini",
+    };
+    const store = {
+      getSettings: vi.fn().mockResolvedValue(settings),
+      createTask: vi.fn().mockResolvedValue(created),
+    };
+
+    await createAgentTask(store as any, { description: "untitled follow-up" } as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      description: "untitled follow-up",
+      summarize: true,
+    }), expect.objectContaining({ settings }));
+  });
+
+  it("passes full settings and does not set summarize when title is provided", async () => {
+    const created = { id: "FN-202", title: "Explicit title", description: "titled follow-up", dependencies: [], column: "triage" };
+    const settings = {
+      autoSummarizeTitles: false,
+      titleSummarizerProvider: "openai",
+      titleSummarizerModelId: "gpt-4o-mini",
+    };
+    const store = {
+      getSettings: vi.fn().mockResolvedValue(settings),
+      createTask: vi.fn().mockResolvedValue(created),
+    };
+
+    await createAgentTask(store as any, { title: "Explicit title", description: "titled follow-up" } as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Explicit title",
+      summarize: undefined,
+    }), expect.objectContaining({ settings }));
+  });
+
+  it("passes summarize: true without onSummarize so the store resolves title generation", async () => {
+    const created = { id: "FN-203", description: "untitled follow-up", dependencies: [], column: "triage" };
+    const settings = {
+      autoSummarizeTitles: false,
+      titleSummarizerProvider: "openai",
+      titleSummarizerModelId: "gpt-4o-mini",
+    };
+    const store = {
+      getSettings: vi.fn().mockResolvedValue(settings),
+      createTask: vi.fn().mockResolvedValue(created),
+    };
+
+    await createAgentTask(store as any, { description: "untitled follow-up" } as any, { rootDir: "/repo" });
+
+    const createInput = vi.mocked(store.createTask).mock.calls[0]?.[0];
+    const createOptions = vi.mocked(store.createTask).mock.calls[0]?.[1] as { onSummarize?: (description: string) => Promise<string | null>; settings?: unknown };
+    expect(createInput).toEqual(expect.objectContaining({
+      description: "untitled follow-up",
+      summarize: true,
+    }));
+    expect(createOptions).toEqual(expect.objectContaining({ settings }));
+    expect(createOptions.onSummarize).toBeUndefined();
+  });
 });
 
 describe("createDelegateTaskTool", () => {
@@ -300,6 +403,48 @@ describe("createDelegateTaskTool", () => {
     }), expect.any(Object));
   });
 
+  it("passes workflow_id through as workflowId for delegated tasks", async () => {
+    const agentStore = {
+      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+    };
+    const taskStore = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "FN-103", dependencies: [], description: "Delegated" }),
+    };
+
+    const tool = createDelegateTaskTool(agentStore as any, taskStore as any);
+    const result = await tool.execute(
+      "call-1",
+      { agent_id: "agent-1", description: "Delegated", workflow_id: " builtin:coding " } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    expect(taskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: "builtin:coding",
+    }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+    const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(responseText).toContain("(workflow: builtin:coding)");
+  });
+
+  it("omits workflowId for delegated tasks when workflow_id is not provided", async () => {
+    const agentStore = {
+      getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
+    };
+    const taskStore = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "FN-104", dependencies: [], description: "Delegated" }),
+    };
+
+    const tool = createDelegateTaskTool(agentStore as any, taskStore as any);
+    await tool.execute("call-1", { agent_id: "agent-1", description: "Delegated" } as any, undefined, undefined, {} as any);
+
+    expect(taskStore.createTask).toHaveBeenCalledWith(expect.not.objectContaining({
+      workflowId: expect.anything(),
+    }), expect.anything());
+  });
+
   it("uses linked-existing wording when delegated task is a deterministic duplicate", async () => {
     vi.spyOn(core, "runDeterministicDuplicateGuard").mockResolvedValueOnce({
       action: "duplicate",
@@ -324,28 +469,26 @@ describe("createDelegateTaskTool", () => {
     expect(taskStore.createTask).not.toHaveBeenCalled();
   });
 
-  it("wires title summarization callback when rootDir is provided", async () => {
-    const summarizeSpy = vi.spyOn(core, "summarizeTitle").mockResolvedValue("Short title");
+  it("does not wire a title summarization callback when rootDir is provided", async () => {
     const agentStore = {
       getAgent: vi.fn().mockResolvedValue({ id: "agent-1", name: "Worker", role: "executor", state: "idle" }),
     };
+    const settings = {
+      autoSummarizeTitles: true,
+      titleSummarizerProvider: "openai",
+      titleSummarizerModelId: "gpt-4o-mini",
+    };
     const taskStore = {
-      getSettings: vi.fn().mockResolvedValue({
-        autoSummarizeTitles: true,
-        titleSummarizerProvider: "openai",
-        titleSummarizerModelId: "gpt-4o-mini",
-      }),
+      getSettings: vi.fn().mockResolvedValue(settings),
       createTask: vi.fn().mockResolvedValue({ id: "FN-101", dependencies: [], description: "Delegated" }),
     };
 
     const tool = createDelegateTaskTool(agentStore as any, taskStore as any, { rootDir: "/repo" });
     await tool.execute("call-1", { agent_id: "agent-1", description: "Delegated" } as any, undefined, undefined, {} as any);
 
-    const options = vi.mocked(taskStore.createTask).mock.calls[0]?.[1] as { onSummarize?: (description: string) => Promise<string | null> };
-    expect(options.onSummarize).toBeTypeOf("function");
-    await options.onSummarize?.("Long description");
-    expect(summarizeSpy).toHaveBeenCalledWith("Long description", "/repo", "openai", "gpt-4o-mini");
-    summarizeSpy.mockRestore();
+    const options = vi.mocked(taskStore.createTask).mock.calls[0]?.[1] as { onSummarize?: (description: string) => Promise<string | null>; settings?: unknown };
+    expect(options).toEqual(expect.objectContaining({ settings }));
+    expect(options.onSummarize).toBeUndefined();
   });
 });
 

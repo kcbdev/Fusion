@@ -22,10 +22,10 @@ const { mockSetIssueState, mockGetIssue, mockResolveGithubTrackingAuth } = vi.ho
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
     getIssue: (...args: unknown[]) => mockGetIssue(...args),
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({
@@ -234,6 +234,8 @@ describe("github tracking delete flow", () => {
       createdAt: new Date().toISOString(),
     });
 
+    await store.moveTask(task.id, "todo");
+    await store.moveTask(task.id, "in-progress");
     await store.moveTask(task.id, "done");
     mockSetIssueState.mockClear();
     mockGetIssue.mockResolvedValue({ state: "closed" });

@@ -2070,6 +2070,8 @@ export interface Task {
   /** The task's current column id. Widened to {@link ColumnId} so workflow-defined
    *  custom columns are representable; flag-OFF paths only ever store legacy ids. */
   column: ColumnId;
+  /** Source column captured when this task is archived; used to restore sensibly. */
+  preArchiveColumn?: Column;
   dependencies: string[];
   /** User-requested hint for triage: prefer splitting into child tasks when appropriate. */
   breakIntoSubtasks?: boolean;
@@ -2129,12 +2131,16 @@ export interface Task {
    *  Defaults to the project default branch when omitted. */
   baseBranch?: string;
   /** Per-task auto-merge override.
-   *  `undefined` means no explicit per-task value: follow `settings.autoMerge`
-   *  and snapshot that global setting when the task enters `in-review`.
-   *  `true`/`false` are explicit user overrides and take precedence.
+   *  `undefined` means no explicit per-task value: follow live `settings.autoMerge`.
+   *  `true`/`false` are explicit overrides when paired with `autoMergeProvenance: "user"`.
    *  Distinct from GitHub PR metadata (`PrInfo.autoMergeOnGreen` /
    *  `PrInfo.autoMergeStrategy`), which must not be conflated with this field. */
   autoMerge?: boolean;
+  /** Provenance for `autoMerge`.
+   *  `"user"` means a sticky explicit user-set override.
+   *  `"legacy-stamp"` means an ambiguous value written by the pre-FN-6245
+   *  review-entry stamp and is operator-clearable. Absent means unknown/none. */
+  autoMergeProvenance?: "user" | "legacy-stamp";
   /** Actual git working branch name used for this task's worktree. May differ from
    *  the conventional `fn/{task-id}` when conflict recovery generated a
    *  unique suffixed name (e.g., `fn/fn-042-2`). */
@@ -2265,6 +2271,11 @@ export interface Task {
    *  Incremented by self-healing for resume-limbo detection and reset when
    *  progress is observed or recovery escalates to a fresh todo dispatch. */
   resumeLimboCount?: number;
+  /** Bounded auto-retry attempts for transient workflow-graph failures observed
+   *  immediately after engine-restart or unpause resume. Reset by manual retry
+   *  and by successful forward progress; capped by the executor before terminal
+   *  `status:"failed"` is recorded to preserve the FN-5704 anti-loop exemption. */
+  graphResumeRetryCount?: number | null;
   /** Branch tip SHA snapshot captured at the last reclaim/unpause attempt used
    *  by resume-limbo detection to determine whether commits advanced. */
   resumeLimboTipSha?: string;
@@ -2368,6 +2379,8 @@ export interface Task {
   sourceMessageId?: string;
   sourceParentTaskId?: string;
   sourceMetadata?: Record<string, unknown>;
+  /** Reconstructed task prompt content when available on in-memory execution tasks. */
+  prompt?: string;
   /** Explicitly assigned user ID for task-user linking. Used during review handoff to indicate
    *  which user should review the task. The sentinel value "requesting-user" indicates the
    *  user who created or steered the task. */
@@ -3157,7 +3170,9 @@ export interface GlobalSettings {
    *    "another-experiment": false
    *  }
    *
-   *  Default: {} (empty object — no experimental features enabled). */
+   *  Default: workflow columns, graph executor, dual-observe, and authoritative
+   *  interpreter flags enabled; operators may explicitly set individual flags
+   *  false while rollout controls remain available. */
   experimentalFeatures?: Record<string, boolean>;
   /** Per-adapter CLI-agent launch configuration (CLI Agent Executor, U15).
    *  Keyed by adapter id (e.g. `"claude-code"`, `"codex"`, `"generic"`). Each
@@ -3319,6 +3334,8 @@ export interface ProjectSettings {
   heartbeatMultiplier?: number;
   /** Number of auto-claim candidates rendered in no-task heartbeat prompts. Range: 0-10. Default: 5. */
   autoClaimCandidatesInPrompt?: number;
+  /** Opt engineer-role agents into no-task backlog auto-claim. Default: false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Sticky window for intake duplicate checks against soft-deleted tasks.
    * Unit: days. Default: 7. Set to 0 to disable tombstone-window widening. */
   tombstoneStickyWindowDays?: number;
@@ -4144,6 +4161,10 @@ export interface Settings extends GlobalSettings, ProjectSettings {
   /** Whether PR authentication is currently available (read-only, set by server).
    *  True when authenticated gh CLI access is available or token fallback exists. */
   prAuthAvailable?: boolean;
+  /** Use the lean fast-path planning prompt variant instead of the full triage spec prompt. */
+  leanPlanning?: boolean;
+  /** Auto-approve generated specs and skip the independent spec reviewer. */
+  autoApproveSpec?: boolean;
   /** Index signature for dynamic settings access */
   [key: string]: unknown;
 }
@@ -4367,6 +4388,8 @@ export interface ArchivedTaskEntry {
    */
   priority?: TaskPriority;
   column: "archived"; // Always archived when in the log
+  /** Source column captured at archive time; absent on legacy archive entries. */
+  preArchiveColumn?: Column;
   dependencies: string[];
   steps: TaskStep[];
   currentStep: number;
@@ -4779,6 +4802,8 @@ export interface SettingsSyncPayload {
    *  Values contain the credential type and key. Only transmitted over authenticated
    *  node connections. */
   providerAuth?: Record<string, ProviderAuthEntry>;
+  /** Per-project workflow setting values keyed `workflowId → { settingKey: value }`. */
+  workflowSettings?: Record<string, Record<string, unknown>>;
   /** ISO timestamp when this snapshot was generated. */
   exportedAt: string;
   /** Checksum of the settings data for change detection (SHA-256 hex of JSON). */
@@ -4815,6 +4840,8 @@ export interface SettingsSyncResult {
   projectCount: number;
   /** Number of provider auth entries synced. */
   authCount: number;
+  /** Number of workflow setting values applied by the caller. */
+  workflowSettingsCount: number;
   /** Whether the sync was successful. */
   success: boolean;
   /** Error message if sync failed. */
@@ -6253,6 +6280,8 @@ export interface AgentHeartbeatConfig {
   autoClaimRelevantTasks?: boolean;
   /** Number of auto-claim candidates to inject into no-task heartbeat prompts. Default: 5, range: 0-10. */
   autoClaimCandidatesInPrompt?: number;
+  /** Per-agent override for opting engineer-role agents into no-task backlog auto-claim. Default: project setting or false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Polling interval in ms (default: 30000). Min: 1000 */
   heartbeatIntervalMs?: number;
   /** Heartbeat timeout in ms (default: 60000). Min: 5000 */

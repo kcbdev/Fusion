@@ -1,9 +1,11 @@
 .reliability-view {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: var(--space-lg);
   height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -13,6 +15,37 @@
   border: var(--border-width-thin, 0.0625rem) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
+}
+
+.reliability-loading {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  height: 100%;
+  min-width: 0;
+  padding: var(--space-2xl);
+  color: var(--text-muted);
+}
+
+.reliability-error {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  height: 100%;
+  min-width: 0;
+  padding: var(--space-2xl);
+  text-align: center;
+}
+
+.reliability-error p {
+  color: var(--text-muted);
+  margin: 0;
 }
 
 .reliability-headline-card {
@@ -110,6 +143,11 @@
 
 @media (max-width: 768px) {
   .reliability-view {
+    padding-bottom: calc(var(--space-lg) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+  }
+
+  .reliability-loading,
+  .reliability-error {
     padding-bottom: calc(var(--space-lg) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
   }
 

@@ -1,5 +1,39 @@
 # @fusion-plugin-examples/reports
 
+## 0.1.23
+
+### Patch Changes
+
+- @fusion/dashboard@0.42.0
+- @fusion/core@0.42.0
+- @fusion/plugin-sdk@0.42.0
+
+## 0.1.22
+
+### Patch Changes
+
+- @fusion/core@0.41.0
+- @fusion/dashboard@0.41.0
+- @fusion/plugin-sdk@0.41.0
+
+## 0.1.21
+
+### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/dashboard@0.40.1
+- @fusion/plugin-sdk@0.40.1
+
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [2d2024f]
+- Updated dependencies [784f308]
+  - @fusion/dashboard@0.40.0
+  - @fusion/core@0.40.0
+  - @fusion/plugin-sdk@0.40.0
+
 ## 0.1.19
 
 ### Patch Changes

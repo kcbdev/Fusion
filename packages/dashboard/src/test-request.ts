@@ -46,6 +46,7 @@ export async function request(
 ): Promise<TestResponse> {
   const normalizedBody = normalizeBody(body);
   const socket = new MockSocket();
+  socket.resume();
   const req = new http.IncomingMessage(socket as unknown as Socket);
   const res = new http.ServerResponse(req);
   const chunks: Buffer[] = [];
@@ -68,14 +69,16 @@ export async function request(
 
   res.write = ((chunk: string | Buffer, encoding?: BufferEncoding | ((error?: Error | null) => void), cb?: (error?: Error | null) => void) => {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === "string" ? encoding : undefined));
-    return originalWrite(chunk as never, encoding as never, cb);
+    originalWrite(chunk as never, encoding as never, cb);
+    return true;
   }) as typeof res.write;
 
   res.end = ((chunk?: string | Buffer, encoding?: BufferEncoding | (() => void), cb?: () => void) => {
     if (chunk !== undefined) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof encoding === "string" ? encoding : undefined));
     }
-    return originalEnd(chunk as never, encoding as never, cb as never);
+    const callback = typeof encoding === "function" ? encoding : cb;
+    return originalEnd(chunk as never, encoding as never, callback as never);
   }) as typeof res.end;
 
   const response = new Promise<TestResponse>((resolve, reject) => {

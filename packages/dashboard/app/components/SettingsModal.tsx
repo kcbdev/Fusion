@@ -9,6 +9,7 @@ import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } fro
 import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, fetchRemoteSettings, fetchRemoteStatus, installCloudflared, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteStatus, UpdateCheckResponse, OAuthDeviceCodeInfo } from "../api";
 import { splitSettingsSave } from "./settings/save-split";
+import type { SectionSaveHandler } from "./settings/sections/context";
 import { AppearanceSection } from "./settings/sections/AppearanceSection";
 import { ExperimentalSection } from "./settings/sections/ExperimentalSection";
 import { NodeSyncSection } from "./settings/sections/NodeSyncSection";
@@ -26,7 +27,7 @@ import {
 import { SecretsSection } from "./settings/sections/SecretsSection";
 import { PromptsSection } from "./settings/sections/PromptsSection";
 import { GeneralSection } from "./settings/sections/GeneralSection";
-import { ProjectModelsSection } from "./settings/sections/ProjectModelsSection";
+import { ProjectModelsSection, WorkflowLaneFlushRejection } from "./settings/sections/ProjectModelsSection";
 import { SchedulingSection } from "./settings/sections/SchedulingSection";
 import { ScheduledEvalsSection } from "./settings/sections/ScheduledEvalsSection";
 import { NodeRoutingSection } from "./settings/sections/NodeRoutingSection";
@@ -189,8 +190,10 @@ function useGitHubStarCount(): number | null {
  *
  * Group headers (isGroupHeader: true) are non-clickable labels that visually group sections.
  * The sidebar is organized into three groups:
- *   - Account: Scope-less sections (authentication)
- *   - Global: Global-scoped sections (appearance, notifications, node-sync, global-models)
+ *   - Global: User-level/shared sections (global-general, authentication, appearance,
+ *     notifications, node-sync, global-models)
+ *   - Runtimes: Global-scoped plugin runtime sections (hermes-runtime, openclaw-runtime,
+ *     paperclip-runtime)
  *   - Project: Project-scoped sections (project-models, general, scheduling, node-routing,
  *     worktrees, commands, merge, memory, experimental, prompts, backups, plugins)
  *
@@ -212,13 +215,10 @@ const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 768px)";
 const DEFAULT_MEMORY_EDITOR_PATH = ".fusion/memory/DREAMS.md";
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
-  // Account group (scope-less items — independent of settings storage)
-  { id: "__account_header", label: "Account", labelKey: "settings.nav.accountHeader", scope: undefined, isGroupHeader: true },
-  { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe },
-
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
   { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global" },
+  { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe },
   { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global" },
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global" },
   { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
@@ -614,6 +614,10 @@ export function SettingsModal({
     : {};
   const modalRef = useRef<HTMLDivElement>(null);
   const settingsContentRef = useRef<HTMLDivElement>(null);
+  const workflowLaneSaverRef = useRef<SectionSaveHandler | null>(null);
+  const registerWorkflowLaneSaver = useCallback((saver: SectionSaveHandler | null) => {
+    workflowLaneSaverRef.current = saver;
+  }, []);
   useModalResizePersist(modalRef, true, "fusion:settings-modal-size");
   const sessionBannersHidden = useSessionBannersHidden();
   const [form, setForm] = useState<SettingsFormState>({
@@ -2212,9 +2216,12 @@ export function SettingsModal({
           : Promise.resolve(),
       ]);
 
+      await workflowLaneSaverRef.current?.();
+
       addToast(t("settings.general.settingsSaved", "Settings saved"), "success");
       onClose();
     } catch (err) {
+      if (err instanceof WorkflowLaneFlushRejection) return;
       addToast(getErrorMessage(err), "error");
     } finally {
       setIsSaving(false);
@@ -2484,6 +2491,7 @@ export function SettingsModal({
             projectId={projectId}
             addToast={addToast}
             onOpenWorkflowSettings={onOpenWorkflowSettings}
+            registerWorkflowLaneSaver={registerWorkflowLaneSaver}
             models={{
               modelLanes: MODEL_LANES,
               getLaneStatus,

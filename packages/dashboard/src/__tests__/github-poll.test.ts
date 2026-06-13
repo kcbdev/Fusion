@@ -8,9 +8,9 @@ const { mockGetBadgeStatusesBatch } = vi.hoisted(() => ({
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     getBadgeStatusesBatch: (...args: any[]) => mockGetBadgeStatusesBatch(...args),
-  })),
+  }; }),
 }));
 
 describe("GitHubRateLimiter", () => {

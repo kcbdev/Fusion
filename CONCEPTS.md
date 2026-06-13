@@ -197,7 +197,7 @@ A plugin-contributed workflow capability registered through the engine rather th
 
 ## Workflow columns & traits
 
-*Behind the `experimentalFeatures.workflowColumns` flag. With the flag off, the legacy fixed pipeline (the closed column enum + `VALID_TRANSITIONS`) is authoritative and unchanged.*
+*Controlled by the default-on `experimentalFeatures.workflowColumns` flag. With an explicit flag-off override, the legacy fixed pipeline (the closed column enum + `VALID_TRANSITIONS`) is authoritative and unchanged.*
 
 ### Column (workflow-defined)
 A first-class, workflow-defined unit of task state: an id, a display name, and a set of Trait configurations. A Task's board position is its current column, persisted in `tasks."column"`. Column validity is workflow-scoped — the legacy closed enum widens to a string validated against the Task's resolved workflow. The Default workflow's column ids are byte-identical to the legacy enum values, so no task row is ever rewritten.
@@ -230,7 +230,7 @@ A persisted crash-safe marker (`tasks.transitionPending`) written in the same tr
 
 ## Step inversion
 
-*Behind the `experimentalFeatures.workflowGraphExecutor` flag (orthogonal to `workflowColumns`). With the flag off, and for the Default workflow always, step policy is the legacy engine-owned path (PROMPT.md parsing, in-session review verdicts, RETHINK reset) — unchanged.*
+*Controlled by the default-on `experimentalFeatures.workflowGraphExecutor` flag (orthogonal to `workflowColumns`). With an explicit flag-off override, and for the Default workflow always, step policy is the legacy engine-owned path (PROMPT.md parsing, in-session review verdicts, RETHINK reset) — unchanged.*
 
 ### Step instance
 One runtime expansion of a `foreach` template subgraph, bound to a single planned step (`Task.steps[i]`). Identity is deterministic — `<foreachNodeId>#<stepIndex>:<templateNodeId>` — so resume reconstructs the full instance set from the pinned step count without persisting the expansion itself. Each instance carries its own run-state (current node, rework count, baseline/checkpoint, and in worktree mode its branch and integration status) in its own persisted run-state table. The step count is pinned at expansion; a later disagreement with the live step list is a `pin-mismatch` failure, never a silent re-expansion. An instance's lifecycle writes flow through `store.updateStep` so `Task.steps[]` stays the physical projection sink for every existing consumer.

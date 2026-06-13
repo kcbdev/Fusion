@@ -91,6 +91,10 @@ export interface EngineRunContext {
 export type GitMutationType =
   | "worktree:create"
   | "worktree:remove"
+  | "worktree:remove-fallback"
+  | "worktree:remove-classified-harmless"
+  | "worktree:remove-classification-probe-failed"
+  | "worktree:remove-leaked-registered-worktree"
   | "worktree:reuse"
   | "worktree:incomplete-detected"
   | "worktree:reanchored"
@@ -167,6 +171,32 @@ export type GitMutationType =
   | "merge:ai-review-landed-with-concerns"
   | "merge:ai-local-sync"
   | "merge:ai-landed"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   mergeRoot: string;
+   *   phase: "git-remove" | "fs-rm";
+   *   success: boolean;
+   *   error?: string;
+   *   code?: string;
+   * }
+   * ```
+   */
+  | "merge:ai-worktree-cleanup"
+  /**
+   * Metadata shape:
+   * ```ts
+   * {
+   *   path: string;
+   *   success: boolean;
+   *   reason?: "stale" | "active-session" | "git-remove-failed" | "fs-rm-failed" | "not-directory" | "stat-failed";
+   *   error?: string;
+   * }
+   * ```
+   */
+  | "worktree:tempdir-sweep"
   | "merge:reuse-handoff-acquired"
   | "merge:reuse-handoff-refused"
   | "merge:reuse-handoff-released"
@@ -477,6 +507,7 @@ export type DatabaseMutationType =
   /** Metadata: { taskId, branch, worktree, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch, reason } */
   | "task:reclaim-self-owned-branch-conflict-no-action"
   | "task:orphan-detected-no-action"
+  | "task:reattach-orphaned-execution"
   /** Metadata: { taskId, lastReason, stuckKillCount, attemptedStuckKillCount, maxStuckKills, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch } */
   | "task:stuck-loop-exhausted-no-action"
   /** Metadata: { taskId: string; ignoredStepUpdateCount: number; stuckKillStreak: number; lastReason: "no-progress-churn" } */
@@ -523,6 +554,7 @@ export type DatabaseMutationType =
    */
   | "session:runtime-resolved"
   | "task:in-review-stall-deadlock-disposed"
+  | "task:in-review-stall-terminal-provider-error"
   | "task:finalize-unproven-blocked"
   /**
    * FN-5490/FN-5517/FN-5526/FN-5540 lost-work guard: the merger or self-heal

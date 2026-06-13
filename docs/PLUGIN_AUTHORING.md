@@ -763,12 +763,13 @@ The host then renders plugin views via `PluginDashboardViewHost` using the compo
 Bundled workspace plugin pattern:
 - Keep plugin package under `plugins/` (for example `plugins/fusion-plugin-roadmap`)
 - Export backend/plugin entry from `src/index.ts` and keep dashboard view exports in the plugin package (for example `./dashboard-view`)
+- Do not re-export dashboard view entrypoints (including `dashboard-view`, `manage-view`, or other `-view` modules) from `src/index.ts`; the `fusion/no-plugin-view-reexport` ESLint guard catches violations because server-side plugin entries must not transitively load CSS
 - Register the lazy dashboard component in host code (currently `packages/dashboard/app/plugins/registerBundledPluginViews.ts`)
 - CLI bundling inlines backend plugin code from workspace packages; dashboard view modules are imported by the dashboard build via the host registry
 
 Runtime host context contract:
 - Registered views receive a `context` object from the dashboard host (`PluginDashboardViewContext`).
-- Context includes the active `projectId`, current visible `tasks`, optional `workflowSteps`, and `openTaskDetail` for launching the native task detail flow.
+- Context includes the active `projectId`, current visible `tasks`, optional `workflowSteps`, `openTaskDetail` for launching the native task detail flow, and `openFile(path, options?)` for opening project-relative files in the dashboard's built-in file viewer.
 - Keep view-specific UI behavior in the plugin; treat host context as service/data injection only.
 
 Placement guidance:
@@ -1690,6 +1691,54 @@ Workflow IR extension metadata is preserved only on v2 workflows. Keys must use
 the `plugin:<pluginId>:<extensionId>` form, and values must be JSON objects. If
 the extension is registered and declares a `configSchema`, the engine validates
 the metadata fields during IR validation.
+
+## 16.7. Plugin-Gated Built-in Workflows
+
+Plugin-gated built-in workflows are read-only workflow definitions that ship in
+Fusion's `BUILTIN_WORKFLOWS` array but stay hidden until their associated plugin
+is installed. For example, `builtin:compound-engineering` is bundled with core so
+it can be selected like any other built-in workflow, but it references
+Compound Engineering plugin skills that do not exist unless the plugin is active.
+
+Runtime gating is declared in `packages/core/src/builtin-workflows.ts`. The
+`PLUGIN_GATED_BUILTIN_WORKFLOWS` map links each gated built-in workflow id to the
+plugin id that unlocks it:
+
+```typescript
+// In packages/core/src/builtin-workflows.ts
+const PLUGIN_GATED_BUILTIN_WORKFLOWS: ReadonlyMap<string, string> = new Map([
+  ["builtin:compound-engineering", "fusion-plugin-compound-engineering"],
+]);
+```
+
+When the dashboard or API lists workflow definitions, `listWorkflowDefinitions()`
+checks each built-in with `isBuiltinWorkflowPluginGated()` and then calls
+`isPluginInstalled()` for the required plugin before including it. Direct lookup
+uses the same rule: `getWorkflowDefinition()` returns `undefined` for a gated
+built-in until `getRequiredPluginIdForBuiltinWorkflow()` resolves to an installed
+plugin.
+
+The workflow-definition cache is invalidated on plugin register/unregister
+events, so installing or removing a plugin updates the visible workflow list
+immediately. Gated built-ins are also excluded from
+`defaultEnabledBuiltinWorkflowIds()`: they are never enabled by default and only
+surface when the gating plugin is present.
+
+Use this pattern when a first-party built-in workflow references plugin-provided
+skills, tools, workflow handlers, or other runtime capabilities that would be
+missing without the plugin. The gate prevents users from selecting a workflow
+that cannot run in their project.
+
+The current first-party example is `builtin:compound-engineering`, which is gated
+on `fusion-plugin-compound-engineering`. It does not appear in the workflow
+picker or task workflow selection until the Compound Engineering plugin is
+installed and enabled; if the plugin is uninstalled, the workflow is hidden
+again.
+
+> **Plugin author note:** plugin-gated built-in workflows are currently for
+> first-party, bundled workflows because the gating map lives in `@fusion/core`.
+> Plugin authors who want to add their own workflow behavior should use the
+> workflow step contribution API in §16 or workflow extensions in §16.6 instead.
 
 ## 17. Contributing Prompt Modifications
 

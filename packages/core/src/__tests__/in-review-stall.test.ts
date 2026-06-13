@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyProviderError,
   countRecentIdenticalStallEntries,
   DEFAULT_MAX_AUTO_MERGE_RETRIES,
   DEFAULT_STALE_MERGING_MIN_AGE_MS,
@@ -21,6 +22,45 @@ const baseTask = {
   mergeRetries: 0,
   updatedAt: new Date(NOW).toISOString(),
 };
+
+describe("classifyProviderError", () => {
+  it.each([
+    "HTTP 400 invalid_request_error: unsupported parameter",
+    "model gpt-5.3-codex is not supported by this provider",
+    "model claude-next not found",
+    "Configured model provider/model was not found in the pi model registry",
+    "invalid model: gpt-unknown",
+    "The requested model does not exist",
+    "permission denied for model access",
+    "HTTP 403 forbidden for model",
+    "401 unauthorized: invalid api key",
+  ])("classifies non-retryable provider errors: %s", (message) => {
+    expect(classifyProviderError(message)).toBe("non_retryable");
+  });
+
+  it.each([
+    "HTTP 503 service unavailable",
+    "429 rate limit exceeded",
+    "Request timed out after 60s",
+    "ECONNRESET while reading provider response",
+    "provider overloaded; try again later",
+  ])("classifies retryable provider errors: %s", (message) => {
+    expect(classifyProviderError(message)).toBe("retryable");
+  });
+
+  it.each([
+    "",
+    "task has incomplete steps",
+    "merge conflict in package.json",
+    "unexpected provider response shape",
+  ])("classifies unknown errors: %s", (message) => {
+    expect(classifyProviderError(message)).toBe("unknown");
+  });
+
+  it("gives non-retryable patterns precedence over retryable patterns", () => {
+    expect(classifyProviderError("HTTP 400 invalid_request_error after rate limit warning")).toBe("non_retryable");
+  });
+});
 
 describe("countRecentIdenticalStallEntries", () => {
   const reason = "Failed to create worktree after 3 attempts";
@@ -121,6 +161,36 @@ describe("getInReviewStallReason", () => {
     }, { now: NOW });
     expect(signal?.code).toBe("merge-blocker");
     expect(signal?.reason).toContain("failed pre-merge workflow steps");
+  });
+
+  it("returns non-retryable-provider-error for failed task provider blockers", () => {
+    const signal = getInReviewStallReason({
+      ...baseTask,
+      status: "failed",
+      error: "HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported",
+    }, { now: NOW });
+    expect(signal?.code).toBe("non-retryable-provider-error");
+    expect(signal?.reason).toBe("Terminal provider error: HTTP 400 invalid_request_error: model gpt-5.3-codex is not supported");
+  });
+
+  it("keeps retryable provider errors as merge-blockers", () => {
+    const signal = getInReviewStallReason({
+      ...baseTask,
+      status: "failed",
+      error: "HTTP 503 service unavailable",
+    }, { now: NOW });
+    expect(signal?.code).toBe("merge-blocker");
+    expect(signal?.reason).toBe("task is marked 'failed': HTTP 503 service unavailable");
+  });
+
+  it("keeps unknown failed task errors as merge-blockers", () => {
+    const signal = getInReviewStallReason({
+      ...baseTask,
+      status: "failed",
+      error: "merge conflict requires manual resolution",
+    }, { now: NOW });
+    expect(signal?.code).toBe("merge-blocker");
+    expect(signal?.reason).toBe("task is marked 'failed': merge conflict requires manual resolution");
   });
 
   it("suppresses merge-blocker when autoMerge is disabled", () => {

@@ -20,7 +20,7 @@ vi.mock("@fusion/core", async () => {
   return {
     ...actual,
     isGhAuthenticated: vi.fn(),
-    CentralCore: vi.fn().mockImplementation(() => ({
+    CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
       close: mockCentralClose,
       listProjects: mockCentralListProjects,
@@ -28,7 +28,7 @@ vi.mock("@fusion/core", async () => {
       getProject: mockCentralGetProject,
       updateProject: mockCentralUpdateProject,
       updateProjectHealth: mockCentralUpdateProjectHealth,
-    })),
+    }; }),
   };
 });
 

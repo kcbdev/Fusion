@@ -7,6 +7,7 @@ import * as projectMemory from "../project-memory.js";
 import { AgentStore } from "../agent-store.js";
 import { CentralDatabase } from "../central-db.js";
 import { DependencyCycleError, TaskStore, TaskHasDependentsError } from "../store.js";
+import { setCreateFnAgent } from "../ai-engine-loader.js";
 import { setTaskCreatedHook } from "../task-creation-hooks.js";
 import { buildResearchDocumentKey, type Task } from "../types.js";
 import { createTaskStoreTestHarness, makeTmpDir } from "./store-test-helpers.js";
@@ -26,6 +27,7 @@ describe("TaskStore", () => {
 
   afterEach(async () => {
     setTaskCreatedHook(undefined);
+    setCreateFnAgent(undefined);
     await harness.afterEach();
   });
 
@@ -462,6 +464,43 @@ describe("TaskStore", () => {
       const updatedTask = await store.getTask(task.id);
       expect(updatedTask.title).toBe("AI Title");
     });
+
+    it("resolves and calls a store-managed summarizer when summarize input flag is true", async () => {
+      const longDescription = "a".repeat(201);
+      const promptSpy = vi.fn(async () => {});
+      const createFnAgent = vi.fn(async () => ({
+        session: {
+          prompt: promptSpy,
+          state: { messages: [{ role: "assistant", content: "Generated Store Title" }] },
+        },
+      }));
+      setCreateFnAgent(createFnAgent);
+
+      const task = await store.createTask(
+        { description: longDescription, summarize: true },
+        {
+          settings: {
+            autoSummarizeTitles: false,
+            titleSummarizerProvider: "mock",
+            titleSummarizerModelId: "title-model",
+          },
+        },
+      );
+
+      expect(task.title).toBeUndefined();
+
+      await vi.waitFor(async () => {
+        const updatedTask = await store.getTask(task.id);
+        expect(updatedTask.title).toBe("Generated Store Title");
+      });
+      expect(createFnAgent).toHaveBeenCalledWith(expect.objectContaining({
+        cwd: rootDir,
+        defaultProvider: "mock",
+        defaultModelId: "title-model",
+      }));
+      expect(promptSpy).toHaveBeenCalledWith(expect.stringContaining(longDescription));
+    });
+
 
     it("should ignore malformed confirmation-prose generated titles", async () => {
       const mockOnSummarize = vi

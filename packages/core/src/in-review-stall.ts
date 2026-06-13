@@ -15,7 +15,10 @@ export type InReviewStallCode =
   | "merge-blocker"
   | "transient-merge-status-no-owner"
   | "merge-retries-exhausted"
-  | "no-worktree-no-merge-confirmed";
+  | "no-worktree-no-merge-confirmed"
+  | "non-retryable-provider-error";
+
+export type ProviderErrorClassification = "non_retryable" | "retryable" | "unknown";
 
 export interface InReviewStallSignal {
   reason: string;
@@ -40,8 +43,45 @@ export const DEFAULT_STALE_MERGING_MIN_AGE_MS = 5 * 60_000;
 export const DEFAULT_MAX_AUTO_MERGE_RETRIES = 3;
 export const IN_REVIEW_STALL_LOG_PREFIX = "In-review stall surfaced [";
 export const IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX = "In-review stall auto-disposed [";
+export const IN_REVIEW_STALL_TERMINAL_LOG_PREFIX = "In-review stall terminal disposed [";
 
 const TRANSIENT_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix"]);
+const FAILED_TASK_MERGE_BLOCKER_PREFIX = "task is marked 'failed':";
+
+export function classifyProviderError(error: string): ProviderErrorClassification {
+  const normalized = error.trim().toLowerCase();
+  if (!normalized) return "unknown";
+
+  if (
+    (/\b400\b/.test(normalized) && normalized.includes("invalid_request_error"))
+    || /model\b.*\bis not supported/.test(normalized)
+    || /model\b.*\bnot found/.test(normalized)
+    || normalized.includes("was not found in the pi model registry")
+    || normalized.includes("invalid model")
+    || normalized.includes("model does not exist")
+    || (/\b401\b/.test(normalized) && normalized.includes("unauthorized"))
+    || (/\b403\b/.test(normalized) && normalized.includes("forbidden"))
+    || (/permission denied/.test(normalized) && /model|access/.test(normalized))
+  ) {
+    return "non_retryable";
+  }
+
+  if (
+    /\b429\b/.test(normalized)
+    || normalized.includes("too many requests")
+    || normalized.includes("rate limit")
+    || /\b5\d\d\b/.test(normalized)
+    || normalized.includes("overloaded")
+    || normalized.includes("econnreset")
+    || normalized.includes("etimedout")
+    || normalized.includes("timed out")
+    || normalized.includes("timeout")
+  ) {
+    return "retryable";
+  }
+
+  return "unknown";
+}
 
 export function countRecentIdenticalStallEntries(
   task: Pick<Task, "log">,
@@ -135,6 +175,17 @@ export function getInReviewStallReason(
 
   const mergeBlocker = getTaskMergeBlocker(task);
   if (mergeBlocker) {
+    if (mergeBlocker.startsWith(FAILED_TASK_MERGE_BLOCKER_PREFIX)) {
+      const error = mergeBlocker.slice(FAILED_TASK_MERGE_BLOCKER_PREFIX.length).trim();
+      if (classifyProviderError(error) === "non_retryable") {
+        return {
+          code: "non-retryable-provider-error",
+          reason: `Terminal provider error: ${error}`,
+          observedAt,
+        };
+      }
+    }
+
     return {
       code: "merge-blocker",
       reason: mergeBlocker,

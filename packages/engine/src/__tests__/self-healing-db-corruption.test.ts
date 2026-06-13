@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Settings, TaskStore } from "@fusion/core";
+
+const osState = vi.hoisted(() => ({ tempRoot: "" }));
+
+vi.mock("node:os", async () => {
+  const actual = await vi.importActual<typeof import("node:os")>("node:os");
+  return { ...actual, tmpdir: vi.fn(() => osState.tempRoot || actual.tmpdir()) };
+});
 
 import { SelfHealingManager } from "../self-healing.js";
 import type { NotificationService } from "../notification/notification-service.js";
@@ -97,8 +107,13 @@ function stubMaintenance(manager: SelfHealingManager) {
   vi.spyOn(manager, "archiveStaleDoneTasks").mockResolvedValue(0);
 }
 
+const RM = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
+let sandboxRoot = "";
+
 describe("FN-5284: self-healing DB corruption surfacing", () => {
   beforeEach(() => {
+    sandboxRoot = mkdtempSync(join(tmpdir(), "fusion-db-corruption-sandbox-"));
+    osState.tempRoot = sandboxRoot;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
     vi.spyOn(notifierModule, "getActiveNotificationService").mockReturnValue(undefined);
@@ -108,6 +123,13 @@ describe("FN-5284: self-healing DB corruption surfacing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    osState.tempRoot = "";
+    try {
+      rmSync(sandboxRoot, RM);
+    } catch {
+      // Best-effort cleanup only.
+    }
+    sandboxRoot = "";
   });
 
   it("does not dispatch or audit when the database is healthy", async () => {

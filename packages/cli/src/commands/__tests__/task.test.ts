@@ -24,7 +24,15 @@ vi.mock("node:child_process", async () => {
     new Promise((resolve) => {
       execFn(cmd, opts, (_err: any, stdout: string, stderr: string) => resolve({ stdout, stderr }));
     });
-  return { exec: execFn };
+  const execFileFn = vi.fn((_file: string, _args: any, opts: any, cb: any) => {
+    const callback = typeof opts === "function" ? opts : cb;
+    if (typeof callback === "function") callback(null, "", "");
+  }) as any;
+  execFileFn[promisify.custom] = (file: string, args?: any, opts?: any) =>
+    new Promise((resolve) => {
+      execFileFn(file, args, opts, (_err: any, stdout: string, stderr: string) => resolve({ stdout, stderr }));
+    });
+  return { exec: execFn, execFile: execFileFn };
 });
 
 // Mock @fusion/core before importing the module under test
@@ -39,9 +47,33 @@ vi.mock("@fusion/core", async (importActual) => {
     done: "Done",
   };
 
+  const TaskStoreMock = vi.fn(function () {});
+  const taskStoreMockImplementation = TaskStoreMock.mockImplementation.bind(TaskStoreMock);
+  TaskStoreMock.mockImplementation = ((impl: (...args: any[]) => unknown) =>
+    taskStoreMockImplementation(function (this: unknown, ...args: any[]) {
+      return impl(...args);
+    })) as typeof TaskStoreMock.mockImplementation;
+
+  const CentralCoreMock = vi.fn(function () {});
+  const centralCoreMockImplementation = CentralCoreMock.mockImplementation.bind(CentralCoreMock);
+  CentralCoreMock.mockImplementation = ((impl: (...args: any[]) => unknown) =>
+    centralCoreMockImplementation(function (this: unknown, ...args: any[]) {
+      return impl(...args);
+    })) as typeof CentralCoreMock.mockImplementation;
+  CentralCoreMock.mockImplementation(() => ({
+    init: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    listProjects: vi.fn().mockResolvedValue([]),
+    getProject: vi.fn().mockResolvedValue(undefined),
+    getProjectByPath: vi.fn().mockResolvedValue(undefined),
+    registerProject: vi.fn().mockResolvedValue({ id: "proj_test", name: "test", path: "/test" }),
+    getNode: vi.fn().mockResolvedValue(undefined),
+    getNodeByName: vi.fn().mockResolvedValue(undefined),
+  }));
+
   return {
     ...actual,
-    TaskStore: vi.fn(),
+    TaskStore: TaskStoreMock,
     COLUMNS,
     COLUMN_LABELS,
     runDeterministicDuplicateGuard: vi.fn(),
@@ -59,18 +91,7 @@ vi.mock("@fusion/core", async (importActual) => {
       }
       return ids;
     }),
-    CentralCore: vi.fn().mockImplementation(function() {
-      return {
-        init: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-        listProjects: vi.fn().mockResolvedValue([]),
-        getProject: vi.fn().mockResolvedValue(undefined),
-        getProjectByPath: vi.fn().mockResolvedValue(undefined),
-        registerProject: vi.fn().mockResolvedValue({ id: "proj_test", name: "test", path: "/test" }),
-        getNode: vi.fn().mockResolvedValue(undefined),
-        getNodeByName: vi.fn().mockResolvedValue(undefined),
-      };
-    }),
+    CentralCore: CentralCoreMock,
   };
 });
 
@@ -79,9 +100,11 @@ vi.mock("@fusion/engine", () => ({ aiMergeTask: vi.fn() }));
 
 // Mock @fusion/dashboard
 vi.mock("@fusion/dashboard", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
-    createPr: vi.fn(),
-  })),
+  GitHubClient: vi.fn().mockImplementation(function () {
+    return {
+      createPr: vi.fn(),
+    };
+  }),
   generatePrMetadata: vi.fn(),
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
 }));
@@ -152,6 +175,8 @@ function makeTask(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(resolveProject).mockRejectedValue(new Error("No project context"));
   vi.mocked(runDeterministicDuplicateGuard).mockResolvedValue({
     action: "proceed",
     fingerprint: null,
@@ -958,12 +983,16 @@ describe("project-aware task command behavior", () => {
     vi.mocked(isGhAvailable).mockReturnValue(true);
     vi.mocked(isGhAuthenticated).mockReturnValue(true);
     vi.mocked(getCurrentRepo).mockReturnValue({ owner: "acme", repo: "demo" });
-    vi.mocked(GitHubClient).mockImplementation(() => ({ createPr: mockCreatePr }) as never);
+    vi.mocked(GitHubClient).mockImplementation(function () {
+      return { createPr: mockCreatePr } as never;
+    });
 
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       init: vi.fn(),
       getTask: vi.fn().mockResolvedValue(makeTask({ id: "FN-001", column: "in-review", branchName: "fusion/fn-001" })),
       updatePrInfo: vi.fn().mockResolvedValue(undefined),
+      ensurePrEntityForSource: vi.fn(() => ({ id: "pr-entity-1" })),
+      updatePrEntity: vi.fn(),
       logEntry: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -2379,13 +2408,18 @@ describe("runTaskRetry", () => {
     mockMoveTask = vi.fn();
     mockLogEntry = vi.fn();
 
-    (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-      init: vi.fn(),
-      getTask: mockGetTask,
-      updateTask: mockUpdateTask,
-      moveTask: mockMoveTask,
-      logEntry: mockLogEntry,
-    }));
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj_test",
+      projectPath: "/test",
+      projectName: "test",
+      isRegistered: true,
+      store: {
+        getTask: mockGetTask,
+        updateTask: mockUpdateTask,
+        moveTask: mockMoveTask,
+        logEntry: mockLogEntry,
+      } as unknown as TaskStore,
+    });
   });
 
   afterEach(() => {
@@ -2426,6 +2460,7 @@ describe("runTaskRetry", () => {
       reviewerContextRetryCount: 0,
       reviewerFallbackRetryCount: 0,
       completionHandoffLimboRecoveryCount: 0,
+      graphResumeRetryCount: 0,
       mergeAuditBounceCount: 0,
       mergeRetries: 0,
       resumeLimboCount: 0,
@@ -2500,6 +2535,7 @@ describe("runTaskRetry", () => {
       reviewerContextRetryCount: 0,
       reviewerFallbackRetryCount: 0,
       completionHandoffLimboRecoveryCount: 0,
+      graphResumeRetryCount: 0,
       mergeAuditBounceCount: 0,
       mergeRetries: 0,
       resumeLimboCount: 0,
@@ -2513,6 +2549,115 @@ describe("runTaskRetry", () => {
     expect(successLine).toBeDefined();
     expect(successLine![0]).toContain("FN-001");
     expect(successLine![0]).toContain("todo");
+  });
+
+  it("retries stranded in-review task with status none and incomplete steps to todo preserving progress", async () => {
+    mockGetTask.mockResolvedValueOnce(makeTask({
+      id: "FN-001",
+      status: null,
+      column: "in-review",
+      mergeRetries: 4,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "in-progress" },
+        { name: "Step 2", status: "pending" },
+      ],
+    }));
+    mockUpdateTask.mockResolvedValueOnce(makeTask({ id: "FN-001", status: undefined, error: undefined }));
+    mockMoveTask.mockResolvedValueOnce(makeTask({ id: "FN-001", column: "todo" }));
+    mockLogEntry.mockResolvedValueOnce(makeTask({ id: "FN-001" }));
+
+    await runTaskRetry("FN-001");
+
+    expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      status: null,
+      error: null,
+    }));
+    expect(mockUpdateTask.mock.calls[0][1]).not.toHaveProperty("mergeRetries");
+    expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
+    expect(mockLogEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Retry requested from CLI (stranded in-review execution retry → todo, preserving progress)",
+    );
+  });
+
+  it("retries stranded zero-step in-review task with no merge attempts to todo", async () => {
+    mockGetTask.mockResolvedValueOnce(makeTask({
+      id: "FN-001",
+      status: null,
+      column: "in-review",
+      mergeRetries: 0,
+      steps: [],
+    }));
+    mockUpdateTask.mockResolvedValueOnce(makeTask({ id: "FN-001", status: undefined, error: undefined }));
+    mockMoveTask.mockResolvedValueOnce(makeTask({ id: "FN-001", column: "todo" }));
+    mockLogEntry.mockResolvedValueOnce(makeTask({ id: "FN-001" }));
+
+    await runTaskRetry("FN-001");
+
+    expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo", { preserveProgress: true });
+    expect(mockLogEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Retry requested from CLI (stranded in-review execution retry → todo, preserving progress)",
+    );
+  });
+
+  it("retries stranded in-review task with status none and prior merge attempts as merge retry", async () => {
+    mockGetTask.mockResolvedValueOnce(makeTask({
+      id: "FN-001",
+      status: null,
+      column: "in-review",
+      mergeRetries: 2,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "done" },
+      ],
+    }));
+    mockUpdateTask.mockResolvedValueOnce(makeTask({ id: "FN-001", status: undefined, error: undefined }));
+    mockLogEntry.mockResolvedValueOnce(makeTask({ id: "FN-001" }));
+
+    await runTaskRetry("FN-001");
+
+    expect(mockUpdateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      status: null,
+      error: null,
+      mergeRetries: 0,
+    }));
+    expect(mockMoveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(mockLogEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Retry requested from CLI (merge retry → todo, mergeRetries reset)",
+    );
+  });
+
+  it("rejects stranded in-review task with status none, completed steps, and no merge attempts", async () => {
+    mockGetTask.mockResolvedValueOnce(makeTask({
+      id: "FN-001",
+      status: null,
+      column: "in-review",
+      mergeRetries: 0,
+      steps: [
+        { name: "Step 0", status: "done" },
+        { name: "Step 1", status: "done" },
+      ],
+    }));
+
+    await expect(runTaskRetry("FN-001")).rejects.toThrow("Task FN-001 is not in a retryable state (status: none)");
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockMoveTask).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-review task with status none", async () => {
+    mockGetTask.mockResolvedValueOnce(makeTask({
+      id: "FN-001",
+      status: null,
+      column: "todo",
+      steps: [{ name: "Step 0", status: "pending" }],
+    }));
+
+    await expect(runTaskRetry("FN-001")).rejects.toThrow("Task FN-001 is not in a retryable state (status: none)");
+    expect(mockUpdateTask).not.toHaveBeenCalled();
+    expect(mockMoveTask).not.toHaveBeenCalled();
   });
 });
 
@@ -2885,6 +3030,7 @@ describe("runTaskPrCreate", () => {
   }
 
   beforeEach(() => {
+    vi.clearAllMocks();
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     stderrWriteSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -2896,9 +3042,11 @@ describe("runTaskPrCreate", () => {
 
     // Setup GitHubClient mock
     mockCreatePr = vi.fn();
-    vi.mocked(GitHubClient).mockImplementation(() => ({
-      createPr: mockCreatePr,
-    } as unknown as GitHubClient));
+    vi.mocked(GitHubClient).mockImplementation(function () {
+      return {
+        createPr: mockCreatePr,
+      } as unknown as GitHubClient;
+    });
     vi.mocked(generatePrMetadata).mockResolvedValue({ title: "AI Generated Title", body: "AI Generated Body", templateUsed: false });
 
     // Setup gh-cli mocks
@@ -2915,6 +3063,8 @@ describe("runTaskPrCreate", () => {
       init: vi.fn(),
       getTask: mockGetTask,
       updatePrInfo: mockUpdatePrInfo,
+      ensurePrEntityForSource: vi.fn(() => ({ id: "pr-entity-1" })),
+      updatePrEntity: vi.fn(),
       logEntry: mockLogEntry,
     }));
   });

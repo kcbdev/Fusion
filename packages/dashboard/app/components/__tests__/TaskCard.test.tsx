@@ -462,6 +462,50 @@ describe("TaskCard", () => {
     expect(screen.getByLabelText("Archive task")).toBeDefined();
   });
 
+  it.each(["triage", "todo", "in-progress", "in-review"] as const)(
+    "hides archive action for %s tasks",
+    (column) => {
+      render(
+        <TaskCard
+          task={makeTask({ column })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+        />,
+      );
+
+      expect(screen.queryByLabelText("Archive task")).toBeNull();
+    },
+  );
+
+  it("renders archive action for done tasks", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "done" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+      />,
+    );
+
+    expect(screen.getByLabelText("Archive task")).toBeDefined();
+  });
+
+  it("does not render archive action for archived tasks", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "archived" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+        onUnarchiveTask={vi.fn(async () => makeTask({ column: "done" }))}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Archive task")).toBeNull();
+    expect(screen.getByLabelText("Unarchive task")).toBeDefined();
+  });
+
   it("keeps two-button delete flow for non-done task", async () => {
     const onDeleteTask = vi.fn(async () => makeTask());
     mockConfirm.mockResolvedValueOnce(false);
@@ -1963,7 +2007,7 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(editBtn)).toBe(true);
   });
 
-  it("renders archive button inside card-header-actions for done column", () => {
+  it("renders archive button inside card-header-actions for done columns", () => {
     const { container } = render(
       <TaskCard 
         task={makeTask({ column: "done", size: "L" })} 
@@ -4339,19 +4383,92 @@ describe("TaskCard mission badge", () => {
 
   it("renders a promote action when onPromote is provided", () => {
     const onPromote = vi.fn().mockResolvedValue(undefined);
+    const style = document.createElement("style");
+    style.textContent = loadAllAppCss();
+    document.head.appendChild(style);
+
+    try {
+      render(
+        <TaskCard
+          task={makeTask({ id: "FN-777", column: "todo" })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onPromote={onPromote}
+        />,
+      );
+
+      const promoteButton = screen.getByTestId("card-promote-FN-777");
+      expect(promoteButton).toBeDefined();
+      expect(promoteButton).toHaveClass("card-promote-action");
+      expect(promoteButton.textContent).toContain("Promote");
+
+      const styles = getComputedStyle(promoteButton);
+      expect(styles.gap).toBe("var(--space-xs)");
+      expect(styles.padding).toBe("var(--space-xs) var(--space-sm)");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("right-aligns the promote action inside the card action row", () => {
+    const onPromote = vi.fn().mockResolvedValue(undefined);
+    const css = loadAllAppCssBaseOnly();
 
     render(
       <TaskCard
-        task={makeTask({ id: "FN-777", column: "todo" })}
+        task={makeTask({ id: "FN-781", column: "todo" })}
         onOpenDetail={noop}
         addToast={noop}
         onPromote={onPromote}
       />,
     );
 
-    const promoteButton = screen.getByTestId("card-promote-FN-777");
-    expect(promoteButton).toBeDefined();
-    expect(promoteButton.textContent).toContain("Promote");
+    const promoteButton = screen.getByTestId("card-promote-FN-781");
+    const actionRow = promoteButton.closest(".card-action-row");
+
+    expect(actionRow).not.toBeNull();
+    expect(actionRow?.contains(promoteButton)).toBe(true);
+    expect(css).toMatch(/\.card-promote-action\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
+    expect(css).toMatch(/\.card-promote-action\.card-send-back-btn\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
+  });
+
+  it("keeps the promote action right-aligned in the mobile card action row", () => {
+    const css = loadAllAppCss();
+    const onPromote = vi.fn().mockResolvedValue(undefined);
+
+    const soloRender = render(
+      <TaskCard
+        task={makeTask({ id: "FN-782", column: "todo" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onPromote={onPromote}
+      />,
+    );
+
+    const soloPromoteButton = screen.getByTestId("card-promote-FN-782");
+    expect(soloPromoteButton.closest(".card-action-row")?.children).toHaveLength(1);
+    expect(soloPromoteButton).toHaveClass("card-promote-action", "card-send-back-btn");
+    soloRender.unmount();
+
+    render(
+      <TaskCard
+        task={makeTask({ id: "FN-783", column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onPromote={onPromote}
+        prAuthAvailable={true}
+        autoMergeEnabled={false}
+      />,
+    );
+
+    const createPrButton = screen.getByRole("button", { name: "Create pull request" });
+    const promoteButton = screen.getByTestId("card-promote-FN-783");
+    const actionRow = promoteButton.closest(".card-action-row");
+
+    expect(actionRow).not.toBeNull();
+    expect(actionRow?.contains(createPrButton)).toBe(true);
+    expect(createPrButton.compareDocumentPosition(promoteButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(css).toMatch(/@media[^{}]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-promote-action\.card-send-back-btn\s*\{[^}]*margin-left:\s*auto;[^}]*\}/);
   });
 
   it("calls onPromote without opening the card when promote is clicked", () => {

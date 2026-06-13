@@ -797,7 +797,10 @@
 .card-promote-action {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-xs);
   flex-shrink: 0;
+  padding: var(--space-xs) var(--space-sm);
+  margin-left: auto;
   height: var(--card-chip-height);
   min-height: var(--card-chip-height);
   white-space: nowrap;
@@ -1294,6 +1297,9 @@
 }
 
 .card-promote-action.card-send-back-btn {
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  margin-left: auto;
   border: var(--btn-border-width) solid color-mix(in srgb, var(--text-muted) 30%, transparent);
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   color: var(--text);
@@ -1430,6 +1436,11 @@
     opacity: 1;
   }
 
+  .card-promote-action.card-send-back-btn {
+    opacity: 1;
+    margin-left: auto;
+  }
+
   /* Card: compact progress bar on narrow cards */
   .card-progress {
     gap: var(--space-xs);
@@ -1534,7 +1545,7 @@
 .card-field-badge--boolean {
   background: var(--accent, #4f7cff);
   border-color: var(--accent, #4f7cff);
-  color: #fff;
+  color: var(--cta-text);
 }
 
 .card-field-badge--multi {

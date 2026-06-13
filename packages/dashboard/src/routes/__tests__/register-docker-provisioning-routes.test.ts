@@ -26,16 +26,16 @@ const dockerClientServiceMock = {
 
 vi.mock("@fusion/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@fusion/core")>()),
-  DockerProvisioningService: vi.fn().mockImplementation(() => ({
+  DockerProvisioningService: vi.fn().mockImplementation(function () { return {
     provision: provisionMock,
     deprovision: deprovisionMock,
     startContainer: startContainerMock,
     stopContainer: stopContainerMock,
     restartContainer: restartContainerMock,
     getContainerStatus: getContainerStatusMock,
-  })),
-  DockerClientService: vi.fn().mockImplementation(() => dockerClientServiceMock),
-  CentralCore: vi.fn().mockImplementation(() => ({
+  }; }),
+  DockerClientService: vi.fn().mockImplementation(function () { return dockerClientServiceMock; }),
+  CentralCore: vi.fn().mockImplementation(function () { return {
     init: initMock,
     close: closeMock,
     registerNode: registerNodeMock,
@@ -43,7 +43,7 @@ vi.mock("@fusion/core", async (importOriginal) => ({
     updateManagedDockerNode: updateManagedDockerNodeMock,
     listManagedDockerNodes: listManagedDockerNodesMock,
     deleteManagedDockerNode: deleteManagedDockerNodeMock,
-  })),
+  }; }),
   deterministicGuardLocks: new Map(),
 }));
 

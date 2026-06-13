@@ -679,6 +679,114 @@ describe("Scheduler", () => {
       expect(schedulerLog.log).toHaveBeenCalledWith(expect.stringContaining("no reservable slot"));
     });
 
+    it("FN-6292: does not let an in-progress task with unmet deps block its own dependency by file-scope lease", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = new Map<string, Task>([
+        ["FN-H", createMockTask({ id: "FN-H", column: "in-progress", dependencies: ["FN-D"] })],
+        ["FN-D", createMockTask({ id: "FN-D", column: "todo", dependencies: [] })],
+      ]);
+      const moveTask = vi.fn(async (taskId: string, column: Task["column"]) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, column } as Task;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const updateTask = vi.fn(async (taskId: string, updates: Partial<Task>) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, ...updates } as Task;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const store = createMockStore({
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 10, maxWorktrees: 10, groupOverlappingFiles: true }),
+        parseFileScopeFromPrompt: vi.fn(async () => ["packages/engine/src/scheduler.ts"]),
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).not.toHaveBeenCalledWith("FN-D", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-H" });
+      expect(moveTask).toHaveBeenCalledWith("FN-D", "in-progress", expect.anything());
+    });
+
+    it("FN-6292: workflow-column hold sweep does not lease unmet-dependency in-progress holders", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = new Map<string, Task>([
+        ["FN-H", createMockTask({ id: "FN-H", column: "in-progress", dependencies: ["FN-D"] })],
+        ["FN-D", createMockTask({ id: "FN-D", column: "todo", dependencies: [] })],
+      ]);
+      const updateTask = vi.fn(async (taskId: string, updates: Partial<Task>) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, ...updates } as Task;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const moveTask = vi.fn(async (taskId: string, column: Task["column"]) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, column } as Task;
+        tasks.set(taskId, updated);
+        return updated;
+      });
+      const store = createMockStore({
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 10,
+          maxWorktrees: 10,
+          groupOverlappingFiles: true,
+          experimentalFeatures: { workflowColumns: true },
+        }),
+        parseFileScopeFromPrompt: vi.fn(async () => ["packages/engine/src/scheduler.ts"]),
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).not.toHaveBeenCalledWith("FN-D", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-H" });
+      expect(moveTask).toHaveBeenCalledWith("FN-D", "in-progress", expect.anything());
+    });
+
+    it("FN-6292: keeps file-scope leases for in-progress tasks whose dependencies are met", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = [
+        createMockTask({ id: "FN-DEP", column: "done" }),
+        createMockTask({ id: "FN-H", column: "in-progress", dependencies: ["FN-DEP"] }),
+        createMockTask({ id: "FN-D", column: "todo", dependencies: [] }),
+      ];
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 10, maxWorktrees: 10, groupOverlappingFiles: true }),
+        parseFileScopeFromPrompt: vi.fn(async (taskId: string) => taskId === "FN-DEP" ? [] : ["packages/engine/src/scheduler.ts"]),
+        updateTask,
+        moveTask,
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).toHaveBeenCalledWith("FN-D", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-H" });
+      expect(moveTask).not.toHaveBeenCalledWith("FN-D", "in-progress", expect.anything());
+    });
+
     it("holds workflow-column releases when file scopes overlap active work", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
@@ -1834,12 +1942,6 @@ describe("Scheduler", () => {
         (call: unknown[]) => call[0] === "FN-C" && String(call[1]).includes("queued — concurrency limit reached"),
       );
       expect(concurrencyReasonCalls).toHaveLength(1);
-
-      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
-      );
-      expect(auditCalls).toHaveLength(1);
-      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxConcurrent"]);
     });
 
     it("dedupes queued-concurrency logs when only non-binding semaphore counts change", async () => {
@@ -1872,12 +1974,6 @@ describe("Scheduler", () => {
         (call: unknown[]) => call[0] === "FN-D" && String(call[1]).includes("queued — concurrency limit reached"),
       );
       expect(concurrencyReasonCalls).toHaveLength(1);
-
-      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
-      );
-      expect(auditCalls).toHaveLength(1);
-      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
     });
 
     it("dedupes queued-concurrency logs across used/limit churn on the same binding gate", async () => {
@@ -1910,13 +2006,6 @@ describe("Scheduler", () => {
       );
       expect(concurrencyReasonCalls).toHaveLength(1);
       expect(String(concurrencyReasonCalls[0]?.[1])).toContain("semaphore used=1/2");
-
-      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
-      );
-      expect(auditCalls).toHaveLength(1);
-      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["semaphore"]);
-      expect(auditCalls[0]?.[0]?.metadata?.semaphore).toEqual({ used: 1, limit: 2, slack: 1 });
     });
 
     it("suppresses re-log and re-audit when only binding holder identity changes", async () => {
@@ -1950,13 +2039,6 @@ describe("Scheduler", () => {
         (call: unknown[]) => call[0] === "FN-D" && String(call[1]).includes("queued — concurrency limit reached"),
       );
       expect(concurrencyReasonCalls).toHaveLength(1);
-
-      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
-      );
-      expect(auditCalls).toHaveLength(1);
-      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
-      expect(auditCalls[0]?.[0]?.metadata?.holders?.maxWorktrees).toEqual(["FN-A"]);
     });
 
     it("re-logs and re-audits when binding gate changes", async () => {
@@ -1995,13 +2077,6 @@ describe("Scheduler", () => {
       expect(concurrencyReasonCalls).toHaveLength(2);
       expect(String(concurrencyReasonCalls[0]?.[1])).toContain("gate=maxConcurrent");
       expect(String(concurrencyReasonCalls[1]?.[1])).toContain("gate=maxWorktrees");
-
-      const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
-      );
-      expect(auditCalls).toHaveLength(2);
-      expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxConcurrent"]);
-      expect(auditCalls[1]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
     });
 
     it("formats queued-concurrency memo keys from binding gates only", () => {

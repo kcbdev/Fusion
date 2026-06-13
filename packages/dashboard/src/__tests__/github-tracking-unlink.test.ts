@@ -15,11 +15,11 @@ const { mockCommentOnIssue, mockSetIssueState, mockGetIssue, mockResolveGithubTr
 }));
 
 vi.mock("../github.js", () => ({
-  GitHubClient: vi.fn().mockImplementation(() => ({
+  GitHubClient: vi.fn().mockImplementation(function () { return {
     commentOnIssue: (...args: unknown[]) => mockCommentOnIssue(...args),
     setIssueState: (...args: unknown[]) => mockSetIssueState(...args),
     getIssue: (...args: unknown[]) => mockGetIssue(...args),
-  })),
+  }; }),
 }));
 
 vi.mock("../github-auth.js", () => ({

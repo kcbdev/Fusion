@@ -2,6 +2,1083 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.42.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- Updated dependencies [630b2a8]
+  - @fusion/engine@0.42.0
+  - @fusion/core@0.42.0
+  - @fusion/i18n@0.39.4
+  - @fusion-plugin-examples/cli-printing-press@0.1.21
+  - @fusion-plugin-examples/compound-engineering@0.1.4
+  - @fusion-plugin-examples/dependency-graph@0.1.35
+  - @fusion-plugin-examples/roadmap@0.1.23
+  - @fusion-plugin-examples/cursor-runtime@0.1.23
+  - @fusion-plugin-examples/droid-runtime@0.1.30
+  - @fusion-plugin-examples/hermes-runtime@0.2.54
+  - @fusion-plugin-examples/openclaw-runtime@0.2.54
+  - @fusion-plugin-examples/paperclip-runtime@0.2.54
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/dashboard@0.42.0
+- @fusion/core@0.42.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- 630b2a8: Allow narrowly scoped plan-only operational tasks to complete without source commits when their prompt or metadata explicitly declares no-source/no-code intent and their recorded evidence satisfies the task. The commit guard still rejects missing commits for normal implementation tasks and still enforces worktree and branch invariants before applying the no-commit exemption.
+  - @fusion/core@0.42.0
+  - @fusion/pi-claude-cli@0.42.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.42.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- e22afec: Add workflow-native typed settings for triage/spec policy thresholds and routing defaults. The built-in defaults preserve current behavior: size bands remain S <2h, M 2-4h, L 4-8h; subtask signals use the canonical planning-prompt values of step threshold 7 and packages/modules threshold 3; file-scope/remediation thresholds remain 20 and 30.
+
+  These triage policy settings are new workflow settings, not moved project settings, so they are excluded from the U4 `MOVED_SETTINGS_KEYS` tombstone while still resolving through workflow effective settings.
+
+- 039d3ce: Fast-mode triage is now expressed as workflow-declared policy: the lean prompt lives in the built-in `default-triage-fast` agent prompt and `planning-fast` seam, while `leanPlanning` and `autoApproveSpec` are workflow-native settings for prompt selection and spec-review auto-approval.
+
+  The internal `FAST_TRIAGE_SYSTEM_PROMPT` engine constant was removed. Existing `executionMode: "fast"` tasks remain byte-equivalent through a single legacy execution-mode-to-resolved-policy bridge.
+
+- 167f9b0: Allow engineer-role agents to opt into no-task backlog auto-claim for implementation tasks while preserving executor-only default pickup behavior.
+- 1c4ec5f: Add dashboard controls for the engineer backlog auto-claim opt-in at project scope and per-agent heartbeat settings.
+- eb607c6: Make dashboard modals touch-resizable on tablet and widen the task-detail modal default tablet width.
+- f7f2cae: Move Frontend UX criteria injection from AI self-instructions into deterministic engine-applied workflow policy, preserving the byte-equivalent checklist and idempotent insertion behavior.
+- 4e6df03: Add a verified no-op/duplicate task completion path so executors can close already-satisfied tasks without fabricating commits by using an audited `fn_task_done` sentinel summary.
+- 7ffea9f: Expose Google Generative AI as a selectable custom-provider API type in the dashboard settings UI and documentation.
+- 508551c: Allow tasks to be archived from any live board column and restored to their pre-archive column.
+- bd87ce7: Add workflow-declared optional steps and expose Browser Verification as the built-in coding workflow's opt-in optional step for task creation and editing.
+- 72661fa: Title summarization now accepts descriptions of any length by truncating the model input to a bounded prompt instead of rejecting descriptions over 2000 characters.
+- 07d5262: Sync workflow setting values across nodes in settings push, pull, receive, and status flows.
+
+#### Patch Changes
+
+- 8eb99ed: Quick Entry no longer auto-focuses when the board or dashboard becomes visible.
+- 36f5ecd: Skip custom workflow pre-merge prompt, script, and gate nodes when a task runs in fast execution mode.
+- 1a716f2: Resolve the standard triage planning prompt from the selected workflow IR planning node instead of the removed engine-side `TRIAGE_SYSTEM_PROMPT` duplicate. The built-in `default-triage` prompt is now the canonical policy source for `builtin:coding`; where the old copies disagreed, the surviving canonical subtask-split threshold is `MORE THAN 7 implementation steps` (with the matching `MORE THAN 3 different packages/modules` guidance). Fast-mode triage continues to use `FAST_TRIAGE_SYSTEM_PROMPT` unchanged.
+- fb2c6e5: Resolve the built-in reviewer base prompt from the workflow IR `review` node instead of an engine-local `REVIEWER_SYSTEM_PROMPT` duplicate. The canonical reviewer policy now lives in the `default-reviewer` agent prompt / built-in workflow seam, with reconciled superset content that preserves the FN-5928/FN-6229 surface-enumeration and symptom-verification gates, undersplit-task guidance, test-quality rules, worktree-boundary review, and the embedded port-4040 safety rule.
+- c0ff360: Fix mobile dashboard blanking after toggling the in-review auto-merge switch by keeping the board visible when real browsers horizontally pan the document to the offscreen column control.
+- 12621aa: Record explicit `builtin:coding` project-default workflow selections even when the compiled built-in has zero materialized steps, while preserving interpreter-deferred `builtin:stepwise-coding` fallback behavior.
+- 30e747b: Standalone plugin scaffolds now declare the dev toolchain they generate scripts and config for: `@types/node`, `vitest`, and `typescript`. This lets projects created with `fn plugin new` install, build, test, and load through `fn plugin dev . --once` via the documented external-author path without relying on transitive or hoisted dependencies.
+
+  Manual spot-check for release validation:
+
+  ```sh
+  npx @runfusion/fusion@latest plugin new proof-point-plugin
+  cd proof-point-plugin
+  pnpm install
+  pnpm build
+  pnpm test
+  fn plugin dev . --once
+  ```
+
+- 8c16395: Stop self-healing from removing worktrees that are still in use. The idle-worktree and cap-enforcement sweeps now skip any worktree bound to a live executor/merger/step/workflow session, so a checkout is no longer reaped while its task transiently sits in `done` or loses its worktree linkage mid-run.
+- d5b45c8: Fix "Couldn't start local Fusion" on the Linux AppImage (and any packaged build launched from a desktop launcher). The embedded local runtime now roots its data at the user's home directory (`~/.fusion`) instead of `process.cwd()`, which was `/` or the read-only AppImage mount point and caused database creation to fail with EACCES/EROFS. Set `FUSION_HOME` to override the location.
+- f0d2415: Fix custom provider message sends failing with a `ByteString` error (`character ... value 8226`). The settings UI displays the saved API key masked with `•` characters; saving the provider without retyping the key persisted that mask as the real credential, which then broke HTTP header encoding. Masked values echoed back on update are now treated as "unchanged" and the stored key is preserved; masked values on create/probe are rejected.
+
+  The edit form no longer seeds the API key field with the masked value at all — it starts blank (with a "Leave blank to keep current key" hint) so the mask can never be echoed back to save or "Detect Models". Existing keys are preserved when the field is left empty.
+
+- a83c2d8: Fix custom provider models not appearing in model dropdowns. The `/models` endpoint filtered results to providers configured in Fusion's auth stores, which excluded custom providers (stored in global settings). Their registry keys are now added to the allowlist so their models surface in pickers.
+- cbc3157: Fix the mobile chat keyboard collapsing on iOS Safari. Several ancestor/scroll mutations were blurring the focused composer textarea:
+
+  1. `.chat-thread--keyboard-active` declared `transform: translateY(...)` + `will-change: transform` in CSS, keeping a non-`none` transform on `.chat-thread` (an ancestor of the composer) for the whole keyboard-active window. The drift compensation is now applied imperatively in JS only when iOS actually shifts the visual viewport (`offsetTop > 0`), so the ancestor stays `transform: none` on focus.
+
+  2. The mobile keyboard scroll-lock pinned `body { position: fixed }` a beat after the composer was focused — the textbook iOS keyboard-dismiss trigger. App-level and ChatView keyboard pins now use a new `useMobileKeyboardViewportLock` that locks `overflow: hidden` + `scrollTo(0, 0)` WITHOUT changing `position` (the same approach the Quick Chat panel uses), so iOS keeps the input focused. Modals are unchanged and keep the `position: fixed` lock.
+
+  3. The direct-chat composer's `handleInputFocus` ran `window.scrollTo(0, 0)` on every focus to undo iOS layout drift. That scroll fires while iOS is still raising the keyboard, which aborts the raise — the keyboard opened then immediately dismissed on re-focus (first tap fine, every tap after a dismiss broken). The drift reset now happens on **blur** instead — when the keyboard is already closing, so there is nothing to dismiss — immediately plus a short follow-up that is cancelled on the next focus, so a fast re-tap can't scroll mid-raise. Each focus therefore starts at `scrollY 0` and the keyboard lock's `scrollTo(0, 0)` is a harmless no-op.
+
+  4. The mobile bottom nav stayed on screen while the keyboard was up: `.mobile-nav-bar--keyboard-open` only pinned it to `bottom: 0` and relied on the keyboard to cover it, but on iOS the layout viewport doesn't shrink, so the bar overlapped the composer. It now slides fully off-screen (`translateY(100%)` + `pointer-events: none`) while typing. Safe for the keyboard because the nav is a sibling of the input, not an ancestor.
+
+- cbc3157: Fix the Quick Chat FAB not opening on iOS Safari. The drag hook calls `setPointerCapture()` in `pointerdown`, which makes WebKit swallow the synthetic `click`, so the FAB never toggled on iPhone. The open/close toggle now fires from the drag hook's `pointerup` (a real user gesture, so the stealth-input focus still raises the keyboard), with the trailing synthetic click de-duped so mouse and test click paths are unaffected.
+- e5036b1: Fix the Quick Chat send button going dead after switching chats on mobile. The send and stop buttons run their action on `pointerdown`/`touchstart` (iOS needs that) and set a shared `handledMobileActionRef` latch so the trailing synthetic `onClick` doesn't double-fire — but the latch was only ever cleared inside `onClick`. On iOS, `preventDefault()` in `touchstart` routinely suppresses that click, leaving the latch stuck `true`, so the next real click (e.g. after opening a different chat) was swallowed and the button appeared unresponsive. The latch is now self-clearing: it auto-resets on a short timer after each gesture and is consumed-and-cancelled when a click does fire, so it can never persist across taps. Because the ref is shared by both buttons, this also stops a stuck stop-button latch from killing the next send tap.
+- 535c40d: Fix task creation failing with "node 'merge-gate' branches into 2 edges — graphs with branches require the workflow interpreter (deferred)". The built-in coding workflow now models the merge lifecycle as a branching region of merge/retry/branch-group primitives (FN-6035), but the linear workflow compiler still tried to lower those nodes and rejected their fan-out. The compiler now treats the merge-region primitive kinds (merge-gate, merge-attempt, manual-merge-hold, retry-backoff, recovery-router, branch-group-member-integration, branch-group-promotion) as an engine-owned terminal boundary — exempt from the single-edge linearity rule and never lowered to a step — so linear-prefix workflows compile to their pre-merge step list again.
+- e35f3dd: Classify harmless temporary merge worktree cleanup failures after `git worktree prune`/porcelain inspection while keeping still-registered worktree leaks visible in merger diagnostics.
+- 3a729f5: Allow narrowly-scoped Review Level 1 coordination tasks with board-only file scope and explicit no-source intent to complete without commits while preserving the missing-commit guard for implementation tasks.
+- c285f3f: Fix pi 0.79 extension discovery compatibility and retry stale title-summarizer model ids with automatic model resolution.
+- 9a78814: Stop review entry from freezing the global auto-merge setting onto tasks. Tasks without an explicit per-task auto-merge override now continue to follow the live global setting, so toggling global auto-merge off stops newly-entered non-override in-review tasks from being auto-merge processed.
+- 2085610: Move AI-merge clean-room worktrees into a repo-local cleanup-exempt root, guard cleanup sweeps by active merge ownership, and classify missing clean-room worktree failures as transient so merges can retry cleanly.
+- d23c5d9: Fix task detail Pull Request and Review surfaces so they use the live project auto-merge setting instead of a stale modal-open snapshot. Create PR / manual merge affordances now appear immediately when auto-merge is toggled off, and the automatic auto-merge hint returns when it is toggled back on.
+- 4fc00b6: Self-heal compound-engineering answer submission for restarted awaiting-input sessions by rehydrating the interactive session before sending the answer.
+- 65251d2: Pausing or sleeping an agent no longer pauses its assigned tasks. Assigned tasks now keep their existing pause state so only explicit user actions pause ordinary task work.
+- bffae81: Add `autoMergeProvenance` so Fusion can distinguish explicit per-task auto-merge overrides from legacy review-entry stamps. Startup now marks ambiguous legacy in-review `autoMerge: true` rows as `legacy-stamp` without changing behavior, and the operator-visible `reconcileLegacyAutoMergeStamps` action (dry-run by default) can clear those legacy stamps so global auto-merge OFF is respected while genuine user overrides are preserved.
+- 0897b2a: Add a bounded persisted auto-retry for transient workflow-graph resume failures after engine restart or unpause, while preserving terminal failures for genuine graph errors.
+- ec4b247: Re-fire durable-agent assignment wakes that were skipped because the agent was mid-heartbeat, so newly assigned tasks are worked when the active run completes instead of waiting for the next timer tick.
+- 751d942: Fix workflow graph execution for the built-in coding workflow's merge-policy primitive region by collapsing any merge-region entry back to the legacy `merge` seam until the workflow interpreter owns merge policy execution.
+- 93237c3: Fix mobile chat composer first taps so iOS and Android preserve native keyboard focus across direct chat, room chat, and Quick Chat.
+- 480e55f: Fix non-English Active Agents next-heartbeat translations so localized strings interpolate the provided elapsed heartbeat value instead of showing a raw placeholder.
+- 0a135c9: Fix the task details Chat tab so it opens and reactivates at the latest agent output while preserving scroll-away behavior for live updates.
+- 66591ec: Add dashboard and CLI operator surfaces to inspect and apply legacy auto-merge stamp cleanup.
+- a9b1139: Self-healing now automatically re-dispatches an assigned in-progress task when its durable agent loses both the heartbeat run and active execution session, preventing the task from stranding until the next engine restart.
+- f2054d0: Reliably settle the task detail Chat transcript to the latest output on load and tab reactivation, including after collapsible thinking/tool groups reflow.
+- 34ada00: Show user-sent task-detail Chat steering messages as You bubbles and keep them visible after steering requests persist.
+- 35554e6: Keep the task-detail Chat composer pinned and visible while the transcript scrolls internally on mobile and desktop.
+- e0ec3d1: Steering messages sent from task chat now reach active step-session and workflow runs, including parallel step sessions, and the misleading inactive-session "next session" composer copy was removed.
+- f68775a: Ensure only explicit user actions unpause user-paused tasks. Engine self-healing, agent resume cascades, dashboard agent-state resume fallback, heartbeat recovery, and approval-decision resume no longer clear `userPaused` or auto-unpause tasks the user paused.
+- 4ea9d66: Fix automatic agent runs to resolve executor, planning, heartbeat, merger, and validator models from fresh task/settings configuration before falling back to durable agent runtime defaults.
+- 44b756d: Fix built-in branching workflow selection so interpreter-deferred coding workflows can be selected or used as project defaults without throwing during legacy step materialization.
+- e6eef1a: Handle insight extraction agent responses deterministically by accepting prompt return text, falling back to session state, and surfacing a 503 error when no assistant text is produced.
+- e305b1a: Respect per-task pause state during triage planning so paused tasks do not auto-advance after specification approval.
+- 40cb0d3: Keep the dashboard usage dialog near the top of the viewport across desktop popover, modal, and mobile presentations.
+- f16b038: Add workflow work-item storage primitives for workflow-owned merge migration.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [8eb99ed]
+- Updated dependencies [36f5ecd]
+- Updated dependencies [1a716f2]
+- Updated dependencies [e22afec]
+- Updated dependencies [fb2c6e5]
+- Updated dependencies [039d3ce]
+- Updated dependencies [c0ff360]
+- Updated dependencies [167f9b0]
+- Updated dependencies [1c4ec5f]
+- Updated dependencies [12621aa]
+- Updated dependencies [30e747b]
+- Updated dependencies [eb607c6]
+- Updated dependencies [8c16395]
+- Updated dependencies [d5b45c8]
+- Updated dependencies [f0d2415]
+- Updated dependencies [a83c2d8]
+- Updated dependencies [cbc3157]
+- Updated dependencies [cbc3157]
+- Updated dependencies [e5036b1]
+- Updated dependencies [535c40d]
+- Updated dependencies [e35f3dd]
+- Updated dependencies [3a729f5]
+- Updated dependencies [c285f3f]
+- Updated dependencies [f7f2cae]
+- Updated dependencies [9a78814]
+- Updated dependencies [2085610]
+- Updated dependencies [d23c5d9]
+- Updated dependencies [4fc00b6]
+- Updated dependencies [65251d2]
+- Updated dependencies [4e6df03]
+- Updated dependencies [bffae81]
+- Updated dependencies [0897b2a]
+- Updated dependencies [ec4b247]
+- Updated dependencies [7ffea9f]
+- Updated dependencies [751d942]
+- Updated dependencies [508551c]
+- Updated dependencies [93237c3]
+- Updated dependencies [bd87ce7]
+- Updated dependencies [72661fa]
+- Updated dependencies [480e55f]
+- Updated dependencies [0a135c9]
+- Updated dependencies [66591ec]
+- Updated dependencies [a9b1139]
+- Updated dependencies [f2054d0]
+- Updated dependencies [34ada00]
+- Updated dependencies [35554e6]
+- Updated dependencies [e0ec3d1]
+- Updated dependencies [f68775a]
+- Updated dependencies [4ea9d66]
+- Updated dependencies [44b756d]
+- Updated dependencies [e6eef1a]
+- Updated dependencies [07d5262]
+- Updated dependencies [e305b1a]
+- Updated dependencies [40cb0d3]
+- Updated dependencies [f16b038]
+  - @runfusion/fusion@0.42.0
+
+## 0.41.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.41.0
+- @fusion/engine@0.41.0
+- @fusion/i18n@0.39.3
+- @fusion-plugin-examples/cli-printing-press@0.1.20
+- @fusion-plugin-examples/compound-engineering@0.1.3
+- @fusion-plugin-examples/dependency-graph@0.1.34
+- @fusion-plugin-examples/roadmap@0.1.22
+- @fusion-plugin-examples/cursor-runtime@0.1.22
+- @fusion-plugin-examples/droid-runtime@0.1.29
+- @fusion-plugin-examples/hermes-runtime@0.2.53
+- @fusion-plugin-examples/openclaw-runtime@0.2.53
+- @fusion-plugin-examples/paperclip-runtime@0.2.53
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.41.0
+- @fusion/dashboard@0.41.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.41.0
+- @fusion/pi-claude-cli@0.41.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.41.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 4151a19: Bump `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` from `^0.78.0` to `^0.79.1`. This adds **Claude Fable 5** (`claude-fable-5`) model support on the Anthropic and Amazon Bedrock providers, with adaptive thinking and `xhigh` effort. Fable now appears automatically in the registry-driven model picker for users with Anthropic (or Claude CLI) auth configured. See the upstream pi coding agent changelog for [`0.79.1` (2026-06-09)](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md).
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [4151a19]
+  - @runfusion/fusion@0.41.0
+
+## 0.40.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/engine@0.40.1
+- @fusion/i18n@0.39.2
+- @fusion-plugin-examples/cli-printing-press@0.1.19
+- @fusion-plugin-examples/compound-engineering@0.1.2
+- @fusion-plugin-examples/dependency-graph@0.1.33
+- @fusion-plugin-examples/roadmap@0.1.21
+- @fusion-plugin-examples/cursor-runtime@0.1.21
+- @fusion-plugin-examples/droid-runtime@0.1.28
+- @fusion-plugin-examples/hermes-runtime@0.2.52
+- @fusion-plugin-examples/openclaw-runtime@0.2.52
+- @fusion-plugin-examples/paperclip-runtime@0.2.52
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/dashboard@0.40.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+- @fusion/pi-claude-cli@0.40.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- e62847b: fix: keep `./dist/*` subpaths resolvable in the packed manifest
+
+  The prepack transform injects an `exports` field for the plugin-sdk subpath,
+  which flips Node into strict subpath mode and hid every other `./dist/*` file.
+  That broke the runfusion.ai alias (which imports
+  `@runfusion/fusion/dist/bin.js`) with `ERR_PACKAGE_PATH_NOT_EXPORTED`, failing
+  the pre-publish smoke test. Add a `./dist/*` passthrough so the alias bin and
+  the pi `./dist/extension.js` loader keep resolving after pack.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [e62847b]
+  - @runfusion/fusion@0.40.1
+
+## 0.40.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- 2d2024f: Unfreeze dashboard spinners and pulse/enter animations. Transition tokens
+  (`--transition-slow: 0.3s ease`) bundle a duration and an easing; 15 animation
+  declarations reused them as bare durations, which made the whole `animation`
+  declaration invalid at computed-value time and silently resolved it to
+  `animation: none`. Animation rules now use new duration-only tokens
+  (`--duration-instant/fast/normal/slow`), with the transition tokens derived
+  from them, and a repo-wide CSS regression test forbids the pattern.
+- 784f308: Fix first tap of GitHub tracking icon in quick task entry on mobile (FN-6148).
+
+  The delegated touch handler on `.quick-entry-actions` now uses `closest("button")` to resolve taps that land on child SVG elements, so the GitHub tracking toggle responds correctly on the first touch — identical root-cause fix as FN-6145.
+
+  - @fusion/core@0.40.0
+  - @fusion/engine@0.40.0
+  - @fusion/i18n@0.39.1
+  - @fusion-plugin-examples/cli-printing-press@0.1.18
+  - @fusion-plugin-examples/compound-engineering@0.1.1
+  - @fusion-plugin-examples/dependency-graph@0.1.32
+  - @fusion-plugin-examples/roadmap@0.1.20
+  - @fusion-plugin-examples/cursor-runtime@0.1.20
+  - @fusion-plugin-examples/droid-runtime@0.1.27
+  - @fusion-plugin-examples/hermes-runtime@0.2.51
+  - @fusion-plugin-examples/openclaw-runtime@0.2.51
+  - @fusion-plugin-examples/paperclip-runtime@0.2.51
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- Updated dependencies [2d2024f]
+- Updated dependencies [784f308]
+  - @fusion/dashboard@0.40.0
+  - @fusion/core@0.40.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.40.0
+- @fusion/pi-claude-cli@0.40.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.40.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 61d6874: Add a guarded interpreter-authoritative workflow cutover for coding-task lifecycle execution. The new capability stays default-off behind `experimentalFeatures.workflowInterpreterAuthoritative` and only activates when rollout-readiness checks pass, preserving legacy execution as the fallback path.
+- 93e8bd9: Add mission↔goal linkage tooling across Fusion surfaces: REST mission goal endpoints, `fn mission goals|link-goal|unlink-goal` CLI commands, and `fn_mission_list_goals|fn_mission_link_goal|fn_mission_unlink_goal` pi-extension tools.
+- 26bc80a: Add mission↔goal batch linking support across REST, CLI, and pi-extension surfaces.
+
+  - `POST /api/missions` and `PATCH /api/missions/:missionId` now accept optional `goalIds: string[]` for mission goal linking on create and update.
+  - `fn mission create --goal <id>` supports repeatable goal flags to link goals during mission creation.
+  - Mission goal link surfaces now reject archived goals with `GOAL_ARCHIVED` while preserving `404` for missing goals.
+  - Unlink paths remain permissive so archived goals can still be removed from missions.
+
+- 489a287: Add an ACP (Agent Client Protocol) client runtime plugin (`runtimeId: "acp"`)
+  that drives any external ACP-compatible agent over JSON-RPC/stdio, built on the
+  official `@agentclientprotocol/sdk`. Installed on demand (experimental).
+
+  The agent runs as an untrusted subprocess that calls back into Fusion, so the
+  integration ships a defense-in-depth security floor: per-category permission
+  gating against the live policy (never a preset shortcut; `allow_once` only;
+  unmappable kinds and missing policy default-deny), an unrestricted-risk
+  acknowledgement that escalates blanket allows to approval under the allow-all
+  default, an opt-in filesystem capability behind a real symlink-resolving cwd jail
+  (realpath + `O_NOFOLLOW`, secret/`.git` deny-list, writes gated through the
+  permission policy), untrusted-output sanitization and bounds, and an env
+  allow-list for the subprocess.
+
+- c1c99a9: Wire the CLI Agent Executor as a selectable executor kind for the task execute
+  path (U7). A workflow node with `config.executor === "cli-agent"` (plus
+  `cliAdapterId` and optional `cliAutonomy`/`cliNotify`) now drives an engine-owned
+  CLI coding agent (Claude Code / Codex / Droid / Pi / generic) through the execute
+  step inside the task worktree.
+
+  The new `cli-agent/task-session.ts` orchestrates the task↔session lifecycle:
+  spawn in the worktree, mint the per-session hook token and write the hook scripts,
+  inject the task prompt after readiness, subscribe to the authoritative state
+  machine, and resolve on a positive completion signal (origin R20 gating — a
+  native `done` advances the pipeline; the generic tier never auto-advances on idle
+  and exposes a `confirmAdvance()` affordance instead). The resolved executor config
+  is snapshotted at launch, so a mid-run node-config edit applies to the next run
+  only. The PTY is reaped (recorded `completed`) at the execute→in-review handoff.
+
+  Lifecycle semantics honor the existing contracts: a hard cancel
+  (`moveTask(in-progress→todo)` / column-exit abort) SIGKILLs the CLI session via
+  the same dispose/abort path API sessions use and marks it `killed` (never
+  resume-eligible); a re-plan/RETHINK re-entry kills any prior live session and
+  launches fresh; a follow-up to a done task resumes the recorded native session id
+  when the adapter supports resume, else launches fresh. A PTY-pool ceiling
+  (`CliConcurrencyLimitError`) surfaces as a clear queued/rejected task state rather
+  than a silent stall.
+
+- d8248b4: Add the CLI Agent Executor hook ingestion route and per-session hook scripts
+  (U17). The dashboard now serves a localhost-only `POST /api/cli-agent/hooks`
+  endpoint that authenticates per-session hook POSTs from a spawned CLI agent and
+  forwards the validated payload in-process to the engine telemetry hub (the engine
+  has no HTTP server — only the dashboard serves HTTP).
+
+  The route is hardened because localhost is not a trust boundary: it validates the
+  high-entropy per-session token against the engine-held registry (a session id
+  alone is never sufficient, and a token for one session never validates for
+  another), rejects browser-context requests via Origin/Host CSRF checks, caps the
+  payload size, and treats an unknown/non-live session as a 200 no-op rather than a
+  crash. It is exempt from the daemon bearer-token middleware (hook scripts only
+  hold the per-session token) but authenticates with that token instead.
+
+  The engine gains `hook-scripts.ts`: it generates the per-session hook script and
+  notify shim (Orca `agent-hooks` shape — `curl` POST of the stdin JSON with the
+  session token header, short timeouts, always exit 0), writes them into a
+  session-scoped config dir (owner-only, executable), and deletes that dir on
+  session end (the token is registry-invalidated at the same moment, bounding its
+  at-rest exposure to the session lifetime).
+
+- ace7106: CLI-agent hybrid chat (U12): a chat session can select a cli-agent executor and
+  be driven by a long-lived CLI agent process. Adapter transcript telemetry maps
+  to durable chat_messages rows at user/assistant/tool-summary granularity (raw
+  tool noise stays in the terminal), with the shared `redactSecrets` pass applied
+  before persistence so transcripts never become a secret store. Composer sends
+  route through the inject path with FIFO queueing; the flush decision re-fetches
+  authoritative session state rather than trusting a cached busy flag. The chat
+  surface gains a transcript ↔ raw-terminal toggle (terminal owns input, composer
+  hidden in terminal mode); generic-tier sessions render terminal-only with no
+  toggle. New per-session `cliExecutorAdapterId` linkage on chat_sessions.
+
+  ChatView now mounts `CliChatSurface` for cli-backed sessions (the message-pane +
+  composer region is delegated to it; regular sessions keep the standard composer),
+  and the engine `TelemetryHub` gains a narrow optional `onEvent` tap (settable via
+  `setEventListener`) so the chat transcript runner can observe the same sanitized
+  events the hook route already feeds, without the hub becoming a subscriber bus.
+
+- 7a80d29: Mobile terminal interaction for cli-agent sessions (U13). `SessionTerminal` now
+  detects mobile viewports via the canonical breakpoint
+  (`(max-width: 768px), (max-height: 480px)`) and renders a bottom input model in
+  place of relying on xterm's hidden-textarea (unreliable on mobile): a visible
+  text input that forwards typed text + `\r` as input frames on submit, plus an
+  accessory key bar emitting exact control sequences — Esc (`0x1B`), Tab (`0x09`),
+  a dedicated Ctrl-C (`0x03`), ANSI CSI cursor arrows (`CSI A/B/C/D`), and a sticky
+  Ctrl modifier whose next key combines into a control byte (Ctrl-C `0x03`,
+  Ctrl-D `0x04`, Ctrl-Z `0x1A`) with a visible active state.
+
+  Bar keys apply the iOS composer survival pattern (pointerdown/mousedown
+  preventDefault, action on click) so the input keeps focus, and the bar behaves as
+  a fixed footer that lifts above the virtual keyboard via `useMobileKeyboard`
+  (including its pinch-zoom `vv.scale > 1` guard, which is not treated as
+  keyboard-open). xterm `onData` input stays attached (the bar is primary, not
+  exclusive). Bar keys and the input are deliberate user keystrokes routed straight
+  to the session input path. All new strings are localized in the `app` i18n
+  catalog.
+
+- 8bac390: Add CLI-agent one-shot sessions for the validator, planning, and CE plugin
+  surfaces (U9). A one-shot session runs an adapter's non-interactive invocation
+  (`claude -p`, `codex exec --json`, `droid exec --output-format json`,
+  `pi --print`) to completion in a working directory, streams output to a
+  read-only terminal (input disabled server-side via the durable
+  `autonomyPosture.readOnly` flag the transport's `isReadOnlySession` honors),
+  parses the adapter's structured JSON result, and reaps the PTY on exit.
+
+  The new `cli-agent/one-shot-session.ts` returns a typed result: a success with
+  the parsed payload, or a typed failure (`nonzero-exit` / `unparseable` /
+  `spawn-failed`) carrying a bounded output tail. The validator integration
+  (`cli-agent-validator.ts`) maps results into the existing
+  pass/fail/blocked/error verdict contract — a malformed or unparseable result
+  maps to `error`, NEVER a silent pass. A planning seam (`runCliAgentPlanning`)
+  maps one-shot output into the same `PlanningResponse` shape a model run
+  produces, and the CE plugin's orchestrator threads an `executor` option
+  (`model` | `cli-agent`) end-to-end to its resolver.
+
+- 10acf17: Add the CLI agent resume coordinator and self-healing integration (U8). On
+  engine start, sessions persisted as live (starting / ready / busy /
+  waitingOnInput) are classified `engineDeath` and queued for resume respecting
+  the session-manager concurrency ceiling. Resume verifies the recorded worktree
+  still exists (missing → needsAttention, never a CLI spawned into a vanished
+  directory), detects a dirty worktree (logged + flagged on the session record,
+  resume proceeds), relaunches via the adapter's `buildResume` with the recorded
+  native session id in the recorded worktree, re-attaches telemetry, and
+  re-injects no prompt. Only `crashed`/`engineDeath` are resume-eligible
+  (`killed`/`userExited`/`authFailed`/`completed` never); attempts are capped at 2
+  with backoff; exhaustion, an unsupported adapter, a missing vendor session
+  store, or an immediate spawn error route to needsAttention (a permanent-failure
+  path, not a retry loop).
+
+  Self-healing idle-worktree sweeps (`enforceWorktreeCap`, `cleanupOrphans`,
+  unregistered-orphan reap) now skip a worktree backing a resume-eligible
+  `cli_sessions` record via a narrow `isWorktreeResumeReserved` seam, and the
+  stuck-task detector suppresses stuck/inactivity flagging while a task's CLI
+  session is `waitingOnInput` via a narrow `isCliSessionWaitingOnInput` seam — the
+  U3 stall backstop remains the only escalation while genuinely waiting.
+
+- 5872331: Bootstrap the CLI Agent Executor runtime and wire it end-to-end.
+
+  A new `createCliAgentRuntime` factory (engine) constructs the per-project bundle — a `CliSessionStore` over the project's existing core Database, a per-runtime adapter registry with all five bundled adapters, the `CliSessionManager` (PTY lifecycle), the `TelemetryHub` (per-session token registry rebuilt from live records), and the `CliResumeCoordinator` (relaunch re-mints a hook token + rewrites hook scripts) — returning the executor bundle, the `isWorktreeResumeReserved` / `isCliSessionWaitingOnInput` predicates, and a scoped `dispose`.
+
+  The runtime is instantiated per project in `InProcessRuntime` behind the `experimentalFeatures.cliAgentExecutor` flag (opt-in, matching the `workflowGraphExecutor` precedent): the bundle threads into `TaskExecutorOptions.cliAgentRuntime`, the predicates feed the self-healing idle-worktree sweep and the stuck-task detector, and `resumeCoordinator.recoverOnStart()` runs non-blocking after engine start (errors logged, never thrown). The dashboard hook endpoint URL is derived from a server-threaded option, falling back to a localhost URL from `FUSION_DASHBOARD_PORT` (default 4040).
+
+  The dashboard now resolves the project's `TelemetryHub` via `cliAgentHubResolver`, mounts the cli-sessions transport from the runtime's manager + store, and brokers cli-backed chat sends: a chat session with a `cliExecutorAdapterId` routes composer sends to a `CliChatSessionRunner` (instead of the model agent loop), and the hub's sanitized telemetry is routed per-session into the runner's transcript handler.
+
+- 17c9303: CLI agent session transport (U10): authenticated cli-sessions REST routes
+  (list, single-use session-scoped attach tickets, inject, confirm-advance), a
+  distinct `/api/cli-sessions/ws` WebSocket attach handler (daemon-token + Origin
+  allowlist + single-use ticket gate, scrollback replay then live byte frames,
+  ACK-credit flow control driving engine pause/resume, latest-active-client
+  resize, server-side read-only enforcement, input-source attribution), a
+  streaming-safe outbound output filter (`neutralizeTerminalOutput`) that strips
+  OSC 52 clipboard writes, non-http(s) OSC 8 hyperlink URIs, and device-status /
+  query sequences, and a throttled `cli:session:state` SSE event with
+  Last-Event-ID replay.
+- 243113a: Add CLI-agent adapter launch settings, an autonomy approval gate, and workflow
+  node-editor configuration for the CLI Agent Executor (U15).
+
+  A new `cliAgents` slice of global settings holds per-adapter operator launch
+  config — command override, extra args, autonomy mode, and env allowlist
+  additions — validated and sanitized at the write boundary (unknown adapter ids
+  and invalid fields are dropped). Shipped defaults are owned by the adapters.
+
+  The autonomy gate closes the "adjacent settings" bypass: elevation requested
+  through ANY channel (the autonomy field, extra args such as
+  `--dangerously-skip-permissions`, an autonomy-toggling env var, or a non-default
+  command override) is detected over the FULLY RESOLVED argv + env via per-adapter
+  elevation markers plus a shared generic env-pattern set. `resolveEffectivePosture`
+  derives the posture chip from the resolved invocation — never the autonomy field
+  alone — and the effective posture is denormalized onto the session record at
+  spawn. An elevated launch without a stored per-project approval fails with a
+  typed `CliAutonomyNotApprovedError` instead of stalling. Approvals are per-project
+
+  - per-adapter (mirroring the raw workflow-CLI-command approval precedent) and the
+    approving principal in v1 is the daemon-token holder.
+
+  The dashboard adds daemon-token-authed routes
+  (`/api/cli-agents`, `/api/cli-agents/settings`,
+  `/api/cli-agents/:adapterId/approve-autonomy` + revoke), a Settings section for
+  per-adapter launch config with an explicit confirmation flow before elevated
+  autonomy is approved, and a workflow node-editor block that surfaces an adapter
+  picker (with native/hybrid/generic tier labels), an autonomy toggle, and the
+  waiting-on-input notification mode (banner / banner+notify) when a node's executor
+  is `cli-agent`. All new strings are localized in the `app` i18n catalog.
+
+- e10db81: CLI agent terminal UI (U11): a shared `SessionTerminal` component (lazy-loaded
+  xterm + fit/webgl/unicode11) that attaches to the U10 cli-sessions WebSocket
+  with ACK flow control, a posture chip (baseline vs elevated), a read-only
+  badge, session-idle/ended replay states, and a generic-tier confirm-advance
+  strip. Adds a `terminal` tab to the task detail view driven by the lifecycle
+  visibility matrix (live / read-only live / replay-idle / replay-ended / hidden)
+  with live `cli:session:state` SSE merging, waiting-on-input and needs-attention
+  task-card badges (distinct from staleness/stall badges), and extends
+  `SessionNotificationBanner` with a `cli-agent` session type plus the pinned
+  needs-attention variants (userExited / authFailed / resume-exhausted) and their
+  actions. All new strings flow through the i18n catalogs.
+- 57631c7: Add full-screen TUI attach to cli-agent sessions (U14). The Ink dashboard TUI
+  can hand the terminal to a CLI agent session as a raw passthrough: it enters the
+  alternate screen, streams WebSocket terminal bytes to stdout and stdin keystrokes
+  back as input frames, propagates resizes, and ACKs consumed bytes for flow
+  control. The detach chord (Ctrl-]) restores the TUI cleanly, and a dropped
+  connection surfaces an error and restores the terminal. Untrusted terminal output
+  is neutralized through the same hardening filter the dashboard WS bridge uses
+  (OSC 52 clipboard writes, non-http(s) OSC 8 links, and device-status queries are
+  stripped before reaching the host TTY).
+- 3cf13dd: Add the Compound Engineering bundled plugin: a dedicated dashboard surface for compound-engineering artifacts and interactive `ce-*` sessions, a work→board bridge, and bidirectional board↔pipeline sync. Sessions are fully multi-session: a Sessions panel lists every run with stage/status/last-activity, lets you open and switch between concurrent sessions (each keeps running server-side), resume interrupted ones, and discard settled ones (`DELETE /sessions/:id` disposes the live handle before deleting the row).
+
+  Sessions show the agent's full working output live (streamed thinking/tool activity with an inactivity-based stall timeout instead of a fixed turn timeout), the user can steer mid-stage with free-text guidance (attached to an answer or sent on its own), and the transcript renders past questions/answers/working traces as a proper chat surface.
+
+  This also adds two reusable host capabilities that any plugin benefits from:
+
+  - **Interactive agent sessions for plugin routes** (`ctx.createInteractiveAiSession`), with skill-discovery forwarding (`requestedSkillNames` / `additionalSkillPaths`) and live mid-turn progress streaming (`onProgress`: thinking/text deltas + tool markers) so a plugin can load a bundled skill into a live session and surface its work in real time.
+  - **Real plugin event push over SSE**: a plugin's `ctx.emitEvent` calls are forwarded to connected `/api/events` clients as project-scoped `plugin:custom` events, and dashboard views can consume them via the new `subscribePluginEvents` view-context capability.
+
+- ee5f5e8: Add "New folder" button to DirectoryPicker for project setup
+
+  The directory picker in the project setup flow now includes a "New folder"
+  button that lets users create folders directly when selecting a project path.
+  This includes:
+
+  - New `POST /api/create-directory` endpoint for creating directories
+  - Create folder UI in DirectoryPicker with inline error handling
+  - Keyboard support (Enter to create, Escape to cancel)
+  - Client-side validation for folder names (no path separators or traversal)
+
+  Also fixes a bug where navigating into an empty folder would revert to the
+  previous directory.
+
+- e854d33: Add `fn onboard` command: a sequential, prompt-based onboarding wizard covering central DB creation, AI provider setup (API key), first project init, core settings defaults, and a next-steps tour. Persists a `cliOnboardingCompletedAt` completion marker in global settings (distinct from the dashboard `setupComplete` first-run flag).
+- 641b932: Add a safe onboarding auto-launch hook in the CLI bootstrap path. When the central DB is missing, interactive TTY commands now trigger `fn onboard` automatically before command dispatch, while non-interactive contexts (non-TTY, `serve`, `daemon`, explicit skip signals) remain unchanged and never block execution.
+- 2053f3f: Add `fn onboard`: an explicit, user-invoked onboarding command that runs a sequential, prompt-based wizard for central DB creation, AI provider setup (API key), first project init (`fn init`), core settings defaults (global `testMode` and project `maxConcurrent`), and a next-steps tour. It persists a `cliOnboardingCompletedAt` completion marker in global settings so later runs are skipped unless `--force` is passed.
+- e9de195: Add dashboard shared branch-group visibility and controls: branch-group list/show/assign/promote API routes, grouped task surfacing, and a completion-gated branch-group card that only reveals PR/merge actions once all members are landed.
+- eb425d1: Add a dedicated dashboard Group Task Modal for shared branch groups. Grouped badges in task cards and subtask planning now open a modal showing shared branch status, member landed progress, tracked PR state, member-task quick links, and completion-gated promote actions.
+- 9c29e2e: Add a new New Task branch strategy option, **Merge into a shared feature branch** (`shared-group`).
+
+  When selected, task creation now joins an existing open branch group by shared branch name (or creates a `new-task` sourced group when missing), links `branchContext` with `assignmentMode: "shared"`, and derives a per-task working branch from the shared branch instead of running directly on the shared integration branch.
+
+- 3373c0b: Add shared branch-group completion-gate promotion machinery so grouped shared branches promote to the default branch exactly once after all members land. This includes idempotent promotion re-evaluation, finalized branch-group status/PR tracking persistence, and lifecycle wiring that keeps member integration and shared→default promotion as separate phases.
+- 130f6f1: Custom OpenAI-compatible providers now register with explicit conservative role compatibility: Fusion defaults `compat.supportsDeveloperRole` to `false` so reasoning-capable models emit the legacy `system` role instead of relying on provider URL auto-detection. Advanced users can opt in per provider with `supportsDeveloperRole: true` when their endpoint explicitly supports the `developer` role.
+- 0a418e6: Add the external plugin authoring loop for published Fusion installs: `@runfusion/fusion/plugin-sdk` is available as the public SDK subpath, `fn plugin new <name>` scaffolds standalone publishable plugin packages, and `fn plugin dev <path>` builds, installs, watches, and hot-reloads local plugins during development.
+- 30a09e3: Persist mission↔goal many-to-many links with a new `mission_goals` join table, MissionStore link/unlink/list helpers, and a project schema version bump from 100 to 101.
+- abbeaec: Surface mission-linked goals across mission read paths, including `fn_mission_show`, mission detail API payloads, and dashboard mission detail navigation into anchored goal cards.
+- 577ce12: Document mission-to-goal linkage behavior, including the explicit no-backfill decision for existing missions, and surface an Unlinked badge for active missions without linked goals in Mission Manager.
+- 3b9ff42: Add self-healing recovery for stale mission validator runs that are left in `running` after their owning execution disappears.
+
+  Stale validator runs are now reaped to the existing terminal `error` status (rather than introducing a new `cancelled` status), the reap reason is stored in the run summary, active mission features are moved back to `needs_fix` so validation can re-trigger, and startup/maintenance sweeps emit `mission:validator-run-reaped` audit events for recovered rows.
+
+- cc18206: Mission validation now AI-validates all mission criteria by lazily ensuring a per-feature managed assertion at runtime and removing the zero-assertion auto-pass path. Milestone acceptance criteria are threaded into validator prompts, and the dashboard now presents mission criteria as AI-validated instead of informational-only.
+- d72cb2a: Move agent logs out of the SQLite `agentLogEntries` table into per-task `.fusion/tasks/{ID}/agent-log.jsonl` files, add one-time migration + source-ref rewrite support, preserve soft-deleted log files for forensics while hiding them from live reads, and switch goal-citation source refs to `agentLog:{taskId}:{lineNo}`.
+- 8aed4da: Add AI-assisted conflict resolution to the dashboard Create PR flow so users can resolve task-branch merge conflicts against the selected base branch, push the updated branch, and continue PR creation without leaving Fusion.
+- 8891d4b: Add an in-app Create PR remediation that pushes the task branch to `origin`, refreshes preflight status, and unblocks PR creation without leaving Fusion.
+- 13c6d96: Add workflow `notify` nodes so custom workflows can dispatch templated notifications through configured providers.
+- 6271778: Add `workflow_id` support to agent task creation, delegation, and update tools so agents can select or clear task workflows directly.
+- 0b7549a: Enable workflow columns, graph executor, dual-observe, and authoritative interpreter experimental flags by default.
+- 1b7e52e: Expose workflow discovery and selection during triage planning, including workflow routing metadata for child task creation.
+- b1454c1: Branch-group promotion now creates a single real GitHub PR for the group integration branch when promoting a completed PR-mode group. The PR number/url/state are persisted on the branch group and promotion is idempotent — re-running never opens a second PR (an existing persisted or open PR is reused). The GitHub client is injected into the engine via the same option-callback seam as `processPullRequestMerge`, wired at the `fn daemon`, `fn dashboard`, and `fn serve` construction sites. PR creation only happens for eligible (completion-gated, auto-merge-allowed) groups, and a GitHub failure leaves the group recoverable rather than persisting a false PR state.
+
+  The single managed group PR is now kept in sync through its terminal lifecycle: as additional members land, the PR body is rewritten with the latest member checklist and x/N completion (idempotent body rewrite — sync failures are non-fatal and retry on the next landing). When the persisted PR is closed or merged out-of-band on GitHub, the stored `prState` is reconciled rather than re-opened. Abandoning a group best-effort closes its GitHub PR and marks `prState` `closed` (or preserves `merged`). New injected `syncGroupPr` callback and dashboard `updatePr`/`closePr` GitHub-client helpers back this flow.
+
+  The branch-group surface is completion-gated end-to-end: the dashboard branch-group card and Group Task modal show member progress before completion, reveal the promote/Open-PR control only when the group is complete, render the persisted PR link once promoted, expose an Abandon action while the PR is open, and display a terminal merged/closed state. A new agent-native CLI command (`fn branch-group list | show <id> | promote <id>`) reaches the same promotion coordinator path the dashboard uses — promoting a complete group opens/links the same single managed PR, and an incomplete group is rejected with the same completion-gate message.
+
+- f9e5513: Harden the project database against the recurring "database disk image is malformed" corruption.
+
+  - **Integrity-checked backups**: every backup copy is now verified with `PRAGMA quick_check` before it is kept, a verifiably-corrupt copy is quarantined as `*.corrupt` instead of masquerading as good, and `cleanupOldBackups` will never rotate out the last verified-good backup.
+  - **Startup auto-recovery**: on open, a malformed `fusion.db` is detected and rebuilt offline via `sqlite3 .recover` (corrupt original preserved as `fusion.db.corrupt-<ts>`, stale `-wal`/`-shm` dropped) before any connection is established. Opt out with `FUSION_DISABLE_DB_AUTORECOVER=1`. This also fixes a latent bug where the recovery path invoked the non-existent `.recover main` option and always failed.
+  - **Database shrink + retention**: scratch `lost_and_found*` tables left by prior recoveries are dropped on init, and a new `operationalLogRetentionDays` setting (default 30 days, configurable in Settings → Backups → Database Maintenance, 0 to disable) prunes unbounded append-only log tables (`activityLog`, `agentLogEntries`, `runAuditEvents`, `agentHeartbeats`) during periodic maintenance to curb the file growth that widens the corruption window.
+
+- 34c8ac9: Add the unified `fn pr` command namespace for CLI parity with the dashboard's
+  PR-entity review surface (U8, R13): `fn pr create | list | show | approve |
+respond | retry | merge | close | automerge`.
+
+  Each subcommand routes to the SAME store/engine/release path the dashboard PR
+  routes use, so the two surfaces can't diverge: `create` mints the GitHub PR;
+  `list`/`show` read PR entities; `approve`/`respond`/`retry`/`merge`/`close` fire
+  the workflow's user-controlled release edges via `releaseHeldTaskByEvent`
+  (`pr-approve`/`pr-respond`/`pr-retry`/`pr-merge`/`pr-close`); `automerge` toggles
+  the entity's `autoMerge` flag.
+
+  BREAKING: the per-task `fn task pr-create` command is retired. Use `fn pr create
+<task-id>` instead (same flags: `--title`, `--base`, `--body`, `--draft`,
+  `--no-ai`, `--reviewer`).
+
+- 5c4c765: Add a dashboard browse-and-install flow for skills.sh catalog entries, including the new `POST /api/skills/install` API route and Skills view install actions that refresh discovered skills after a successful install.
+- d071aec: Add executable custom workflows with a visual graph node editor. Author a workflow as a graph (start → prompt/script/gate steps → end) in a new React Flow–based editor, then select it per task or set a project default. Selected workflows compile to the existing WorkflowStep engine and run at the pre/post-merge boundaries — no changes to the scheduler/executor/merger. Non-linear graphs are rejected with a clear message and reserved for the (deferred) graph interpreter.
+
+  Prompt nodes carry an execution profile: run on a chosen model, as a named agent, as a skill invocation, or as a named project script (CLI) with the prompt passed via FUSION_NODE_PROMPT — plus per-node retries and an auto-approve toggle. "User input" nodes pause the run with a needs-input badge on the task card and a banner in the task modal; replying in comments and unpausing resumes the workflow with the answer.
+
+  CLI nodes can run arbitrary commands (not just named scripts); the first run of an exact command pauses the task for explicit user approval. The task modal's input/approval banner is interactive — reply-and-resume for user-input nodes, approve-and-run for CLI commands.
+
+  Agents reach workflows too: the `fn_workflow_list`, `fn_workflow_get`, `fn_workflow_select`, `fn_workflow_create`, `fn_workflow_update`, and `fn_workflow_delete` tools (plus `fn_trait_list` for the column vocabulary) give agents the same author/list/select capability as the dashboard. These are exposed not only to the task executor but also to the chat and planning agents, so you can author and edit workflows directly in a chat or planning conversation; a guard test locks all six tool names to each lane to prevent silent exposure drift. Built-in workflows are now read-only in the editor (palette/inspector disabled, with a "Duplicate to edit" action), and a node's "Auto-approve requests" toggle now actually bypasses the CLI first-run approval pause.
+
+  Also fixes a latent persistence bug where `pausedReason` was written to the in-memory task and read by queries but never stored by the task upsert or mapped back on read — so it was lost on every reload. This silently broke any pause/resume that depends on the reason (workflow CLI-approval and await-input nodes, token-budget pauses, worktrunk failures). The approve-CLI endpoint now derives the approved command solely from the task's pausedReason (ignoring any caller-supplied command), await-input nodes only resume when this node actually paused the task (not on a pre-existing steering comment), and write-capable custom nodes are refused until a task worktree exists so they never mutate the shared repo root.
+
+  The editor itself got a major usability upgrade: card-style nodes with kind accents and live config summaries (model/agent/skill/command, gate mode, hold release, join mode); success/failure edge authoring on regular edges with distinct styling, parallel conditioned edges, and an author-time cycle guard; one-click auto-layout that respects column swimlanes; safe node/edge deletion with cascade semantics; proper dialogs (create/delete/discard) with inline rename, descriptions, and a dirty-state guard on every dismissal path; onboarding/empty states; and the Columns and Fields panels now live in the editor's left sidebar under the workflow list.
+
+  The node editor is now the primary workflow surface: the header and mobile nav open it directly and the legacy Workflow Steps screen is retired. Existing flat steps migrate automatically (and idempotently) on first editor open — every step becomes an insertable template fragment in the new palette Templates section (alongside built-in and plugin step templates), and your default-on steps become a "Migrated steps" workflow that's set as the project default. Task creation now picks a workflow (applied atomically at create) instead of individual step checkboxes.
+
+  Workflows and template fragments import/export as JSON files — with server-side validation, name-collision handling, and automatic stripping of approval-bypass flags from untrusted files. And you can ask AI to design a workflow: describe what you want in the create dialog (or redesign the active workflow from the toolbar) and a planning-lane model emits a validated graph, with interpreter-only branching flagged honestly.
+
+- 9072d71: Add a localization (i18n) foundation across the UI. Introduces react-i18next-backed translation for both the dashboard and the terminal UI, with English as the source language and Simplified Chinese, Traditional Chinese, French, and Spanish as target locales.
+
+  - New `@fusion/i18n` package holding the authored catalogs and shared i18next configuration (namespace split, script-aware zh-CN/zh-TW fallback, plural setup).
+  - A `language` preference (`fusion settings`) and a Settings language switcher; the CLI resolves locale from `--lang`, settings, then environment.
+  - An `i18next-cli` workflow (`extract`/`sync`/`types`/`status`/`lint`) so adding a future language is a translate-only, near-zero-code operation.
+
+- c1a7231: Redesign the workflow editor mobile surface with a graph outline, mobile add flow, and first-class workflow settings destinations.
+- fbc2c37: Convert the built-in PR lifecycle from a selectable task workflow into a reusable workflow-editor fragment template.
+- bd5315f: Allow projects to enable or disable built-in workflows from settings, and show built-in workflow seam prompt text in workflow nodes.
+- d8a015e: Allow built-in workflow review columns to surface the auto-merge toggle.
+- 7076dd4: Make task steps workflow-modelable, behind the `experimentalFeatures.workflowGraphExecutor` flag (off by default).
+
+  Step policy — how a task breaks into steps, how each step is reviewed, and what happens on revision/rethink — was previously fixed engine law. Workflows can now model it as graph structure: a `foreach` node instantiates a per-step template subgraph once per planned step; a `step-review` node surfaces APPROVE/REVISE/RETHINK/UNAVAILABLE verdicts as outcome edges; `rework` edges (the only legal graph cycles, bounded per instance) route revisions back to a `step-execute` seam, with RETHINK triggering a substrate reset-to-baseline (git reset + session rewind). Steps additionally gain parallel execution: with `mode: parallel` + per-instance worktrees, dependency-satisfied steps (declared via `### Step N (depends: 1,2):` annotations) run concurrently off a common base, with an ordered integration stage that lands branches in step order and routes rebase conflicts to a budget-counted rework outcome.
+
+  Step parsing itself becomes a graph node: `parse-steps(artifact, parser)` reads a workflow-declared task artifact and runs a registry parser (built-in `step-headings`/`json-steps`, or plugin-contributed parsers under `plugin:<id>:<parser>`) to write the step list, with routable `no-steps`/`parse-error` outcomes. A `code` node runs sandboxed TypeScript (esbuild + child process, clamped timeout, no store handle) for arbitrary computed routing/field logic. Workflows also declare typed custom task fields (string/text/number/boolean/enum/multi-enum/date/url, with enum options and render hints); values are validated through a single store authority and the task UI renders the field schema dynamically (detail form widgets, card badges, and a workflow-editor Fields panel). `fn_task_update` accepts a `custom_fields` patch; `fn_workflow_create/update` accept the new IR constructs.
+
+  The default coding workflow is untouched and byte-identical (the parity oracle); a new built-in stepwise coding workflow demonstrates the full modeling. With the flag off, step execution, review, and the board are exactly as before.
+
+  **ROLLBACK:** This is flag-gated by `experimentalFeatures.workflowGraphExecutor` and additive on disk. Schema migration v108 only ADDS the `workflow_run_step_instances` table and the `tasks.customFields` column (default `'{}'`) — it rewrites no existing rows. The flag is read once and pinned per run, so a mid-flight toggle never switches a task between the legacy and graph step paths; flag-off rollback mid-task converges via the existing fell-back + git-reconcile recovery, because `Task.steps[]` remains the always-git-reconcilable projection sink. Instance rows are per-run prunable and are never the authority over git history. IR using the new node kinds (`foreach`/`step-review`/`parse-steps`/`code`) is v2-only, and `downgradeIrToV1IfPure` already refuses non-v1 node kinds, so the v2 rollback contract from the columns track is preserved automatically. To downgrade to a pre-v108 binary, turn the flag off and let in-flight stepwise tasks settle (or reconcile from git) first; custom-field values on the dropped column are lost on downgrade, so export any needed field values beforehand.
+
+- 4fa5407: Add per-column agent assignment for workflow columns, behind the combined `experimentalFeatures.workflowColumns` + `experimentalFeatures.workflowGraphExecutor` flags.
+
+  A workflow column can now name a permanent agent from the registry plus a mode — `defer` (the column agent is the default for work in that column that carries no agent/model settings of its own) or `override` (the column agent supersedes node- and task-level agent/model settings). The binding applies to all session-running work attributable to the column's nodes: custom prompt/gate/script nodes, the execute seam's coding session, and step-execute sessions. Precedence is resolved by one shared `@fusion/core` resolver (`resolveColumnAgentBinding` + `resolveEffectiveAgent`) consumed by every reader, with defer/override expressed as explicit named rules and defer granularity all-or-nothing (an own agent identity OR a complete `modelProvider`+`modelId` pair suppresses the column agent). The binding keys off the node's declared IR column; foreach template nodes inherit the enclosing foreach node's column. A missing/deleted agent at resolution time logs and falls back to normal resolution — a live session is never aborted. The built-in default workflow carries no column agents and stays byte-identical (parity oracle); with either flag off, column agents are inert.
+
+  The effective column agent is also the principal for the subsystems that previously assumed the running agent is always `task.assignedAgentId`: action gating (`buildActionGateContext` / `buildPermanentAgentGatingContext`) is computed for the agent actually running; heartbeat serialization honors it in both directions (the execute deferral gate, a second `resumeTaskForAgent` pass that re-dispatches tasks whose effective column agent matches, and a reverse-direction heartbeat-scheduler guard so an `allowParallelExecution=false` column agent never heartbeats concurrently with its own session); and a workflow-definition edit or agent runtimeConfig change that re-keys the column-effective agent/model hot-swaps the running graph session, while an agent deleted mid-session falls back without a restart.
+
+  Authoring lands in the workflow editor: the column panel gains a registry-backed per-column agent picker plus a defer/override mode toggle, bound columns are badged on their headers, and a node inside an override column shows that its own executor settings are superseded (so override never reads as a bug). Picker interaction states are explicit — flags off disables the picker with a tooltip naming both required flags, an in-flight fetch disables it, a failed fetch shows an inline error, and a stored `agentId` missing from the registry renders an "Agent not found" warning that preserves the IR until the author clears or replaces it. Agent references are validated at save time: the `POST`/`PATCH` workflow routes reject an unknown `agentId` with a typed 4xx naming the offending column, and binding an agent whose permission policy is broader than the project default requires an explicit `confirmPolicyEscalation` flag so override cannot silently re-key action gates to a more-privileged agent.
+
+- 60605fa: Add workflow-defined custom columns with composable traits, behind the `experimentalFeatures.workflowColumns` flag (off by default).
+
+  Workflows can now define their own columns, each carrying composable traits (declarative flags plus lifecycle hooks) instead of the fixed `triage → todo → in-progress → in-review → done → archived` pipeline. The dashboard board renders one lane per workflow in use, and graphs gain `hold`, `split`, and `join` nodes for passive dwell and parallel fan-out/join branches. The built-in default workflow reproduces today's pipeline verbatim, and migration rewrites zero task rows — a null workflow selection resolves to the default workflow at read time. With the flag off, the legacy board, transitions, and engine behavior are unchanged.
+
+  **ROLLBACK:** Workflow IR now has a `v2` on-disk shape (custom columns + `hold`/`split`/`join` nodes). Pre-v2 binaries hard-reject any IR whose `version !== 'v1'`, so a naive downgrade would brick rows that had been re-serialized as v2. To keep rollback safe, the store downgrades a workflow back to the `v1` shape on save whenever (a) the `experimentalFeatures.workflowColumns` flag is OFF, and (b) the graph is "pure v1" — only `start`/`prompt`/`script`/`gate`/`end` nodes, no `hold`/`split`/`join`, and exactly the synthesized default columns at their default seam-derived placement. v2 is persisted only when the flag is ON or a genuine v2 feature (custom column, applied trait, custom placement, or a v2-only node) is in use. Reading a downgraded `v1` row on a v2 binary re-upgrades it to the identical v2 graph, so this is lossless. Rollback is therefore only unsafe for workflows that actually use v2 features with the flag ON; turn the flag OFF and re-save such workflows (or delete them) before downgrading to a pre-v2 binary.
+
+- 71822f2: Add workflow extension plugin contracts for move policies, work engines, node handlers, task verdict providers, auto-merge facts, and shared board action services.
+- a504238: Add first-class workflow loop nodes with bounded template repetition, exit conditions, editor support, and plugin SDK type exports.
+- 61ae1bf: Expose default-workflow Plan/Triage, Executor, and Reviewer model lanes from Project Models settings while keeping workflow setting values as the source of truth.
+- e2707af: Add a first-class workflow settings mechanism and hard-move execution policy onto it.
+
+  - **Workflow settings.** Workflows now declare typed settings in their IR (id, type, default, options) — the same authoring pattern as custom task fields. Setting _values_ persist per `(workflow, project)` behind a single validating store authority, and the engine resolves _effective settings_ per task (`stored value ?? declaration default`, dropping values that no longer validate). Built-in `builtin:coding` declares every moved key with its former default, so an untuned project behaves identically.
+  - **Hard-move migration.** A one-time, idempotent, per-project migration relocates the step-execution, review/approval, and per-phase model-lane keys out of project/global settings into workflow setting values, removing them from the settings schema entirely. A `MOVED_SETTINGS_KEYS` tombstone list shields cross-node sync, v1 imports, and stale writers from resurrecting a moved key; a consistency test enforces one home per key.
+  - **Settings UI redesign.** The Settings modal is rebuilt from shared schema-driven field primitives and per-section components; moved settings show a redirect stub linking to the workflow editor (one release). The new **Workflow editor → Settings** panel (Definitions/Values tabs) and the `fn_workflow_settings` agent tool edit values with typed validation.
+  - **Export v2.** Settings export bumps to version 2 with a `workflowSettings` value section; importing a v1 export upgrades any moved key it carries into the appropriate workflow's values. Workflow settings are not synced across nodes yet (surfaced in the sync UI).
+
+#### Patch Changes
+
+- f76716e: Fix custom-provider model resolution in the bundled engine for OpenAI Responses API providers.
+
+  - Align custom-provider reads with global settings directory resolution (including legacy `~/.pi/fusion` and `~/.pi/kb` migration paths), so providers persist across restart and remain visible during agent session creation.
+  - Ensure custom provider registration diagnostics include enough detail for troubleshooting registration failures.
+  - Improve configured-model resolution errors to clearly identify the failing `provider/model` selection while retaining the existing `"was not found in the pi model registry"` matcher substring and pointing users to Settings → Custom Providers.
+  - Add regression tests covering legacy settings-path custom-provider loading and openai-responses provider model resolution.
+
+- fab8a62: Make `fn_goal_list` and `fn_goal_show` available in engine agent sessions, including executor, heartbeat, and triage runs.
+
+  Also make `fn_goal_list` output concise by truncating descriptions to short single-line snippets while keeping full goal descriptions available through `fn_goal_show`.
+
+- 2d81a95: Fix mission→goal link write paths to return `400 { code: "GOAL_NOT_FOUND" }` instead of 404 for unknown goals, aligning the API, CLI, and pi tool contract.
+- 40c0048: Fix built-in workflow editor graph edge visibility so read-only built-in workflows render connected, clickable React Flow edges for success, failure, and rework paths.
+- 9c84ba2: Built-in coding workflow catalog (`builtin:coding`) now exposes the canonical `BUILTIN_CODING_WORKFLOW_IR` used by resolver/runtime fallback paths, removing drift between workflow surfaces.
+- 934071c: Agent-created tasks without explicit titles now request AI title summarization regardless of the project auto-summarize setting.
+- d75f861: Harden AI merge temporary worktree cleanup with same-task pre-merge pruning and task-aware stale tempdir sweeping for completed or deleted tasks.
+- db971a9: Initialize missing Git repositories automatically when registering Fusion projects.
+- 30ba1f0: Expose the dashboard file viewer to plugin views and use it for Compound Engineering artifact documents.
+- 07dcb16: Add the Codex, Droid, and Pi CLI agent adapters (U5).
+
+  Three new launch adapters join the engine's CLI agent executor, each declaring honest, verified capability flags so surfaces can render tier differences:
+
+  - **Codex** (hybrid tier): native turn-complete via the session-scoped `notify` config program (`-c notify=[…]`), capturing `thread-id` as the native session id; waiting-on-input is inferred from ANSI-stripped PTY prompt-pattern heuristics (approval menus, idle composer markers, with a spinner/working override) because Codex has no native waiting signal; resume via `codex resume <thread-id>`; rollout JSONL transcript tailed by probing (not hardcoding) the sessions directory for the file matching the thread-id.
+  - **Droid** (native tier): Claude-style hooks (`SessionStart`, `Stop`, `Notification`, tool-activity) delivering `session_id`/`transcript_path`/`permission_mode`; a message classifier splits the conflated `Notification` event into permission-request vs idle sub-reasons (both treated as waiting-on-input); resume via interactive `droid --resume <id>` or headless `droid exec -s <id>` — never the bare `-r` that means `--reasoning-effort` in exec mode.
+  - **Pi** (native tier): telemetry and transcript from session-JSONL tailing under a session-scoped `--session-dir`; lifecycle events (turn/agent start→busy, end→done, input-request→waiting) plus message rows→transcript; resume via `pi --session <path|partial-uuid>`.
+
+  A new `session-jsonl` transcript source is added to the adapter capability union for Pi.
+
+- f3b700a: Add the generic heuristic-tier CLI agent adapter (U6).
+
+  Arbitrary user-configured CLI commands can now run as engine-owned PTY sessions. The generic adapter declares every native capability disabled (no native done/waiting signal, no transcript) and infers state purely from the terminal byte stream: busy while output progresses or a spinner animates, and a synthetic idle after a configurable quiet window when a prompt-like glyph is showing and no spinner overrides it. Per the completion-gating decision (origin R20) the generic tier NEVER reports done — idle surfaces a "looks idle — confirm to advance" affordance via a new busy-equivalent idle sub-state and never advances the pipeline.
+
+- b9afce3: Fix a batch of CLI Agent Executor review defects:
+
+  - **Schema-version gate**: bump `SCHEMA_VERSION` to 110 so a DB already at 109
+    runs migration 110 and gains the `chat_sessions.cliExecutorAdapterId` column
+    (it was previously short-circuited). Add the column to the compat-fingerprint
+    `MIGRATION_ONLY_TABLE_SCHEMAS.chat_sessions` entry so the fingerprint matches.
+  - **Generic adapter double-wrap**: `formatInjection` no longer re-wraps injected
+    text in bracketed-paste markers when `bracketedPasteActive`; the session
+    manager's security path is the sole wrapper, so the generic adapter (like every
+    native one) only appends a carriage return.
+  - **Output-filter cross-boundary bypass**: thread one carry buffer across the
+    scrollback→live seam in the CLI session WS bridge so a dangerous escape (e.g.
+    OSC 52) split across the seam is fully neutralized instead of the held
+    introducer being flushed verbatim into the scrollback frame.
+  - **Output-filter overflow leak**: when an over-length carry begins with a
+    recognized dangerous introducer (OSC `ESC ]` / DCS `ESC P`), drop the
+    introducer instead of flushing it as literal, so it cannot recombine with a
+    later terminator at the client.
+  - **Follow-up never resolves**: `followUp()` now drives the authoritative state
+    machine `done→busy` before injecting, so the re-armed result promise resolves
+    on the next positive `done` instead of hanging on an idempotent done.
+
+- 38b84a3: Recover failed Planning Mode session loads into the existing retryable error view instead of dropping back to the empty planner. Failed or malformed persisted planning sessions now keep their session id so Retry/Dismiss recovery remains available, while deleted sessions still quietly fall back to a new session.
+- 68e52e3: Fix in-review tasks showing other tasks' files in the "files changed" list. `baseCommitSha` was captured as `merge-base(HEAD, origin/main)` at task start, but task branches fork from local main — when local main was ahead by merged-but-unpushed task commits, the recorded base rewound past them, and after the post-merge rebase-and-push rewrote their SHAs the diff range permanently swept the predecessors' files into the new task's diff. The capture now measures against local main first (origin/main as fallback), matching the contamination-base sites.
+- 314411c: Fix mission triage silently stranding features when two missions share a base branch.
+
+  `branch_groups.branchName` is globally unique, but `ensureBranchGroupForSource` only checked for an existing group by `(sourceType, sourceId)`. When a second mission's shared-branch triage resolved to a base branch (e.g. `main`) that another mission already owned a branch group for, `createBranchGroup` threw `UNIQUE constraint failed: branch_groups.branchName`. That error escaped `triageFeature` and was swallowed by both of its callers (the validation-failure auto-triage and the startup/maintenance reconcile sweep), leaving the mission's `defined` features — including auto-generated fix features — permanently un-triaged and the mission unable to progress.
+
+  `ensureBranchGroupForSource` now reuses an existing open group for the same branch name (matching the established `getBranchGroupByBranchName(...) ?? ensureBranchGroupForSource(...)` idiom) instead of colliding on the unique constraint.
+
+- 7d417a1: Fix the bundled Compound Engineering dashboard plugin build so its CSS is included in `dist`.
+- 978d07c: Fix opencode-go model sync: pass API key to CLI and strip provider prefix from model IDs
+
+  Two bugs when using OpenCode Go as a provider:
+
+  1. **Model discovery only returned free models** — the saved Go API key was never passed as `OPENCODE_API_KEY` to the spawned `opencode models opencode --refresh` process. The CLI's internal plugin checks this env var and, when absent, disables all paid models (those with `cost.input > 0`). Only 20 free models appeared instead of all 67.
+
+  2. **API requests failed with 401** — `normalizeOpencodeGoModel` was registering models with prefixed IDs like `opencode-go/deepseek-v4-flash`. The Pi SDK sends `model.id` verbatim in API requests; the OpenCode API expects bare model names (e.g. `deepseek-v4-flash`). The prefix is now stripped during normalization.
+
+  Also deduplicates models when the CLI emits both `opencode/foo` and `opencode-go/foo` for the same model, guards against empty model IDs, and refactors the duplicated `onApiKeySaved` handler into a shared `handleOpencodeGoApiKeySaved` helper.
+
+  After this change, users must re-select their opencode-go model in Settings because model IDs have changed from prefixed to bare names.
+
+- c2604d5: Fix missions stalling when a feature is marked `done` but stranded mid-loop.
+
+  A mission feature could be left `status: "done"` while its `loopState` never advanced past `"implementing"` and it had no linked board task (so it was never validated). The slice-completion gate (`MissionStore.computeSliceStatus`) correctly refuses to count an assertion-linked `done` feature until its validator passes, but nothing re-drove a task-less feature, so the slice — and the whole mission — could never auto-progress.
+
+  Active-mission recovery now detects these stranded `done` features and re-runs assertion validation directly (no board task), so the gate can resolve: on pass the feature becomes legitimately complete, on fail the normal fix-feature flow takes over. The feature-validation path was extracted into a shared `runFeatureValidation` helper used by both task-completion and recovery.
+
+- a27921a: Fix project selector review regressions around optional selection handlers and bookmarked search matches, and tighten retry/backoff timeout and rate-limit handling.
+- 77a1099: Fix a spurious Settings → Plugins error for the bundled Dependency Graph plugin where plugin startup could fail with `Invalid state transition from "started" to "started"`.
+
+  Plugin state transitions now treat same-state updates as idempotent no-ops, while still allowing same-state calls with an explicit error payload to update the persisted error field without emitting a state-changed transition.
+
+- 944c03d: Fixes the UsageIndicator popup hidden-window recovery flow by preventing hide/show controls from acting as implicit form-submit buttons.
+
+  - Sets the per-window hide control and provider-level **Show hidden (N)** control to `type="button"` so they do not trigger parent form submits.
+  - Adds a regression test that verifies clicking **Show hidden** reveals hidden windows, persists the unhidden state, and remains correct after rerender/state re-sync.
+
+- feceedb: Repair dropped spaces after sentence-ending punctuation when streamed agent text is split across separate assistant messages by tool-call round-trips (chat and agent logs), by tracking a per-session running tail at the shared engine streaming-delta chokepoints. Completes FN-5789, which only covered within-message boundaries.
+- 40b4919: `fn onboard` now allows each onboarding step to be skipped individually without aborting the overall wizard. Skipping steps still marks onboarding as completed, while interactive cancellation behavior remains unchanged.
+- e1a35a3: Harden CLI onboarding auto-launch backward compatibility by adding an explicit skip when both the central DB and local project DB already exist. This preserves established agent/headless behavior by ensuring non-TTY, `serve`, and `daemon` invocations continue without onboarding prompts or blocking.
+- 38e0422: Refine onboarding auto-launch bypass behavior by treating `--skip-onboarding` and `FUSION_SKIP_ONBOARDING` as first-class skip paths.
+
+  - Parse `FUSION_SKIP_ONBOARDING` with strict truthiness (`1`, `true`, `yes`, `on` only).
+  - Return distinct auto-launch skip reasons for flag (`skip-flag`) and env (`skip-env`).
+  - Strip `--skip-onboarding` as a global CLI flag so it never leaks into downstream command parsers while still informing onboarding gate decisions.
+
+- 245129e: Add orchestrator-level regression coverage and CLI docs that guarantee onboarding auto-launch never blocks existing projects, non-TTY/headless workflows, or agent-run `fn` commands.
+- c676cbe: Update `fn onboard` CLI HELP text and CLI reference docs to match shipped onboarding behavior, including auto-launch conditions, skip paths, and onboarding escape hatches (`--skip-onboarding`, `FUSION_SKIP_ONBOARDING`).
+- 1aef3c9: Fixes a mobile dashboard crash path where toggling the in-review auto-merge switch could blank the UI until refresh on some Android/legacy WebView environments.
+- 327f0a9: Fix shared branch-group execution to always derive per-task working branches (`fusion/<task-id>`) for checkout/worktree operations while keeping the branch-group branch as the merge target.
+- e16893a: Classify provider 400 errors for unsupported `messages.[n].role` values as operator-actionable agent errors, and annotate prompt-boundary failures with a clear model/provider compatibility hint. This stops invisible retry loops and makes misconfigured imported agent model/provider combinations fail fast with actionable diagnostics.
+- b4230c0: Reuse imported GitHub source issues as task tracking links when GitHub tracking is enabled, instead of creating a duplicate issue. Tasks imported from GitHub now link their existing `sourceIssue` (when valid) as `githubTracking.issue` with no GitHub auth or issue creation call required.
+- 8376781: Fix mobile Task Detail Logs scrolling for branch-group tasks by making the branch-group card collapsible and re-pinning the agent log viewer when its container height changes.
+- e561290: Fix shared-branch-group member finalization so routed members land on the group's shared branch instead of being auto-finalized against the project default branch. Also harden already-landed commit attribution so the recovery detector never claims a commit that merely mentions a task ID in prose (2026-05-23 lost-work regression): the `git log --grep` ancestry fallback is now ownership-anchored on a Fusion trailer or a task-scoped conventional-commit subject.
+- d4db0b0: CLI auto-launch now honors the persisted `cliOnboardingCompletedAt` marker so onboarding fires only once, even when the Central DB step was skipped during `fn onboard`.
+- 7d1708f: Fix `fn_goal_list` and `fn_goal_show` so tool calls made from Fusion worktree directories resolve the canonical project database and return goals created through the dashboard UI.
+- 684baa0: Stop queued chat messages from disappearing after back-navigation while the assistant is still responding (GitHub #1279).
+
+  Re-entering a chat restored the queued follow-up and immediately flushed it based on the client's local `isGenerating` flag — which is stale mid-generation (it is a route-level enrichment the `chat:session:updated` SSE payload lacks). The premature send aborted the live generation server-side and could lose the queued message entirely, since its persisted copy was deleted before the send.
+
+  The restore path in both Chat and Quick Chat now confirms with the server before flushing: if a generation is still in flight it re-attaches to the stream and lets completion deliver the queued message; the message is sent immediately only when the server reports no active generation. On a failed check the queued bubble is kept for a later flush trigger.
+
+- e6ce500: Fix the dashboard skills interface so enabled and disabled skill toggles persist across refreshes for both top-level and package-scoped skills. The adapter now normalizes stored skill paths consistently when writing settings and when rediscovering installed skills.
+- c60dae1: Fix the desktop quick chat panel so moving the FAB while the panel is closed no longer shrinks or overwrites the saved panel size before the next reopen.
+- f3732af: Fix chat message sends with file attachments by parsing multipart form bodies on the chat messages SSE endpoint.
+
+  Uploaded message attachments are now validated, persisted to the session attachment directory, converted into chat attachment metadata, and forwarded to the chat manager while JSON-only message sends continue to work unchanged.
+
+- de23db3: Bump `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` from `^0.77.0` to `^0.78.0`. See the upstream pi coding agent changelog for [`0.78.0` (2026-05-29)](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/CHANGELOG.md#0780---2026-05-29).
+- 7d20a99: Clear stale active-session registry entries when PR-mode merge cleanup removes a task worktree.
+- 48e08c0: Recover mission interview drafts that were sent to the background from the final summary step. Plan-ready `complete` mission interview sessions now remain resumable across the dashboard, `fn mission list`, and `fn_mission_list` until they are approved into a mission or discarded.
+- a66b128: Fix Planning Mode single-task session history so completed sessions remain restorable from the summary view after task creation.
+- d9e1cdb: Fix agent-created ntfy task notifications so they include the task description when a title has not been assigned yet.
+- dab1569: Fix Planning Mode session history so duplicate AI-session rows are collapsed by session id and deleting a history entry only succeeds when the server-side delete persists.
+- ac92174: Fix a Planning Mode reliability bug where creating a single task could fail with a browser-level `Failed to fetch` error when post-create side effects threw or rejected before the dashboard finished responding.
+- cf23c6f: Run the configured `worktreeInitCommand` on merge worktrees before AI merge verification across warm and cold integration modes, so merge verification uses the same project-specific bootstrap as executor worktrees.
+- e33dadd: Fix fresh-install `pnpm install` bin-link warnings by pointing the published `fn`/`fusion` bins at a committed `bin.mjs` launcher that forwards to the built CLI output.
+- 3d18872: Fix the dashboard OAuth login flow for ChatGPT Plus/Pro (Codex Subscription) so multi-option provider selection prompts no longer cancel the login before browser auth starts.
+- a1b7556: persist the OAuth expiry alert/notification throttle so users are alerted at most once per provider every 12 hours, even across server restarts.
+- 419f688: Fix the dashboard auto-merge toggle blanking on mobile by keeping board stabilization tied to viewport events instead of a one-shot resize listener.
+
+  The in-review board now stays visible when auto-merge is toggled across Android mobile, iOS mobile, tablet, and desktop layouts, with regression coverage for populated and empty columns plus rollback and error-boundary paths.
+
+- de3273e: Clear the in-review stall deadlock auto-pause on user-initiated retry so dashboard, CLI, and extension retries can actually resume merge/execution work without overriding manual pauses.
+- 6a00dd2: Stop missions from silently looping or stalling when agents can't run their tasks (GitHub #1261).
+
+  Importing a catalog ("company") agent assigns it the role `custom`, which the scheduler never auto-assigns mission/queue work to. Combined with a model/provider that rejects the `developer` system role, this surfaced to users as an invisible, repeating failure loop.
+
+  - **Auto-recover from incompatible roles:** an "unsupported message role" provider rejection (e.g. a reasoning model sending the `developer` role to a provider that only accepts `system`/`user`/`assistant`/`tool`) is now treated as a model-selection error, so a configured fallback model is tried once before the task is marked failed. The single-swap guard keeps an incompatible fallback from looping.
+  - **Stop the retry loop:** operator-actionable failures (unsupported role, auth, quota) now block the mission feature immediately with a clear event instead of burning the full retry budget re-running the same cryptic error.
+  - **Preflight mission start:** when ephemeral agents are disabled and no eligible executor agent exists, starting a mission now fails fast with an actionable message instead of queueing tasks forever.
+  - **Warn on import:** importing only `custom`-role agents now surfaces a warning that they won't be auto-assigned mission work unless one is given the `executor` role.
+
+- 08d25f0: Streamline the Task Changes tab header controls on mobile so diff navigation and actions use a more compact layout.
+- fa23782: Fix the dashboard mobile auto-merge toggle blank-screen regression by restoring shared mobile breakpoint coverage and strengthening the regression suite across mobile, tablet, desktop, rollback, and task-review detail surfaces.
+- e84410e: Fix duplicate GitHub tracking issues and harden GitHub issue import deduping.
+- 60eb2ec: Allow failed agents to be stopped and deleted consistently across the dashboard and CLI guidance.
+
+  Agents in the error state can now transition to paused, the dashboard exposes delete actions for failed agents in list/detail views, and regression coverage protects the updated behavior.
+
+- f77aa07: Fix auto-merge toggle not appearing on the built-in coding workflow's in-review column. The builtin:coding IR now carries the correct column traits (merge-blocker, human-review) so the dashboard resolves and passes the auto-merge toggle to the in-review column.
+- 4ffd0a2: Restore terminal task notifications for workflow/PR-backed completions that move tasks to done before emitting the canonical merged lifecycle event.
+- 8bc3d7b: Harden dependency security floors by forcing protobufjs resolutions to patched versions and upgrading Vitest tooling to the patched 4.1 line.
+- a2f4bb1: Removed the `collapsible`, `collapseStorageKey`, and `collapsedLabel` props from `WorkflowSelector`. Callers should stop passing these props; workflow selectors now always render expanded.
+- fc33a42: Open the workflow editor on the selected board workflow when using the workflow-mode edit action.
+- be7645f: Right-align the task-card promote action at the end of the card action row.
+- 07a5365: Fix workflow/AI merge ntfy notification delivery by preserving merge-backed task metadata, treating an empty ntfy event allowlist as the documented default events, and allowing failed/no-provider notification attempts to retry after settings refresh.
+- 6ec0e2b: Fix task changed-file counts for stacked or cherry-equivalent task branches by filtering active review diffs to commits attributed to the current task.
+- 7c4e44d: Prevent QuickEntry quick-action buttons from stealing or restoring textarea focus on mouse down, preserving existing click behavior while avoiding unwanted mobile keyboard refocus.
+- 576ff77: Stop failing task worktree acquisition and branch authority checks when a task branch contains foreign task-attributed commits.
+- b7a56cc: Stop classifying benign workflow-graph exits after a task already advanced or paused as failures. These exits now use info-level benign wording while genuine in-progress graph failures keep the existing failure handling.
+- 99661c1: Add an expand/collapse control for the workflow prompt editor so long prompts can be edited in a fullscreen overlay.
+- 477c8f1: Tokenize bare hex colors in ScriptsModal and SettingsSyncLog CSS to use semantic custom properties.
+- 4435ca2: Detect Codex model-auth-tier incompatibility as a model-selection error, trigger configured fallback models, and surface an actionable diagnostic when no fallback is available.
+- d7e1454: Make the Nodes screen open as a full-screen mobile overlay so it covers the header while staying above the mobile nav.
+- 1c69ea7: Fix CLI task retry behavior and plugin SDK runtime shims, and harden CLI tests against stale constructor mocks.
+- de7b110: Fix the Nodes view tablet overlay so node cards and topology content no longer bleed through node detail modals.
+- bbf3de9: Fix merger AI commit finalization so deleted tasks no longer crash settings resolution while the merge is completing.
+- d9d67fb: Hide the compound engineering built-in workflow unless the `fusion-plugin-compound-engineering` plugin is installed.
+- c9d48fb: Revalidate dashboard service-worker assets before falling back to cache so rebuilt tabs cannot stay on stale bundles and render a blank page.
+- fa68edf: Fix the integrated dashboard terminal so Ctrl/Cmd+C copies selected terminal text without swallowing plain SIGINT behavior, and Ctrl/Cmd+V pastes clipboard text into the active session.
+- e883a8d: Fix retry handling for stranded in-review tasks whose status is unset by allowing retry when execution is incomplete or a merge retry has already been attempted.
+- 7a9d2b0: Suppress in-review stall and merge-stalled signals for tasks already owned by the merge queue.
+- 0b0186a: Suppress legacy stalled-review badges and re-enqueue churn for tasks already owned by the merge queue.
+- 5f5852d: Fix coding-agent startup and tool boundary checks from AI merge temp worktrees on macOS by comparing Git worktree paths with filesystem-canonical paths.
+- 85c3420: Fix Fusion task tools from AI merge temp worktrees so merger agents can fetch task details without trying to bootstrap a nested project.
+- 6f37806: Fix missing model rows in the Minimax provider usage panel. The primary `general` model meters quota purely via `current_interval_remaining_percent` (its count fields are `0`), so the previous count-based visibility filter dropped it entirely.
+
+  Minimax usage now prefers the authoritative `*_remaining_percent` field (with a count-based fallback) and renders a window only when a model exposes any quota signal. Each model's separate weekly quota window (`current_weekly_remaining_percent`, `weekly_*` timing) is now surfaced as its own indicator alongside the interval window.
+
+- ad46881: Respect per-task auto-merge overrides when the global auto-merge setting is off. Tasks with auto-merge explicitly enabled now get enqueued for merge and covered by the in-review self-healing sweeps (stall surfacing, merged-task finalization, retry recovery) even when the project-level setting is disabled; tasks without an explicit override keep the PR-based/manual review flow untouched.
+- 1c49ae6: Fix mobile quick-entry action buttons so nested icons and labels do not trigger browser touch gestures instead of toggling their controls.
+- be0140c: Fix the bundled dependency graph plugin so the graph view fills the available dashboard width.
+- aa8bd3d: Fix stuck task recovery by preserving retryable requeues, supervising verification subprocesses, and narrowing executor verification guidance to impacted work.
+- b6243d6: Suppress transient dashboard fetch errors after tab resume so cached data remains visible and executor status shows a reconnecting state instead of raw network errors.
+- c27c321: Fix mobile Quick Entry action buttons so taps rely on native browser click synthesis instead of a manual touchend click.
+- 614bec2: Fix the vitest memory-pressure auto-kill firing on a garbage metric and killing innocent processes. The guard probed `os.availableMemory` (which does not exist) and silently fell back to `os.freemem()`, which on macOS reads ~99% used on an idle machine — so with the toggle on, every vitest process was SIGKILLed every 30 seconds regardless of real memory pressure. It now reads `process.availableMemory()` (Node 22+) and refuses to auto-kill when only the unreliable freemem fallback is available. Kill targeting is also fixed: `pgrep -f vitest` matches full command lines (wrapper shells, monitors, editors that merely mention vitest); the TUI auto-kill/manual kill and the dashboard `POST /api/kill-vitest` + system-stats count now filter matches to actual node processes via a shared `findVitestProcessIds` helper.
+- e138971: Fix workflow board/list workflow selection, custom workflow task creation controls, workflow editor defaults, built-in workflow node prompt display, and executor handling for built-in workflow runs.
+- 4b4c32d: Fix workflow scheduling so in-progress column limits are enforced from fresh task state after hold-advancing sweep dispatches.
+- ff0750c: Fix the workflow graph editor opening invisibly and bundle the Compound Engineering and Roadmaps plugins.
+
+  - The "Graph editor" button now actually shows the editor: its overlay was rendered without the `open` class, leaving it `display: none`, so opening it looked like the workflow steps view was just dismissed.
+  - `fusion-plugin-compound-engineering` and `fusion-plugin-roadmap` are now listed in the dashboard's built-in plugins, so they appear under Settings → Built-in Plugins (they were implemented and registered but missing from the list).
+  - Installing Compound Engineering (and CLI Printing Press) from Settings → Built-in Plugins no longer fails with "Plugin manifest not found": both ids are now in the dashboard's bundled-plugin fallback set, and the Compound Engineering plugin is staged into `dist/plugins/` so packaged installs can resolve it.
+  - Plugins installed from Settings now load instead of erroring with "Plugin entry must be a file, got directory": the dashboard install routes register the plugin's loadable entry file (`bundled.js`/`dist/index.js`/`src/index.ts`) rather than the package directory, and enabling a plugin heals legacy directory-path registrations in place.
+
+- 8f42098: Route task execution through workflow-native runtime primitives and make the built-in coding workflow explicitly own planning before execute/review/merge.
+- a533307: Restore file-overlap blocking for workflow-column task releases so cards stay queued with overlap badges until active file-scope leases clear.
+- 83565a5: Fix workflow-native dispatch capacity accounting and publish workflow node task metadata to the existing task fields used by scheduler and dashboard surfaces.
+- cd8126d: Honor the worktree execution limit when workflow-column hold releases dispatch tasks.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [61d6874]
+- Updated dependencies [f76716e]
+- Updated dependencies [93e8bd9]
+- Updated dependencies [26bc80a]
+- Updated dependencies [fab8a62]
+- Updated dependencies [2d81a95]
+- Updated dependencies [40c0048]
+- Updated dependencies [9c84ba2]
+- Updated dependencies [489a287]
+- Updated dependencies [934071c]
+- Updated dependencies [d75f861]
+- Updated dependencies [db971a9]
+- Updated dependencies [30ba1f0]
+- Updated dependencies [07dcb16]
+- Updated dependencies [c1c99a9]
+- Updated dependencies [f3b700a]
+- Updated dependencies [d8248b4]
+- Updated dependencies [ace7106]
+- Updated dependencies [7a80d29]
+- Updated dependencies [8bac390]
+- Updated dependencies [10acf17]
+- Updated dependencies [b9afce3]
+- Updated dependencies [5872331]
+- Updated dependencies [17c9303]
+- Updated dependencies [243113a]
+- Updated dependencies [e10db81]
+- Updated dependencies [57631c7]
+- Updated dependencies [3cf13dd]
+- Updated dependencies [ee5f5e8]
+- Updated dependencies [38b84a3]
+- Updated dependencies [68e52e3]
+- Updated dependencies [314411c]
+- Updated dependencies [7d417a1]
+- Updated dependencies [978d07c]
+- Updated dependencies [c2604d5]
+- Updated dependencies [a27921a]
+- Updated dependencies [77a1099]
+- Updated dependencies [944c03d]
+- Updated dependencies [feceedb]
+- Updated dependencies [e854d33]
+- Updated dependencies [40b4919]
+- Updated dependencies [641b932]
+- Updated dependencies [e1a35a3]
+- Updated dependencies [38e0422]
+- Updated dependencies [245129e]
+- Updated dependencies [c676cbe]
+- Updated dependencies [2053f3f]
+- Updated dependencies [1aef3c9]
+- Updated dependencies [327f0a9]
+- Updated dependencies [e9de195]
+- Updated dependencies [eb425d1]
+- Updated dependencies [9c29e2e]
+- Updated dependencies [3373c0b]
+- Updated dependencies [e16893a]
+- Updated dependencies [130f6f1]
+- Updated dependencies [b4230c0]
+- Updated dependencies [0a418e6]
+- Updated dependencies [8376781]
+- Updated dependencies [e561290]
+- Updated dependencies [d4db0b0]
+- Updated dependencies [7d1708f]
+- Updated dependencies [684baa0]
+- Updated dependencies [e6ce500]
+- Updated dependencies [c60dae1]
+- Updated dependencies [f3732af]
+- Updated dependencies [de23db3]
+- Updated dependencies [7d20a99]
+- Updated dependencies [48e08c0]
+- Updated dependencies [a66b128]
+- Updated dependencies [d9e1cdb]
+- Updated dependencies [dab1569]
+- Updated dependencies [30a09e3]
+- Updated dependencies [abbeaec]
+- Updated dependencies [577ce12]
+- Updated dependencies [3b9ff42]
+- Updated dependencies [cc18206]
+- Updated dependencies [ac92174]
+- Updated dependencies [cf23c6f]
+- Updated dependencies [d72cb2a]
+- Updated dependencies [e33dadd]
+- Updated dependencies [3d18872]
+- Updated dependencies [a1b7556]
+- Updated dependencies [419f688]
+- Updated dependencies [de3273e]
+- Updated dependencies [6a00dd2]
+- Updated dependencies [8aed4da]
+- Updated dependencies [8891d4b]
+- Updated dependencies [08d25f0]
+- Updated dependencies [fa23782]
+- Updated dependencies [e84410e]
+- Updated dependencies [60eb2ec]
+- Updated dependencies [f77aa07]
+- Updated dependencies [4ffd0a2]
+- Updated dependencies [13c6d96]
+- Updated dependencies [8bc3d7b]
+- Updated dependencies [a2f4bb1]
+- Updated dependencies [fc33a42]
+- Updated dependencies [6271778]
+- Updated dependencies [be7645f]
+- Updated dependencies [07a5365]
+- Updated dependencies [6ec0e2b]
+- Updated dependencies [7c4e44d]
+- Updated dependencies [0b7549a]
+- Updated dependencies [576ff77]
+- Updated dependencies [b7a56cc]
+- Updated dependencies [99661c1]
+- Updated dependencies [477c8f1]
+- Updated dependencies [4435ca2]
+- Updated dependencies [1b7e52e]
+- Updated dependencies [d7e1454]
+- Updated dependencies [1c69ea7]
+- Updated dependencies [de7b110]
+- Updated dependencies [bbf3de9]
+- Updated dependencies [d9d67fb]
+- Updated dependencies [c9d48fb]
+- Updated dependencies [b1454c1]
+- Updated dependencies [f9e5513]
+- Updated dependencies [34c8ac9]
+- Updated dependencies [5c4c765]
+- Updated dependencies [fa68edf]
+- Updated dependencies [e883a8d]
+- Updated dependencies [d071aec]
+- Updated dependencies [9072d71]
+- Updated dependencies [7a9d2b0]
+- Updated dependencies [0b0186a]
+- Updated dependencies [5f5852d]
+- Updated dependencies [85c3420]
+- Updated dependencies [6f37806]
+- Updated dependencies [c1a7231]
+- Updated dependencies [ad46881]
+- Updated dependencies [fbc2c37]
+- Updated dependencies [1c49ae6]
+- Updated dependencies [bd5315f]
+- Updated dependencies [d8a015e]
+- Updated dependencies [be0140c]
+- Updated dependencies [7076dd4]
+- Updated dependencies [aa8bd3d]
+- Updated dependencies [b6243d6]
+- Updated dependencies [c27c321]
+- Updated dependencies [614bec2]
+- Updated dependencies [e138971]
+- Updated dependencies [4b4c32d]
+- Updated dependencies [4fa5407]
+- Updated dependencies [60605fa]
+- Updated dependencies [71822f2]
+- Updated dependencies [ff0750c]
+- Updated dependencies [a504238]
+- Updated dependencies [61ae1bf]
+- Updated dependencies [8f42098]
+- Updated dependencies [a533307]
+- Updated dependencies [83565a5]
+- Updated dependencies [e2707af]
+- Updated dependencies [cd8126d]
+  - @runfusion/fusion@0.40.0
+
 ## 0.39.0
 
 ### @fusion/dashboard
@@ -7817,6 +8894,70 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.39.4
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.42.0
+
+## 0.39.3
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.41.0
+
+## 0.39.2
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.40.1
+
+## 0.39.1
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.40.0
+
+## 0.11.30
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.30
+
+## 0.11.29
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.29
+
+## 0.11.28
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.28
+
+## 0.11.27
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.27
 
 ## 0.11.26
 

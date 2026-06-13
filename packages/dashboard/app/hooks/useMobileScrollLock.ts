@@ -120,10 +120,139 @@ function releaseLock(): void {
   void scrollY;
 }
 
+export function isAnyMobileScrollLockActive(): boolean {
+  return lockCount > 0 || kbLockCount > 0;
+}
+
+function clearOrphanedBodyOffset(): void {
+  if (savedStyles !== null || kbSavedStyles !== null) return;
+  const body = document.body;
+  if (body.style.position === "fixed") {
+    body.style.position = "";
+  }
+  if (body.style.top) {
+    body.style.top = "";
+  }
+  if (body.style.left === "0px") {
+    body.style.left = "";
+  }
+  if (body.style.right === "0px") {
+    body.style.right = "";
+  }
+  if (body.style.width === "100%") {
+    body.style.width = "";
+  }
+}
+
+function resetStaleDocumentScrollOnRestore(): void {
+  if (isAnyMobileScrollLockActive()) return;
+  clearOrphanedBodyOffset();
+  if (window.scrollY > 0) {
+    window.scrollTo(0, 0);
+  }
+}
+
 /** Test-only: reset the module-level lock state. */
 export function _resetLockState(): void {
   lockCount = 0;
   savedStyles = null;
+  kbLockCount = 0;
+  kbSavedStyles = null;
+}
+
+// --- Keyboard viewport lock (non-blurring variant) -------------------------
+//
+// The `position: fixed` lock above is correct for fullscreen overlays whose
+// input is focused AFTER the lock is applied (modals). It is WRONG for the
+// inline chat composer: there the input is focused FIRST (the tap raises the
+// keyboard), and pinning `body { position: fixed }` a beat later — once
+// `keyboardOpen` flips true — makes iOS Safari blur the focused textarea and
+// collapse the keyboard the instant it opens (no visible jump, because the
+// dashboard's base layout is already at scrollY 0).
+//
+// This variant mirrors the QuickChat overlay's proven approach: lock
+// `overflow: hidden` on <html>/<body> and snap scroll to the top, WITHOUT
+// touching `position`. No position change → iOS keeps the input focused, so
+// the keyboard stays up. Independent ref-count from the modal lock so the two
+// never interfere.
+let kbLockCount = 0;
+let kbSavedStyles: {
+  htmlOverflow: string;
+  bodyOverflow: string;
+} | null = null;
+
+function applyKeyboardLock(): void {
+  if (typeof window === "undefined") return;
+  if (kbLockCount > 0) {
+    kbLockCount += 1;
+    return;
+  }
+  const html = document.documentElement;
+  const body = document.body;
+  kbSavedStyles = {
+    htmlOverflow: html.style.overflow,
+    bodyOverflow: body.style.overflow,
+  };
+  window.scrollTo(0, 0);
+  html.style.overflow = "hidden";
+  body.style.overflow = "hidden";
+  kbLockCount = 1;
+}
+
+function releaseKeyboardLock(): void {
+  if (typeof window === "undefined") return;
+  if (kbLockCount === 0) return;
+  kbLockCount -= 1;
+  if (kbLockCount > 0 || !kbSavedStyles) return;
+  document.documentElement.style.overflow = kbSavedStyles.htmlOverflow;
+  document.body.style.overflow = kbSavedStyles.bodyOverflow;
+  kbSavedStyles = null;
+  window.scrollTo(0, 0);
+}
+
+/**
+ * Pin the mobile viewport while the soft keyboard is up for an INLINE
+ * (non-overlay) focused input — chat composer, inline edits. Uses an
+ * overflow-only lock that does not change `position`, so iOS does not blur
+ * the already-focused input. iOS-only; no-op on desktop/Android.
+ */
+export function useMobileKeyboardViewportLock(enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled || !isMobileDevice() || !isIOS()) return;
+    applyKeyboardLock();
+    return () => {
+      releaseKeyboardLock();
+    };
+  }, [enabled]);
+}
+
+/**
+ * Snap stale iOS document scroll/body offset back to the dashboard's resting
+ * position when the page is restored from background or bfcache. Active locks
+ * own their own restore path, so this only runs when the page is otherwise
+ * unlocked.
+ */
+export function useMobileViewportRestoreReset(enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled || !isMobileDevice() || !isIOS()) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      resetStaleDocumentScrollOnRestore();
+    };
+
+    const handlePageShow = () => {
+      resetStaleDocumentScrollOnRestore();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, [enabled]);
 }
 
 /**

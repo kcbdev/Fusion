@@ -3,10 +3,10 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Brain, Link, Lightbulb, ListTree, Zap, ChevronDown, ChevronUp, Bot, Maximize2, Minimize2, Server } from "lucide-react";
-import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type Task, type TaskPriority, type Settings } from "@fusion/core";
+import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, type Task, type TaskPriority, type Settings, type ResolvedWorkflowOptionalStep } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { checkDuplicateTasks, fetchModels, uploadAttachment, fetchSettings, updateGlobalSettings, fetchAgents, selectTaskWorkflow, DuplicateCandidatesError } from "../api";
+import { checkDuplicateTasks, fetchModels, uploadAttachment, fetchSettings, updateGlobalSettings, fetchAgents, selectTaskWorkflow, fetchWorkflowOptionalSteps, DuplicateCandidatesError } from "../api";
 import type { CreateTaskInput, ModelInfo, Agent, NodeInfo, DuplicateMatch } from "../api";
 import { useNodes } from "../hooks/useNodes";
 import { ModelSelectionModal } from "./ModelSelectionModal";
@@ -108,7 +108,10 @@ export function InlineCreateCard({
   const [executorModelId, setExecutorModelId] = useState<string | undefined>(undefined);
   const [validatorProvider, setValidatorProvider] = useState<string | undefined>(undefined);
   const [validatorModelId, setValidatorModelId] = useState<string | undefined>(undefined);
-  const [browserVerification, setBrowserVerification] = useState(false);
+  const [planningProvider, setPlanningProvider] = useState<string | undefined>(undefined);
+  const [planningModelId, setPlanningModelId] = useState<string | undefined>(undefined);
+  const [optionalSteps, setOptionalSteps] = useState<ResolvedWorkflowOptionalStep[]>([]);
+  const [enabledOptionalStepIds, setEnabledOptionalStepIds] = useState<string[]>([]);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -254,12 +257,45 @@ export function InlineCreateCard({
 
   const executorSelectionValue = getModelSelectionValue(executorProvider, executorModelId);
   const validatorSelectionValue = getModelSelectionValue(validatorProvider, validatorModelId);
+  const planningSelectionValue = getModelSelectionValue(planningProvider, planningModelId);
   const availablePresets = settings?.modelPresets || [];
   const selectedPreset = availablePresets.find((preset) => preset.id === selectedPresetId);
 
   const hasExecutorOverride = Boolean(executorProvider && executorModelId);
   const hasValidatorOverride = Boolean(validatorProvider && validatorModelId);
-  const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride);
+  const hasPlanningOverride = Boolean(planningProvider && planningModelId);
+  const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride) + Number(hasPlanningOverride);
+  const effectiveWorkflowId = selectedWorkflowId || settings?.defaultWorkflowId || "builtin:coding";
+
+  useEffect(() => {
+    let cancelled = false;
+    setOptionalSteps([]);
+    setEnabledOptionalStepIds([]);
+
+    fetchWorkflowOptionalSteps(effectiveWorkflowId, projectId)
+      .then((steps) => {
+        if (cancelled) return;
+        setOptionalSteps(steps);
+        setEnabledOptionalStepIds(steps.filter((step) => step.defaultOn).map((step) => step.templateId));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOptionalSteps([]);
+        setEnabledOptionalStepIds([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveWorkflowId, projectId]);
+
+  const toggleOptionalStep = useCallback((templateId: string) => {
+    setEnabledOptionalStepIds((prev) => (
+      prev.includes(templateId)
+        ? prev.filter((id) => id !== templateId)
+        : [...prev, templateId]
+    ));
+  }, []);
 
   // Track focus-out for conditional cancel behavior and justResetRef cleanup.
   useEffect(() => {
@@ -383,7 +419,9 @@ export function InlineCreateCard({
       setExecutorModelId(undefined);
       setValidatorProvider(undefined);
       setValidatorModelId(undefined);
-      setBrowserVerification(false);
+      setPlanningProvider(undefined);
+      setPlanningModelId(undefined);
+      setEnabledOptionalStepIds([]);
       setPriority(DEFAULT_TASK_PRIORITY);
       setDependencies([]);
       setSelectedAgentId(null);
@@ -394,6 +432,7 @@ export function InlineCreateCard({
       setIsModelModalOpen(false);
       setShowPresets(false);
       setSelectedWorkflowId(null);
+      setEnabledOptionalStepIds([]);
       addToast(`Created ${task.id}`, "success");
 
       // Collapse and clear localStorage after successful task creation
@@ -434,7 +473,9 @@ export function InlineCreateCard({
       modelId: hasExecutorOverride ? executorModelId : undefined,
       validatorModelProvider: hasValidatorOverride ? validatorProvider : undefined,
       validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
-      enabledWorkflowSteps: browserVerification ? ["browser-verification"] : undefined,
+      planningModelProvider: hasPlanningOverride ? planningProvider : undefined,
+      planningModelId: hasPlanningOverride ? planningModelId : undefined,
+      enabledWorkflowSteps: enabledOptionalStepIds.length ? enabledOptionalStepIds : undefined,
       priority,
       nodeId,
     };
@@ -451,7 +492,7 @@ export function InlineCreateCard({
     }
 
     await submitTask(input);
-  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, browserVerification, priority, nodeId, projectId, addToast, submitTask]);
+  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, enabledOptionalStepIds, priority, nodeId, projectId, addToast, submitTask]);
 
   const handleDuplicateProceed = useCallback(async () => {
     const matches = duplicateMatches;
@@ -595,6 +636,12 @@ export function InlineCreateCard({
     setValidatorModelId(next.modelId);
   }, []);
 
+  const handlePlanningModelChange = useCallback((value: string) => {
+    const next = parseModelSelection(value);
+    setPlanningProvider(next.provider);
+    setPlanningModelId(next.modelId);
+  }, []);
+
   const handleToggleFavorite = useCallback(async (provider: string) => {
     const currentFavorites = favoriteProviders;
     const isFavorite = currentFavorites.includes(provider);
@@ -655,7 +702,9 @@ export function InlineCreateCard({
     setExecutorModelId(undefined);
     setValidatorProvider(undefined);
     setValidatorModelId(undefined);
-    setBrowserVerification(false);
+    setPlanningProvider(undefined);
+    setPlanningModelId(undefined);
+    setEnabledOptionalStepIds([]);
     setSelectedPresetId(undefined);
     setSelectedAgentId(null);
     setNodeId(undefined);
@@ -681,7 +730,9 @@ export function InlineCreateCard({
     setExecutorModelId(undefined);
     setValidatorProvider(undefined);
     setValidatorModelId(undefined);
-    setBrowserVerification(false);
+    setPlanningProvider(undefined);
+    setPlanningModelId(undefined);
+    setEnabledOptionalStepIds([]);
     setSelectedPresetId(undefined);
     setSelectedAgentId(null);
     setNodeId(undefined);
@@ -1018,16 +1069,34 @@ export function InlineCreateCard({
               )}
             </div>
 
-            <button
-              type="button"
-              className="btn btn-sm"
-              data-testid="inline-create-browser-verification-toggle"
-              aria-pressed={browserVerification}
-              onClick={() => setBrowserVerification((prev) => !prev)}
-              title={t("inline.enableBrowserVerification", "Enable browser verification workflow step")}
-            >
-              {browserVerification ? t("inline.browserVerifyChecked", "Browser Verify ✓") : t("inline.browserVerify", "Browser Verify")}
-            </button>
+            {optionalSteps.length > 0 && (
+              <div
+                className="inline-create-optional-steps"
+                aria-label={t("inline.optionalWorkflowSteps", "Optional workflow steps")}
+              >
+                {optionalSteps.map((step) => {
+                  const enabled = enabledOptionalStepIds.includes(step.templateId);
+                  const testId = step.templateId === "browser-verification"
+                    ? "inline-create-browser-verification-toggle"
+                    : `inline-create-optional-step-${step.templateId}`;
+                  return (
+                    <button
+                      key={step.templateId}
+                      type="button"
+                      className="btn btn-sm inline-create-optional-step"
+                      data-testid={testId}
+                      aria-pressed={enabled}
+                      onClick={() => toggleOptionalStep(step.templateId)}
+                      title={t("inline.toggleOptionalWorkflowStep", "Toggle optional workflow step: {{name}}", { name: step.name })}
+                    >
+                      {enabled
+                        ? t("inline.optionalWorkflowStepChecked", "{{name}} ✓", { name: step.name })
+                        : step.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <WorkflowSelector
               value={selectedWorkflowId}
@@ -1088,6 +1157,8 @@ export function InlineCreateCard({
                       setExecutorModelId(undefined);
                       setValidatorProvider(undefined);
                       setValidatorModelId(undefined);
+                      setPlanningProvider(undefined);
+                      setPlanningModelId(undefined);
                       setShowPresets(false);
                     }}
                   >
@@ -1163,8 +1234,10 @@ export function InlineCreateCard({
               models={loadedModels}
               executorValue={executorSelectionValue}
               validatorValue={validatorSelectionValue}
+              planningValue={planningSelectionValue}
               onExecutorChange={handleExecutorChange}
               onValidatorChange={handleValidatorChange}
+              onPlanningChange={handlePlanningModelChange}
               modelsLoading={modelsLoading}
               modelsError={modelsError}
               onRetry={loadModels}

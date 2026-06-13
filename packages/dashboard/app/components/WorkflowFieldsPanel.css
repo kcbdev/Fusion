@@ -70,7 +70,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 0.7rem;
   color: var(--text-tertiary);
-  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  background: var(--surface-2, color-mix(in srgb, #ffffff 4%, transparent));
   padding: 1px 6px;
   border-radius: var(--radius-sm);
 }

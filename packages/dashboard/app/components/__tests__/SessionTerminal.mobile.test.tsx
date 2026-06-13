@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
+import { MOBILE_MEDIA_QUERY } from "../../hooks/useViewportMode";
 
 // ── Mock xterm + addon dynamic imports (jsdom has no canvas/WebGL) ──────────
 const mockTerm = {
@@ -44,30 +45,49 @@ class FakeWS {
     this.readyState = 3;
   }
 }
-(globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
+let originalWebSocket: typeof WebSocket | undefined;
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
   observe() {}
   disconnect() {}
 };
 
 // ── matchMedia mock: drive the mobile breakpoint convention ─────────────────
-let matchMediaMatches = true;
-function installMatchMedia(matches: boolean) {
-  matchMediaMatches = matches;
+const MOBILE_WIDTH_MEDIA_QUERY = "(max-width: 768px)";
+const MOBILE_HEIGHT_MEDIA_QUERY = "(max-height: 480px)";
+const originalScreenDescriptor = Object.getOwnPropertyDescriptor(window, "screen");
+type MatchMediaState = boolean | { width: boolean; height: boolean };
+let matchMediaState: MatchMediaState = true;
+function installMatchMedia(state: MatchMediaState) {
+  matchMediaState = state;
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
-    value: vi.fn((query: string) => ({
-      matches: matchMediaMatches,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
+    value: vi.fn((query: string) => {
+      const matches = typeof matchMediaState === "boolean"
+        ? matchMediaState
+        : query === MOBILE_MEDIA_QUERY
+          ? matchMediaState.width || matchMediaState.height
+          : query === MOBILE_WIDTH_MEDIA_QUERY
+            ? matchMediaState.width
+            : query === MOBILE_HEIGHT_MEDIA_QUERY
+              ? matchMediaState.height
+              : false;
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      };
+    }),
   });
+}
+
+function stubScreen(width: number, height: number) {
+  Object.defineProperty(window, "screen", { configurable: true, value: { width, height } });
 }
 
 import { SessionTerminal } from "../SessionTerminal";
@@ -89,15 +109,22 @@ async function renderMobile(props: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   FakeWS.instances = [];
+  originalWebSocket = (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket;
+  (globalThis as unknown as { WebSocket: typeof FakeWS }).WebSocket = FakeWS;
   mockTerm.onData.mockReset();
   mockTerm.write.mockClear();
   apiMock.mockReset();
   apiMock.mockResolvedValue({ ticket: "tkt-1", expiresAt: "", readOnly: false });
   installMatchMedia(true); // mobile by default
+  stubScreen(390, 844);
   _resetInitialViewportHeight();
 });
 
 afterEach(() => {
+  (globalThis as typeof globalThis & { WebSocket?: typeof WebSocket }).WebSocket = originalWebSocket;
+  if (originalScreenDescriptor) {
+    Object.defineProperty(window, "screen", originalScreenDescriptor);
+  }
   vi.clearAllMocks();
 });
 
@@ -111,6 +138,13 @@ describe("SessionTerminal (mobile)", () => {
 
   it("does not render the mobile bar off-mobile (desktop breakpoint)", async () => {
     installMatchMedia(false);
+    await renderMobile();
+    expect(screen.queryByTestId("cli-terminal-mobile-bar")).toBeNull();
+  });
+
+  it("does not render the mobile bar when a tablet-class screen only matches the short-height clause", async () => {
+    stubScreen(1024, 768);
+    installMatchMedia({ width: false, height: true });
     await renderMobile();
     expect(screen.queryByTestId("cli-terminal-mobile-bar")).toBeNull();
   });

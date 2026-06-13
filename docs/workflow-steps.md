@@ -34,11 +34,13 @@ The workflow runtime is the authoritative execution path for task lifecycle work
 
 The engine remains the substrate for scheduler dispatch, routing claims, persistence, concurrency limits, process supervision, storage, and audit plumbing. Lifecycle policy belongs in built-in or custom workflows.
 
-The default built-in catalog entry `builtin:coding` is backed by the canonical `BUILTIN_CODING_WORKFLOW_IR`, which is also the resolver/runtime fallback for tasks with no workflow selection or an explicit default selection. Missing/corrupt explicit custom selections fail closed as workflow-resolution failures instead of silently running the default. The built-in IR encodes the legacy lifecycle path as graph stages:
+The default built-in catalog entry `builtin:coding` is backed by the canonical `BUILTIN_CODING_WORKFLOW_IR`, which is also the resolver/runtime fallback for tasks with no workflow selection or an explicit default selection. Missing/corrupt explicit custom selections fail closed as workflow-resolution failures instead of silently running the default. The built-in IR encodes the legacy lifecycle path as graph stages, with merge represented by workflow-native policy primitives rather than a single linear merge seam:
 
-- `triage/planning` → `execute` → `workflow-step` → `review` → `merge` → `end`
+- `triage/planning` → `execute` → `workflow-step` → `review` → `merge-gate` / branch-group integration / `merge-attempt` / retry or manual hold → `end`
 
 `builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
+
+During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
 
 #### Runtime invariant criterion
 
@@ -165,6 +167,14 @@ Notification delivery is intentionally best-effort: a missing/unconfigured notif
 
 Workflows declare typed task fields via IR `fields: [{ id, name, type, required?, default?, options?, render? }]` (`type ∈ string | text | number | boolean | enum | multi-enum | date | url`; `options` for enum kinds; `render.placement ∈ card | detail | detail-section`, `render.widget`, `render.badge`). Values live in `tasks.customFields` and are validated through a single store authority (`updateTaskCustomFields`) with typed rejections (offending `fieldId` + `code`). Editing or switching a workflow **orphans** (never destroys) values for removed/incompatible fields — orphans are retained and shown under a detail disclosure. The task UI renders the schema dynamically (detail-form widgets by type, up to 3 card badges by placement). Agents read/write fields via `fn_task_update`'s `custom_fields` patch; authors set them via `fn_workflow_create/update`. Field values are surfaced in task/session context.
 
+#### Workflow-declared optional steps
+
+Workflows can advertise optional workflow-step templates with `optionalSteps: [{ templateId, defaultOn? }]`. This IR facet is execution-inert: the graph executor does not run or route on `optionalSteps` directly. Instead, the create and task-detail workflow UIs resolve each `templateId` against built-in and plugin-contributed `WorkflowStepTemplate` metadata, show toggleable rows, and persist the selected template ids through the existing per-task `enabledWorkflowSteps` contract.
+
+`defaultOn` is optional and seeds the UI toggle when a task is created or edited before the task has made its own selection. Unknown or removed template ids are skipped during resolution so stale declarations do not render blank controls or break workflow loading.
+
+The built-in coding workflow (`builtin:coding`) declares `browser-verification` as an optional step. It remains opt-in by default, so browser verification only runs for tasks whose `enabledWorkflowSteps` includes `browser-verification`.
+
 ## What They Are
 
 A workflow step is a reusable check (AI prompt or script) that can be enabled on tasks.
@@ -185,7 +195,7 @@ Workflow steps run in one of two phases:
 - **Pre-merge** (default): runs before merge/finalization; failure blocks completion
 - **Post-merge**: runs after successful merge; failure is logged but non-blocking
 
-> **Note on Fast Mode:** When a task has `executionMode: "fast"`, pre-merge workflow steps are bypassed entirely during executor completion. Post-merge workflow steps remain active and run normally (post-merge is merger-owned and unaffected by execution mode).
+> **Note on Fast Mode:** When a task has `executionMode: "fast"`, pre-merge workflow steps are bypassed entirely during executor completion on both the legacy path and the workflow graph executor path. Custom graph pre-merge prompt/script/gate validation nodes are skipped as the graph equivalent of pre-merge workflow steps. Post-merge workflow steps remain active and run normally (post-merge is merger-owned and unaffected by execution mode).
 
 ## Execution Modes
 
@@ -422,12 +432,12 @@ Tasks are not parked in `in-review` for this remediable path unless additional t
 
 ## Workflow Interpreter Dual-Observe (parity instrumentation)
 
-Fusion now includes a **default-OFF** experimental parity seam for the workflow interpreter rollout.
+Fusion now enables the workflow interpreter parity seam by default as part of the workflow rollout.
 
-- **Flag:** `experimentalFeatures.workflowInterpreterDualObserve`
-- **Mode:** observe-only shadow run; legacy executor/reviewer/merger/scheduler path remains authoritative
-- **Behavior when OFF (default):** strict no-op (no shadow run, no parity audit records)
-- **Behavior when ON:** compare legacy and interpreter observations plus comparable run-audit slices
+- **Flag:** `experimentalFeatures.workflowInterpreterDualObserve` (default ON)
+- **Mode:** observe-only shadow run; legacy executor/reviewer/merger/scheduler path remains authoritative unless the authoritative cutover guard passes
+- **Behavior when OFF:** strict no-op (no shadow run, no parity audit records)
+- **Behavior when ON (default):** compare legacy and interpreter observations plus comparable run-audit slices
 
 Run-audit events emitted in `database` domain:
 

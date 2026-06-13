@@ -367,8 +367,7 @@ export async function branchTipCarriesTaskIdTrailer(
 
 /**
  * Whole-branch authority check: the branch ref exists, its tip carries the
- * task's Fusion-Task-Id trailer, and (when a base is supplied) the range
- * `base..branch` has no foreign FN-attributed commits.
+ * task's Fusion-Task-Id trailer.
  *
  * Returns `{ ok: true }` when safe to treat the branch ref as authoritative
  * for `taskId`. On failure, returns `{ ok: false, reason }` so callers can
@@ -378,7 +377,6 @@ export async function isBranchAuthoritativeForTask(
   repoDir: string,
   branch: string,
   taskId: string,
-  baseSha?: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   try {
     await revParse(repoDir, `refs/heads/${branch}`);
@@ -389,37 +387,7 @@ export async function isBranchAuthoritativeForTask(
   if (!tipCarriesTrailer) {
     return { ok: false, reason: "tip-missing-task-trailer" };
   }
-  if (baseSha) {
-    try {
-      await assertCleanBranchAtBase(repoDir, branch, baseSha, taskId);
-    } catch (err) {
-      const reason = err instanceof BranchCrossContaminationError ? "foreign-contamination" : "clean-branch-check-failed";
-      return { ok: false, reason };
-    }
-  }
   return { ok: true };
-}
-
-/**
- * Cheap ancestry check: is `commitSha` reachable from `ref`?
- *
- * Used to recognize "promoted" commits during contamination audits: when
- * the engine fast-forwards local `main` with a sibling task's commit, that
- * commit's `Fusion-Task-Id` trailer still points at the sibling, but the
- * commit itself is now integrated. Treating it as foreign contamination
- * for downstream tasks branched from the same main tip is incorrect — the
- * commit is, by definition, ancestral on the integration target.
- *
- * Returns `false` on any git error (missing ref, repo unreadable, etc.)
- * so the caller falls back to the conservative trailer-only judgement.
- */
-async function isAncestorOf(repoDir: string, commitSha: string, ref: string): Promise<boolean> {
-  try {
-    await runGit(repoDir, `git merge-base --is-ancestor ${quoteShellArg(commitSha)} ${quoteShellArg(ref)}`);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function assertCleanBranchAtBase(
@@ -428,48 +396,13 @@ export async function assertCleanBranchAtBase(
   baseSha: string,
   taskId: string,
 ): Promise<void> {
-  const output = await runGit(repoDir, `git log --format=%H%x1f%s%x1f%b ${quoteShellArg(`${baseSha}..${branchName}`)}`)
-    .catch(() => "");
-  if (!output) return;
-
-  const subjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
-  const trailerPattern = /(?:^|\n)Fusion-Task-Id:\s*(FN-\d+)\s*(?:\n|$)/i;
-  const candidateForeign: BranchCrossContaminationCommit[] = [];
-  for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
-    const [sha, subject, body] = line.split("\u001f");
-    const subjectMatch = (subject ?? "").match(subjectPattern);
-    const trailerMatch = (body ?? "").match(trailerPattern);
-    const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
-    if (attributedTaskId && attributedTaskId !== taskId.toUpperCase()) {
-      candidateForeign.push({ sha, subject: subject ?? "", foreignTaskId: attributedTaskId });
-    }
-  }
-
-  if (candidateForeign.length === 0) return;
-
-  // FN-5475/FN-219: a commit attributed to another task that's already
-  // reachable from the integration target was promoted through integration.
-  // Treat it as ancestral, not contamination. Check both local `main` and
-  // `origin/main`: long-running dashboards can have stale local main while
-  // the remote-tracking branch already contains the promoted dependency, and
-  // using only local main produces false branch-cross-contamination loops.
-  const integratedRefs = ["main", "origin/main"];
-  const foreignCommits: BranchCrossContaminationCommit[] = [];
-  for (const commit of candidateForeign) {
-    let alreadyIntegrated = false;
-    for (const ref of integratedRefs) {
-      if (await isAncestorOf(repoDir, commit.sha, ref)) {
-        alreadyIntegrated = true;
-        break;
-      }
-    }
-    if (alreadyIntegrated) continue;
-    foreignCommits.push(commit);
-  }
-
-  if (foreignCommits.length > 0) {
-    throw new BranchCrossContaminationError({ branchName, baseSha, taskId, foreignCommits });
-  }
+  // Foreign task attribution in a branch range is informational only. Stacked
+  // task branches and cherry-equivalent commits are handled by merge/display
+  // attribution, not by failing worktree acquisition or branch authority.
+  void repoDir;
+  void branchName;
+  void baseSha;
+  void taskId;
 }
 
 export interface ClassifyBootstrapMisbindingInput {

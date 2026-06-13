@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AlertCircle, Loader2 } from "lucide-react";
 import "./ReliabilityView.css";
 
 type ReliabilityResponse = {
@@ -42,18 +43,28 @@ function formatDateTime(value: string | null | undefined): string {
 export function ReliabilityView() {
   const { t } = useTranslation("app");
   const [data, setData] = useState<ReliabilityResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showEmptyDays, setShowEmptyDays] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const response = await fetch("/api/health/reliability");
-    if (!response.ok) {
-      throw new Error(`Failed to load reliability metrics (${response.status})`);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/health/reliability");
+      if (!response.ok) {
+        throw new Error(`Failed to load reliability metrics (${response.status})`);
+      }
+      const payload = (await response.json()) as ReliabilityResponse;
+      setData(payload);
+    } catch (loadError: unknown) {
+      setError(loadError instanceof Error ? loadError.message : t("reliability.failedToLoad", "Failed to load reliability metrics"));
+    } finally {
+      setIsLoading(false);
     }
-    const payload = (await response.json()) as ReliabilityResponse;
-    setData(payload);
-  }, []);
+  }, [t]);
 
   const resetStats = useCallback(async () => {
     setResetError(null);
@@ -102,6 +113,24 @@ export function ReliabilityView() {
   const windowStartLabel = data
     ? formatDateTime(data.resetAt ?? new Date(Date.parse(data.generatedAt) - data.windowDays * 86_400_000).toISOString())
     : "—";
+
+  if (isLoading && data === null) {
+    return (
+      <div className="reliability-loading" data-testid="reliability-loading">
+        <Loader2 size={24} className="spin" />
+        <p>{t("reliability.loading", "Loading reliability data...")}</p>
+      </div>
+    );
+  }
+
+  if (error !== null && data === null) {
+    return (
+      <div className="reliability-error" data-testid="reliability-error" role="alert">
+        <AlertCircle size={24} />
+        <p>{error}</p>
+      </div>
+    );
+  }
 
   return (
     <section className="reliability-view">

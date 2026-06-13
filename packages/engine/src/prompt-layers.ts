@@ -17,7 +17,7 @@ export interface SystemPromptLayers {
 }
 
 export interface PromptLayerInput {
-  /** The base role system prompt (e.g. REVIEWER_SYSTEM_PROMPT). */
+  /** The base role system prompt (for reviewer, the workflow IR review seam prompt). */
   basePrompt: string;
   /** Resolved agent instructions (instructionsText + instructionsPath + soul). */
   agentInstructions?: string;

@@ -4,6 +4,7 @@ import {
   buildConflictMatrix,
   determineParallelWaves,
   buildStepPrompt,
+  buildReducedStepPrompt,
   StepSessionExecutor,
 } from "../step-session-executor.js";
 import { AgentLogger } from "../agent-logger.js";
@@ -487,6 +488,170 @@ Do important work.
     expect(result).not.toContain("/repo/project/.worktrees/happy-robin/.fusion/memory/");
   });
 
+  it("includes attachment section with absolute project-root paths for image attachments", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "abc123-screenshot.png",
+          originalName: "screenshot.png",
+          mimeType: "image/png",
+          size: 2048,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).toContain("## Attachments");
+    expect(result).toContain("**screenshot.png** (screenshot)");
+    expect(result).toContain("/repo/project/.fusion/tasks/FN-001/attachments/abc123-screenshot.png");
+  });
+
+  it("includes attachment section for text attachments with read-for-context wording", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "def456-error.log",
+          originalName: "error.log",
+          mimeType: "text/plain",
+          size: 512,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).toContain("## Attachments");
+    expect(result).toContain("**error.log** (text/plain)");
+    expect(result).toContain("read for context");
+    expect(result).toContain("/repo/project/.fusion/tasks/FN-001/attachments/def456-error.log");
+  });
+
+  it("omits attachment section when attachments is undefined", () => {
+    const task = makeTaskDetail({ prompt: fullPrompt, attachments: undefined });
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).not.toContain("## Attachments");
+  });
+
+  it("omits attachment section when attachments is empty", () => {
+    const task = makeTaskDetail({ prompt: fullPrompt, attachments: [] });
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).not.toContain("## Attachments");
+  });
+
+  it("includes both image and text attachments together", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "abc-shot.png",
+          originalName: "shot.png",
+          mimeType: "image/png",
+          size: 1024,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          filename: "def-config.json",
+          originalName: "config.json",
+          mimeType: "application/json",
+          size: 256,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).toContain("**shot.png** (screenshot)");
+    expect(result).toContain("/repo/project/.fusion/tasks/FN-001/attachments/abc-shot.png");
+    expect(result).toContain("**config.json** (application/json)");
+    expect(result).toContain("/repo/project/.fusion/tasks/FN-001/attachments/def-config.json");
+    expect(result).toContain("read for context");
+  });
+
+  it("keeps attachment paths at the project root when executing in a worktree", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "abc123-screenshot.png",
+          originalName: "screenshot.png",
+          mimeType: "image/png",
+          size: 2048,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(
+      task,
+      1,
+      "/repo/project",
+      undefined,
+      "/repo/project/.worktrees/happy-robin",
+    );
+
+    expect(result).toContain("/repo/project/.fusion/tasks/FN-001/attachments/abc123-screenshot.png");
+    expect(result).not.toContain("/repo/project/.worktrees/happy-robin/.fusion/tasks/FN-001/attachments/abc123-screenshot.png");
+  });
+
+  it("includes attachment-read permission note when attachments and rootDir are provided", () => {
+    const task = makeTaskDetail({
+      id: "FN-777",
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "abc123-screenshot.png",
+          originalName: "screenshot.png",
+          mimeType: "image/png",
+          size: 2048,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).toContain("## Attachments");
+    expect(result).toContain(
+      "> **Note:** Attachment files are at the project root under `.fusion/tasks/FN-777/attachments/` — you may read them even when working in a worktree.",
+    );
+    expect(result.indexOf("> **Note:** Attachment files")).toBeGreaterThan(
+      result.indexOf("/repo/project/.fusion/tasks/FN-777/attachments/abc123-screenshot.png"),
+    );
+  });
+
+  it("omits attachment-read permission note when no attachments exist", () => {
+    const task = makeTaskDetail({ prompt: fullPrompt, attachments: [] });
+    const result = buildStepPrompt(task, 1, "/repo/project");
+
+    expect(result).not.toContain("Attachment files are at the project root");
+  });
+
+  it("omits attachment-read permission note when rootDir is not provided", () => {
+    const task = makeTaskDetail({
+      prompt: fullPrompt,
+      attachments: [
+        {
+          filename: "abc123-screenshot.png",
+          originalName: "screenshot.png",
+          mimeType: "image/png",
+          size: 2048,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const result = buildStepPrompt(task, 1);
+
+    expect(result).not.toContain("Attachment files are at the project root");
+  });
+
   it("handles step 0 (preflight) correctly", () => {
     const task = makeTaskDetail({ prompt: fullPrompt });
     const result = buildStepPrompt(task, 0);
@@ -543,6 +708,113 @@ Some freeform text without checkboxes.`;
     const result = buildStepPrompt(task, 0);
     // Step 1 content should not appear
     expect(result).not.toContain("Create new-module.ts");
+  });
+});
+
+// ── buildReducedStepPrompt tests ───────────────────────────────────────
+
+describe("buildReducedStepPrompt", () => {
+  const reducedPrompt = `# Task: FN-001 - Test Task
+
+## Steps
+
+### Step 0: Preflight
+
+- [ ] Check files exist
+
+### Step 1: Implement
+
+- [ ] Create new-module.ts
+- [ ] Add exports
+
+### Step 2: Test
+
+- [ ] Write unit tests
+`;
+
+  it("includes one-line attachment reference when attachments exist", () => {
+    const task = makeTaskDetail({
+      id: "FN-123",
+      prompt: reducedPrompt,
+      attachments: [
+        {
+          filename: "abc-shot.png",
+          originalName: "shot.png",
+          mimeType: "image/png",
+          size: 1024,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          filename: "def-config.json",
+          originalName: "config.json",
+          mimeType: "application/json",
+          size: 256,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildReducedStepPrompt(task, 1);
+
+    expect(result).toContain(
+      "2 attachment(s) available at .fusion/tasks/FN-123/attachments/ — ask for context if needed.",
+    );
+  });
+
+  it("places the attachment reference after the step and before the important block", () => {
+    const task = makeTaskDetail({
+      prompt: reducedPrompt,
+      attachments: [
+        {
+          filename: "abc-shot.png",
+          originalName: "shot.png",
+          mimeType: "image/png",
+          size: 1024,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildReducedStepPrompt(task, 1);
+    const attachmentReference =
+      "1 attachment(s) available at .fusion/tasks/FN-001/attachments/ — ask for context if needed.";
+
+    expect(result.indexOf(attachmentReference)).toBeGreaterThan(result.indexOf("Add exports"));
+    expect(result.indexOf(attachmentReference)).toBeLessThan(result.indexOf("IMPORTANT:"));
+  });
+
+  it("does not list individual attachment files in the reduced prompt", () => {
+    const task = makeTaskDetail({
+      prompt: reducedPrompt,
+      attachments: [
+        {
+          filename: "abc-shot.png",
+          originalName: "shot.png",
+          mimeType: "image/png",
+          size: 1024,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    const result = buildReducedStepPrompt(task, 1);
+
+    expect(result).not.toContain("abc-shot.png");
+    expect(result).not.toContain("shot.png");
+  });
+
+  it("omits attachment reference when attachments is undefined", () => {
+    const task = makeTaskDetail({ prompt: reducedPrompt, attachments: undefined });
+    const result = buildReducedStepPrompt(task, 1);
+
+    expect(result).not.toContain("attachment(s) available");
+  });
+
+  it("omits attachment reference when attachments is empty", () => {
+    const task = makeTaskDetail({ prompt: reducedPrompt, attachments: [] });
+    const result = buildReducedStepPrompt(task, 1);
+
+    expect(result).not.toContain("attachment(s) available");
   });
 });
 
@@ -714,6 +986,7 @@ function makeMockSession(promptFn?: () => Promise<void>) {
     prompt: promptFn ?? vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn(),
     subscribe: vi.fn(),
+    steer: vi.fn().mockResolvedValue(undefined),
     model: { provider: "mock", id: "mock-model" },
   };
 }
@@ -747,6 +1020,45 @@ describe("StepSessionExecutor", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  describe("steering", () => {
+    it("steers every active step session and continues after per-session failures", async () => {
+      const task = makeTaskDetail();
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings: makeSettings(),
+        pluginRunner: undefined,
+      } as any);
+      const steerOne = vi.fn().mockResolvedValue(undefined);
+      const steerTwo = vi.fn().mockRejectedValue(new Error("disconnected"));
+      const steerThree = vi.fn().mockResolvedValue(undefined);
+
+      (executor as any).activeSessions.set(0, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerOne,
+      });
+      (executor as any).activeSessions.set(1, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerTwo,
+      });
+      (executor as any).activeSessions.set(2, {
+        dispose: vi.fn(),
+        abortBash: vi.fn(),
+        steer: steerThree,
+      });
+
+      await executor.steerActiveSessions("new guidance");
+
+      expect(steerOne).toHaveBeenCalledWith("new guidance");
+      expect(steerTwo).toHaveBeenCalledWith("new guidance");
+      expect(steerThree).toHaveBeenCalledWith("new guidance");
+      expect(getStepSessionLogger().warn).toHaveBeenCalledWith(expect.stringContaining("Failed to steer active session for step 1"));
+    });
   });
 
   describe("sequential execution", () => {

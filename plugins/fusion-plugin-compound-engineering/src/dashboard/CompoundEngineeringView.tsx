@@ -7,7 +7,6 @@ import { useArtifacts } from "./hooks/useArtifacts.js";
 import { useViewportMode } from "./hooks/useViewportMode.js";
 import { useCeSession, type CeSessionSubscribe } from "./hooks/useCeSession.js";
 import { useCeSessions, type CeSessionsSubscribe } from "./hooks/useCeSessions.js";
-import { getArtifactPreviewUrl } from "./hooks/api.js";
 import { CeFlow } from "./CeFlow.js";
 import { getStage, listStages, type CeStageDefinition } from "../session/stage-registry.js";
 import type { CeArtifactEntry, CeArtifactGroup } from "../artifacts/discovery.js";
@@ -75,12 +74,14 @@ function SessionsPanel({
   activeSessionId,
   disabled,
   onOpen,
+  onCancel,
   onDiscard,
 }: {
   sessions: CeSession[];
   activeSessionId?: string;
   disabled: boolean;
   onOpen: (session: CeSession) => void;
+  onCancel: (session: CeSession) => void;
   onDiscard: (session: CeSession) => void;
 }) {
   if (sessions.length === 0) return null;
@@ -125,7 +126,19 @@ function SessionsPanel({
                 >
                   Discard
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  className="btn-icon ce-session-cancel"
+                  data-testid="ce-session-cancel"
+                  disabled={disabled}
+                  onClick={() => onCancel(s)}
+                  aria-label="Cancel session"
+                  title="Cancel session"
+                >
+                  <LucideIcons.Trash2 size={16} aria-hidden="true" />
+                </button>
+              )}
             </li>
           );
         })}
@@ -170,14 +183,14 @@ function EmptyState({ onStart }: { onStart: () => void }) {
 
 function ArtifactRow({
   entry,
-  projectId,
   onSelect,
   selected,
+  openFile,
 }: {
   entry: CeArtifactEntry;
-  projectId?: string;
   onSelect: (id: string) => void;
   selected: boolean;
+  openFile?: PluginDashboardViewContext["openFile"];
 }) {
   if (entry.kind === "error") {
     return (
@@ -196,28 +209,28 @@ function ArtifactRow({
         <span className="ce-artifact-name">{entry.name}</span>
         <span className="ce-artifact-path">{entry.path}</span>
       </button>
-      <a
+      <button
+        type="button"
         className="ce-artifact-open"
-        href={getArtifactPreviewUrl(entry.id, projectId)}
-        target="_blank"
-        rel="noreferrer"
+        data-testid="ce-artifact-open"
+        onClick={() => openFile?.(entry.path)}
       >
         Open
-      </a>
+      </button>
     </li>
   );
 }
 
 function StageGroup({
   group,
-  projectId,
   onSelect,
   selectedId,
+  openFile,
 }: {
   group: CeArtifactGroup;
-  projectId?: string;
   onSelect: (id: string) => void;
   selectedId?: string;
+  openFile?: PluginDashboardViewContext["openFile"];
 }) {
   const empty = group.entries.length === 0;
   return (
@@ -236,9 +249,9 @@ function StageGroup({
             <ArtifactRow
               key={entry.id}
               entry={entry}
-              projectId={projectId}
               onSelect={onSelect}
               selected={selectedId === entry.id}
+              openFile={openFile}
             />
           ))}
         </ul>
@@ -261,6 +274,7 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
   // host doesn't supply it, the hook falls back to polling.
   const subscribePluginEvents = (props.context as PluginDashboardViewContext | undefined)
     ?.subscribePluginEvents;
+  const openFile = props.context?.openFile;
   const subscribe = useMemo<CeSessionSubscribe | undefined>(() => {
     if (!subscribePluginEvents) return undefined;
     return (sessionId, _projectId, onSessionEvent) =>
@@ -282,6 +296,7 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
     ...(subscribeList ? { subscribe: subscribeList } : {}),
   });
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const [sessionActionBusy, setSessionActionBusy] = useState(false);
 
   const totalArtifacts = result?.totalArtifacts ?? 0;
   const totalErrors = result?.totalErrors ?? 0;
@@ -310,9 +325,23 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
     [ceSession, projectId],
   );
 
+  const onCancelSession = useCallback(
+    (s: CeSession) => {
+      setSessionActionBusy(true);
+      void ceSessions
+        .cancel(s.id)
+        .then(() => {
+          if (ceSession.session?.id === s.id) ceSession.reset();
+        })
+        .finally(() => setSessionActionBusy(false));
+    },
+    [ceSession, ceSessions],
+  );
+
   const onDiscardSession = useCallback(
     (s: CeSession) => {
-      void ceSessions.remove(s.id);
+      setSessionActionBusy(true);
+      void ceSessions.remove(s.id).finally(() => setSessionActionBusy(false));
     },
     [ceSessions],
   );
@@ -336,16 +365,18 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
         <SessionsPanel
           sessions={ceSessions.sessions}
           activeSessionId={ceSession.session.id}
-          disabled={ceSession.busy}
+          disabled={ceSession.busy || sessionActionBusy}
           onOpen={onOpenSession}
+          onCancel={onCancelSession}
           onDiscard={onDiscardSession}
         />
         <CeFlow
           session={ceSession.session}
-          busy={ceSession.busy}
+          busy={ceSession.busy || sessionActionBusy}
           error={ceSession.error}
           onAnswer={ceSession.answer}
           onResume={ceSession.resume}
+          onCancel={() => onCancelSession(ceSession.session!)}
           onClose={onCloseFlow}
         />
       </div>
@@ -376,8 +407,9 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
 
       <SessionsPanel
         sessions={ceSessions.sessions}
-        disabled={ceSession.busy}
+        disabled={ceSession.busy || sessionActionBusy}
         onOpen={onOpenSession}
+        onCancel={onCancelSession}
         onDiscard={onDiscardSession}
       />
 
@@ -415,9 +447,9 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
             <StageGroup
               key={group.stage}
               group={group}
-              projectId={projectId}
               onSelect={setSelectedId}
               selectedId={selectedId}
+              openFile={openFile}
             />
           ))}
         </div>

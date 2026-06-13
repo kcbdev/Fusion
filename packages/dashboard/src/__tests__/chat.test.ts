@@ -33,7 +33,8 @@ vi.mock("@fusion/core", () => ({
 
 describe("resolveFileReferences", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockReadFile.mockReset();
+    mockStat.mockReset();
   });
 
   afterEach(() => {

@@ -7,12 +7,30 @@ import { TaskStore, setTaskCreatedHook } from "@fusion/core";
 import { HeartbeatMonitor } from "../agent-heartbeat.js";
 import { createDelegateTaskTool, createTaskCreateTool } from "../agent-tools.js";
 
-const githubTrackingHookModulePromise: Promise<any> = import(
-  new URL("../../../dashboard/src/github-tracking-hook.js", import.meta.url).href
-);
-const githubTrackingModulePromise: Promise<any> = import(
-  new URL("../../../dashboard/src/github-tracking.js", import.meta.url).href
-);
+const { githubTrackingHookPath, githubTrackingPath, maybeCreateTrackingIssueMock } = vi.hoisted(() => ({
+  githubTrackingHookPath: new URL("../../../dashboard/src/github-tracking-hook.js", import.meta.url).href,
+  githubTrackingPath: new URL("../../../dashboard/src/github-tracking.js", import.meta.url).href,
+  maybeCreateTrackingIssueMock: vi.fn(async () => ({
+    created: false as const,
+    reason: "no_repo_configured" as const,
+  })),
+}));
+
+vi.mock("@fusion/core", async (importOriginal) => {
+  const { createEngineCoreMock } = await import("../test/mockCore.js");
+  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
+    isGhAvailable: vi.fn(() => true),
+    isGhAuthenticated: vi.fn(() => true),
+  });
+});
+
+vi.mock(githubTrackingPath, async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../../dashboard/src/github-tracking.js")>();
+  return {
+    ...original,
+    maybeCreateTrackingIssue: maybeCreateTrackingIssueMock,
+  };
+});
 
 function makeTmpDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -25,7 +43,7 @@ describe("agent task creation githubTracking.enabled persistence", () => {
 
   beforeEach(async () => {
     setTaskCreatedHook(undefined);
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     rootDir = makeTmpDir("kb-engine-agent-task-create-gh-flag-");
     globalDir = makeTmpDir("kb-engine-agent-task-create-gh-flag-global-");
     store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
@@ -79,15 +97,11 @@ describe("agent task creation githubTracking.enabled persistence", () => {
       },
     },
   ])("persists githubTracking.enabled and invokes tracking hook for $name", async ({ run }) => {
-    const githubTrackingHookModule = await githubTrackingHookModulePromise;
-    const githubTrackingModule = await githubTrackingModulePromise;
+    const { registerGithubTrackingHook } = await import(githubTrackingHookPath);
+    const { maybeCreateTrackingIssue } = await import(githubTrackingPath);
+    const maybeCreateSpy = vi.mocked(maybeCreateTrackingIssue);
 
-    const maybeCreateSpy = vi.spyOn(githubTrackingModule, "maybeCreateTrackingIssue").mockImplementation(async () => ({
-      created: false,
-      reason: "no_repo_configured",
-    }));
-
-    githubTrackingHookModule.registerGithubTrackingHook();
+    registerGithubTrackingHook();
 
     const result = await run();
     const taskId = (result as { details?: { taskId?: string } }).details?.taskId as string;

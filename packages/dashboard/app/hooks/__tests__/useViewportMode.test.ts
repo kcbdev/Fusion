@@ -3,6 +3,39 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getViewportMode, MOBILE_MEDIA_QUERY, useViewportMode } from "../useViewportMode";
 
 const TABLET_MEDIA_QUERY = "(min-width: 769px) and (max-width: 1024px)";
+const MOBILE_WIDTH_MEDIA_QUERY = "(max-width: 768px)";
+const MOBILE_HEIGHT_MEDIA_QUERY = "(max-height: 480px)";
+const originalScreenDescriptor = Object.getOwnPropertyDescriptor(window, "screen");
+
+function stubScreen(width: number, height: number) {
+  Object.defineProperty(window, "screen", { configurable: true, value: { width, height } });
+}
+
+function stubMissingScreen() {
+  Object.defineProperty(window, "screen", { configurable: true, value: undefined });
+}
+
+function installViewportMedia(options: { width: boolean; height: boolean; tablet: boolean }) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches:
+        query === MOBILE_MEDIA_QUERY
+          ? options.width || options.height
+          : query === MOBILE_WIDTH_MEDIA_QUERY
+            ? options.width
+            : query === MOBILE_HEIGHT_MEDIA_QUERY
+              ? options.height
+              : query === TABLET_MEDIA_QUERY
+                ? options.tablet
+                : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+}
 
 type TestMediaQueryList = MediaQueryList & {
   setMatches: (matches: boolean) => void;
@@ -13,6 +46,8 @@ function createViewportMediaMock(initial: { mobile: boolean; tablet: boolean }) 
   const listeners = new Map<string, Set<() => void>>();
   const matches = new Map<string, boolean>([
     [MOBILE_MEDIA_QUERY, initial.mobile],
+    [MOBILE_WIDTH_MEDIA_QUERY, initial.mobile],
+    [MOBILE_HEIGHT_MEDIA_QUERY, false],
     [TABLET_MEDIA_QUERY, initial.tablet],
   ]);
   const queries = new Map<string, TestMediaQueryList>();
@@ -40,6 +75,9 @@ function createViewportMediaMock(initial: { mobile: boolean; tablet: boolean }) 
       dispatchEvent: vi.fn(() => true),
       setMatches: (nextMatches: boolean) => {
         matches.set(query, nextMatches);
+        if (query === MOBILE_MEDIA_QUERY) {
+          matches.set(MOBILE_WIDTH_MEDIA_QUERY, nextMatches);
+        }
       },
       dispatchChange: () => {
         for (const listener of [...queryListeners]) listener();
@@ -66,16 +104,20 @@ function createViewportMediaMock(initial: { mobile: boolean; tablet: boolean }) 
 describe("useViewportMode", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    if (originalScreenDescriptor) {
+      Object.defineProperty(window, "screen", originalScreenDescriptor);
+    }
   });
 
   it("treats short landscape phones as mobile", () => {
+    stubScreen(844, 390);
     vi.stubGlobal(
       "matchMedia",
       vi.fn((query: string) => ({
         matches:
-          query === MOBILE_MEDIA_QUERY
+          query === MOBILE_MEDIA_QUERY || query === MOBILE_HEIGHT_MEDIA_QUERY
             ? true
-            : query === "(min-width: 769px) and (max-width: 1024px)"
+            : query === MOBILE_WIDTH_MEDIA_QUERY || query === "(min-width: 769px) and (max-width: 1024px)"
               ? false
               : false,
         media: query,
@@ -87,6 +129,50 @@ describe("useViewportMode", () => {
 
     expect(getViewportMode()).toBe("mobile");
     expect(renderHook(() => useViewportMode()).result.current).toBe("mobile");
+  });
+
+  it("keeps tablet mode when only the short-height clause matches on a tablet-class screen", () => {
+    stubScreen(1024, 768);
+    installViewportMedia({ width: false, height: true, tablet: true });
+
+    expect(getViewportMode()).toBe("tablet");
+    expect(renderHook(() => useViewportMode()).result.current).toBe("tablet");
+  });
+
+  it("keeps desktop mode when only the short-height clause matches on a desktop-class screen", () => {
+    stubScreen(1920, 1080);
+    installViewportMedia({ width: false, height: true, tablet: false });
+
+    expect(getViewportMode()).toBe("desktop");
+    expect(renderHook(() => useViewportMode()).result.current).toBe("desktop");
+  });
+
+  it("keeps mobile portrait mode from width regardless of height", () => {
+    stubScreen(390, 844);
+    installViewportMedia({ width: true, height: false, tablet: false });
+
+    expect(getViewportMode()).toBe("mobile");
+    expect(renderHook(() => useViewportMode()).result.current).toBe("mobile");
+  });
+
+  it("falls back to width-only mobile detection when screen data is unavailable", () => {
+    stubMissingScreen();
+    installViewportMedia({ width: false, height: true, tablet: true });
+    expect(() => getViewportMode()).not.toThrow();
+    expect(getViewportMode()).toBe("tablet");
+
+    installViewportMedia({ width: true, height: false, tablet: false });
+    expect(getViewportMode()).toBe("mobile");
+  });
+
+  it("falls back to width-only mobile detection when screen dimensions are zero", () => {
+    stubScreen(0, 0);
+    installViewportMedia({ width: false, height: true, tablet: false });
+    expect(() => getViewportMode()).not.toThrow();
+    expect(getViewportMode()).toBe("desktop");
+
+    installViewportMedia({ width: true, height: true, tablet: false });
+    expect(getViewportMode()).toBe("mobile");
   });
 
   it("updates from mobile to tablet when the mobile media query changes", () => {

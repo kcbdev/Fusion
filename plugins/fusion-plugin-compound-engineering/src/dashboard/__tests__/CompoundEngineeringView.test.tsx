@@ -8,6 +8,9 @@ const listArtifacts = vi.fn(async (): Promise<DiscoveryResult> => {
 });
 const listSessions = vi.fn(async (): Promise<CeSession[]> => []);
 const deleteSession = vi.fn(async (_id: string, _projectId?: string): Promise<void> => undefined);
+const cancelSession = vi.fn(async (_id: string, _projectId?: string): Promise<CeSession> => {
+  throw new Error("cancelSession mock not configured");
+});
 const getSession = vi.fn(async (_id: string, _projectId?: string): Promise<CeSession> => {
   throw new Error("getSession mock not configured");
 });
@@ -16,6 +19,7 @@ vi.mock("../hooks/api.js", () => ({
   getArtifactPreviewUrl: (id: string) => `/preview/${id}`,
   listSessions: () => listSessions(),
   deleteSession: (id: string, projectId?: string) => deleteSession(id, projectId),
+  cancelSession: (id: string, projectId?: string) => cancelSession(id, projectId),
   getSession: (id: string, projectId?: string) => getSession(id, projectId),
   startSession: vi.fn(),
   answerSession: vi.fn(),
@@ -79,6 +83,8 @@ describe("CompoundEngineeringView", () => {
     listSessions.mockResolvedValue([]);
     deleteSession.mockReset();
     deleteSession.mockResolvedValue(undefined);
+    cancelSession.mockReset();
+    cancelSession.mockImplementation(async (id: string, projectId?: string) => mkCeSession({ id, projectId: projectId ?? null, status: "interrupted", error: "Cancelled by user" }));
     getSession.mockReset();
   });
 
@@ -119,6 +125,44 @@ describe("CompoundEngineeringView", () => {
     expect(screen.getAllByTestId("ce-group-empty").length).toBeGreaterThan(0);
   });
 
+  it("opens an artifact in the built-in file viewer via context.openFile", async () => {
+    const openFile = vi.fn();
+    listArtifacts.mockResolvedValue(
+      makeResult({
+        strategy: [
+          { kind: "artifact", id: "strategy:STRATEGY.md", stage: "strategy", path: "STRATEGY.md", name: "STRATEGY.md", size: 10, updatedAt: 1 },
+        ],
+      }),
+    );
+    render(
+      <CompoundEngineeringView
+        projectId="p1"
+        enabledOverride
+        context={{ openFile, tasks: [], workflowSteps: [], openTaskDetail: vi.fn() }}
+      />,
+    );
+
+    await screen.findByTestId("ce-artifact");
+    fireEvent.click(screen.getByTestId("ce-artifact-open"));
+    expect(openFile).toHaveBeenCalledWith("STRATEGY.md");
+  });
+
+  it("renders artifact open button without crashing when openFile is not in context", async () => {
+    listArtifacts.mockResolvedValue(
+      makeResult({
+        strategy: [
+          { kind: "artifact", id: "strategy:STRATEGY.md", stage: "strategy", path: "STRATEGY.md", name: "STRATEGY.md", size: 10, updatedAt: 1 },
+        ],
+      }),
+    );
+    render(<CompoundEngineeringView projectId="p1" enabledOverride />);
+
+    await screen.findByTestId("ce-artifact");
+    const open = screen.getByTestId("ce-artifact-open");
+    expect(open).toBeInTheDocument();
+    fireEvent.click(open);
+  });
+
   it("renders an error entry for an unreadable artifact (not a crash or silent drop)", async () => {
     listArtifacts.mockResolvedValue(
       makeResult({
@@ -155,8 +199,28 @@ describe("CompoundEngineeringView", () => {
     ]);
     // Awaiting sessions advertise that they need the user.
     expect(rows[0].textContent).toMatch(/needs your input/i);
-    // Only the terminal session can be discarded.
+    // Only non-terminal sessions can be cancelled; only terminal sessions can be discarded.
+    const cancelButtons = screen.getAllByTestId("ce-session-cancel");
+    expect(cancelButtons).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Cancel session" })).toHaveLength(2);
+    for (const cancelButton of cancelButtons) {
+      expect(cancelButton).toHaveAccessibleName("Cancel session");
+      expect(cancelButton).toHaveAttribute("title", "Cancel session");
+      expect(cancelButton).not.toHaveTextContent(/cancel/i);
+    }
     expect(screen.getAllByTestId("ce-session-discard")).toHaveLength(1);
+    expect(rows[0].querySelector("[data-testid='ce-session-cancel']")).toBeInTheDocument();
+    expect(rows[1].querySelector("[data-testid='ce-session-cancel']")).toBeInTheDocument();
+    expect(rows[2].querySelector("[data-testid='ce-session-cancel']")).not.toBeInTheDocument();
+  });
+
+  it("renders no cancel affordance for an empty sessions list", async () => {
+    listArtifacts.mockResolvedValue(makeResult({}));
+    listSessions.mockResolvedValue([]);
+    render(<CompoundEngineeringView projectId="p1" enabledOverride />);
+
+    await screen.findByTestId("ce-empty-state");
+    expect(screen.queryByTestId("ce-session-cancel")).not.toBeInTheDocument();
   });
 
   it("opens an existing session from the list into the flow (and back without losing it)", async () => {
@@ -193,6 +257,38 @@ describe("CompoundEngineeringView", () => {
     await screen.findByTestId("ce-empty-state");
     expect(screen.getByTestId("ce-sessions")).toBeInTheDocument();
     expect(deleteSession).not.toHaveBeenCalled();
+  });
+
+  it("cancels an in-flight session via the list", async () => {
+    listArtifacts.mockResolvedValue(makeResult({}));
+    listSessions.mockResolvedValue([mkCeSession({ id: "running", stage: "plan", status: "active" })]);
+    render(<CompoundEngineeringView projectId="p1" enabledOverride />);
+
+    await screen.findByTestId("ce-sessions");
+    listSessions.mockResolvedValue([mkCeSession({ id: "running", stage: "plan", status: "interrupted", error: "Cancelled by user" })]);
+    fireEvent.click(screen.getByTestId("ce-session-cancel"));
+
+    await waitFor(() => expect(cancelSession).toHaveBeenCalledWith("running", "p1"));
+    await waitFor(() => expect(screen.queryByTestId("ce-session-cancel")).not.toBeInTheDocument());
+    expect(screen.getByTestId("ce-session-discard")).toBeInTheDocument();
+  });
+
+  it("cancels an open flow and returns to the refreshed sessions overview", async () => {
+    listArtifacts.mockResolvedValue(makeResult({}));
+    listSessions.mockResolvedValue([mkCeSession({ id: "flow", stage: "plan", status: "active" })]);
+    getSession.mockResolvedValue(mkCeSession({ id: "flow", stage: "plan", status: "active" }));
+    render(<CompoundEngineeringView projectId="p1" enabledOverride />);
+
+    await screen.findByTestId("ce-sessions");
+    fireEvent.click(screen.getByTestId("ce-session-open"));
+    await screen.findByTestId("ce-flow");
+    listSessions.mockResolvedValue([mkCeSession({ id: "flow", stage: "plan", status: "interrupted", error: "Cancelled by user" })]);
+    fireEvent.click(screen.getByTestId("ce-flow-cancel"));
+
+    await waitFor(() => expect(cancelSession).toHaveBeenCalledWith("flow", "p1"));
+    await waitFor(() => expect(screen.queryByTestId("ce-flow")).not.toBeInTheDocument());
+    expect(screen.getByTestId("ce-sessions")).toBeInTheDocument();
+    expect(screen.getByTestId("ce-session-discard")).toBeInTheDocument();
   });
 
   it("discards a terminal session via the list", async () => {

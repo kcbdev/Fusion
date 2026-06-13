@@ -1814,6 +1814,7 @@ describe("MailboxView", () => {
       const contentBlock = contentBlockMatch![1];
       expect(contentBlock).toContain("flex: 1;");
       expect(contentBlock).toContain("min-height: 0;");
+      expect(contentBlock).toContain("overflow-y: auto;");
       expect(contentBlock).toContain("max-height: none;");
     });
 
@@ -1916,6 +1917,40 @@ describe("MailboxView", () => {
       expect(css).toContain('.mailbox-modal[style*="--keyboard-overlap"]');
       expect(css).toContain("height: var(--vv-height, 100dvh);");
       expect(css).toContain("transform: translateY(var(--vv-offset-top, 0px));");
+    });
+
+    it("preserves mobile mailbox scroll after SSE refreshes inbox data", async () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      const originalRequestAnimationFrame = window.requestAnimationFrame;
+      window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+        callback(0);
+        return 0;
+      }) as typeof window.requestAnimationFrame;
+      mockFetchInbox
+        .mockResolvedValueOnce(makeInboxResponse([mockMessage], 1))
+        .mockResolvedValueOnce(makeInboxResponse([{ ...mockReadMessage, id: "msg-sse", content: "Message refreshed by SSE" }], 0));
+      mockFetchUnreadCount.mockResolvedValue({ unreadCount: 0 });
+
+      try {
+        render(<MailboxView {...defaultProps} />);
+        await screen.findByText("Hello, this is a test message from the agent.");
+
+        const content = screen.getByTestId("mailbox-content");
+        content.scrollTop = 144;
+
+        const latest = sseSubscriptions.at(-1);
+        expect(latest).toBeDefined();
+        await act(async () => {
+          latest?.["message:received"]?.();
+        });
+
+        await waitFor(() => {
+          expect(screen.getByText("Message refreshed by SSE")).toBeDefined();
+        });
+        expect(content.scrollTop).toBe(144);
+      } finally {
+        window.requestAnimationFrame = originalRequestAnimationFrame;
+      }
     });
 
     it("renders structural elements that mobile CSS targets", async () => {

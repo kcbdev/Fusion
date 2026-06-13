@@ -7,6 +7,7 @@ import type { Terminal as XTerm, ITerminalAddon } from "@xterm/xterm";
 import { appendTokenQuery } from "../auth";
 import { api } from "../api";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { isMobileViewport, MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
 
 /**
  * SessionTerminal (CLI Agent Executor, U11) — shared xterm terminal for a CLI
@@ -26,12 +27,6 @@ import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 /** ACK cadence — ACK roughly every 32KB of consumed output. */
 const ACK_THRESHOLD_BYTES = 32 * 1024;
 const RESIZE_DEBOUNCE_MS = 100;
-
-/**
- * Canonical mobile breakpoint (matches the repo CSS convention). Landscape
- * phones exceed 768px wide, so the height clause covers them too.
- */
-const MOBILE_MEDIA_QUERY = "(max-width: 768px), (max-height: 480px)";
 
 /**
  * Control sequences emitted by the accessory key bar (U13). These are
@@ -65,19 +60,14 @@ function ctrlCombo(key: string): string | null {
 
 /** Reactive mobile-viewport detection via the repo breakpoint convention. */
 function useIsMobileViewport(): boolean {
-  const [isMobile, setIsMobile] = useState<boolean>(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return false;
-    }
-    return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
-  });
+  const [isMobile, setIsMobile] = useState<boolean>(() => isMobileViewport());
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
       return;
     }
     const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
-    const onChange = () => setIsMobile(mql.matches);
+    const onChange = () => setIsMobile(isMobileViewport());
     onChange();
     // Safari < 14 only has addListener/removeListener.
     if (typeof mql.addEventListener === "function") {

@@ -42,6 +42,9 @@ export type SetSettingsForm = (
   updater: SettingsFormState | ((prev: SettingsFormState) => SettingsFormState),
 ) => void;
 
+/** Async callback registered by a section when it owns a shell-triggered save side effect. */
+export type SectionSaveHandler = () => Promise<void>;
+
 /** Props every extracted section receives. */
 export interface SectionBaseProps {
   /** The single merged settings form (global + project keys). */

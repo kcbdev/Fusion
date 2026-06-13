@@ -30,6 +30,10 @@ export function decideIssueAction(
   from: string,
   to: string,
 ): { action: "close" | "reopen"; stateReason: "completed" | "not_planned" | "reopened" } | null {
+  if (from === "archived" && to === "done") {
+    return { action: "reopen", stateReason: "reopened" };
+  }
+
   if (to === "done" && from !== "done") {
     return { action: "close", stateReason: "completed" };
   }

@@ -72,8 +72,6 @@ vi.mock("../Lane", () => ({
   ),
 }));
 
-const BOARD_WORKFLOW_COLLAPSED_KEY = "kb-dashboard-board-workflow-collapsed";
-
 const DEFAULT_WORKFLOW = {
   id: "builtin:coding",
   name: "Coding (built-in)",
@@ -935,7 +933,6 @@ describe("Board", () => {
       const toolbar = document.querySelector(".board-workflow-toolbar");
       expect(toolbar).not.toBeNull();
       return Array.from(toolbar?.querySelectorAll("button") ?? [])
-        .filter((button) => !button.classList.contains("board-workflow-collapse-toggle"))
         .map((button) => button.getAttribute("aria-label"));
     }
 
@@ -1032,7 +1029,7 @@ describe("Board", () => {
       enableFlag({}, [DEFAULT_WORKFLOW]);
       const { unmount } = renderBoard({ onCreateWorkflow });
 
-      await waitFor(() => expect(screen.getByTestId("column-triage")).toBeDefined());
+      await waitFor(() => expect(document.querySelector(".board-workflow-toolbar")).not.toBeNull());
       expect(workflowToolbarActionNames()).toEqual(["New workflow"]);
       fireEvent.click(screen.getByRole("button", { name: "New workflow" }));
       expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
@@ -1042,89 +1039,34 @@ describe("Board", () => {
       enableFlag({}, [DEFAULT_WORKFLOW]);
       renderBoard({ onOpenWorkflowEditor });
 
-      await waitFor(() => expect(screen.getByTestId("column-triage")).toBeDefined());
+      await waitFor(() => expect(document.querySelector(".board-workflow-toolbar")).not.toBeNull());
       expect(workflowToolbarActionNames()).toEqual(["Edit workflows"]);
       fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
     });
 
-    describe("workflow toolbar collapsible", () => {
-      function renderWorkflowToolbarBoard() {
-        const onCreateWorkflow = vi.fn();
-        const onOpenWorkflowEditor = vi.fn();
-        enableFlag(
-          { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
-          [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
-        );
-        renderBoard({
-          tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })],
-          onCreateWorkflow,
-          onOpenWorkflowEditor,
-        });
-        return { onCreateWorkflow, onOpenWorkflowEditor };
-      }
-
-      it("defaults to expanded (not collapsed)", async () => {
-        renderWorkflowToolbarBoard();
-
-        expect(await screen.findByLabelText("Select workflow")).toBeDefined();
-        expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
-        expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("true");
+    it("renders workflow toolbar actions without a collapse affordance", async () => {
+      const onCreateWorkflow = vi.fn();
+      const onOpenWorkflowEditor = vi.fn();
+      enableFlag(
+        { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
+        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+      );
+      renderBoard({
+        tasks: [mkTask({ id: "FN-1" }), mkTask({ id: "FN-2", column: "intake" })],
+        onCreateWorkflow,
+        onOpenWorkflowEditor,
       });
 
-      it("clicking the toggle collapses the toolbar", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-
-        fireEvent.click(screen.getByTestId("board-workflow-collapse-toggle"));
-
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
-        expect(screen.getByText("Workflow")).toBeDefined();
-      });
-
-      it("clicking the toggle again expands the toolbar", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
-
-        fireEvent.click(toggle);
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        fireEvent.click(toggle);
-
-        expect(screen.getByLabelText("Select workflow")).toBeDefined();
-        expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
-        expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
-        expect(toggle.getAttribute("aria-expanded")).toBe("true");
-      });
-
-      it("persists collapsed state to localStorage", async () => {
-        renderWorkflowToolbarBoard();
-        await screen.findByLabelText("Select workflow");
-        const toggle = screen.getByTestId("board-workflow-collapse-toggle");
-
-        fireEvent.click(toggle);
-        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("1");
-
-        fireEvent.click(toggle);
-        expect(window.localStorage.getItem(BOARD_WORKFLOW_COLLAPSED_KEY)).toBe("0");
-      });
-
-      it("reads collapsed state from localStorage on mount", async () => {
-        window.localStorage.setItem(BOARD_WORKFLOW_COLLAPSED_KEY, "1");
-
-        renderWorkflowToolbarBoard();
-        await waitFor(() => expect(screen.getByTestId("board-workflow-collapse-toggle")).toBeDefined());
-
-        expect(screen.queryByLabelText("Select workflow")).toBeNull();
-        expect(screen.queryByRole("button", { name: "New workflow" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Edit workflows" })).toBeNull();
-        expect(screen.getByTestId("board-workflow-collapse-toggle").getAttribute("aria-expanded")).toBe("false");
-        expect(screen.getByText("Workflow")).toBeDefined();
-      });
+      expect(await screen.findByLabelText("Select workflow")).toBeDefined();
+      expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
+      const toolbar = document.querySelector(".board-workflow-toolbar");
+      expect(toolbar).not.toBeNull();
+      expect(toolbar?.hasAttribute("data-collapsed")).toBe(false);
+      expect(toolbar?.querySelector(".board-workflow-collapse-toggle")).toBeNull();
+      expect(toolbar?.querySelector(".board-workflow-collapsed-label")).toBeNull();
+      expect(screen.queryByTestId("board-workflow-collapse-toggle")).toBeNull();
     });
 
     it("renders one selected workflow at a time and switches workflows from the dropdown", async () => {

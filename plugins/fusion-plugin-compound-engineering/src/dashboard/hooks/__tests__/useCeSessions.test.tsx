@@ -41,6 +41,7 @@ function Harness({
       <span data-testid="err">{s.error ?? ""}</span>
       <button onClick={() => void s.refresh()}>refresh</button>
       <button onClick={() => void s.remove("s1")}>remove</button>
+      <button onClick={() => void s.cancel("s1")}>cancel</button>
     </div>
   );
 }
@@ -52,7 +53,7 @@ describe("useCeSessions (multi-session list)", () => {
 
   it("lists all sessions on mount with the projectId", async () => {
     const list = vi.fn(async () => [mkSession({ id: "s1" }), mkSession({ id: "s2", stage: "plan" })]);
-    const transport: CeSessionsTransport = { list, remove: vi.fn() };
+    const transport: CeSessionsTransport = { list, remove: vi.fn(), cancel: vi.fn() };
     render(<Harness transport={transport} />);
 
     await act(async () => {});
@@ -68,6 +69,7 @@ describe("useCeSessions (multi-session list)", () => {
       remove: vi.fn(async () => {
         removed = true;
       }),
+      cancel: vi.fn(),
     };
     render(<Harness transport={transport} />);
     await act(async () => {});
@@ -78,6 +80,43 @@ describe("useCeSessions (multi-session list)", () => {
     });
     expect(transport.remove).toHaveBeenCalledWith("s1", "p1");
     expect(screen.getByTestId("ids")).toHaveTextContent("s2");
+  });
+
+  it("cancel() cancels via the transport then refreshes the list", async () => {
+    let cancelled = false;
+    const transport: CeSessionsTransport = {
+      list: vi.fn(async () => [mkSession({ id: "s1", status: cancelled ? "interrupted" : "active" })]),
+      remove: vi.fn(),
+      cancel: vi.fn(async () => {
+        cancelled = true;
+      }),
+    };
+    render(<Harness transport={transport} />);
+    await act(async () => {});
+    expect(screen.getByTestId("ids")).toHaveTextContent("s1");
+
+    await act(async () => {
+      screen.getByText("cancel").click();
+    });
+    expect(transport.cancel).toHaveBeenCalledWith("s1", "p1");
+    expect(transport.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancel() surfaces a transport error without crashing", async () => {
+    const transport: CeSessionsTransport = {
+      list: vi.fn(async () => [mkSession({ id: "s1", status: "active" })]),
+      remove: vi.fn(),
+      cancel: vi.fn(async () => {
+        throw new Error("cancel failed");
+      }),
+    };
+    render(<Harness transport={transport} />);
+    await act(async () => {});
+
+    await act(async () => {
+      screen.getByText("cancel").click();
+    });
+    expect(screen.getByTestId("err")).toHaveTextContent("cancel failed");
   });
 
   it("refreshes when a push event fires", async () => {
@@ -92,6 +131,7 @@ describe("useCeSessions (multi-session list)", () => {
     const transport: CeSessionsTransport = {
       list: vi.fn(async () => Array.from({ length: n }, (_, i) => mkSession({ id: `s${i + 1}` }))),
       remove: vi.fn(),
+      cancel: vi.fn(),
     };
     render(<Harness transport={transport} subscribe={subscribe} />);
     await act(async () => {});
@@ -114,6 +154,7 @@ describe("useCeSessions (multi-session list)", () => {
         return [mkSession({ id: "s1", status: calls >= 3 ? "completed" : "active" })];
       }),
       remove: vi.fn(),
+      cancel: vi.fn(),
     };
     render(<Harness transport={transport} />);
     await act(async () => {
@@ -140,6 +181,7 @@ describe("useCeSessions (multi-session list)", () => {
         throw new Error("kaput");
       }),
       remove: vi.fn(),
+      cancel: vi.fn(),
     };
     render(<Harness transport={transport} />);
     await act(async () => {});

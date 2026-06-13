@@ -127,6 +127,20 @@ export function SchedulingSection({
         <small>Strict — coordination-focused; higher per-tick tokens. Lite — pre-2026-05-11 behavior. Off — minimal procedure.</small>
       </div>
       <div className="form-group">
+        <label htmlFor="engineerBacklogAutoClaim" className="checkbox-label">
+          <input
+            id="engineerBacklogAutoClaim"
+            type="checkbox"
+            checked={form.engineerBacklogAutoClaim === true}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, engineerBacklogAutoClaim: e.target.checked }))
+            }
+          />
+          Let engineer agents auto-claim backlog tasks
+        </label>
+        <small>Backlog/no-task auto-claim is executor-only by default. Enable to let engineer-role agents auto-claim unowned backlog tasks; explicit routing and delegation are unchanged. Default: off.</small>
+      </div>
+      <div className="form-group">
         <label htmlFor="taskStuckTimeoutMs">Stuck Task Timeout (minutes)</label>
         <input
           id="taskStuckTimeoutMs"
