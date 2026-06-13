@@ -160,11 +160,30 @@ export function createMainWindow(state?: WindowState, launchTargetUrl?: string):
   return window;
 }
 
+/**
+ * Resolve the project root for the embedded local runtime.
+ *
+ * Must NOT be `process.cwd()`: when a packaged build is launched from a desktop
+ * launcher or file manager (notably the Linux AppImage), cwd is `/` or the
+ * read-only squashfs mount point, so creating `<cwd>/.fusion/fusion.db` fails
+ * with EACCES/EROFS and the local runtime never starts ("Couldn't start local
+ * Fusion"). Anchor to a stable, writable per-user location instead — the home
+ * directory, so data lives in `~/.fusion` (consistent with the CLI). Honor
+ * `FUSION_HOME` for power users who want their data elsewhere.
+ */
+export function resolveLocalRuntimeRoot(): string {
+  const override = process.env.FUSION_HOME?.trim();
+  if (override) {
+    return resolve(override);
+  }
+  return app.getPath("home");
+}
+
 export async function initializeApp(): Promise<void> {
   const state = await loadWindowState();
   const rememberedLaunchMode = await loadDesktopLaunchMode();
 
-  localRuntimeManager = new LocalRuntimeManager({ rootDir: process.cwd() });
+  localRuntimeManager = new LocalRuntimeManager({ rootDir: resolveLocalRuntimeRoot() });
   currentDesktopLaunchMode = rememberedLaunchMode;
   currentRemoteLaunch = null;
   localRuntimeStartupAttempted = false;
