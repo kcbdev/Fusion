@@ -204,6 +204,8 @@ function isProcessAlive(pid: number): boolean {
 }
 
 function removeTmpdirRedirectSinkForPid(ownerPid: number): void {
+  if (ownerPid === process.pid || isProcessAlive(ownerPid)) return;
+
   try {
     rmSync(join(WORKER_ROOT, `redir-${ownerPid}`), { recursive: true, force: true });
   } catch {
@@ -264,8 +266,25 @@ function sweepDeadTmpdirRedirectSinks(): void {
   }
 }
 
+export const __fusionTmpdirRedirectTestHooks = {
+  workerRoot: WORKER_ROOT,
+  registryPath: TMPDIR_REDIRECT_REGISTRY,
+  sinkForPid(pid: number): string {
+    return join(WORKER_ROOT, `redir-${pid}`);
+  },
+  resetSweepForTest(): void {
+    tmpdirRedirectSweepComplete = false;
+  },
+  sweepDeadTmpdirRedirectSinks,
+};
+
 function ensureTmpdirRedirectSink(): string {
-  if (tmpdirRedirectSink) return tmpdirRedirectSink;
+  if (tmpdirRedirectSink) {
+    // FN-6310: recovery-timeout cleanup can remove a live worker's cached
+    // redirect sink; recreate it on demand so later mkdtemp calls don't ENOENT.
+    mkdirSync(tmpdirRedirectSink, { recursive: true });
+    return tmpdirRedirectSink;
+  }
 
   sweepDeadTmpdirRedirectSinks();
   const sink = join(WORKER_ROOT, `redir-${process.pid}`);
