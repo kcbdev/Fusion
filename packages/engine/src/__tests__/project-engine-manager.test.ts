@@ -432,8 +432,13 @@ describe("ProjectEngineManager", () => {
   });
 
   describe("startReconciliation / stopReconciliation", () => {
+    async function flushReconciliationWork(): Promise<void> {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    }
+
     beforeEach(() => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.useFakeTimers();
     });
 
     afterEach(() => {
@@ -577,9 +582,9 @@ describe("ProjectEngineManager", () => {
       // Start reconciliation (runs immediate tick which fails all 3)
       manager.startReconciliation(1000);
 
-      // Wait for the immediate tick to complete
-      await vi.advanceTimersByTimeAsync(100);
-      await new Promise((resolve) => setTimeout(resolve, 10)); // Let promises settle
+      // Wait for the immediate tick to complete without mixing real timers into
+      // this fake-timer block.
+      await flushReconciliationWork();
 
       // After immediate tick: all should have failed
       expect(manager.getEngine("proj_aaa")).toBeUndefined();
@@ -588,7 +593,7 @@ describe("ProjectEngineManager", () => {
 
       // First scheduled tick (after 1000ms): should retry and succeed
       await vi.advanceTimersByTimeAsync(1000);
-      await new Promise((resolve) => setTimeout(resolve, 10)); // Let promises settle
+      await flushReconciliationWork();
 
       expect(manager.getEngine("proj_aaa")).toBeDefined();
       expect(manager.getEngine("proj_bbb")).toBeDefined();

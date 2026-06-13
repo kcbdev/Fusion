@@ -260,23 +260,23 @@ Programmatic equivalent:
 
 ### Assigned-agent runtime model precedence for task execution
 
-When a task is executed by an assigned durable agent, executor session model selection now prefers that agent's explicit runtime model when it is fully specified.
+When a task is executed by an assigned durable agent, executor session model selection prefers fresh task and settings values before the agent's stored runtime model.
 
 Executor precedence for task runs:
-1. Assigned agent `runtimeConfig` model pair (combined `runtimeConfig.model = "provider/modelId"` or separate `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are present
-2. Task `modelProvider` + `modelId`
-3. Project/global execution lane fallbacks (same resolution as unassigned runs)
+1. Task `modelProvider` + `modelId`
+2. Project/global execution lane fallbacks (same resolution as unassigned runs)
+3. Assigned agent `runtimeConfig` model pair (combined `runtimeConfig.model = "provider/modelId"` or separate `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) only when both provider and model ID are present and no task/settings pair is configured
 
-If the assigned agent runtime model is missing or incomplete, Fusion falls back to the normal task/settings execution hierarchy.
+If the assigned agent runtime model is missing or incomplete, Fusion continues to automatic provider/model resolution without mixing partial runtime fields into the selected pair.
 
 ### Durable-agent heartbeat model precedence and unavailable-provider behavior
 
-Heartbeat sessions for durable agents resolve models with heartbeat-specific fallback semantics:
+Heartbeat sessions for durable agents resolve models with the same fresh-settings-first rule:
 
-1. Agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when present
-2. Execution-lane settings fallback (`executionProvider`/`executionModelId` → `executionGlobalProvider`/`executionGlobalModelId` → project/global defaults)
+1. Execution-lane settings fallback (`executionProvider`/`executionModelId` → `executionGlobalProvider`/`executionGlobalModelId` → project/global defaults)
+2. Agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) only when both provider and model ID are present and no execution/default pair is configured
 
-When the runtime model is present and differs from execution-lane settings, heartbeat passes the execution-lane model as a fallback pair for session creation.
+Heartbeat no longer passes a stale runtime model ahead of a saved execution lane or project default override.
 
 Task-scoped heartbeat runs for durable agents execute inside the task's git worktree (same as ephemeral task execution), while no-task heartbeat runs continue to execute from the project root.
 Heartbeat and executor system prompts share the same active-goal context injector (`buildGoalContextSection`), so both lanes receive identical goal preambles when active goals exist.
@@ -511,6 +511,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `enabled` | `boolean` | `true` | Whether heartbeat triggers are enabled for this agent |
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
+| `engineerBacklogAutoClaim` | `boolean` | inherits project (`false`) | Opt this engineer-role agent into no-task backlog auto-claim for implementation tasks. Executor-role agents remain eligible by default; explicit routing/delegation is unchanged. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Per-agent override for no-task candidate lines rendered in prompts. Integer `0-10`; `0` suppresses candidate injection. |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
@@ -526,6 +527,10 @@ The `runtimeConfig` field on agents supports the following options:
 | `modelProvider` | `string` | — | AI provider override for heartbeat session |
 | `modelId` | `string` | — | AI model ID override for heartbeat session |
 | `budgetConfig` | `AgentBudgetConfig` | — | Token budget governance settings |
+
+Assignment-triggered heartbeats are completion-resilient: if an `agent:assigned` wake is skipped only because the durable agent already has an active heartbeat run, Fusion records the latest assigned task as a pending assignment and re-fires that assignment wake once the active run completes. This prevents assigned work from being stranded by long heartbeat intervals or `skipHeartbeatWhenIdle`; disabled agents (`enabled === false`) and budget-exhausted agents still do not defer assignment wakes.
+
+Self-healing also covers abnormal run/session loss for assigned `in-progress` work. If the task remains assigned but the durable agent has no active heartbeat run and no active executor session after the orphan grace window, `reattach-orphaned-assigned-executions` re-dispatches the task forward via `executor.resumeTaskForAgent(agentId)` without pausing, failing, or moving the task backward.
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
 Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat timing globally: both the heartbeat interval (`pollIntervalMs`) and unresponsive timeout base (`heartbeatTimeoutMs`) are multiplied. Per-agent `heartbeatIntervalMs`/`heartbeatTimeoutMs` remain base values before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
@@ -556,6 +561,8 @@ When an identity-bearing, non-ephemeral agent wakes with no assigned task and `r
 Guardrails:
 - Only unpaused, unassigned, unchecked-out todo tasks with satisfied dependencies are considered
 - Claims are rejected for terminal/paused/owned/conflicting tasks
+- Implementation-task backlog pickup is executor-only by default. Engineer-role agents may opt in through project setting `engineerBacklogAutoClaim` or per-agent `runtimeConfig.engineerBacklogAutoClaim`; the per-agent value overrides the project default in both directions.
+- Explicit task routing/delegation is not affected by the backlog auto-claim opt-in gate.
 - Checkout safety is preserved (`checkout_conflict` paths are non-fatal skips)
 - On successful claim, the same heartbeat run switches into task-scoped execution (no nested run re-entry)
 
@@ -1222,7 +1229,7 @@ Effects:
 - Agent state transitions `running/active → paused → active`
 - Orphan reconcile uses `3 × heartbeatTimeoutMs` where the timeout is likewise multiplier-scaled first
 - `pauseReason` is set to `heartbeat-unresponsive` during recovery and cleared on resume
-- Assigned tasks are auto-paused with `pausedByAgentId` during pause, then only those same tasks are auto-unpaused on resume
+- Assigned tasks are not paused or unpaused by agent sleep/heartbeat recovery; unpaused work stays eligible for scheduler re-dispatch, while tasks already paused by a user retain their existing pause state
 - Resume triggers one on-demand heartbeat restart only when `runtimeConfig.enabled !== false`
 - `onTerminated` is a run-level callback for terminated heartbeat runs and is not used by unresponsive recovery
 

@@ -577,6 +577,10 @@ fn task unarchive FN-001
 fn task delete FN-001 --force
 ```
 
+Notes:
+- `fn task archive` accepts any live-board task (`triage`, `todo`, `in-progress`, `in-review`, or `done`) and preserves the original column for restore.
+- `fn task unarchive` restores to the saved pre-archive column when available, with legacy archives falling back to `done`.
+
 ### Branch conflict handling
 
 When executor branch allocation fails because `fusion/<task-id>` is already checked out, Fusion marks the task failed/investigable and logs conflict details (existing worktree path, tip SHA, stranded commits). Operators should inspect and resolve conflicting local branches/worktrees with standard git tooling, then retry the task.
@@ -586,6 +590,8 @@ When executor branch allocation fails because `fusion/<task-id>` is already chec
 Create a pull request for a task with `fn pr create <task-id>`.
 
 Alias: `fn task pr-create <task-id>`
+
+Maintenance: `fn pr automerge-cleanup` performs a dry run of legacy auto-merge stamps left by older `in-review` task behavior and prints affected task IDs/columns. Add `--apply` to clear those stamps after reviewing the list, and `--json` for machine-readable output.
 
 Flags:
 - `--title <title>`: Set the PR title.
@@ -601,6 +607,8 @@ Default behavior: PR title/body are AI-generated unless both `--title` and `--bo
 fn pr create FN-001
 fn pr create FN-001 --draft --reviewer octocat --reviewer hubot --base main
 fn task pr-create FN-001 --title "Fix login race" --body "Prevents duplicate session refresh." --base main
+fn pr automerge-cleanup --json
+fn pr automerge-cleanup --apply
 fn task import owner/repo --labels bug --limit 10
 fn task import owner/repo --interactive
 ```

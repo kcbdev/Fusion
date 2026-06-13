@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { PlanningQuestion } from "@fusion/core";
 import type { CeActivityTurn, CeConversationTurn, CeSession } from "../session/session-store.js";
 import { canRenderRichly } from "./ce-question-support.js";
@@ -33,6 +34,8 @@ export interface CeFlowProps {
   onAnswer: (questionId: string, response: unknown) => void;
   /** Resume an interrupted/error session. */
   onResume?: () => void;
+  /** Cancel an in-flight session while preserving it as interrupted. */
+  onCancel?: () => void;
   /** Back to the launcher. */
   onClose?: () => void;
 }
@@ -506,7 +509,7 @@ function QuestionPanel({
 // ── Flow surface ─────────────────────────────────────────────────────────────
 
 export function CeFlow(props: CeFlowProps) {
-  const { session, busy, error, onAnswer, onResume, onClose } = props;
+  const { session, busy, error, onAnswer, onResume, onCancel, onClose } = props;
 
   const question = session?.currentQuestion ?? undefined;
 
@@ -526,6 +529,7 @@ export function CeFlow(props: CeFlowProps) {
   const status = session.status;
   const settledTerminal = status === "completed";
   const recoverable = status === "interrupted" || status === "error";
+  const cancellable = status === "launching" || status === "active" || status === "awaiting_input";
   const working = status === "active" || status === "launching";
 
   return (
@@ -535,6 +539,19 @@ export function CeFlow(props: CeFlowProps) {
         <span className="ce-flow-status" data-testid="ce-flow-status">
           {status.replace("_", " ")}
         </span>
+        {onCancel && cancellable ? (
+          <button
+            type="button"
+            className="btn-icon ce-flow-cancel"
+            data-testid="ce-flow-cancel"
+            onClick={onCancel}
+            disabled={Boolean(busy)}
+            aria-label="Cancel session"
+            title="Cancel session"
+          >
+            <Trash2 size={16} aria-hidden="true" />
+          </button>
+        ) : null}
         {onClose ? (
           <button type="button" className="btn ce-flow-close" onClick={onClose}>
             Close

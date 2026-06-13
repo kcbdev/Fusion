@@ -9,6 +9,9 @@ import type {
   AutomationStore as AutomationStoreType,
   ScheduledTask,
   AutomationRunResult,
+  ResearchModelSettings,
+  ResearchSynthesisRequest,
+  ResearchSynthesisResult,
 } from "@fusion/core";
 import { allowsAutoMergeProcessing, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
 import { execFile } from "node:child_process";
@@ -36,6 +39,7 @@ import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
 import { ResearchRunDispatcher } from "./research-dispatcher.js";
 import { ResearchStepRunner } from "./research-step-runner.js";
+import { ResearchProviderRegistry } from "./research/provider-registry.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import {
   computeVerificationFailureSignature,
@@ -387,6 +391,7 @@ export class ProjectEngine {
   private taskUpdatedHandler?: (...args: any[]) => void;
   private taskDeletedHandler?: (...args: any[]) => void;
   private autostashOrphansHandler?: (...args: any[]) => void;
+  private legacyAutoMergeStampAdvisoryEmitted = false;
 
   constructor(
     private config: ProjectRuntimeConfig,
@@ -457,9 +462,26 @@ export class ProjectEngine {
     const settings = await store.getSettings();
 
     if (typeof (store as { getResearchStore?: () => unknown }).getResearchStore === "function") {
+      const registry = new ResearchProviderRegistry(settings, cwd);
+      const providers = registry.getAvailableProviders()
+        .map((type) => registry.getProvider(type))
+        .filter((provider): provider is NonNullable<typeof provider> => Boolean(provider));
+      const synthesisProvider = registry.getProvider("llm-synthesis") as ({
+        synthesize?: (
+          request: ResearchSynthesisRequest,
+          modelSelection: { provider?: string; modelId?: string },
+          signal?: AbortSignal,
+        ) => Promise<ResearchSynthesisResult>;
+      } | undefined);
+      const synthesisRunner = typeof synthesisProvider?.synthesize === "function"
+        ? (request: ResearchSynthesisRequest, _modelSettings: ResearchModelSettings, signal?: AbortSignal) => synthesisProvider.synthesize!(request, {
+          provider: settings.researchGlobalDefaults?.synthesisProvider ?? settings.defaultProvider,
+          modelId: settings.researchGlobalDefaults?.synthesisModelId ?? settings.defaultModelId,
+        }, signal)
+        : undefined;
       this.researchOrchestrator = new ResearchOrchestrator({
         store: store.getResearchStore(),
-        stepRunner: new ResearchStepRunner(),
+        stepRunner: new ResearchStepRunner({ providers, synthesisRunner }),
         maxConcurrentRuns: settings.researchMaxConcurrentRuns ?? 3,
       });
       this.researchDispatcher = new ResearchRunDispatcher({
@@ -1616,6 +1638,43 @@ export class ProjectEngine {
    */
   private allowInReviewMergeProcessing(task: Pick<Task, "branchContext" | "autoMerge">, settings: Pick<Settings, "autoMerge">): boolean {
     return allowsAutoMergeProcessing(task, settings) || isSharedBranchGroupMemberIntegration(task);
+  }
+
+  private async emitLegacyAutoMergeStampAdvisory(store: TaskStore): Promise<void> {
+    if (this.legacyAutoMergeStampAdvisoryEmitted) {
+      return;
+    }
+    this.legacyAutoMergeStampAdvisoryEmitted = true;
+
+    try {
+      const candidates = (await store.listTasks({ column: "in-review" }))
+        .filter((task) => task.autoMerge === true && task.autoMergeProvenance !== "user");
+      if (candidates.length === 0) {
+        return;
+      }
+
+      const taskIds = candidates.map((task) => task.id);
+      runtimeLog.warn(
+        `Global auto-merge was turned off, but ${taskIds.length} legacy in-review task(s) still have task.autoMerge=true without user provenance and may continue to auto-merge: ${taskIds.join(", ")}. Run reconcileLegacyAutoMergeStamps({ apply: true }) to clear these legacy stamps after review.`,
+      );
+      store.recordRunAuditEvent({
+        agentId: "system",
+        runId: `legacy-auto-merge-stamp-advisory-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:auto-merge-legacy-stamp-advisory",
+        target: "settings.autoMerge",
+        metadata: {
+          taskIds,
+          candidateCount: taskIds.length,
+          recommendation: "Run reconcileLegacyAutoMergeStamps({ apply: true }) to clear legacy stamps after operator review.",
+          changedTaskState: false,
+        },
+      });
+    } catch (err: unknown) {
+      runtimeLog.warn(
+        `Legacy auto-merge stamp advisory failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private enqueueEligibleInReviewTasks(tasks: readonly Task[], settings: Pick<Settings, "autoMerge">): number {
@@ -3295,7 +3354,23 @@ export class ProjectEngine {
     store.on("settings:updated", onGlobalPause);
     this.settingsHandlers.push(onGlobalPause);
 
-    // 3. Global unpause — resume orphaned tasks + sweep in-review
+    // 3. Auto-merge OFF — legacy pre-provenance stamps are ambiguous, so only
+    // advise operators about clearable candidates; do not mutate task state.
+    const onAutoMergeDisabled = async ({
+      settings: s,
+      previous: prev,
+    }: {
+      settings: Settings;
+      previous: Settings;
+    }) => {
+      if (prev.autoMerge !== false && s.autoMerge === false) {
+        await this.emitLegacyAutoMergeStampAdvisory(store);
+      }
+    };
+    store.on("settings:updated", onAutoMergeDisabled);
+    this.settingsHandlers.push(onAutoMergeDisabled);
+
+    // 4. Global unpause — resume orphaned tasks + sweep in-review
     const onGlobalUnpause = async ({
       settings: s,
       previous: prev,
@@ -3311,7 +3386,7 @@ export class ProjectEngine {
     store.on("settings:updated", onGlobalUnpause);
     this.settingsHandlers.push(onGlobalUnpause);
 
-    // 4. Engine unpause — same as global unpause
+    // 5. Engine unpause — same as global unpause
     const onEngineUnpause = async ({
       settings: s,
       previous: prev,
@@ -3327,7 +3402,7 @@ export class ProjectEngine {
     store.on("settings:updated", onEngineUnpause);
     this.settingsHandlers.push(onEngineUnpause);
 
-    // 5. Maintenance interval change — reschedule mergeActive reconciliation
+    // 6. Maintenance interval change — reschedule mergeActive reconciliation
     const onMaintenanceIntervalChange = ({
       settings: s,
       previous: prev,
@@ -3347,7 +3422,7 @@ export class ProjectEngine {
     store.on("settings:updated", onMaintenanceIntervalChange);
     this.settingsHandlers.push(onMaintenanceIntervalChange);
 
-    // 6. Stuck task timeout change — trigger immediate check
+    // 7. Stuck task timeout change — trigger immediate check
     const onStuckTimeoutChange = async ({
       settings: s,
       previous: prev,
@@ -3373,7 +3448,7 @@ export class ProjectEngine {
     store.on("settings:updated", onStuckTimeoutChange);
     this.settingsHandlers.push(onStuckTimeoutChange);
 
-    // 7. Memory maintenance settings change — sync automations
+    // 8. Memory maintenance settings change — sync automations
     const onInsightSettingsChange = async ({
       settings: s,
       previous: prev,
@@ -3419,7 +3494,7 @@ export class ProjectEngine {
     store.on("settings:updated", onInsightSettingsChange);
     this.settingsHandlers.push(onInsightSettingsChange);
 
-    // 8. Auto-summarize settings change — sync automation
+    // 9. Auto-summarize settings change — sync automation
     const onAutoSummarizeSettingsChange = async ({
       settings: s,
       previous: prev,
@@ -3455,7 +3530,7 @@ export class ProjectEngine {
     store.on("settings:updated", onAutoSummarizeSettingsChange);
     this.settingsHandlers.push(onAutoSummarizeSettingsChange);
 
-    // 9. Scheduled eval settings change — sync automation
+    // 10. Scheduled eval settings change — sync automation
     const onScheduledEvalSettingsChange = async ({
       settings: s,
       previous: prev,

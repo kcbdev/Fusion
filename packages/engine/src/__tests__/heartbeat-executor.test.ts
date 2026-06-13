@@ -571,6 +571,99 @@ describe("executeHeartbeat", () => {
     expect(args.permanentAgentGating?.permissionPolicy?.presetId).toBe("unrestricted");
   });
 
+  describe("agent pause does not pause assigned tasks", () => {
+    it("pauseAgent leaves zero, one, and many assigned tasks untouched", async () => {
+      for (const assignedTasks of [
+        [],
+        [{ id: "FN-001", paused: undefined, pausedByAgentId: undefined }],
+        [
+          { id: "FN-001", paused: undefined, pausedByAgentId: undefined },
+          { id: "FN-002", paused: false, pausedByAgentId: undefined },
+          { id: "FN-003", paused: true, userPaused: true, pausedByAgentId: undefined },
+        ],
+      ]) {
+        const pauseTask = vi.fn().mockResolvedValue(undefined);
+        const getTasksByAssignedAgent = vi.fn().mockResolvedValue(assignedTasks);
+        mockTaskStore = createMockTaskStore({ pauseTask, getTasksByAssignedAgent });
+        const store = createStoreWithAgentForExec({ taskId: assignedTasks[0]?.id });
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        const before = structuredClone(assignedTasks);
+
+        await monitor.pauseAgent("agent-001");
+
+        expect(pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
+        expect(pauseTask).not.toHaveBeenCalled();
+        expect(getTasksByAssignedAgent).not.toHaveBeenCalled();
+        expect(assignedTasks).toEqual(before);
+      }
+    });
+
+    it("reproduces agent sleep symptom and keeps assigned task pause fields unchanged", async () => {
+      const assignedTask = {
+        id: "FN-001",
+        column: "todo",
+        paused: undefined,
+        pausedByAgentId: undefined,
+      };
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      mockTaskStore = createMockTaskStore({
+        pauseTask,
+        getTasksByAssignedAgent: vi.fn().mockResolvedValue([assignedTask]),
+      });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.pauseAgent("agent-001");
+
+      expect(pauseTask).not.toHaveBeenCalled();
+      expect(assignedTask.paused).toBeUndefined();
+      expect(assignedTask.pausedByAgentId).toBeUndefined();
+      expect(assignedTask.column).toBe("todo");
+    });
+
+    it("executeHeartbeat does not pause its assigned task", async () => {
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      mockTaskStore = createMockTaskStore({ pauseTask });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      expect(pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
+      expect(pauseTask).not.toHaveBeenCalled();
+    });
+
+    it("resumeAgent cascade skips user-paused tasks but unpauses agent-only pauses", async () => {
+      const pauseTask = vi.fn().mockResolvedValue(undefined);
+      const getTasksByAssignedAgent = vi.fn().mockResolvedValue([
+        { id: "FN-001", paused: true, pausedByAgentId: "agent-001" },
+        { id: "FN-002", paused: true, pausedByAgentId: "agent-001", userPaused: true },
+        { id: "FN-003", paused: true, userPaused: true },
+      ]);
+      mockTaskStore = createMockTaskStore({ pauseTask, getTasksByAssignedAgent });
+      const store = createStoreWithAgentForExec({
+        taskId: "FN-001",
+        state: "active",
+        runtimeConfig: { enabled: false },
+      });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await monitor.resumeAgent("agent-001", { cascadeToTasks: true });
+
+      expect(getTasksByAssignedAgent).toHaveBeenCalledWith("agent-001", {
+        pausedOnly: true,
+        excludeArchived: true,
+      });
+      expect(pauseTask).toHaveBeenCalledTimes(1);
+      expect(pauseTask).toHaveBeenCalledWith("FN-001", false);
+      expect(pauseTask).not.toHaveBeenCalledWith("FN-002", false);
+      expect(pauseTask).not.toHaveBeenCalledWith("FN-003", false);
+      expect(mockedCreateFnAgent).not.toHaveBeenCalled();
+    });
+  });
+
   it("pauseForApproval pauses task and agent when taskId exists", async () => {
     const store = createStoreWithAgentForExec({ taskId: "FN-001" });
     const pauseTask = vi.fn().mockResolvedValue(undefined);
@@ -953,6 +1046,76 @@ describe("executeHeartbeat", () => {
       expect(toolNames).toContain("fn_task_log");
     });
 
+    it("honors engineerBacklogAutoClaim precedence for no-task auto-claim role compatibility", async () => {
+      const oldEnoughForBaseScore = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const candidateTask = {
+        id: "FN-CANDIDATE",
+        description: "implementation reliability follow-up",
+        title: "Implementation reliability",
+        prompt: "# PROMPT",
+        steps: [],
+        column: "todo",
+        dependencies: [],
+        log: [],
+        attachments: [],
+        createdAt: oldEnoughForBaseScore,
+        updatedAt: oldEnoughForBaseScore,
+        columnMovedAt: oldEnoughForBaseScore,
+      } as unknown as TaskDetail;
+      const scenarios = [
+        { name: "engineer default", role: "engineer", settings: {}, runtimeConfig: {}, shouldClaim: false, promptText: "engineerBacklogAutoClaim disabled" },
+        { name: "engineer project opt-in", role: "engineer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: true },
+        { name: "engineer runtime opt-in overrides project off", role: "engineer", settings: { engineerBacklogAutoClaim: false }, runtimeConfig: { engineerBacklogAutoClaim: true }, shouldClaim: true },
+        { name: "engineer runtime opt-out overrides project on", role: "engineer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: { engineerBacklogAutoClaim: false }, shouldClaim: false, promptText: "engineerBacklogAutoClaim disabled" },
+        { name: "executor unchanged", role: "executor", settings: { engineerBacklogAutoClaim: false }, runtimeConfig: {}, shouldClaim: true },
+        { name: "reviewer blocked with opt-in", role: "reviewer", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: false, promptText: "executor or opted-in engineer role required" },
+        { name: "custom blocked with opt-in", role: "custom", settings: { engineerBacklogAutoClaim: true }, runtimeConfig: {}, shouldClaim: false, promptText: "executor or opted-in engineer role required" },
+      ] as const;
+
+      for (const scenario of scenarios) {
+        vi.clearAllMocks();
+        mockedAcquireTaskWorktree.mockResolvedValue({
+          worktreePath: "/tmp/worktree-fn-candidate",
+          branch: "fusion/fn-candidate",
+          source: "existing",
+          hydrated: false,
+          isResume: true,
+        });
+        const store = createStoreWithAgentForExec({
+          taskId: undefined,
+          role: scenario.role,
+          soul: "implementation reliability owner",
+          runtimeConfig: scenario.runtimeConfig,
+        });
+        const mockSession = createMockAgentSession();
+        mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+        mockTaskStore = createMockTaskStore({
+          getSettings: vi.fn().mockResolvedValue(scenario.settings),
+          listTasks: vi.fn().mockResolvedValue([candidateTask]),
+          getTask: vi.fn().mockResolvedValue(candidateTask),
+        });
+        (store.claimTaskForAgent as ReturnType<typeof vi.fn>).mockResolvedValue({
+          ok: true,
+          task: { id: "FN-CANDIDATE" },
+        });
+
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+        await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        if (scenario.shouldClaim) {
+          expect(store.claimTaskForAgent, scenario.name).toHaveBeenCalledWith(
+            "agent-001",
+            "FN-CANDIDATE",
+            expect.objectContaining({ agentId: "agent-001", source: "timer" }),
+          );
+        } else {
+          expect(store.claimTaskForAgent, scenario.name).not.toHaveBeenCalled();
+          const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+          expect(executionPrompt, scenario.name).toContain(scenario.promptText);
+        }
+      }
+    });
+
     it("auto-claim skips implementation candidates for non-executor agents", async () => {
       const store = createStoreWithAgentForExec({
         taskId: undefined,
@@ -1222,19 +1385,19 @@ describe("executeHeartbeat", () => {
     });
 
     it("no-task run overrides a seeded task-scoped heartbeatProcedurePath in the assembled prompt", async () => {
-      const tmpRoot = mkdtempSync(join(tmpdir(), "fn-hb-no-task-procedure-"));
+      const tmpDir = mkdtempSync(join(process.cwd(), ".tmp-fn-hb-no-task-procedure-"));
       try {
-        writeFileSync(join(tmpRoot, "HEARTBEAT.md"), HEARTBEAT_PROCEDURE, "utf-8");
+        writeFileSync(join(tmpDir, "HEARTBEAT.md"), HEARTBEAT_PROCEDURE, "utf-8");
 
         const store = createStoreWithAgentForExec({
           taskId: undefined,
           soul: "I am a coordinator",
-          heartbeatProcedurePath: "HEARTBEAT.md",
+          heartbeatProcedurePath: `${tmpDir.split("/").pop()}/HEARTBEAT.md`,
         });
         const mockSession = createMockAgentSession();
         mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
 
-        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: tmpRoot });
+        const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: process.cwd() });
         const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
 
         expect(result.status).toBe("completed");
@@ -1248,7 +1411,7 @@ describe("executeHeartbeat", () => {
         const savedRun = await store.getRunDetail("agent-001", result.id);
         expect(savedRun?.heartbeatProcedureSource).toBe("default-no-task-override");
       } finally {
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
@@ -3001,7 +3164,7 @@ describe("executeHeartbeat", () => {
       expect(taskLogTool.name).toBe("fn_task_log");
     });
 
-    it("passes runtime model as primary and execution settings model as fallback", async () => {
+    it("passes execution settings model ahead of stale runtime model", async () => {
       const store = createStoreWithAgentForExec({
         runtimeConfig: { model: "anthropic/claude-sonnet-4-5" },
       });
@@ -3022,10 +3185,10 @@ describe("executeHeartbeat", () => {
 
       expect(mockedCreateFnAgent).toHaveBeenCalledOnce();
       const callArgs = mockedCreateFnAgent.mock.calls[0]![0];
-      expect(callArgs.defaultProvider).toBe("anthropic");
-      expect(callArgs.defaultModelId).toBe("claude-sonnet-4-5");
-      expect(callArgs.fallbackProvider).toBe("openai");
-      expect(callArgs.fallbackModelId).toBe("gpt-4.1");
+      expect(callArgs.defaultProvider).toBe("openai");
+      expect(callArgs.defaultModelId).toBe("gpt-4.1");
+      expect(callArgs.fallbackProvider).toBeUndefined();
+      expect(callArgs.fallbackModelId).toBeUndefined();
     });
 
     it("passes undefined model when runtimeConfig has no model", async () => {

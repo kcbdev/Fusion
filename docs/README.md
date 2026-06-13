@@ -55,7 +55,6 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Storage](./storage.md) | Storage architecture, migration, archive system, and SQLite schema |
 | [DAG Architecture Deliverables](./dag/) | Milestone A DAG architecture documents plus Milestone B prototype scaffold docs (schema migration plan, DagCoordinator design, implementation checklist) |
 | [Dev Server Module Audit](./dev-server-modules.md) | Analysis of parallel dashboard dev-server module families, production wiring, and consolidation guidance |
-| [Beads and Dolt Evaluation for Fusion Node Sync](./beads-dolt-sync-evaluation.md) | Evaluation of Beads and Dolt for node sync, with a recommendation for Fusion-native sync design |
 | [Shared Mesh Replication Protocol](./shared-mesh-protocol.md) | Canonical multi-leader replication/write-coordination contract (versioning, quorum, leases/fencing, queue/replay, reconciliation, and degraded-read semantics) |
 | [Multi-Project Sequencing and Dependency Analysis](./multi-project-sequencing.md) | Sequencing guidance for FN-3448/FN-3449/FN-3503/FN-3182, including identity boundaries and recommended board dependency edges |
 | [Contributing](./contributing.md) | Local development setup, testing, release flow, and contributor conventions |
@@ -116,6 +115,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Test Speed Audit (FN-5048)](./test-speed-audit-FN-5048.md) | Measured baseline test performance, offender list, and optimization priorities |
 | [Soft-Delete Verification Matrix](./soft-delete-verification-matrix.md) | Authoritative checklist for the FN-5105 → FN-5143 soft-delete stream: scenario × layer coverage |
 | [Self-Healing Backward Move Audit](./self-healing-backward-move-audit.md) | Audit of self-healing backward-move safety checks and edge-case validation |
+| [Workflow Policy Ownership Map](./workflow-policy-ownership-map.md) | U1 characterization map classifying production merge, retry, scheduling, and recovery policy branches before workflow-policy migration cutover |
 | [Test-Speed Baseline (2026-06-03)](./test-speed-baseline-2026-06-03.md) | Measured per-file test timing baseline and optimization targets (successor to FN-5048 audit) |
 | [ACP Runtime Contract](./acp-contract.md) | Agent Client Protocol plugin launch/readiness contract and failure taxonomy |
 | [Mission Completion Gate Contract](./missions-completion-contract.md) | Decision record for mission completion gate invariants and acceptance flow |

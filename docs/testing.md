@@ -45,6 +45,29 @@ pnpm --filter @fusion/dashboard test:build          # built client output contra
 
 Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration. Run `test:browser-smoke` for layout/responsive/navigation/modal/CSS changes. Run `test:build` for Vite output, lazy-loading, chunking, or client-dist changes.
 
+`pnpm --filter @fusion/dashboard test` runs the curated app/API quality gate through
+`packages/dashboard/scripts/run-quality-tests.mjs` (FN-6308). The orchestrator keeps
+the historical app/API quality split and the curated/backfill lane boundaries, but
+schedules independent lanes with bounded process concurrency instead of chaining every
+Vitest launch sequentially. Each lane still runs through
+`packages/dashboard/scripts/run-vitest-with-heap.mjs --heap=6144`; do not bypass that
+wrapper or recombine the jsdom-heavy app/API projects, because the old combined run
+was SIGKILLed by heap pressure under workspace worker budgeting. The top-level
+`pretest` artifact bootstrap runs once before the orchestrator; lane subprocesses must
+not re-run `scripts/ensure-test-artifacts.mjs`.
+
+Concurrency knobs:
+
+- `FUSION_DASHBOARD_TEST_CONCURRENCY` controls dashboard quality lane process
+  concurrency, defaulting to `2` and hard-capped at `2` to preserve the measured heap
+  budget.
+- Per-lane heap is fixed at `6144` MiB by the orchestrator. Treat any code change that
+  makes this configurable or increases it as risky and re-measure for OOM/SIGKILL before
+  landing.
+- `FUSION_TEST_TOTAL_WORKERS` / `FUSION_TEST_CONCURRENCY` (or targeted
+  `VITEST_MAX_WORKERS`) still bound Vitest thread fan-out inside each process via
+  `computeMaxWorkers`; do not raise them casually for dashboard/jsdom runs.
+
 New test files under `app/**` or `src/**` are picked up automatically by the
 **backfill lanes** (`dashboard-app-quality-backfill` / `dashboard-api-quality-backfill`),
 which include the broad globs and exclude only the files an explicit curated lane
@@ -137,12 +160,12 @@ commensurably. Untimed packages are named in a logged warning.
 - **Engine** keeps `vitest --shard X/Y` virtual slicing (its `test` is a single vitest
   invocation: `--project=engine-default --project=engine-reliability`); slices are now
   weighted by duration.
-- **Dashboard** is *not* `--shard`-sliced — its `test` script is a chain of many separate
-  vitest invocations, so a forwarded `--shard` cannot apply coherently. Instead each leaf
-  lane in the chain (enumerated programmatically from `packages/dashboard/package.json` by
-  expanding the `pnpm run <name>` graph under `test`) is a separately-weighted schedulable
-  unit; a shard runs `pnpm --filter @fusion/dashboard run <lane>` for its assigned lanes.
-  Every lane is assigned to exactly one shard. **Lane weight** is the sum of durations of
+- **Dashboard** is *not* `--shard`-sliced — its default `test` script is a bounded
+  concurrent lane orchestrator, so a forwarded `--shard` cannot apply coherently. Instead
+  each leaf quality lane (enumerated programmatically from `packages/dashboard/package.json`
+  and the dashboard quality orchestrator) is a separately-weighted schedulable unit; a shard
+  runs `pnpm --filter @fusion/dashboard run <lane>` for its assigned lanes. Every lane is
+  assigned to exactly one shard. **Lane weight** is the sum of durations of
   the files the lane's `--project`s execute, derived from the vitest config project
   `include`/`exclude` globs (imported via `tsx`); if the config cannot be imported the
   package duration is apportioned evenly across lanes (logged as `even-apportionment`).
@@ -299,3 +322,15 @@ Copy this checklist into a bug-fix or UI-affordance add/remove task's `## Surfac
 - [ ] Leftover shells after removal — empty buttons, orphaned click targets, now-unused wrappers, dangling aria-labels — are explicitly checked and fixed/hidden
 
 Motivating incident: FN-6115/FN-6118/FN-6123 — a single workflow-row chevron required three tasks to fully remove because the affordance rendered across multiple components and one mobile surface kept an empty `btn-icon` button shell.
+
+### Symptom Verification for bug-class tasks
+
+Bug-class/bug-fix tasks must also include a `## Symptom Verification` section so FN-5893 acceptance proves the original user-visible failure is gone, not merely that a change landed or broad checks are green. Feature/docs/non-bug tasks are not required to carry this section.
+
+Use the exact heading `## Symptom Verification` and include all three required contents:
+
+- [ ] **Original symptom** — what the user/issue reported was broken.
+- [ ] **Exact reproduction** — the precise steps, inputs, fixture, or automated repro that triggered the failure.
+- [ ] **Assertion it is gone** — final verification reproduces the original failure condition and asserts it no longer occurs via a real automated test.
+
+Symptom-based acceptance is mandatory for bug fixes: reproduce the original failure, prove it is gone, and keep the invariant covered across the `## Surface Enumeration` checklist. Green build/tests alone are insufficient when they do not exercise the reported symptom.

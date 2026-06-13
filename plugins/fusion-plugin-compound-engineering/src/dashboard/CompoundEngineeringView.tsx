@@ -74,12 +74,14 @@ function SessionsPanel({
   activeSessionId,
   disabled,
   onOpen,
+  onCancel,
   onDiscard,
 }: {
   sessions: CeSession[];
   activeSessionId?: string;
   disabled: boolean;
   onOpen: (session: CeSession) => void;
+  onCancel: (session: CeSession) => void;
   onDiscard: (session: CeSession) => void;
 }) {
   if (sessions.length === 0) return null;
@@ -124,7 +126,19 @@ function SessionsPanel({
                 >
                   Discard
                 </button>
-              ) : null}
+              ) : (
+                <button
+                  type="button"
+                  className="btn-icon ce-session-cancel"
+                  data-testid="ce-session-cancel"
+                  disabled={disabled}
+                  onClick={() => onCancel(s)}
+                  aria-label="Cancel session"
+                  title="Cancel session"
+                >
+                  <LucideIcons.Trash2 size={16} aria-hidden="true" />
+                </button>
+              )}
             </li>
           );
         })}
@@ -282,6 +296,7 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
     ...(subscribeList ? { subscribe: subscribeList } : {}),
   });
   const [launcherOpen, setLauncherOpen] = useState(false);
+  const [sessionActionBusy, setSessionActionBusy] = useState(false);
 
   const totalArtifacts = result?.totalArtifacts ?? 0;
   const totalErrors = result?.totalErrors ?? 0;
@@ -310,9 +325,23 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
     [ceSession, projectId],
   );
 
+  const onCancelSession = useCallback(
+    (s: CeSession) => {
+      setSessionActionBusy(true);
+      void ceSessions
+        .cancel(s.id)
+        .then(() => {
+          if (ceSession.session?.id === s.id) ceSession.reset();
+        })
+        .finally(() => setSessionActionBusy(false));
+    },
+    [ceSession, ceSessions],
+  );
+
   const onDiscardSession = useCallback(
     (s: CeSession) => {
-      void ceSessions.remove(s.id);
+      setSessionActionBusy(true);
+      void ceSessions.remove(s.id).finally(() => setSessionActionBusy(false));
     },
     [ceSessions],
   );
@@ -336,16 +365,18 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
         <SessionsPanel
           sessions={ceSessions.sessions}
           activeSessionId={ceSession.session.id}
-          disabled={ceSession.busy}
+          disabled={ceSession.busy || sessionActionBusy}
           onOpen={onOpenSession}
+          onCancel={onCancelSession}
           onDiscard={onDiscardSession}
         />
         <CeFlow
           session={ceSession.session}
-          busy={ceSession.busy}
+          busy={ceSession.busy || sessionActionBusy}
           error={ceSession.error}
           onAnswer={ceSession.answer}
           onResume={ceSession.resume}
+          onCancel={() => onCancelSession(ceSession.session!)}
           onClose={onCloseFlow}
         />
       </div>
@@ -376,8 +407,9 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
 
       <SessionsPanel
         sessions={ceSessions.sessions}
-        disabled={ceSession.busy}
+        disabled={ceSession.busy || sessionActionBusy}
         onOpen={onOpenSession}
+        onCancel={onCancelSession}
         onDiscard={onDiscardSession}
       />
 

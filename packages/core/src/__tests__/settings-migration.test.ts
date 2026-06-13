@@ -22,6 +22,7 @@ import {
   SETTINGS_MIGRATION_VERSION,
   SETTINGS_MIGRATION_MARKER_KEY,
 } from "../moved-settings.js";
+import { BUILTIN_TRIAGE_POLICY_SETTINGS } from "../builtin-workflow-settings.js";
 import { resolveEffectiveSettingsById, type WorkflowSettingsResolverStore } from "../workflow-settings-resolver.js";
 import { DEFAULT_PROJECT_SETTINGS, PROJECT_SETTINGS_KEYS } from "../settings-schema.js";
 
@@ -155,7 +156,16 @@ describe("settings hard-move migration (U4)", () => {
     expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerModelId", undefined);
     expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerFallbackProvider", undefined);
     expect(DEFAULT_PROJECT_SETTINGS).toHaveProperty("titleSummarizerFallbackModelId", undefined);
-    // 26 keys after removing buildTimeoutMs plus the summarizer lane from the catalog.
+    // 26 keys after removing buildTimeoutMs plus the summarizer lane from the moved catalog.
+    expect(MOVED_SETTINGS_KEYS.length).toBe(26);
+  });
+
+  it("workflow-native triage policy settings are excluded from moved/project schemas", () => {
+    for (const setting of BUILTIN_TRIAGE_POLICY_SETTINGS) {
+      expect(MOVED_SETTINGS_KEYS, `${setting.id} is workflow-native, not a moved key`).not.toContain(setting.id);
+      expect(PROJECT_SETTINGS_KEYS, `${setting.id} must not be a project schema key`).not.toContain(setting.id);
+      expect(DEFAULT_PROJECT_SETTINGS as Record<string, unknown>).not.toHaveProperty(setting.id);
+    }
     expect(MOVED_SETTINGS_KEYS.length).toBe(26);
   });
 

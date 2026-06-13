@@ -110,12 +110,77 @@ Behavior:
 - Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
 - Read-only built-in workflows are inspectable in the same canvas as custom workflows, including connected success, failure, and rework edges for their graph topology.
 - The Settings panel is value-first for built-in workflows and groups workflow settings by Models, Review & Approval, Step Execution, and Advanced. Known workflow model values use the same model dropdown picker as **Settings → Project Models** so provider/model pairs are saved together; custom or non-model string values can still use typed inputs. Definitions remain available for custom workflow schema authoring.
-- The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; those dropdown controls write workflow setting values for the active default workflow.
-- On desktop, the editor uses a multi-panel layout for editing the graph and adjacent workflow metadata
+- The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; the modal's primary **Save** action writes those dropdown values as workflow setting values for the active default workflow.
+- On desktop, the editor uses a multi-panel canvas layout for editing the graph and adjacent workflow metadata. The **Show simple editor** toggle switches that same workflow into the graph-outline editor with dedicated **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions** tabs.
 - On viewports `<=768px`, the editor switches to a full-screen mobile sheet. Global workflow entry points open to the workflow list with no workflow preselected and prompt users to select a workflow to edit; the board workflow toolbar edit button opens directly to the selected workflow editor when that selected workflow is available.
-- Mobile editing uses a graph outline instead of making the canvas the primary control. The outline shows nodes, branch/rework edges, column placement, and foreach/loop template children as tappable rows and chips that open the same node and edge detail editors as desktop.
-- Mobile authoring exposes dedicated destinations for **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions**. Add includes the node palette plus fragments, built-in step templates, and plugin step templates; Settings keeps the Definitions/Values tab split.
+- Simple/mobile editing uses a graph outline instead of making the canvas the primary control. The outline shows nodes, branch/rework edges, column placement, and foreach/loop template children as tappable rows and chips that open the same node and edge detail editors as desktop.
+- Simple/mobile authoring exposes dedicated destinations for **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions**. Add includes the node palette plus fragments, built-in step templates, and plugin step templates; Actions includes save, AI edit, auto-layout, export, and delete for custom workflows, plus export and duplicate for built-ins. Settings keeps the Definitions/Values tab split.
 - The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
+
+## Custom Providers
+
+Custom Providers live in **Settings → Authentication → Custom Providers**, inside the **Advanced: Custom Providers** disclosure. Use this section to add user-defined model providers that speak an OpenAI-compatible API, the OpenAI Responses API, an Anthropic-compatible API, or Google Generative AI. After a provider is saved with models, those models become selectable in model dropdowns, including **Settings → Project Models** lanes and workflow model lanes.
+
+Supported **API type** values match the dropdown in the form:
+
+- **OpenAI-compatible**
+- **OpenAI Responses**
+- **Anthropic-compatible**
+- **Google Generative AI**
+
+The custom-provider form uses these fields:
+
+- **Provider name** — the display name for the provider.
+- **API type** — one of the supported API types above.
+- **Base URL** — the provider endpoint base URL. It must be a valid `http` or `https` URL, for example `https://api.example.com/v1`.
+- **API key** — optional credential for providers that require authentication.
+- **Available models** — comma-separated model IDs, for example `gpt-4, gpt-3.5-turbo`.
+
+Use **Detect Models** to auto-fill **Available models** from the provider's `/models` endpoint. Detection requires a **Base URL** and may require an **API key**, depending on the provider.
+
+### Add a custom provider
+
+1. Open **Settings → Authentication → Custom Providers**.
+2. Expand **Advanced: Custom Providers** if it is collapsed.
+3. Select **Add Custom Provider**.
+4. Enter a **Provider name**.
+5. Choose the correct **API type**: **OpenAI-compatible**, **OpenAI Responses**, **Anthropic-compatible**, or **Google Generative AI**.
+6. Enter the provider **Base URL**. The value must be a valid `http` or `https` URL.
+7. If the provider requires authentication, enter its **API key**.
+8. Populate **Available models** by either:
+   - entering comma-separated model IDs manually, or
+   - selecting **Detect Models** to query the provider's `/models` endpoint and prepend detected model IDs to the field.
+9. Select **Save Provider**.
+
+Expected outcome: the provider appears in the Custom Providers list with its API type and base URL. Each saved model is then available in model dropdowns as a `{provider}/{modelId}` option, including **Settings → Project Models** default-workflow lanes and workflow model lanes in the workflow editor.
+
+### Edit a custom provider
+
+1. Open **Settings → Authentication → Custom Providers** and expand **Advanced: Custom Providers**.
+2. Find the provider in the list and select its pencil **Edit** action.
+3. Update **Provider name**, **API type**, **Base URL**, **API key**, or **Available models** as needed.
+4. Select **Detect Models** again if you want to refresh or add model IDs from the provider's `/models` endpoint.
+5. Select **Save Changes**.
+
+Expected outcome: the provider list refreshes, and model dropdowns use the updated model list. If you rename the provider or change model IDs, update any **Project Models** or workflow model lane selections that should use the new `{provider}/{modelId}` value.
+
+### Delete a custom provider
+
+1. Open **Settings → Authentication → Custom Providers** and expand **Advanced: Custom Providers**.
+2. Find the provider in the list and select its trash **Delete** action.
+3. Confirm the prompt: `Delete custom provider "<name>"?`.
+
+Expected outcome: the provider is removed from the list, and its models are no longer offered as selectable options in model dropdowns. Review any **Project Models** or workflow model lane values that previously selected that provider.
+
+### Masked API key behavior
+
+Saved API keys are stored in settings but are masked in API responses and UI-loaded provider records. When you edit an existing Custom Provider, the **API key** field starts blank and shows the hint **Leave blank to keep current key** if a key is already saved.
+
+- Leave **API key** blank to preserve the saved key.
+- Enter a new **API key** value to replace the saved key.
+- The masked value shown in responses is never reused or submitted as a real credential by the edit form.
+
+For the stored settings shape, see [`customProviders` in the Settings Reference](./settings-reference.md#customproviders). For the API behavior, including masked keys in responses, see [Architecture → Custom Provider endpoints](./architecture.md#custom-provider-endpoints).
 
 ## Planning Mode
 
@@ -625,6 +690,7 @@ For related global/project configuration behavior, see [Settings reference](./se
 Inspect task definition, logs, review feedback, comments, documents, workflow outcomes, model overrides, and task routing from a single modal.
 
 - Editable tasks with descriptions show **Summarize as title** beside the read-mode title; it asks AI to generate a concise title from the description and saves it without opening the edit form.
+- The **Chat** tab includes an expand/collapse control that lets the transcript and composer fill the task-detail modal, then restores the normal header, tabs, and action footer when collapsed.
 - The priority chip in task metadata is an inline picker: you can change priority directly without entering full edit mode.
 - Execution mode has a read-mode inline lightning-bolt toggle for Fast mode on/off without opening the full edit form.
 - These two metadata controls share matched sizing/alignment in read mode (including mobile wrapping) so they behave like a single polished control group.
@@ -635,6 +701,7 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 - In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**.
 - From this section you can explicitly enable/disable tracking and manage a per-task repo override (`owner/repo`). Clearing the override saves `null` and falls back to project/global defaults.
 - In `in-review`, pull-request controls/status (including stall badges) are in a dedicated **Pull Request** tab instead of the Definition tab.
+- Task Detail and list split-pane PR affordances follow the live project auto-merge setting: when auto-merge is off, manual **Create PR** / merge actions are shown; when it is on, the tab shows the automatic auto-merge hint unless a per-task override changes the effective behavior.
 - The **Create Pull Request** modal now offers in-app remediation for every blocking preflight check. If `branchOnRemote` is false, use **Push branch to remote** and Fusion will publish `fusion/<task-id-lower>` to `origin` and refresh preflight. If `conflictsWithBase` is true, use **Resolve conflicts with AI** and Fusion will use an AI coding agent to resolve merge markers on the task branch, commit the result, push the branch, and refresh preflight so normal PR creation can continue once all checks pass.
 - The modal shell renders immediately: preflight checks and PR options load independently of AI-generated title/body metadata, so slow AI suggestions no longer block base-branch selection, diagnostics, or manual PR authoring.
 - AI title/body generation is bounded to 60 seconds and is canceled if the dialog request disconnects; on timeout/cancel, Fusion falls back to deterministic task-based PR title/body content instead of leaving the spinner stuck forever.
@@ -643,6 +710,12 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 - Review supports a manual **Refresh** action in-place: PR mode pulls latest GitHub review state/decision, while direct mode rehydrates reviewer-agent feedback from persisted task data (no GitHub call).
 - For shared `branch_groups` (tasks with `branchContext.groupId`), PR merge mode opens and tracks one group-level PR from the group integration branch to the project default branch; member tasks share that PR state.
 - In direct/non-PR auto-merge mode, Review renders normalized reviewer-agent feedback (verdict/step/timestamp/detail) with dedicated loading/error/empty states; it does not require users to read raw agent logs.
+
+### Legacy auto-merge stamp cleanup
+
+Settings → Merge includes **Legacy auto-merge stamp cleanup** for operators auditing tasks that inherited historical in-review `autoMerge` stamps. The panel loads a dry-run candidate list, shows task IDs and current columns, and only reveals the destructive **Clear legacy stamps** action when candidates exist. Applying the cleanup requires the browser confirmation prompt, calls the maintenance apply endpoint, and then refreshes the dry-run list so cleared tasks disappear.
+
+Use this panel when upgrading a project with pre-FN-6245/FN-6277 in-review rows before relying on per-task auto-merge overrides. It only targets stamps tagged as legacy provenance; explicit user overrides remain intact.
 
 ### Identifying high-impact blockers
 
@@ -661,6 +734,8 @@ Use blocker fan-out signals on task cards and in the footer status bar to spot b
 Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low, high-fan-out blockers stand out immediately, and only long-lived high-impact blockers trigger explicit escalation.
 
 ### Logs → Agent Log view
+
+The **Chat** tab sits between Definition and Logs and presents a live, chat-styled transcript of task agent output. Consecutive entries are grouped by role and labeled as Planner, Executor, Reviewer, or Merger; legacy log rows without an agent role use the neutral Agent fallback. Consecutive text/message chunks inside a role group render as one continuous markdown bubble, while consecutive tool/tool-result/tool-error rows collapse into one expandable, compact tool-call summary that stays collapsed by default; the summary counts tool invocations, lists deduped tool names with overflow, and shows an error count when failures are present, while the expanded body pairs each call with its result or error in dense entry cards. Thinking entries render in a collapsible block that starts expanded. The transcript opens at the latest output whenever the tab loads or becomes active, then follows new live output when you are already near the bottom while preserving your scroll position when you review older messages. When you scroll away from the bottom of a populated transcript, a sticky **Latest** button appears inside the transcript so you can jump back to the newest message and resume live follow. For non-`done` tasks, the composer sends guidance through the same steering path used by comments, including active assigned `in-progress`/`in-review` sessions and messages queued when no session is currently live. On a `done` task, sending a Chat message starts a refinement task using the typed text as feedback and shows a success toast with the new task ID; the current task detail modal remains on the completed task. The task-detail Chat tab keeps the composer pinned and visible on mobile and desktop while the transcript scrolls internally; its textarea placeholder reads “Steer the currently executing agent” for steering mode and switches to refinement copy for completed tasks, with the same inline, icon-only send affordance to the right of the input at every breakpoint.
 
 The **Logs** tab includes an **Agent Log** subview designed for debugging long-running and tool-heavy sessions:
 
@@ -1115,7 +1190,7 @@ Dark/light modes via `data-theme`; 54 color themes via `data-color-theme` (lazy-
 
 Reuse existing primitives from `styles.css`:
 - **Buttons**: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-warning`, `.btn-sm`, `.btn-icon`, `.btn-icon--active`, `.btn-badge`. All inherit `:focus-visible` via `--focus-ring-strong` and `:active` via `transform: scale(0.97)`.
-- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`. Overlay dialogs should render through `createPortal(..., document.body)` so `position: fixed` overlays escape transformed, contained, or fixed ancestors.
+- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`. Overlay dialogs should render through `createPortal(..., document.body)` so `position: fixed` overlays escape transformed, contained, or fixed ancestors. Resizable modals using `useModalResizePersist(...)` get a shared bottom-right touch/mouse resize grip on tablet and desktop; mobile sheets stay full-screen and grip-free.
 - **Forms**: `.form-group`, `.input`, `.select`, `.checkbox-label`, `.form-error`. Inputs in `.form-group` get focus styles automatically.
 - **Cards**: `.card`, `.card-header`, `.card-id`, `.card-title`, `.card-meta`, `.card-status-badge--{triage,todo,in-progress,in-review,done,archived}`.
 - **Utility**: `.touch-target` (44px min), `.visually-hidden`.
@@ -1130,7 +1205,7 @@ Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-wi
 
 **Bottom spacing:** `--mobile-nav-height` (44px) + `env(safe-area-inset-bottom, 0px)` + `--standalone-bottom-gap` (0/8px PWA). All bottom-positioned mobile elements compose those. When the soft keyboard opens, the mobile nav bar stays pinned to page bottom cross-platform; the executor footer keyboard-collapse pin is iOS-only. On Android (`interactive-widget=resizes-content`), the footer keeps its stacked position above the nav bar to avoid overlap after keyboard dismiss.
 
-**Footer-safe fill layouts:** View wrappers that reserve footer/mobile-nav space (for example `.project-content`) should be flex containers with `min-height: 0` / `min-width: 0`, and child surfaces like `.board` should use `flex: 1 1 auto` plus the same min-size guards. This keeps the board/columns stretched between the header and fixed bottom bars across desktop, tablet, and mobile while allowing internal scroll regions to own overflow.
+**Footer-safe fill layouts:** View wrappers that reserve footer/mobile-nav space (for example `.project-content`) should be flex containers with `min-height: 0` / `min-width: 0`, and child surfaces like `.board` should use `flex: 1 1 auto` plus the same min-size guards. Workflow-mode board wrappers (`.board-workflow-view` → `.board-workflow-columns`) also keep a definite `height: 100%`/`max-height: 100%` chain so the workflow toolbar and columns split the available space on tablet as well as desktop/mobile. This keeps the board/columns stretched between the header and fixed bottom bars across desktop, tablet, and mobile while allowing internal scroll regions to own overflow.
 
 **Touch targets:** Standing button-freeze directive supersedes per-button touch-target guidance. For non-button elements, primary controls (nav bar, FAB, tab action rows, modal CTAs, list-row tap targets, form controls) must be ≥36px on mobile. Secondary controls inside a card/list-row where the row itself is the tap target stay compact (24–28px or small chips).
 

@@ -709,6 +709,35 @@ describe("Advanced Settings", () => {
     });
   });
 
+  it.each([
+    ["undefined", undefined, false],
+    ["false", false, false],
+    ["true", true, true],
+  ] as const)("renders engineer backlog auto-claim unchecked by default and reflects %s runtimeConfig", async (_label, engineerBacklogAutoClaim, expectedChecked) => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      role: "engineer",
+      runtimeConfig: {
+        heartbeatIntervalMs: 30000,
+        ...(engineerBacklogAutoClaim === undefined ? {} : { engineerBacklogAutoClaim }),
+      },
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("Engineer Backlog Auto-Claim") as HTMLInputElement).checked).toBe(expectedChecked);
+    });
+  });
+
   it("shows Save Settings button disabled when no changes", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ metadata: {} }));
 
@@ -1012,6 +1041,81 @@ describe("Advanced Settings", () => {
         "agent-001",
         expect.objectContaining({
           runtimeConfig: expect.objectContaining({ autoClaimRelevantTasks: false }),
+        }),
+        undefined,
+      );
+    });
+  });
+
+  it("persists engineer backlog auto-claim enabled override on save", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      role: "engineer",
+      runtimeConfig: {
+        enabled: true,
+        heartbeatIntervalMs: 30000,
+      },
+    }));
+    mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    const toggle = await screen.findByLabelText("Engineer Backlog Auto-Claim");
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    await user.click(toggle);
+    await user.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      expect(mockUpdateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          runtimeConfig: expect.objectContaining({ engineerBacklogAutoClaim: true }),
+        }),
+        undefined,
+      );
+    });
+  });
+
+  it("persists engineer backlog auto-claim disabled override on save", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      role: "engineer",
+      runtimeConfig: {
+        enabled: true,
+        engineerBacklogAutoClaim: true,
+        heartbeatIntervalMs: 30000,
+      },
+    }));
+    mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await navigateToSettings(user);
+
+    const toggle = await screen.findByLabelText("Engineer Backlog Auto-Claim");
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    await user.click(toggle);
+    await user.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      expect(mockUpdateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          runtimeConfig: expect.objectContaining({ engineerBacklogAutoClaim: false }),
         }),
         undefined,
       );

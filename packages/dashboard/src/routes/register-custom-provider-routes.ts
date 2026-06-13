@@ -7,13 +7,30 @@ import type { ApiRouteRegistrar } from "./types.js";
 import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js";
 
 /**
+ * Sentinel character used to mask API keys for display. A real API key is an
+ * ASCII/Latin1 credential and will never contain this character, so its
+ * presence in an inbound value reliably indicates the client echoed back a
+ * masked (unchanged) key rather than a freshly entered one.
+ */
+const API_KEY_MASK_CHAR = "•";
+
+/**
  * Masks an API key for safe display, showing only the first 3 and last 4 characters.
  */
 function maskApiKey(key: string): string {
   if (key.length <= 8) {
-    return "••••••••";
+    return API_KEY_MASK_CHAR.repeat(8);
   }
-  return key.slice(0, 3) + "•••••" + key.slice(-4);
+  return key.slice(0, 3) + API_KEY_MASK_CHAR.repeat(5) + key.slice(-4);
+}
+
+/**
+ * Returns true when a value is a masked API key echoed back from the UI rather
+ * than a real credential. Persisting a masked value would corrupt the stored
+ * key and break HTTP header encoding (the mask char is not a valid ByteString).
+ */
+function isMaskedApiKey(value: string): boolean {
+  return value.includes(API_KEY_MASK_CHAR);
 }
 
 /**
@@ -125,6 +142,9 @@ function parseCreateBody(body: unknown): Omit<CustomProvider, "id"> {
   if (row.apiKey !== undefined) {
     if (typeof row.apiKey !== "string") {
       throw badRequest("apiKey must be a string");
+    }
+    if (isMaskedApiKey(row.apiKey)) {
+      throw badRequest("apiKey appears to be a masked value; enter the real API key");
     }
     if (row.apiKey.trim().length > 0) {
       provider.apiKey = row.apiKey;
@@ -416,7 +436,13 @@ function parseUpdateBody(body: unknown): Partial<Omit<CustomProvider, "id">> {
     if (typeof row.apiKey !== "string") {
       throw badRequest("apiKey must be a string");
     }
-    updates.apiKey = row.apiKey.trim().length > 0 ? row.apiKey : undefined;
+    // The UI loads the existing key masked (e.g. "abc•••••wxyz"). If the user
+    // saves without retyping it, that masked value is echoed back — leave the
+    // field absent from the update so the stored key is preserved rather than
+    // overwritten with the mask.
+    if (!isMaskedApiKey(row.apiKey)) {
+      updates.apiKey = row.apiKey.trim().length > 0 ? row.apiKey : undefined;
+    }
   }
   if (row.models !== undefined) {
     updates.models = validateModels(row.models);
@@ -556,6 +582,9 @@ export const registerCustomProviderRoutes: ApiRouteRegistrar = (ctx) => {
       const body = req.body as Record<string, unknown>;
 
       const baseUrl = assertBaseUrl(body.baseUrl);
+      if (typeof body.apiKey === "string" && isMaskedApiKey(body.apiKey)) {
+        throw badRequest("apiKey appears to be a masked value; enter the real API key");
+      }
       const apiKey =
         typeof body.apiKey === "string" && body.apiKey.trim().length > 0
           ? body.apiKey.trim()

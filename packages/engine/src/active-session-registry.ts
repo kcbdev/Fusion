@@ -1,4 +1,4 @@
-export type ActiveSessionKind = "executor" | "step-session" | "workflow-step" | "step-session-parallel";
+export type ActiveSessionKind = "executor" | "step-session" | "workflow-step" | "step-session-parallel" | "ai-merge";
 
 export interface ActiveSessionRegistration {
   taskId: string;

@@ -49,8 +49,15 @@ sessions resume/retry back to their current question.
 
 Turn execution is **detached**: start/answer/resume return as soon as the
 session row reflects the request, with the agent turn running in the background
-(failures persist into session state — never an unhandled rejection). While a
-turn runs, the engine streams mid-turn progress (thinking/text deltas + tool
+(failures persist into session state — never an unhandled rejection). **Close**
+only leaves the flow UI; it does not stop the detached agent. **Cancel** is the
+explicit stop action for `launching`/`active`/`awaiting_input` sessions: it
+aborts any live in-process handle, flushes live working output into history, and
+keeps the session row as terminal `interrupted` with `Cancelled by user` so the
+conversation can be inspected or resumed. **Discard** is different: it removes a
+settled session row entirely after disposing any live handle.
+
+While a turn runs, the engine streams mid-turn progress (thinking/text deltas + tool
 markers) through the seam's `onProgress` option; the orchestrator buffers it
 and `GET /sessions/:id` attaches it as transient `liveActivity`. The per-turn
 timeout is **inactivity-based** (progress re-arms it), so long actively-working
@@ -69,9 +76,11 @@ HTTP endpoints (under `/api/plugins/fusion-plugin-compound-engineering/`):
 - `POST /sessions` → start a stage session
 - `POST /sessions/:id/answer` → answer the awaiting question (send `projectId`)
 - `POST /sessions/:id/resume` → resume an awaiting/interrupted session (send `projectId`)
+- `POST /sessions/:id/cancel` → cancel an in-flight session; stops the agent and keeps the row as `interrupted`
 - `GET /sessions/:id` → current persisted session state (push + poll fallback)
 - `GET /sessions` → list sessions (filter by status/stage)
 - `GET /sessions/:id/links` → the work→board pipeline-link records for a session
+- `DELETE /sessions/:id` → discard a session; stops any live handle and deletes the row
 
 ## Sync model
 

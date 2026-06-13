@@ -21,7 +21,7 @@ At runtime, settings are merged. **Project settings override global settings** w
 | `PUT /api/settings` | Update project settings only. |
 | `GET /api/settings/global` | Get global settings only. |
 | `PUT /api/settings/global` | Update global settings only. |
-| `GET /api/settings/scopes` | Get separated `{ global, project }` view. |
+| `GET /api/settings/scopes` | Get separated `{ global, project, workflowSettings }` view. |
 
 ---
 
@@ -58,7 +58,7 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `webhookFormat` | `"slack" \| "discord" \| "generic"` | `"generic"` | Webhook payload format. Part of legacy flat settings. |
 | `webhookEvents` | `string[]` | `[]` | Event filter for webhook notifications. Empty/omitted means all events. Part of legacy flat settings. |
 | `notificationProviders` | `NotificationProviderConfig[]` | `[]` | Array of pluggable notification provider configurations. Each entry uses `{ id, name, enabled, config }` and is dispatched by provider ID (for example `ntfy` or `webhook`). |
-| `customProviders` | `CustomProvider[]` | `[]` | User-defined OpenAI-compatible, OpenAI Responses API (`apiType: "openai-responses"`), or Anthropic-compatible providers used by the custom-provider API (`/api/custom-providers`). Each entry uses `{ id, name, apiType, baseUrl, apiKey?, supportsDeveloperRole?, models? }`; `supportsDeveloperRole` is an OpenAI-compatible opt-in that enables `developer` role emission (default/omitted is `false`, forcing safe `system` role). API keys are stored raw but masked in API responses. Fusion resolves these providers from the active global settings directory (`~/.fusion`, with legacy `~/.pi/fusion` and `~/.pi/kb` migration support) so custom-provider models remain available after restart. |
+| `customProviders` | `CustomProvider[]` | `[]` | <a id="customproviders"></a>User-defined OpenAI-compatible, OpenAI Responses API (`apiType: "openai-responses"`), Anthropic-compatible, or Google Generative AI (`apiType: "google-generative-ai"`) providers used by the custom-provider API (`/api/custom-providers`). Each entry uses `{ id, name, apiType, baseUrl, apiKey?, supportsDeveloperRole?, models? }`; `supportsDeveloperRole` is an OpenAI-compatible opt-in that enables `developer` role emission (default/omitted is `false`, forcing safe `system` role). API keys are stored raw but masked in API responses. Fusion resolves these providers from the active global settings directory (`~/.fusion`, with legacy `~/.pi/fusion` and `~/.pi/kb` migration support) so custom-provider models remain available after restart. |
 | `defaultProjectId` | `string` | `undefined` | Default project for multi-project CLI operations when `--project` is omitted. |
 | `setupComplete` | `boolean` | `undefined` | Tracks completion of first-run setup. |
 | `favoriteProviders` | `string[]` | `undefined` | Pinned providers shown first in model selectors. |
@@ -184,8 +184,9 @@ govern that execution belong to the workflow.
 **Where to set them.** The common model lanes for a project's default workflow are
 available directly in **Settings → Project Models → Default workflow model lanes**:
 Plan/Triage, Executor, and Reviewer. Those dropdown controls use the shared model
-picker and still write workflow setting values for the active project's default
-workflow; they do not restore the old project settings keys.
+picker and are persisted by the Settings modal's primary **Save** action, which
+writes workflow setting values for the active project's default workflow; they do
+not restore the old project settings keys.
 
 For step execution, review/approval policy, fallbacks, title summarization, and
 custom workflow settings, open the **workflow editor** (the workflow node editor in
@@ -235,11 +236,34 @@ These groups moved out of project settings and into workflow settings (built-in
 | **Review / approval** | `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries` |
 | **Per-phase model lanes** | `executionProvider`/`executionModelId`, `planningProvider`/`planningModelId` (+ fallbacks), `validatorProvider`/`validatorModelId` (+ fallbacks) |
 
+### Workflow-native triage policy settings
+
+The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `triageSizeSmallMaxHours` | `2` | Size S upper hour boundary (`S (<2h)`). |
+| `triageSizeMediumMaxHours` | `4` | Size M upper hour boundary (`M (2-4h)`). |
+| `triageSizeLargeMaxHours` | `8` | Size L upper hour boundary; XL starts at `8h+`. |
+| `triageSubtaskStepThreshold` | `7` | Canonical “MORE THAN 7 implementation steps” split-consideration threshold. |
+| `triageSubtaskLargeStepSignal` | `9` | Broad-scope signal for large tasks whose plan reaches 9+ steps. |
+| `triageSubtaskAdditiveStepSignal` | `12` | Additive partitioning signal for 12+ implementation steps. |
+| `triageSubtaskPackageThreshold` | `3` | Canonical package/module breadth threshold (“MORE THAN 3 different packages/modules”). |
+| `triageSubtaskFileScopeThreshold` | `20` | File Scope entry count that signals broad work. |
+| `triageSubtaskRemediationBatchThreshold` | `30` | Large remediation batch threshold. |
+| `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
+| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
+| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+| `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
+| `autoApproveSpec` | `false` | Workflow-native fast-mode policy: auto-approve generated specs and skip the independent spec reviewer. |
+
 In the dashboard Settings modal, Project Models now exposes Plan/Triage, Executor,
-and Reviewer dropdown controls for the default workflow. The workflow editor's
-Settings → Values tab uses the same dropdown picker for declared provider/model
-pairs, including fallbacks. Former locations for advanced workflow policy still
-show a short redirect stub linking to the workflow editor (for one release).
+and Reviewer dropdown controls for the default workflow. The modal's primary
+**Save** action persists pending default-workflow model lane overrides; there is no
+separate workflow-model save button. The workflow editor's Settings → Values tab
+uses the same dropdown picker for declared provider/model pairs, including
+fallbacks. Former locations for advanced workflow policy still show a short
+redirect stub linking to the workflow editor (for one release).
 
 > Note: the global baseline model lanes (`executionGlobalProvider` etc.) and
 > integrity guarantees stay where they are — only the per-workflow process policy
@@ -271,6 +295,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |
 | `heartbeatPromptTemplate` | `"default" \| "compact"` | `"default"` | Heartbeat execution-prompt trim template default. Per-agent `runtimeConfig.heartbeatPromptTemplate` overrides this value. Role fallback when unset everywhere is `executor`→`default`, non-executor coordination roles→`compact`. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Default no-task heartbeat candidate list length. Integer range `0-10`; `0` suppresses candidate prompt injection. |
+| `engineerBacklogAutoClaim` | `boolean` | `false` | Opt engineer-role agents into no-task backlog auto-claim for implementation tasks. The default remains executor-only; per-agent `runtimeConfig.engineerBacklogAutoClaim` overrides this project default, and explicit routing/delegation is unchanged. Configure the project default in **Settings → Scheduling & Capacity → Let engineer agents auto-claim backlog tasks**; configure the per-agent override in **Agents → Agent Detail → Settings → Heartbeat Settings → Engineer Backlog Auto-Claim**. |
 | `defaultNodeId` | `string` | `undefined` | Optional project default execution node for task dispatch. When set, tasks without a per-task `nodeId` override resolve to this node (`routing source: project-default`). See [Task Management → Node Routing](./task-management.md#node-routing). |
 | `unavailableNodePolicy` | `"block" \| "fallback-local"` | `"block"` | Project routing policy used during scheduler dispatch when a task resolves to a remote node and node health is known. `"block"` keeps the task in `todo` if the node is unhealthy; `"fallback-local"` reroutes dispatch to local execution. See [Architecture → Task Routing Architecture](./architecture.md#task-routing-architecture). |
 | `secretsAccessPolicy` | `"auto" \| "prompt" \| "deny"` | `undefined` | Project-level default secret access policy (overrides global default when present). |
@@ -280,7 +305,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `groupOverlappingFiles` | `boolean` | `true` | Serialize execution when file scopes overlap. |
 | `pluginTrustPolicy` | `"off" | "warn" | "enforce"` | `"warn"` | Plugin provenance enforcement mode: `off` records verification metadata only, `warn` blocks only `invalid` signatures, `enforce` allows only `verified-trusted` or `trusted-local`. |
 | `overlapIgnorePaths` | `string[]` | `[]` | Optional project-relative file or directory paths to exclude from overlap blocking (for example `docs` or `generated/openapi.json`). Entries are trimmed, deduplicated, and must not be absolute or contain `..` traversal. |
-| `autoMerge` | `boolean` | `true` | Auto-finalize tasks from `in-review`. Tasks can override this per-task (including at create time in New Task modal via **Auto-merge** = Default/Enabled/Disabled). For grouped branch flows, per-task `autoMerge` governs member→group-integration landing while group `autoMerge` governs group→default-branch promotion eligibility. |
+| `autoMerge` | `boolean` | `true` | Auto-finalize tasks from `in-review`. Tasks can override this per-task (including at create time in New Task modal via **Auto-merge** = Default/Enabled/Disabled); explicit overrides are tagged with `autoMergeProvenance: "user"`, while tasks left at **Default** keep following the live global setting and do not snapshot it when entering review. Legacy pre-FN-6245 in-review rows that were stamped `autoMerge: true` are marked `autoMergeProvenance: "legacy-stamp"` on startup and can be inspected/cleared with Settings → Merge → **Legacy auto-merge stamp cleanup**, `fn pr automerge-cleanup [--apply] [--json]`, or `reconcileLegacyAutoMergeStamps({ apply: true })` after operator review. For grouped branch flows, per-task `autoMerge` governs member→group-integration landing while group `autoMerge` governs group→default-branch promotion eligibility. |
 | `mergeRequestContractShadowEnabled` | `boolean` | `false` | Phase-1 FN-5741 write-only shadow flag (project/global setting). When enabled, executor/self-healing/merger persist merge-request records and `completion_handoff_accepted` markers for observation only; legacy mergeQueue + lifecycle remains authoritative. |
 | `mergeStrategy` | `"direct" \| "pull-request"` | `"direct"` | Completion mode (local direct merge vs PR-first). |
 | `directMergeCommitStrategy` | `"auto" \| "always-squash" \| "always-rebase"` | `"always-squash"` | Direct-merge commit routing mode. `always-squash` (default) forces the legacy squash path. `auto` keeps the legacy squash path for branches with zero or one substantive commit, but switches multi-substantive direct merges to a history-preserving rebase-and-merge/cherry-pick path so commit boundaries, subjects, and `Fusion-Task-Id` trailers survive on `main`. `always-rebase` always preserves per-commit history. Only applies when `mergeStrategy="direct"`. |
@@ -772,7 +797,7 @@ Short-lived token bounds are enforced server-side:
 
 ## Model Selection Hierarchy
 
-Fusion resolves task models through workflow-backed lane values first, then global lane defaults, then the project/global default model fallback. The common workflow lanes are stored as setting values on the project's default workflow and can be edited with dropdown controls from Settings -> Project Models -> Default workflow model lanes or from workflow editor -> Settings -> Values for declared workflow lanes and fallbacks.
+Fusion resolves task models through workflow-backed lane values first, then global lane defaults, then the project/global default model fallback. The common workflow lanes are stored as setting values on the project's default workflow and can be edited with dropdown controls from Settings -> Project Models -> Default workflow model lanes (persisted by the Settings modal's primary Save) or from workflow editor -> Settings -> Values for declared workflow lanes and fallbacks.
 
 ### Planning model
 
@@ -785,26 +810,26 @@ Fusion resolves task models through workflow-backed lane values first, then glob
 
 ### Executor model
 
-1. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set
-2. Per-task `modelProvider` + `modelId`
-3. Default workflow lane value `executionProvider` + `executionModelId`
-4. Global `executionGlobalProvider` + `executionGlobalModelId`
-5. Project `defaultProviderOverride` + `defaultModelIdOverride`
-6. Global `defaultProvider` + `defaultModelId`
+1. Per-task `modelProvider` + `modelId`
+2. Default workflow lane value `executionProvider` + `executionModelId`
+3. Global `executionGlobalProvider` + `executionGlobalModelId`
+4. Project `defaultProviderOverride` + `defaultModelIdOverride`
+5. Global `defaultProvider` + `defaultModelId`
+6. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no task/lane/default pair is configured
 7. Automatic provider/model resolution
 
 ### Heartbeat model (durable agents)
 
 Heartbeat sessions for durable agents use this order:
 
-1. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when present
-2. Default workflow lane value `executionProvider` + `executionModelId`
-3. Global `executionGlobalProvider` + `executionGlobalModelId`
-4. Project `defaultProviderOverride` + `defaultModelIdOverride`
-5. Global `defaultProvider` + `defaultModelId`
+1. Default workflow lane value `executionProvider` + `executionModelId`
+2. Global `executionGlobalProvider` + `executionGlobalModelId`
+3. Project `defaultProviderOverride` + `defaultModelIdOverride`
+4. Global `defaultProvider` + `defaultModelId`
+5. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no execution/default pair is configured
 6. Automatic provider/model resolution
 
-When heartbeat has both (1) and (2-5), the runtime model is used as primary and the execution-lane model is passed as fallback. On timer-triggered runs, unrecoverable missing-provider credential/registry failures complete as `heartbeat_model_unavailable` instead of permanently setting the durable agent to `state=error`.
+On timer-triggered runs, unrecoverable missing-provider credential/registry failures complete as `heartbeat_model_unavailable` instead of permanently setting the durable agent to `state=error`.
 
 ### Reviewer model
 
@@ -815,13 +840,13 @@ When heartbeat has both (1) and (2-5), the runtime model is used as primary and 
 5. Global `defaultProvider` + `defaultModelId`
 6. Automatic provider/model resolution
 
-Mission validation sessions use this same validator lane, with an assigned durable agent runtime model taking precedence when the linked task has one.
+Mission validation sessions use this same validator lane; assigned durable agent runtime models are only used as a fallback when no complete validator/default pair is configured.
 
 ### Merger model
 
-1. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set
-2. Project `defaultProviderOverride` + `defaultModelIdOverride`
-3. Global `defaultProvider` + `defaultModelId`
+1. Project `defaultProviderOverride` + `defaultModelIdOverride`
+2. Global `defaultProvider` + `defaultModelId`
+3. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no default pair is configured
 4. Automatic provider/model resolution
 
 For post-merge prompt workflow steps, explicit step-level `modelProvider` + `modelId` overrides take precedence over the merger lane above.
@@ -836,6 +861,8 @@ Project-scoped model lane used for task title auto-summarization, GitHub trackin
 4. Project `defaultProviderOverride` + `defaultModelIdOverride`
 5. Global `defaultProvider` + `defaultModelId`
 6. Automatic provider/model resolution
+
+If the configured title summarizer provider/model is stale and no longer exists in the pi model registry, title generation logs a warning with the stale id and retries once with automatic provider/model resolution. Other AI failures (auth, empty output, unavailable engine) still fail normally.
 
 > **Note:** Runtime fallback precedence logic is implemented in engine and dashboard routes. The hierarchies above reflect current runtime behavior.
 
@@ -1146,7 +1173,7 @@ Common heartbeat/runtime keys on `runtimeConfig` include:
 | `selfImproveIntervalMs` | `number` | Delay between self-improvement cycles (default 4h, minimum 1h) |
 | `lastSelfImproveAt` | `string` | Last self-improvement checkpoint timestamp (managed by heartbeat monitor) |
 
-Configure these per agent in **Agents → Agent Detail → Settings → Heartbeat Settings** (dashboard), or by updating agent `runtimeConfig` via the Agents API/CLI config flows.
+Configure these per agent in **Agents → Agent Detail → Settings → Heartbeat Settings** (dashboard), or by updating agent `runtimeConfig` via the Agents API/CLI config flows. The **Engineer Backlog Auto-Claim** checkbox in this card controls `runtimeConfig.engineerBacklogAutoClaim` for that agent and only affects no-task backlog pickup; explicit assignment and delegation behavior are unchanged.
 
 These examples show agents configured to use Paperclip, Hermes, and OpenClaw runtime hints:
 

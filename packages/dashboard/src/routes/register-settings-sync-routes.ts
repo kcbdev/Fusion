@@ -331,6 +331,9 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
         ...payloadWithoutChecksum,
         checksum,
       });
+      const workflowApplyResult = result.success
+        ? await applyWorkflowSettingsSection(store, remoteSettings.workflowSettings)
+        : { count: 0, keys: [] };
 
       // applyRemoteSettings() only validates/strips the global payload; it does NOT
       // write the local global settings store. Persist the pulled global settings
@@ -343,10 +346,6 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
         await store.updateGlobalSettings(remoteSettings.global);
         invalidateAllGlobalSettingsCaches();
       }
-
-      const workflowApplyResult = result.success
-        ? await applyWorkflowSettingsSection(store, remoteSettings.workflowSettings)
-        : { count: 0, keys: [] };
 
       // Record sync
       await central.updateSettingsSyncState(node.id, {

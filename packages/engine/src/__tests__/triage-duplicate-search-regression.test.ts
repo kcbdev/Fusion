@@ -1,9 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  FAST_TRIAGE_SYSTEM_PROMPT,
-  TRIAGE_SYSTEM_PROMPT,
-  TriageProcessor,
-} from "../triage.js";
+import { builtinSeamPrompt, resolveAgentPrompt } from "@fusion/core";
+import { TriageProcessor } from "../triage.js";
 import { createTriageDuplicateScenario } from "./fixtures/triage-duplicate-scenario.js";
 
 const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
@@ -23,16 +20,20 @@ vi.mock("../pi.js", () => ({
 
 vi.mock("@fusion/core", async (importOriginal) => {
   const { createEngineCoreMock } = await import("../test/mockCore.js");
-  return createEngineCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
-    resolveAgentPrompt: vi.fn().mockReturnValue(null),
+  const original = await importOriginal<typeof import("@fusion/core")>();
+  return createEngineCoreMock(() => Promise.resolve(original), {
+    resolveAgentPrompt: vi.fn(original.resolveAgentPrompt),
   });
 });
+
+const TRIAGE_POLICY_PROMPT = resolveAgentPrompt("triage");
+const FAST_PLANNING_PROMPT = builtinSeamPrompt("planning-fast");
 
 /**
  * FN-4726 / FN-4734 / FN-4741: triage created repeated duplicate tasks after equivalent
  * work had already landed. FN-4774 fixed this by (1) exposing fn_task_search in triage,
- * (2) guiding TRIAGE_SYSTEM_PROMPT to search done/archived before creating, and
- * (3) preserving that guidance in FAST_TRIAGE_SYSTEM_PROMPT. FN-4815 pins this contract.
+ * (2) guiding the canonical triage policy prompt to search done/archived before creating, and
+ * (3) preserving that guidance in FAST_PLANNING_PROMPT. FN-4815 pins this contract.
  */
 describe("FN-4815 triage duplicate-search regression", () => {
   it("toolset contract: createTriageTools includes fn_task_search", () => {
@@ -50,17 +51,17 @@ describe("FN-4815 triage duplicate-search regression", () => {
   });
 
   it("standard prompt guidance keeps duplicate-search instructions", () => {
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("Duplicate check");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("fn_task_search");
-    expect(TRIAGE_SYSTEM_PROMPT).toContain("including done and archived tasks");
-    expect(/Duplicate check[\s\S]{0,700}(done|archived)/i.test(TRIAGE_SYSTEM_PROMPT)).toBe(true);
+    expect(TRIAGE_POLICY_PROMPT).toContain("Duplicate check");
+    expect(TRIAGE_POLICY_PROMPT).toContain("fn_task_search");
+    expect(TRIAGE_POLICY_PROMPT).toContain("including done and archived tasks");
+    expect(/Duplicate check[\s\S]{0,700}(done|archived)/i.test(TRIAGE_POLICY_PROMPT)).toBe(true);
   });
 
   it("fast prompt guidance keeps duplicate-search instructions", () => {
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("Duplicate check");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("fn_task_search");
-    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("For any likely match in `done` or `archived`");
-    expect(/Duplicate check[\s\S]{0,700}(done|archived)/i.test(FAST_TRIAGE_SYSTEM_PROMPT)).toBe(true);
+    expect(FAST_PLANNING_PROMPT).toContain("Duplicate check");
+    expect(FAST_PLANNING_PROMPT).toContain("fn_task_search");
+    expect(FAST_PLANNING_PROMPT).toContain("For any likely match in `done` or `archived`");
+    expect(/Duplicate check[\s\S]{0,700}(done|archived)/i.test(FAST_PLANNING_PROMPT)).toBe(true);
   });
 
   it("end-to-end duplicate discovery via fixture shows done match before create", async () => {

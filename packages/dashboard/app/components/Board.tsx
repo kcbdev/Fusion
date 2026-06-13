@@ -82,6 +82,37 @@ function areTaskArraysEqual(previous: Task[], next: Task[]): boolean {
 const EMPTY_WORKFLOW_STEP_NAME_LOOKUP: ReadonlyMap<string, string> = new Map();
 let boardWasPreviouslyInactive = false;
 
+// Real mobile browsers can pan the document horizontally while focusing/clicking
+// an offscreen in-review auto-merge control. Keep that scroll container pinned;
+// the board itself remains the only horizontal scroller.
+function resetDocumentHorizontalScroll() {
+  const scrollingElement = document.scrollingElement as HTMLElement | null;
+  if (window.scrollX !== 0) {
+    window.scrollTo(0, window.scrollY);
+  }
+  if (scrollingElement) {
+    scrollingElement.scrollLeft = 0;
+  }
+  document.documentElement.scrollLeft = 0;
+  if (document.body) {
+    document.body.scrollLeft = 0;
+  }
+}
+
+function scheduleDocumentHorizontalScrollReset() {
+  const run = () => {
+    resetDocumentHorizontalScroll();
+    setTimeout(resetDocumentHorizontalScroll, 0);
+  };
+
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(run);
+    return;
+  }
+
+  setTimeout(run, 0);
+}
+
 function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next: ReadonlyMap<string, string>): boolean {
   if (previous.size !== next.size) return false;
   for (const [key, value] of previous) {
@@ -212,6 +243,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       if (!boardEl) return;
       void boardEl.offsetWidth;
       if (mobileQuery.matches) {
+        resetDocumentHorizontalScroll();
         boardEl.scrollLeft = 0;
       }
     };
@@ -347,6 +379,13 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   const handlePromote = useCallback(async (taskId: string) => {
     await promoteTask(taskId, projectId);
   }, [projectId]);
+
+  const handleToggleAutoMerge = useCallback(() => {
+    onToggleAutoMerge();
+    if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) {
+      scheduleDocumentHorizontalScrollReset();
+    }
+  }, [onToggleAutoMerge]);
 
   const getDraggingTaskId = useCallback(() => draggingTaskIdRef.current, []);
 
@@ -563,7 +602,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
                 prAuthAvailable={prAuthAvailable}
                 autoMerge={autoMerge}
                 {...(isCreateColumn ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
-                {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge } : {})}
+                {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
                 {...(columnDef.id === "done" ? { onArchiveAllDone } : {})}
               />
             );
@@ -656,7 +695,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
             prAuthAvailable={prAuthAvailable}
             autoMerge={autoMerge}
             {...(col === "triage" ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
-            {...(col === "in-review" ? { onToggleAutoMerge } : {})}
+            {...(col === "in-review" ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
             {...(col === "done" ? { onArchiveAllDone } : {})}
             {...(col === "archived" ? { collapsed: archivedCollapsed, onToggleCollapse: handleToggleArchivedCollapse } : {})}
           />

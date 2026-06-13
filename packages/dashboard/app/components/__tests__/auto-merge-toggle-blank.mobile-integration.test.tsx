@@ -92,7 +92,10 @@ function ensureMatchMedia() {
   }
 }
 
+const MOBILE_WIDTH_MEDIA_QUERY = "(max-width: 768px)";
+const MOBILE_HEIGHT_MEDIA_QUERY = "(max-height: 480px)";
 const TABLET_MEDIA_QUERY = "(min-width: 769px) and (max-width: 1024px)";
+const originalScreen = window.screen;
 
 type ViewportSpy = ReturnType<typeof vi.spyOn> & {
   setViewport: (width: number, height?: number) => void;
@@ -106,6 +109,8 @@ function mockViewport(width: number, height = 812): ViewportSpy {
   const listeners = new Map<string, Set<() => void>>();
 
   const matchesQuery = (query: string) => {
+    if (query === MOBILE_WIDTH_MEDIA_QUERY) return viewportWidth <= 768;
+    if (query === MOBILE_HEIGHT_MEDIA_QUERY) return viewportHeight <= 480;
     if (query === MOBILE_MEDIA_QUERY) return viewportWidth <= 768 || viewportHeight <= 480;
     if (query === TABLET_MEDIA_QUERY) return viewportWidth >= 769 && viewportWidth <= 1024;
     return false;
@@ -116,7 +121,21 @@ function mockViewport(width: number, height = 812): ViewportSpy {
     Object.defineProperty(window, "innerHeight", { value: viewportHeight, configurable: true });
   };
 
+  const setScreenSize = () => {
+    Object.defineProperty(window, "screen", {
+      configurable: true,
+      value: {
+        ...originalScreen,
+        width,
+        height,
+        availWidth: width,
+        availHeight: height,
+      } as Screen,
+    });
+  };
+
   setWindowSize();
+  setScreenSize();
 
   const spy = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
     const queryListeners = listeners.get(query) ?? new Set<() => void>();
@@ -423,8 +442,61 @@ describe("auto-merge toggle mobile integration regression", () => {
 
   afterEach(() => {
     _resetInitialViewportHeight();
+    Object.defineProperty(window, "screen", {
+      configurable: true,
+      value: originalScreen,
+    });
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { name: "mobile portrait", width: 375, height: 812 },
+    { name: "mobile landscape", width: 844, height: 390 },
+  ])("realigns mobile document horizontal scroll after toggling an offscreen auto-merge control on $name", async ({ width, height }) => {
+    const { viewportSpy, visualViewport } = renderBoardHarness({
+      width,
+      height,
+      tasks: createInReviewAndWorktreeTasks(),
+      autoMerge: true,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation((xOrOptions?: number | ScrollToOptions, y?: number) => {
+      const left = typeof xOrOptions === "object" ? (xOrOptions.left ?? window.scrollX) : (xOrOptions ?? window.scrollX);
+      const top = typeof xOrOptions === "object" ? (xOrOptions.top ?? window.scrollY) : (y ?? window.scrollY);
+      Object.defineProperty(window, "scrollX", { configurable: true, value: left });
+      Object.defineProperty(window, "scrollY", { configurable: true, value: top });
+    });
+    Object.defineProperty(window, "scrollX", { configurable: true, value: 911 });
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    document.documentElement.scrollLeft = 911;
+    document.body.scrollLeft = 911;
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Auto-merge" }));
+      await Promise.resolve();
+    });
+    act(() => {
+      visualViewport.dispatchResize();
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(updateSettings).toHaveBeenCalledWith({ autoMerge: false }, "proj_123");
+    expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+    expect(window.scrollX).toBe(0);
+    expect(document.documentElement.scrollLeft).toBe(0);
+    expect(document.body.scrollLeft).toBe(0);
+    expectBoardVisible(["FN-5972", "Worktree child task"]);
+
+    scrollToSpy.mockRestore();
+    viewportSpy.mockRestore();
   });
 
   it("keeps the real board/task-card and worktree-group composition visible on mobile portrait after toggling auto-merge on and back off", async () => {

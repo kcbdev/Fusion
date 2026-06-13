@@ -1207,16 +1207,16 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_task_archive",
     label: "fn: Archive Task",
     description:
-      "Archive a done task (move from done → archived). " +
+      "Archive a task from any live column (move to archived). " +
       "Archived tasks are preserved for historical reference but moved out of the main board view.",
-    promptSnippet: "Archive a done Fusion task (moves to archived column)",
+    promptSnippet: "Archive a Fusion task from any live column (moves to archived column)",
     promptGuidelines: [
-      "Use to clean up old completed tasks from the done column",
-      "Only tasks in the 'done' column can be archived",
+      "Use to clean up tasks from any live board column when you want them hidden from active views",
+      "Already archived tasks cannot be archived again",
       "Archived tasks can be unarchived later if needed",
     ],
     parameters: Type.Object({
-      id: Type.String({ description: "Task ID to archive (e.g. FN-001). Must be in 'done' column." }),
+      id: Type.String({ description: "Task ID to archive from any live column (e.g. FN-001)." }),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1236,11 +1236,11 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_task_unarchive",
     label: "fn: Unarchive Task",
     description:
-      "Unarchive an archived task (move from archived → done). " +
-      "Restores the task to the done column.",
-    promptSnippet: "Unarchive a Fusion task (restores to done column)",
+      "Unarchive an archived task (move from archived → its restore column). " +
+      "Restores to the pre-archive column when available, with active execution columns downgraded to todo.",
+    promptSnippet: "Unarchive a Fusion task (restores to its pre-archive column)",
     promptGuidelines: [
-      "Use to restore an archived task back to the done column",
+      "Use to restore an archived task back to its pre-archive column when available",
       "Only tasks in the 'archived' column can be unarchived",
     ],
     parameters: Type.Object({

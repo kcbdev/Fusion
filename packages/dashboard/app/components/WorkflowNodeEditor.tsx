@@ -44,7 +44,7 @@ import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useConfirm } from "../hooks/useConfirm";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useAppSettings } from "../hooks/useAppSettings";
-import { MOBILE_MEDIA_QUERY, useViewportMode } from "../hooks/useViewportMode";
+import { isMobileViewport, useViewportMode } from "../hooks/useViewportMode";
 import { workflowNodeTypes, type WorkflowFlowNodeData, type WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 import { WorkflowEditorCatalogContext } from "./nodes/WorkflowEditorCatalogContext";
 import type { NodeSummaryCatalogs } from "./nodes/node-summary";
@@ -680,11 +680,8 @@ function InnerEditor({
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const viewportMode = useViewportMode();
-  const isMobileViewport = viewportMode === "mobile";
-  const [workflowListStageOpen, setWorkflowListStageOpen] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-    return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
-  });
+  const isMobileMode = viewportMode === "mobile";
+  const [workflowListStageOpen, setWorkflowListStageOpen] = useState(() => isMobileViewport());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -701,7 +698,7 @@ function InnerEditor({
   const [mobilePanel, setMobilePanel] = useState<MobileWorkflowPanel>(() =>
     initialPanel === "settings" ? "settings" : "graph",
   );
-  const simpleLayoutEnabled = isMobileViewport || compactLayoutEnabled;
+  const simpleLayoutEnabled = isMobileMode || compactLayoutEnabled;
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   // Create-workflow dialog (KTD-7) open state + focus-return ref to the
@@ -752,9 +749,7 @@ function InnerEditor({
     try {
       const stored = localStorage.getItem(templatesCollapsedStorageKey);
       if (stored != null) return stored === "1";
-      return typeof window !== "undefined" &&
-        typeof window.matchMedia === "function" &&
-        window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+      return isMobileViewport();
     } catch {
       return false;
     }
@@ -1014,26 +1009,26 @@ function InnerEditor({
         if (initialAction !== "create" && initialWorkflowId && data.some((workflow) => workflow.id === initialWorkflowId)) {
           return initialWorkflowId;
         }
-        return isMobileViewport ? null : data[0]?.id ?? null;
+        return isMobileMode ? null : data[0]?.id ?? null;
       });
     } catch (err) {
       addToast(getErrorMessage(err) || "Failed to load workflows", "error");
     } finally {
       setLoading(false);
     }
-  }, [projectId, addToast, isMobileViewport, initialAction, initialWorkflowId]);
+  }, [projectId, addToast, isMobileMode, initialAction, initialWorkflowId]);
 
   useEffect(() => {
     void loadWorkflows();
   }, [loadWorkflows]);
 
   useEffect(() => {
-    if (!initialWorkflowId || !isMobileViewport || !workflowListStageOpen) return;
+    if (!initialWorkflowId || !isMobileMode || !workflowListStageOpen) return;
     if (activeId !== initialWorkflowId) return;
     if (mobileInitialWorkflowDismissedRef.current === initialWorkflowId) return;
     mobileInitialWorkflowDismissedRef.current = initialWorkflowId;
     setWorkflowListStageOpen(false);
-  }, [activeId, initialWorkflowId, isMobileViewport, workflowListStageOpen]);
+  }, [activeId, initialWorkflowId, isMobileMode, workflowListStageOpen]);
 
   // U2/R5: fire the lazy legacy-step migration once on editor open, then reload
   // the workflow list so any newly created fragments / "Migrated steps" workflow
@@ -1685,12 +1680,12 @@ function InnerEditor({
       await deleteWorkflow(activeWorkflow.id, projectId);
       setWorkflows((ws) => ws.filter((w) => w.id !== activeWorkflow.id));
       setActiveId(null);
-      if (isMobileViewport) setWorkflowListStageOpen(true);
+      if (isMobileMode) setWorkflowListStageOpen(true);
       addToast(t("workflows.deleted", "Workflow deleted"), "success");
     } catch (err) {
       addToast(getErrorMessage(err) || t("workflows.deleteFailed", "Failed to delete workflow"), "error");
     }
-  }, [activeWorkflow, projectId, addToast, confirm, t, isMobileViewport]);
+  }, [activeWorkflow, projectId, addToast, confirm, t, isMobileMode]);
 
   const handleDuplicate = useCallback(async () => {
     if (!activeWorkflow) return;
@@ -1883,8 +1878,9 @@ function InnerEditor({
     selectedNode !== null &&
     selectedNode.data.kind !== "start" &&
     selectedNode.data.kind !== "end";
-  const mobileNodeDetailStage = isMobileViewport && selectedNodeHasInspector && !inspectorCollapsed;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
+  const mobileNodeDetailStage = isMobileMode && selectedNodeHasInspector && !inspectorCollapsed;
+  const mobileEdgeDetailStage = isMobileMode && selectedEdge !== null;
   const [isPromptExpanded, setIsPromptExpanded] = useState(false);
   const handleTogglePromptExpand = useCallback(() => {
     setIsPromptExpanded((prev) => !prev);
@@ -2215,7 +2211,8 @@ function InnerEditor({
         <div
           className={`wf-editor-body${workflowListStageOpen ? " wf-editor-body--list-stage" : " wf-editor-body--editor-stage"}${
             simpleLayoutEnabled ? " wf-editor-body--simple-layout" : ""
-          }${mobileNodeDetailStage ? " wf-editor-body--mobile-node-detail" : ""
+          }${mobileNodeDetailStage ? " wf-editor-body--mobile-node-detail" : ""}${
+            mobileEdgeDetailStage ? " wf-editor-body--mobile-edge-detail" : ""
           }`}
         >
           <aside className="wf-editor-sidebar">
@@ -2264,7 +2261,7 @@ function InnerEditor({
                 ))}
               </div>
             )}
-            {isMobileViewport && workflows.length > 0 && !activeWorkflow ? (
+            {isMobileMode && workflows.length > 0 && !activeWorkflow ? (
               <div className="wf-editor-select-note" data-testid="wf-mobile-select-note">
                 {t("workflows.mobileSelectNote", "Select a workflow to edit.")}
               </div>
@@ -2464,7 +2461,7 @@ function InnerEditor({
                       {description || t("workflows.descriptionPlaceholder", "Add a description")}
                     </button>
                   )}
-                  {!isMobileViewport && (
+                  {!isMobileMode && (
                     <button
                       type="button"
                       className="wf-layout-toggle"
@@ -3068,7 +3065,7 @@ function InnerEditor({
                 )}
 
                 <div className="wf-editor-canvas" ref={canvasRef} tabIndex={-1}>
-                  {isMobileViewport &&
+                  {isMobileMode &&
                     inspectorCollapsed &&
                     selectedNode &&
                     selectedNode.data.kind !== "start" &&
@@ -3152,12 +3149,12 @@ function InnerEditor({
           </section>
 
           {selectedNodeHasInspector &&
-            !(isMobileViewport && inspectorCollapsed) &&
-            !(compactLayoutEnabled && !isMobileViewport) && (
+            !(isMobileMode && inspectorCollapsed) &&
+            !(compactLayoutEnabled && !isMobileMode) && (
             <aside className="wf-editor-inspector" data-testid="wf-node-inspector">
               <div className="wf-inspector-heading">
                 <h3>Node</h3>
-                {isMobileViewport && (
+                {isMobileMode && (
                   <button
                     type="button"
                     className="wf-inspector-toggle wf-inspector-toggle--expanded"
@@ -4123,7 +4120,21 @@ function InnerEditor({
 
           {selectedEdge && (
             <aside className="wf-editor-inspector" data-testid="wf-edge-inspector">
-              <h3>{t("workflowNodes.edgeInspector", "Edge")}</h3>
+              <div className="wf-inspector-heading">
+                <h3>{t("workflowNodes.edgeInspector", "Edge")}</h3>
+                {isMobileMode && (
+                  <button
+                    type="button"
+                    className="wf-inspector-toggle wf-inspector-toggle--expanded"
+                    data-testid="wf-edge-inspector-close"
+                    aria-expanded="true"
+                    onClick={() => setSelectedEdgeId(null)}
+                  >
+                    <ChevronDown size={13} />
+                    <span>{t("workflowNodes.collapseInspector", "Collapse")}</span>
+                  </button>
+                )}
+              </div>
               <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
                 {selectedEdgeEditability === "verdicts" ? (
                   <>

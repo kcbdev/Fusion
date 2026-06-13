@@ -537,6 +537,38 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
       });
       expect(mockExecuteHeartbeat).not.toHaveBeenCalled();
     });
+    it("fallback pause updates only agent state and does not auto-pause assigned tasks", async () => {
+      const { createServer } = await import("../server.js");
+      app = createServer(store as any, {
+        heartbeatMonitor: {
+          executeHeartbeat: mockExecuteHeartbeat,
+          stopRun: mockStopRun,
+        },
+      });
+      (store.getTasksByAssignedAgent as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+        { id: "FN-1", paused: false },
+        { id: "FN-2", paused: undefined },
+      ]);
+      mockUpdateAgentState.mockResolvedValue({ id: "agent-001", state: "paused" });
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/agents/agent-001/state",
+        JSON.stringify({ state: "paused" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ id: "agent-001", state: "paused" });
+      await vi.waitFor(() => {
+        expect(mockGetActiveHeartbeatRun).toHaveBeenCalledWith("agent-001");
+      });
+      expect(store.getTasksByAssignedAgent).not.toHaveBeenCalled();
+      expect(store.pauseTask).not.toHaveBeenCalledWith(expect.any(String), true, expect.anything(), expect.anything());
+      expect(store.pauseTask).not.toHaveBeenCalled();
+    });
+
     it("falls back to direct state update when monitor lacks lifecycle helpers", async () => {
       const { createServer } = await import("../server.js");
       app = createServer(store as any, {
@@ -547,6 +579,8 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
       });
       (store.getTasksByAssignedAgent as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
         { id: "FN-1", paused: true, pausedByAgentId: "agent-001" },
+        { id: "FN-2", paused: true, pausedByAgentId: "agent-001", userPaused: true },
+        { id: "FN-3", paused: true, userPaused: true },
       ]);
       mockUpdateAgentState.mockResolvedValue({ id: "agent-001", state: "active" });
       mockExecuteHeartbeat.mockResolvedValue(createMockRun({ id: "run-resume-1", status: "completed" }));
@@ -563,6 +597,8 @@ describe("Agent runs routes (with HeartbeatMonitor)", () => {
       await vi.waitFor(() => {
         expect(store.pauseTask).toHaveBeenCalledWith("FN-1", false);
       });
+      expect(store.pauseTask).not.toHaveBeenCalledWith("FN-2", false);
+      expect(store.pauseTask).not.toHaveBeenCalledWith("FN-3", false);
       expect(mockExecuteHeartbeat).toHaveBeenCalledTimes(1);
     });
     it("resuming to active does not auto-trigger heartbeat when disabled", async () => {

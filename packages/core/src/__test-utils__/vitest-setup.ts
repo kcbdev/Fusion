@@ -15,7 +15,7 @@
 import { afterEach, expect } from "vitest";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import { assertOutsideRealFusionPath } from "../test-safety.js";
@@ -40,7 +40,17 @@ const requireFromHere = createRequire(import.meta.url);
 const fs = requireFromHere("node:fs") as FsModule;
 const fsPromises = requireFromHere("node:fs/promises") as FsPromisesModule;
 const childProcess = requireFromHere("node:child_process") as ChildProcessModule;
-const { mkdtempSync, mkdirSync, rmSync, realpathSync, existsSync } = fs;
+const {
+  appendFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  realpathSync,
+  existsSync,
+  writeFileSync,
+} = fs;
 
 type EmitWarningArgs = Parameters<typeof process.emitWarning>;
 type EmitWarningRestArgs = EmitWarningArgs extends [string | Error, ...infer Rest] ? Rest : never;
@@ -154,11 +164,165 @@ if (!process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN) {
   process.env.FUSION_MASTER_KEY_DISABLE_KEYCHAIN = "1";
 }
 
-// Shared parent directory for all worker temp dirs in this run.
-// globalTeardown wipes this at the end of the suite.
-const WORKER_ROOT = join(tmpdir(), "fusion-test-workers");
-try { mkdirSync(WORKER_ROOT, { recursive: true }); } catch { /* ignore */ }
-process.env.FUSION_TEST_WORKER_ROOT = WORKER_ROOT;
+// Shared parent directory for all worker temp dirs in this Vitest invocation.
+// Keep this per-run (globalSetup seeds FUSION_TEST_WORKER_ROOT) instead of a
+// single long-lived tmpdir/fusion-test-workers directory: redirect setup does a
+// bounded one-level sweep of WORKER_ROOT, and a static root can accumulate enough
+// stale worker/home dirs after interrupted runs to make every mkdtempSync call
+// take seconds.
+const WORKER_ROOT = (() => {
+  const fromEnv = process.env.FUSION_TEST_WORKER_ROOT;
+  const root = fromEnv && fromEnv.trim().length > 0
+    ? resolve(fromEnv)
+    : realpathSync(mkdtempSync(join(tmpdir(), "fusion-test-workers-")));
+  try { mkdirSync(root, { recursive: true }); } catch { /* ignore */ }
+  process.env.FUSION_TEST_WORKER_ROOT = root;
+  return root;
+})();
+
+const REAL_TMPDIR = (() => {
+  try {
+    return realpathSync(tmpdir());
+  } catch {
+    return resolve(tmpdir());
+  }
+})();
+
+const TMPDIR_REDIRECT_REGISTRY = join(WORKER_ROOT, ".redir-pids");
+let tmpdirRedirectSink: string | null = null;
+let tmpdirRedirectExitCleanupInstalled = false;
+let tmpdirRedirectSweepComplete = false;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "EPERM";
+  }
+}
+
+function removeTmpdirRedirectSinkForPid(ownerPid: number): void {
+  if (ownerPid === process.pid || isProcessAlive(ownerPid)) return;
+
+  try {
+    rmSync(join(WORKER_ROOT, `redir-${ownerPid}`), { recursive: true, force: true });
+  } catch {
+    // Ignore stale-sink cleanup failures; global teardown still owns WORKER_ROOT.
+  }
+}
+
+function sweepDeadTmpdirRedirectSinks(): void {
+  if (tmpdirRedirectSweepComplete) return;
+  tmpdirRedirectSweepComplete = true;
+
+  // Registry-backed cleanup avoids scanning the OS temp root while still
+  // reclaiming redirect sinks from fork-pool workers that were hard-killed.
+  let ownerPids: number[] = [];
+  try {
+    ownerPids = Array.from(new Set(
+      readFileSync(TMPDIR_REDIRECT_REGISTRY, "utf8")
+        .split(/\r?\n/)
+        .map((line) => Number.parseInt(line, 10))
+        .filter((pid) => Number.isInteger(pid) && pid > 0),
+    ));
+  } catch {
+    // The registry may not exist yet. The bounded WORKER_ROOT sweep below still
+    // catches legacy redirect dirs created before the registry was introduced.
+  }
+
+  const liveOwnerPids: number[] = [];
+  for (const ownerPid of ownerPids) {
+    if (ownerPid === process.pid || isProcessAlive(ownerPid)) {
+      liveOwnerPids.push(ownerPid);
+      continue;
+    }
+
+    removeTmpdirRedirectSinkForPid(ownerPid);
+  }
+
+  // Preserve the local self-healing behavior for redirect dirs that predate the
+  // registry or whose registry append was skipped. This is a single-level scan
+  // of WORKER_ROOT (not the OS temp root) and only touches dead pid-owned dirs.
+  try {
+    for (const entry of readdirSync(WORKER_ROOT)) {
+      const match = /^redir-(\d+)$/.exec(entry);
+      if (!match) continue;
+      const ownerPid = Number.parseInt(match[1], 10);
+      if (ownerPid === process.pid || liveOwnerPids.includes(ownerPid) || isProcessAlive(ownerPid)) {
+        continue;
+      }
+      removeTmpdirRedirectSinkForPid(ownerPid);
+    }
+  } catch {
+    // Best-effort only; stale entries are harmless and swept by future workers.
+  }
+
+  try {
+    writeFileSync(TMPDIR_REDIRECT_REGISTRY, liveOwnerPids.length > 0 ? `${liveOwnerPids.join("\n")}\n` : "");
+  } catch {
+    // Best-effort only; stale entries are harmless and swept by future workers.
+  }
+}
+
+export const __fusionTmpdirRedirectTestHooks = {
+  workerRoot: WORKER_ROOT,
+  registryPath: TMPDIR_REDIRECT_REGISTRY,
+  sinkForPid(pid: number): string {
+    return join(WORKER_ROOT, `redir-${pid}`);
+  },
+  resetSweepForTest(): void {
+    tmpdirRedirectSweepComplete = false;
+  },
+  sweepDeadTmpdirRedirectSinks,
+};
+
+function ensureTmpdirRedirectSink(): string {
+  if (tmpdirRedirectSink) {
+    // FN-6310: recovery-timeout cleanup can remove a live worker's cached
+    // redirect sink; recreate it on demand so later mkdtemp calls don't ENOENT.
+    mkdirSync(tmpdirRedirectSink, { recursive: true });
+    return tmpdirRedirectSink;
+  }
+
+  sweepDeadTmpdirRedirectSinks();
+  const sink = join(WORKER_ROOT, `redir-${process.pid}`);
+  mkdirSync(sink, { recursive: true });
+  try {
+    appendFileSync(TMPDIR_REDIRECT_REGISTRY, `${process.pid}\n`);
+  } catch {
+    // Best-effort only; the process exit hook and global teardown still clean up.
+  }
+  tmpdirRedirectSink = sink;
+
+  if (!tmpdirRedirectExitCleanupInstalled) {
+    tmpdirRedirectExitCleanupInstalled = true;
+    process.once("exit", () => {
+      try {
+        rmSync(sink, { recursive: true, force: true });
+      } catch {
+        // Best-effort only. vitest globalTeardown also sweeps WORKER_ROOT.
+      }
+    });
+  }
+
+  return sink;
+}
+
+/**
+ * If a mkdtemp prefix points straight at the OS temp root, rewrite it into a
+ * swept per-process sink under WORKER_ROOT. Prefixes already nested under a
+ * subdirectory pass through unchanged, as do non-string prefixes (Buffer/URL).
+ */
+function redirectTmpdirPrefix<T>(prefix: T): T {
+  if (typeof prefix !== "string") return prefix;
+
+  const parent = dirname(prefix);
+  if (parent !== tmpdir() && parent !== REAL_TMPDIR) return prefix;
+
+  return join(ensureTmpdirRedirectSink(), basename(prefix)) as T;
+}
 
 function ensureIsolatedHome(): void {
   const existingHome = process.env.HOME ?? process.env.USERPROFILE;
@@ -290,8 +454,9 @@ function installFsGuards(): void {
     return originalFs.cpSync(src, dest, options as Parameters<typeof fs.cpSync>[2]);
   }) as typeof fs.cpSync;
   mutableFs.mkdtempSync = ((prefix, options) => {
-    guardOne(prefix, "fs.mkdtempSync");
-    return originalFs.mkdtempSync(prefix, options as Parameters<typeof fs.mkdtempSync>[1]);
+    const redirectedPrefix = redirectTmpdirPrefix(prefix);
+    guardOne(redirectedPrefix, "fs.mkdtempSync");
+    return originalFs.mkdtempSync(redirectedPrefix, options as Parameters<typeof fs.mkdtempSync>[1]);
   }) as typeof fs.mkdtempSync;
   mutableFs.openSync = ((path, flags, mode) => {
     guardOne(path, "fs.openSync");
@@ -408,8 +573,9 @@ function installFsGuards(): void {
     return originalFsPromises.open(...args);
   }) as typeof fsPromises.open;
   mutableFsPromises.mkdtemp = (async (...args: Parameters<typeof fsPromises.mkdtemp>) => {
-    guardOne(args[0], "fs.promises.mkdtemp");
-    return originalFsPromises.mkdtemp(...args);
+    const redirectedPrefix = redirectTmpdirPrefix(args[0]);
+    guardOne(redirectedPrefix, "fs.promises.mkdtemp");
+    return originalFsPromises.mkdtemp(redirectedPrefix, args[1]);
   }) as typeof fsPromises.mkdtemp;
   mutableFsPromises.truncate = (async (...args: Parameters<typeof fsPromises.truncate>) => {
     guardOne(args[0], "fs.promises.truncate");

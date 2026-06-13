@@ -3,7 +3,7 @@ import type { InteractiveAiSession, InteractiveAiSessionEvent, PlanningQuestion 
 import { vi } from "vitest";
 import { CeOrchestrator, CE_EVENTS } from "../session/orchestrator.js";
 import { CeSessionStore, getCeSessionStore } from "../session/session-store.js";
-import { makeHarness, makeScriptedSession, type TestHarness } from "./_harness.js";
+import { makeHarness, makeScriptedSession, scriptedFactory, type TestHarness } from "./_harness.js";
 
 /**
  * CHARACTERIZATION TEST — written first (U5 execution note: cover the
@@ -120,6 +120,160 @@ describe("interrupt + resume (no silent loss)", () => {
     expect(resumed.session.status).toBe("awaiting_input");
     expect(resumed.session.currentQuestion?.id).toBe("q1");
     expect(resumed.session.conversationHistory).toHaveLength(2);
+  });
+
+  it("answer() rehydrates an old awaiting_input session with no live handle and drives the answer to completion", async () => {
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
+    store.appendHistory(created.id, {
+      role: "agent",
+      text: JSON.stringify({ question: QUESTION }),
+      at: new Date().toISOString(),
+    });
+    store.update(created.id, { status: "awaiting_input", currentQuestion: QUESTION });
+
+    const rehydrated = makeScriptedSession([
+      { type: "question", data: QUESTION },
+      { type: "complete", data: { artifact: "# Done\n" } },
+    ]);
+    const factory = scriptedFactory(rehydrated);
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: factory,
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    const done = await orch.answer(created.id, "q1", "a");
+    expect(done.event?.type).toBe("complete");
+    expect(done.session.status).toBe("completed");
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(rehydrated.prompt).toHaveBeenCalledTimes(1);
+    expect(rehydrated.answer).toHaveBeenCalledTimes(1);
+    const hasAnswerTurn = done.session.conversationHistory.some(
+      (t) => t.text === JSON.stringify({ answer: "a", questionId: "q1" }),
+    );
+    expect(hasAnswerTurn).toBe(true);
+  });
+
+  it("answer() uses an existing live handle directly without rehydrating", async () => {
+    const live = makeScriptedSession([
+      { type: "question", data: QUESTION },
+      { type: "complete", data: { artifact: "# Done\n" } },
+    ]);
+    const factory = scriptedFactory(live);
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: factory,
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    const started = await orch.start("brainstorm", { openingMessage: "kick off" });
+    expect(started.session.status).toBe("awaiting_input");
+    expect(factory).toHaveBeenCalledTimes(1);
+
+    const done = await orch.answer(started.session.id, "q1", "a");
+    expect(done.session.status).toBe("completed");
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(live.prompt).toHaveBeenCalledTimes(1);
+    expect(live.answer).toHaveBeenCalledTimes(1);
+  });
+
+  it("answer() without a live handle and without a factory reports an honest error without corrupting the question", async () => {
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
+    store.appendHistory(created.id, {
+      role: "agent",
+      text: JSON.stringify({ question: QUESTION }),
+      at: new Date().toISOString(),
+    });
+    store.update(created.id, { status: "awaiting_input", currentQuestion: QUESTION });
+    const orch = new CeOrchestrator({ ctx: h.ctx, projectRoot: h.projectRoot, turnTimeoutMs: 5000 });
+
+    await expect(orch.answer(created.id, "q1", "a")).rejects.toThrow(/cannot be continued in this process/i);
+    const after = store.get(created.id)!;
+    expect(after.status).toBe("awaiting_input");
+    expect(after.currentQuestion?.id).toBe("q1");
+    expect(after.conversationHistory.some((t) => t.text.includes('"answer"'))).toBe(false);
+  });
+
+  it("answer() rejects a stale questionId before rehydration and leaves state untouched", async () => {
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
+    store.appendHistory(created.id, {
+      role: "agent",
+      text: JSON.stringify({ question: QUESTION }),
+      at: new Date().toISOString(),
+    });
+    store.update(created.id, { status: "awaiting_input", currentQuestion: QUESTION });
+    const factory = scriptedFactory(makeScriptedSession([{ type: "question", data: QUESTION }]));
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: factory,
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    await expect(orch.answer(created.id, "stale-q", "a")).rejects.toThrow(/q1|stale-q/);
+    expect(factory).not.toHaveBeenCalled();
+    const after = store.get(created.id)!;
+    expect(after.status).toBe("awaiting_input");
+    expect(after.currentQuestion?.id).toBe("q1");
+    expect(after.conversationHistory.some((t) => t.text.includes("stale-q"))).toBe(false);
+  });
+
+  it("answer() preserves the existing not-awaiting guard before rehydration", async () => {
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.update(created.id, { status: "active", currentQuestion: QUESTION });
+    const factory = scriptedFactory(makeScriptedSession([{ type: "question", data: QUESTION }]));
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: factory,
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    await expect(orch.answer(created.id, "q1", "a")).rejects.toThrow(/not awaiting input/);
+    expect(factory).not.toHaveBeenCalled();
+    expect(store.get(created.id)!.status).toBe("active");
+  });
+
+  it("detached answer() rehydrates an old awaiting_input session in the background", async () => {
+    const store = getCeSessionStore(h.ctx);
+    const created = store.create({ stage: "brainstorm", turnIntervalMs: 5000 });
+    store.appendHistory(created.id, { role: "user", text: "kick off", at: new Date().toISOString() });
+    store.appendHistory(created.id, {
+      role: "agent",
+      text: JSON.stringify({ question: QUESTION }),
+      at: new Date().toISOString(),
+    });
+    store.update(created.id, { status: "awaiting_input", currentQuestion: QUESTION });
+    const rehydrated = makeScriptedSession([
+      { type: "question", data: QUESTION },
+      { type: "complete", data: { artifact: "# Done\n" } },
+    ]);
+    const orch = new CeOrchestrator({
+      ctx: h.ctx,
+      createInteractiveAiSession: scriptedFactory(rehydrated),
+      projectRoot: h.projectRoot,
+      turnTimeoutMs: 5000,
+    });
+
+    const returned = await orch.answer(created.id, "q1", "a", { detach: true });
+    expect(returned.session.status).toBe("active");
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const after = store.get(created.id)!;
+    expect(after.status).toBe("completed");
+    const hasAnswerTurn = after.conversationHistory.some(
+      (t) => t.text === JSON.stringify({ answer: "a", questionId: "q1" }),
+    );
+    expect(hasAnswerTurn).toBe(true);
   });
 
   it("Bug 5: an interrupted/awaiting session with a currentQuestion + history can be resumed (rehydrated) and then ANSWERED to continue to completion", async () => {

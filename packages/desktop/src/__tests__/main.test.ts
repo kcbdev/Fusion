@@ -34,7 +34,9 @@ const mocks = vi.hoisted(() => {
     maximize: vi.fn(),
   };
 
-  const BrowserWindow = vi.fn(() => browserWindowInstance) as unknown as {
+  const BrowserWindow = vi.fn(function () {
+    return browserWindowInstance;
+  }) as unknown as {
     (...args: unknown[]): typeof browserWindowInstance;
     getAllWindows: () => unknown[];
   };
@@ -43,6 +45,7 @@ const mocks = vi.hoisted(() => {
   const app = {
     whenReady: vi.fn(() => Promise.resolve()),
     getVersion: vi.fn(() => "0.1.0"),
+    getPath: vi.fn(() => "/mock/home"),
     quit: vi.fn(),
     on: vi.fn(),
   };
@@ -59,7 +62,9 @@ const mocks = vi.hoisted(() => {
     on: vi.fn(),
   };
 
-  const Tray = vi.fn(() => trayInstance);
+  const Tray = vi.fn(function () {
+    return trayInstance;
+  });
   const Menu = {
     buildFromTemplate: vi.fn(() => ({ id: "mock-menu" })),
     setApplicationMenu: vi.fn(),
@@ -132,7 +137,9 @@ const mainDeps = vi.hoisted(() => {
     loadDesktopLaunchMode,
     saveDesktopLaunchMode,
     saveWindowState: vi.fn(),
-    LocalRuntimeManager: vi.fn(() => ({ startLocal, stopLocal, getStatus, getServerPort })),
+    LocalRuntimeManager: vi.fn(function () {
+      return { startLocal, stopLocal, getStatus, getServerPort };
+    }),
     startLocal,
   };
 });
@@ -201,6 +208,7 @@ describe("main process", () => {
     vi.clearAllMocks();
     vi.resetModules();
     delete process.env.FUSION_DESKTOP_MODE;
+    delete process.env.FUSION_HOME;
     if (originalDashboardUrl === undefined) {
       delete process.env.FUSION_DASHBOARD_URL;
     } else {
@@ -299,8 +307,27 @@ describe("main process", () => {
 
     await initializeApp();
 
+    expect(mainDeps.LocalRuntimeManager).toHaveBeenCalledWith({ rootDir: "/mock/home" });
     expect(mainDeps.startLocal).toHaveBeenCalledTimes(1);
     expect(getCurrentDesktopLaunchMode()).toBe("local");
+  });
+
+  it("anchors the local runtime root to the home dir, not process.cwd()", async () => {
+    const { resolveLocalRuntimeRoot } = await importMainModule();
+
+    // Packaged builds (notably the Linux AppImage launched from a desktop
+    // launcher) run with cwd at `/` or a read-only mount point, so the root
+    // must come from the home dir to keep `~/.fusion` writable.
+    expect(resolveLocalRuntimeRoot()).toBe("/mock/home");
+    expect(mocks.app.getPath).toHaveBeenCalledWith("home");
+  });
+
+  it("honors FUSION_HOME override for the local runtime root", async () => {
+    process.env.FUSION_HOME = "/custom/fusion-home";
+    const { resolveLocalRuntimeRoot } = await importMainModule();
+
+    expect(resolveLocalRuntimeRoot()).toBe("/custom/fusion-home");
+    expect(mocks.app.getPath).not.toHaveBeenCalled();
   });
 
   it("initializeApp does not start local runtime for remembered choose mode", async () => {

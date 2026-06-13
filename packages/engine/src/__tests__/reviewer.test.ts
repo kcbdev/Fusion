@@ -12,8 +12,11 @@ vi.mock("../pi.js", () => ({
   }),
 }));
 
-import { reviewStep, REVIEWER_SYSTEM_PROMPT } from "../reviewer.js";
+import { resolveAgentPrompt } from "@fusion/core";
+import { reviewStep } from "../reviewer.js";
 import { createFnAgent, promptWithFallback } from "../pi.js";
+
+const DEFAULT_REVIEWER_PROMPT = resolveAgentPrompt("reviewer");
 
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedPromptWithFallback = vi.mocked(promptWithFallback);
@@ -293,28 +296,55 @@ describe("reviewStep — spec review type", () => {
 
 describe("FN-5928 surface-enumeration review-gate wording", () => {
   it("requires spec reviews to block missing or incomplete surface enumeration for bug-fix specs", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("**Surface enumeration:**");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("Missing or incomplete coverage is a blocking REVISE");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("desktop + mobile breakpoints/platforms");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("shared hooks/components/modules/helpers");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("bug-fix specs and UI-affordance add/remove specs");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("**Surface enumeration:**");
+    expect(DEFAULT_REVIEWER_PROMPT).toMatch(
+      /For bug-fix specs and UI-affordance add\/remove specs, is `## Surface Enumeration` present[\s\S]*Missing or incomplete coverage is a blocking REVISE\./,
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("desktop + mobile breakpoints/platforms");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("shared hooks/components/modules/helpers");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("bug-fix specs and UI-affordance add/remove specs");
   });
 
   it("requires code reviews to reject repro-only regression tests for bug fixes", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("single-surface-only test");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("doesn't verify the invariant across the spec's enumerated surfaces");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("Keep enforcing FN-5893 for bug fixes");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("FN-5787/FN-5789/FN-5803");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("FN-5797/FN-5875/FN-5919");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("FN-5751");
+    expect(DEFAULT_REVIEWER_PROMPT).toMatch(
+      /For bug fixes, apply FN-5893 strictly: if the regression test only reproduces the reported case instead of asserting the invariant across the spec's `## Surface Enumeration` surfaces, issue REVISE\./,
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("single-surface-only test");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("doesn't verify the invariant across the spec's enumerated surfaces");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("Keep enforcing FN-5893 for bug fixes");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("FN-5787/FN-5789/FN-5803");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("FN-5797/FN-5875/FN-5919");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("FN-5751");
+  });
+
+  it("requires spec reviews to block bug-class specs missing symptom verification", () => {
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("**Symptom verification:**");
+    expect(DEFAULT_REVIEWER_PROMPT).toMatch(
+      /For bug-class\/bug-fix specs only, is `## Symptom Verification` present and complete with \*\*Original symptom\*\*, \*\*Exact reproduction\*\*, and \*\*Assertion it is gone\*\*\?/,
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
+      "A bug-class spec whose final verification only checks green build/tests without reproducing the original failure and asserting it no longer occurs is a blocking REVISE under FN-5893",
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
+      "Missing, empty, or incomplete `## Symptom Verification` is a blocking REVISE for bug-class specs",
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("feature/docs/non-bug specs are not required to carry it");
+  });
+
+  it("requires code reviews to reject green-build-only symptom acceptance for bug fixes", () => {
+    expect(DEFAULT_REVIEWER_PROMPT).toMatch(
+      /For bug-class\/bug-fix specs, also enforce symptom-based acceptance:[\s\S]*final verification only checks green build\/tests without reproducing the original failure condition and asserting it no longer occurs, issue REVISE\./,
+    );
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("lacks **Original symptom**, **Exact reproduction**, or **Assertion it is gone**");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("Do not require `## Symptom Verification` for feature/docs/non-bug specs");
   });
 
   it("requires spec/code reviews to enforce surface enumeration for UI-affordance add/remove tasks", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("leftover shells after removal");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("For bug fixes and UI-affordance add/remove changes");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("UI-affordance removals");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("For UI-affordance add/remove changes, apply the same surface-enumeration strictness");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("FN-6115/FN-6118/FN-6123");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("leftover shells after removal");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("For bug fixes and UI-affordance add/remove changes");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("UI-affordance removals");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("For UI-affordance add/remove changes, apply the same surface-enumeration strictness");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("FN-6115/FN-6118/FN-6123");
   });
 
   it("demonstrates the gate firing on a single-component UI-removal spec", () => {
@@ -322,11 +352,11 @@ describe("FN-5928 surface-enumeration review-gate wording", () => {
       "## Mission\nRemove the workflow-row chevron from WorkflowRow.tsx only.";
 
     expect(singleComponentRemovalSpec).toContain("WorkflowRow.tsx only");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("searches for ALL components rendering the affordance");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("not just the one the user pointed at");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("leftover shells after removal");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("empty button shells");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("Issue REVISE when coverage stops at the single reported surface");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("searches for ALL components rendering the affordance");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("not just the one the user pointed at");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("leftover shells after removal");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("empty button shells");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("Issue REVISE when coverage stops at the single reported surface");
   });
 });
 
@@ -849,24 +879,24 @@ describe("reviewStep — validator model overrides", () => {
   });
 });
 
-describe("REVIEWER_SYSTEM_PROMPT", () => {
+describe("default reviewer prompt", () => {
   it("includes subtask breakdown criterion in spec review", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("Subtask breakdown");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("Subtask breakdown");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
       "12+ implementation steps",
     );
   });
 
   it("biases the reviewer toward keeping tasks whole", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("The bar for splitting is high");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("The bar for splitting is high");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
       "Default position:** do NOT flag undersplit",
     );
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("12+ implementation steps");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("12+ implementation steps");
   });
 
   it("downgrades borderline undersplit findings to non-blocking suggestions", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
       "Suggestions** section instead of REVISE",
     );
   });
@@ -874,25 +904,25 @@ describe("REVIEWER_SYSTEM_PROMPT", () => {
   it("instructs planner to use fn_task_create for genuinely oversized tasks", () => {
     // The reviewer's REVISE feedback must explicitly direct the planner to
     // create child tasks via fn_task_create rather than just flagging the issue.
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("fn_task_create");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("fn_task_create");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
       "create 2–5 child tasks",
     );
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(
       "Not write a parent PROMPT.md",
     );
   });
 
   it("includes user comment coverage criterion in spec review format", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("User comment coverage");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("missing coverage is a blocking REVISE");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("User comment coverage");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("missing coverage is a blocking REVISE");
   });
 
   it("includes worktree boundary guidance for code reviews", () => {
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("Worktree Boundary Review");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("assigned task worktree");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain("blocking REVISE");
-    expect(REVIEWER_SYSTEM_PROMPT).toContain(".fusion/memory/");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("Worktree Boundary Review");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("assigned task worktree");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain("blocking REVISE");
+    expect(DEFAULT_REVIEWER_PROMPT).toContain(".fusion/memory/");
   });
 });
 

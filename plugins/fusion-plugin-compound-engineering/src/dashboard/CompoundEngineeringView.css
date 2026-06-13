@@ -177,6 +177,22 @@
     width: 100%;
     padding: var(--space-sm);
   }
+
+  .ce-session-row {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .ce-session-open {
+    flex-wrap: wrap;
+  }
+
+  .ce-session-cancel,
+  .ce-session-discard,
+  .ce-flow-cancel,
+  .ce-flow-close {
+    margin-left: 0;
+  }
 }
 
 /* --- Stage launcher (U6) --- */
@@ -228,8 +244,12 @@
   color: var(--text-muted);
   text-transform: capitalize;
 }
+.ce-flow-cancel,
 .ce-flow-close {
   margin-left: auto;
+}
+.ce-flow-cancel + .ce-flow-close {
+  margin-left: 0;
 }
 .ce-flow-transcript {
   list-style: none;
@@ -277,9 +297,28 @@
   flex-direction: column;
   gap: 0.4rem;
 }
+.ce-flow-text textarea,
+.ce-flow-guidance-row textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-primary);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
 .ce-flow-text textarea {
   width: 100%;
   resize: vertical;
+}
+.ce-flow-text textarea:focus,
+.ce-flow-guidance-row textarea:focus {
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring);
+}
+.ce-flow-text textarea::placeholder,
+.ce-flow-guidance-row textarea::placeholder {
+  color: var(--text-dim);
 }
 .ce-flow-confirm {
   display: flex;
@@ -364,7 +403,8 @@
   background: color-mix(in srgb, var(--todo) 8%, transparent);
 }
 .ce-session-open {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
@@ -405,6 +445,45 @@
   margin-left: auto;
   font-size: 0.72rem;
   color: var(--text-dim);
+}
+.ce-session-cancel,
+.ce-session-discard {
+  flex: none;
+}
+.ce-session-cancel,
+.ce-flow-cancel {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--space-xl) + var(--space-sm));
+  height: calc(var(--space-xl) + var(--space-sm));
+  padding: var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-error);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast);
+}
+.ce-session-cancel:hover:not(:disabled),
+.ce-flow-cancel:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
+}
+.ce-session-cancel:focus-visible,
+.ce-flow-cancel:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.ce-session-cancel:disabled,
+.ce-flow-cancel:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* ── Q&A transcript bubbles ────────────────────────────────────────────── */

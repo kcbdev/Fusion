@@ -5,6 +5,7 @@ import type {
   WorkflowIrColumn,
   WorkflowIrNode,
   WorkflowIrEdge,
+  WorkflowIrNodeKind,
   WorkflowDefinition,
   WorkflowFieldDefinition,
   WorkflowSettingDefinition,
@@ -127,17 +128,57 @@ function isV2(ir: WorkflowIr): ir is WorkflowIrV2 {
   return ir.version === "v2";
 }
 
-/** Resolve the editor node "type" for an IR node (merge seam → "merge"). */
+const SAME_KIND_EDITOR_NODE_KINDS = new Set<WorkflowIrNodeKind>([
+  "start",
+  "prompt",
+  "script",
+  "gate",
+  "end",
+  "hold",
+  "split",
+  "join",
+  "foreach",
+  "loop",
+  "step-review",
+  "parse-steps",
+  "code",
+  "notify",
+]);
+
+const GRAPH_ONLY_EDITOR_KIND: Partial<Record<WorkflowIrNodeKind, WorkflowEditorNodeKind>> = {
+  "merge-gate": "gate",
+  "merge-attempt": "merge",
+  "manual-merge-hold": "hold",
+  "retry-backoff": "hold",
+  "recovery-router": "gate",
+  "branch-group-member-integration": "merge",
+  "branch-group-promotion": "merge",
+  "pr-merge": "merge",
+  "pr-create": "prompt",
+  "pr-respond": "prompt",
+};
+
+function isSameKindEditorNodeKind(
+  kind: WorkflowIrNodeKind,
+): kind is Extract<WorkflowEditorNodeKind, WorkflowIrNodeKind> {
+  return SAME_KIND_EDITOR_NODE_KINDS.has(kind);
+}
+
+/**
+ * Resolve the editor node "type" for an IR node. Graph-only IR policy nodes map
+ * to the closest existing editor shape: merge/recovery gates render as gate,
+ * merge/branch actions render as merge, passive waits render as hold, and PR
+ * nodes reuse merge/prompt until dedicated renderers exist.
+ */
 function editorKind(node: WorkflowIr["nodes"][number]): WorkflowEditorNodeKind {
   const seam = node.config?.seam;
   if (seam === "merge") return "merge";
-  // PR node kinds (pr-create/pr-respond/pr-merge) are graph node kinds but have
-  // no dedicated editor palette renderer yet; map them to the closest existing
-  // editor shape so the workflow editor renders them as recognizable nodes.
-  // (Dedicated PR-node editor rendering is a follow-up, not part of this work.)
-  if (node.kind === "pr-merge") return "merge";
-  if (node.kind === "pr-create" || node.kind === "pr-respond") return "prompt";
-  return node.kind;
+  const mapped = GRAPH_ONLY_EDITOR_KIND[node.kind];
+  if (mapped) return mapped;
+
+  if (isSameKindEditorNodeKind(node.kind)) return node.kind;
+
+  return "prompt";
 }
 
 function nodeLabel(node: WorkflowIr["nodes"][number]): string {
@@ -145,6 +186,14 @@ function nodeLabel(node: WorkflowIr["nodes"][number]): string {
   if (typeof name === "string" && name.trim()) return name;
   if (node.config?.seam === "merge") return "Merge boundary";
   return node.id;
+}
+
+function dataIrKind(node: WorkflowIrNode, editorNodeKind: WorkflowEditorNodeKind): Partial<WorkflowFlowNodeData> {
+  return node.kind === editorNodeKind ? {} : { irKind: node.kind };
+}
+
+function preservedIrKind(data: WorkflowFlowNodeData): WorkflowIrNode["kind"] | undefined {
+  return typeof data.irKind === "string" ? (data.irKind as WorkflowIrNode["kind"]) : undefined;
 }
 
 /** Build React Flow swimlane band group nodes from the workflow's columns. */
@@ -177,7 +226,7 @@ function foreachConfigOf(node: WorkflowIrNode): WorkflowForeachConfig | undefine
 }
 
 function loopConfigOf(node: WorkflowIrNode): WorkflowLoopConfig | undefined {
-  if (node.kind !== "loop") return undefined;
+  if (node.kind !== "loop" && node.kind !== "retry-backoff") return undefined;
   const cfg = node.config as Partial<WorkflowLoopConfig> | undefined;
   if (!cfg || !cfg.template) return undefined;
   return cfg as WorkflowLoopConfig;
@@ -272,7 +321,7 @@ export function irToFlow(def: WorkflowDefinition): {
           position: childPos,
           parentId: node.id,
           extent: "parent",
-          data: { kind: innerKind, label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
+          data: { kind: innerKind, ...dataIrKind(inner, innerKind), label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
           deletable: true,
           zIndex: WF_STEP_NODE_Z_INDEX,
         });
@@ -288,6 +337,7 @@ export function irToFlow(def: WorkflowDefinition): {
         position: pos ?? { x: 80 + index * 180, y: fallbackY },
         data: {
           kind,
+          ...dataIrKind(node, kind),
           label: nodeLabel(node),
           config: { ...restCfg },
           column,
@@ -305,6 +355,7 @@ export function irToFlow(def: WorkflowDefinition): {
       position: pos ?? { x: 80 + index * 180, y: fallbackY },
       data: {
         kind,
+        ...dataIrKind(node, kind),
         label: nodeLabel(node),
         config: { ...(node.config ?? {}) },
         column,
@@ -324,7 +375,11 @@ export function irToFlow(def: WorkflowDefinition): {
 function nodeConfig(node: FlowNode<WorkflowFlowNodeData>): Record<string, unknown> | undefined {
   const data = node.data;
   const config: Record<string, unknown> = { ...(data.config ?? {}) };
-  const fallbackLabel = data.kind === "merge" ? "Merge boundary" : node.id;
+  const fallbackLabel = data.kind === "merge"
+    ? "Merge boundary"
+    : node.parentId
+      ? templateNodeIdFromChild(node.parentId, node.id)
+      : node.id;
   if (data.kind !== "start" && data.kind !== "end" && data.label && data.label !== fallbackLabel) {
     config.name = data.label;
   } else {
@@ -377,10 +432,17 @@ export function flowToIr(
   function toIrNode(node: FlowNode<WorkflowFlowNodeData>, localId: string): WorkflowIrNode {
     const data = node.data;
     const config = nodeConfig(node);
+    const originalKind = preservedIrKind(data);
     if (data.kind === "merge") {
+      if (originalKind) {
+        return { id: localId, kind: originalKind, config: config && Object.keys(config).length ? config : undefined };
+      }
       return { id: localId, kind: "prompt", config: { ...(config ?? {}), seam: "merge" } };
     }
-    if (data.kind === "foreach" || data.kind === "loop") {
+    if (data.kind === "foreach" || data.kind === "loop" || originalKind === "retry-backoff") {
+      if (originalKind && originalKind !== "foreach" && originalKind !== "loop" && originalKind !== "retry-backoff") {
+        return { id: localId, kind: originalKind, config: config && Object.keys(config).length ? config : undefined };
+      }
       // Reassemble the template from this group's children.
       const children = childrenByGroup.get(node.id) ?? [];
       const templateNodes: WorkflowIrNode[] = children.map((c) => {
@@ -395,13 +457,13 @@ export function flowToIr(
       const baseCfg = (config ?? {}) as Record<string, unknown>;
       return {
         id: localId,
-        kind: data.kind,
+        kind: originalKind ?? data.kind,
         config: { ...baseCfg, template: { nodes: templateNodes, edges: templateEdges } },
       };
     }
     return {
       id: localId,
-      kind: data.kind as WorkflowIrNode["kind"],
+      kind: originalKind ?? (data.kind as WorkflowIrNode["kind"]),
       config: config && Object.keys(config).length ? config : undefined,
     };
   }
@@ -947,7 +1009,7 @@ function irNodeToFlowNode(
     id,
     type: kind,
     position,
-    data: { kind, label: nodeLabel(node), config: { ...(node.config ?? {}) } },
+    data: { kind, ...dataIrKind(node, kind), label: nodeLabel(node), config: { ...(node.config ?? {}) } },
     deletable: node.kind !== "start" && node.kind !== "end",
     zIndex: WF_STEP_NODE_Z_INDEX,
   };
@@ -1025,7 +1087,7 @@ export function insertFragment(
           position: childPos,
           parentId: id,
           extent: "parent",
-          data: { kind: innerKind, label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
+          data: { kind: innerKind, ...dataIrKind(inner, innerKind), label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
           deletable: true,
           zIndex: WF_STEP_NODE_Z_INDEX,
         });
@@ -1041,6 +1103,7 @@ export function insertFragment(
         position: pos,
         data: {
           kind: groupKind,
+          ...dataIrKind(node, groupKind),
           label: nodeLabel(node),
           config: { ...restCfg },
           templateEmpty: template.nodes.length === 0,

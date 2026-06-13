@@ -1080,6 +1080,7 @@ interface PackageManagerSettingsView {
   getGlobalSettings(): Record<string, any>;
   getProjectSettings(): Record<string, any>;
   getNpmCommand(): string[] | undefined;
+  isProjectTrusted(): boolean;
 }
 
 function readJsonObject(path: string): Record<string, any> {
@@ -1258,7 +1259,7 @@ function siblingAgentDir(agentDir: string, siblingRoot: ".fusion" | ".pi"): stri
   return join(dirname(dirname(agentDir)), siblingRoot, "agent");
 }
 
-function createReadOnlyPiSettingsView(cwd: string, agentDir: string): PackageManagerSettingsView {
+export function createReadOnlyPiSettingsView(cwd: string, agentDir: string): PackageManagerSettingsView {
   const projectRoot = resolvePiExtensionProjectRoot(cwd);
   const fusionAgentDir = agentDir.includes(`${join(".fusion", "agent")}`)
     ? agentDir
@@ -1279,6 +1280,10 @@ function createReadOnlyPiSettingsView(cwd: string, agentDir: string): PackageMan
     getNpmCommand: () => Array.isArray(mergedSettings.npmCommand)
       ? [...mergedSettings.npmCommand]
       : undefined,
+    // Pi's SettingsManager defaults projects to trusted. Fusion workspaces are
+    // user-owned, so preserve pre-upgrade behavior and keep project-scoped
+    // .fusion resources loadable through the read-only settings view.
+    isProjectTrusted: () => true,
   };
 }
 

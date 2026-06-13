@@ -104,15 +104,15 @@ Request a refinement of a completed or in-review task. Creates a new follow-up t
 
 ### fn_task_archive
 
-Archive a done task (move from done → archived). Archived tasks are preserved for historical reference but moved out of the main board view.
+Archive a task from any live column (move to archived). Archived tasks are preserved for historical reference but moved out of the main board view.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | ✓ | Task ID to archive (e.g. FN-001). Must be in 'done' column. |
+| `id` | string | ✓ | Task ID to archive from any live column (e.g. FN-001). |
 
 ### fn_task_unarchive
 
-Unarchive an archived task (move from archived → done). Restores the task to the done column.
+Unarchive an archived task (move from archived → its restore column). Restores to the pre-archive column when available, with active execution columns downgraded to todo.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

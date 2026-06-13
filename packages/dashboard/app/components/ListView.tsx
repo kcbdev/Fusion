@@ -233,6 +233,7 @@ interface ListViewProps {
   /** Timestamp (ms) when task data was last confirmed fresh from the server. Used for freshness-aware stuck detection. */
   lastFetchTimeMs?: number;
   prAuthAvailable?: boolean;
+  autoMerge?: boolean;
   onCreateWorkflow?: () => void;
 }
 
@@ -296,6 +297,7 @@ export function ListView({
   searchQuery = "",
   lastFetchTimeMs,
   prAuthAvailable,
+  autoMerge,
   onCreateWorkflow,
 }: ListViewProps) {
   const { t } = useTranslation("app");
@@ -2332,6 +2334,7 @@ export function ListView({
                       }}
                       addToast={addToast}
                       prAuthAvailable={prAuthAvailable}
+                      autoMergeEnabled={autoMerge}
                     />
                   </div>
                 )}

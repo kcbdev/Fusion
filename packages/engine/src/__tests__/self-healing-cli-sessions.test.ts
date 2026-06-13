@@ -20,6 +20,7 @@ import type { TaskStore } from "@fusion/core";
 import { SelfHealingManager } from "../self-healing.js";
 import * as worktreePool from "../worktree-pool.js";
 import { StuckTaskDetector, type DisposableSession } from "../stuck-task-detector.js";
+import { activeSessionRegistry } from "../active-session-registry.js";
 
 function createStore(settings: Record<string, unknown>): TaskStore & EventEmitter {
   const emitter = new EventEmitter() as TaskStore & EventEmitter;
@@ -46,6 +47,7 @@ describe("self-healing idle-worktree sweeps skip resume-eligible CLI session wor
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+    activeSessionRegistry.clear();
     vi.restoreAllMocks();
   });
 
@@ -83,6 +85,42 @@ describe("self-healing idle-worktree sweeps skip resume-eligible CLI session wor
     const removed = removeSpy.mock.calls.map((c) => (c[0] as { worktreePath: string }).worktreePath);
     expect(removed).toEqual([freePath]);
     expect(cleaned).toBe(1);
+  });
+
+  it("cleanupOrphans skips a worktree backing a live (active-session) executor session", async () => {
+    // FN-4811/FN-5065 regression: a registered idle worktree whose task transiently
+    // sits in "done" (so scanIdleWorktrees lists it) must NOT be reaped while a live
+    // executor/merger/step session is still bound to it — that yanks the checkout out
+    // from under in-flight work ("removed before the work is done").
+    const store = createStore({ recycleWorktrees: false });
+    vi.spyOn(worktreePool, "scanIdleWorktrees").mockResolvedValue([reservedPath, freePath]);
+    const removeSpy = vi.spyOn(worktreePool, "removeWorktree").mockResolvedValue(undefined as never);
+
+    activeSessionRegistry.registerPath(reservedPath, { taskId: "FN-1", kind: "executor", ownerKey: "owner-1" });
+
+    // No isWorktreeResumeReserved seam — protection comes solely from the active session.
+    const manager = new SelfHealingManager(store, { rootDir });
+    const cleaned = await (manager as any).cleanupOrphans();
+
+    const removed = removeSpy.mock.calls.map((c) => (c[0] as { worktreePath: string }).worktreePath);
+    expect(removed).toEqual([freePath]);
+    expect(cleaned).toBe(1);
+  });
+
+  it("enforceWorktreeCap skips a worktree backing a live (active-session) executor session", async () => {
+    mkdirSync(join(worktreesDir, "wt-extra"));
+    const store = createStore({ maxWorktrees: 1, recycleWorktrees: false });
+    vi.spyOn(worktreePool, "scanIdleWorktrees").mockResolvedValue([reservedPath, freePath, join(worktreesDir, "wt-extra")]);
+    const removeSpy = vi.spyOn(worktreePool, "removeWorktree").mockResolvedValue(undefined as never);
+
+    activeSessionRegistry.registerPath(reservedPath, { taskId: "FN-1", kind: "executor", ownerKey: "owner-1" });
+
+    const manager = new SelfHealingManager(store, { rootDir });
+    await (manager as any).enforceWorktreeCap();
+
+    const removed = removeSpy.mock.calls.map((c) => (c[0] as { worktreePath: string }).worktreePath);
+    expect(removed).not.toContain(reservedPath);
+    expect(removed).toContain(freePath);
   });
 
   it("without the seam predicate, both worktrees are reaped (no behavior change)", async () => {

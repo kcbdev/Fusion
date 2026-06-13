@@ -5,6 +5,7 @@ export interface PackageManagerSettingsView {
   getGlobalSettings(): Record<string, unknown>;
   getProjectSettings(): Record<string, unknown>;
   getNpmCommand(): string[] | undefined;
+  isProjectTrusted(): boolean;
 }
 
 function siblingAgentDir(agentDir: string, siblingRoot: ".fusion" | ".pi"): string | undefined {
@@ -47,6 +48,10 @@ export function createReadOnlyProviderSettingsView(cwd: string, agentDir: string
     getNpmCommand: () => Array.isArray(mergedSettings.npmCommand)
       ? [...mergedSettings.npmCommand]
       : undefined,
+    // Pi's SettingsManager defaults projects to trusted. Fusion workspaces are
+    // user-owned, so preserve pre-upgrade behavior and keep project-scoped
+    // .fusion resources loadable through the read-only settings view.
+    isProjectTrusted: () => true,
   };
 }
 

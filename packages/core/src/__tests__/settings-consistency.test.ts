@@ -10,7 +10,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { MOVED_SETTINGS_KEYS } from "../moved-settings.js";
-import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
+import {
+  BUILTIN_TRIAGE_POLICY_SETTINGS,
+  BUILTIN_WORKFLOW_SETTINGS,
+} from "../builtin-workflow-settings.js";
 import {
   DEFAULT_GLOBAL_SETTINGS,
   DEFAULT_PROJECT_SETTINGS,
@@ -39,18 +42,29 @@ describe("settings consistency (U5)", () => {
     }
   });
 
-  it("(b) MOVED_SETTINGS_KEYS and BUILTIN_WORKFLOW_SETTINGS declaration ids are exactly equal sets", () => {
+  it("(b) every built-in declaration is either moved or workflow-native triage policy", () => {
     const declIds = new Set(BUILTIN_WORKFLOW_SETTINGS.map((s) => s.id));
     const moved = new Set(movedKeys);
+    const native = new Set(BUILTIN_TRIAGE_POLICY_SETTINGS.map((s) => s.id));
     // Every moved key has a declaration.
     for (const key of moved) {
       expect(declIds.has(key), `moved key '${key}' has no BUILTIN_WORKFLOW_SETTINGS declaration`).toBe(true);
     }
-    // Every declaration is a moved key.
+    // Every declaration is either a moved key or an explicitly workflow-native triage setting.
     for (const id of declIds) {
-      expect(moved.has(id), `declaration '${id}' is missing from MOVED_SETTINGS_KEYS`).toBe(true);
+      expect(
+        moved.has(id) || native.has(id),
+        `declaration '${id}' must be in MOVED_SETTINGS_KEYS or BUILTIN_TRIAGE_POLICY_SETTINGS`,
+      ).toBe(true);
     }
-    expect(moved.size).toBe(declIds.size);
+    for (const id of native) {
+      expect(moved.has(id), `native triage setting '${id}' must not be in MOVED_SETTINGS_KEYS`).toBe(false);
+      expect(PROJECT_SETTINGS_KEYS as readonly string[], `native triage setting '${id}' must not be project schema key`).not.toContain(id);
+      expect(GLOBAL_SETTINGS_KEYS as readonly string[], `native triage setting '${id}' must not be global schema key`).not.toContain(id);
+      expect(Object.keys(DEFAULT_PROJECT_SETTINGS), `native triage setting '${id}' must not be project default`).not.toContain(id);
+      expect(Object.keys(DEFAULT_GLOBAL_SETTINGS), `native triage setting '${id}' must not be global default`).not.toContain(id);
+    }
+    expect(declIds.size).toBe(moved.size + native.size);
   });
 
   it("(c) every moved key is absent from GLOBAL_SETTINGS_KEYS / PROJECT_SETTINGS_KEYS and their predicates", () => {

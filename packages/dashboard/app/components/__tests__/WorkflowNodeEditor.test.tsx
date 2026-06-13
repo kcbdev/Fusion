@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup, within } from "@testing-library/react";
 import type { WorkflowDefinition, Settings } from "@fusion/core";
@@ -344,7 +345,7 @@ describe("workflow-flow-mapping", () => {
     const failuresToEnd = edges.filter((edge) => edge.target === "end" && edge.data?.condition === "failure");
     expect(failuresToEnd.map((edge) => edge.source).sort()).toEqual([
       "execute",
-      "merge",
+      "merge-attempt",
       "planning",
       "review",
       "workflow-step",
@@ -407,6 +408,58 @@ describe("WorkflowNodeEditor", () => {
 
     await waitFor(() => expect(screen.queryByTestId("wf-mobile-shell")).not.toBeInTheDocument());
     expect(screen.getByTestId("wf-layout-toggle")).toHaveTextContent("Show simple editor");
+  });
+
+  it("surfaces the full styled simple-editor affordance set at desktop width", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+
+    const shell = await screen.findByTestId("wf-mobile-shell");
+    for (const panel of ["graph", "add", "settings", "fields", "columns", "actions"]) {
+      expect(within(shell).getByTestId(`wf-mobile-tab-${panel}`)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-actions"));
+    expect(screen.getByTestId("wf-mobile-save")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-ai-edit")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-auto-layout")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-export")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-delete")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-add"));
+    expect(screen.getByTestId("wf-mobile-add-prompt-prompt")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-add-script-script")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-add-gate-gate")).toBeInTheDocument();
+  });
+
+  it("surfaces built-in simple-editor actions at desktop width", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("Default coding workflow");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+    await screen.findByTestId("wf-mobile-shell");
+
+    fireEvent.click(screen.getByTestId("wf-mobile-tab-actions"));
+    expect(screen.getByTestId("wf-mobile-export")).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-duplicate")).toBeInTheDocument();
+    expect(screen.queryByTestId("wf-mobile-save")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wf-mobile-delete")).not.toBeInTheDocument();
+  });
+
+  it("keeps simple-editor shell styling outside the mobile media query", () => {
+    const css = readFileSync("app/components/WorkflowNodeEditor.css", "utf8");
+    const mobileMediaIndex = css.indexOf("@media (max-width: 768px)");
+
+    expect(css.indexOf("--wf-editor-touch-target")).toBeGreaterThanOrEqual(0);
+    expect(css.indexOf("--wf-editor-touch-target")).toBeLessThan(mobileMediaIndex);
+    expect(css.indexOf(".wf-mobile-tab {")).toBeLessThan(mobileMediaIndex);
+    expect(css.indexOf(".wf-mobile-actions .wf-editor-action")).toBeLessThan(mobileMediaIndex);
   });
 
   it("lets tablet users switch to the simple graph layout", async () => {
@@ -516,6 +569,37 @@ describe("WorkflowNodeEditor", () => {
 
     expect(await screen.findByTestId("wf-node-inspector")).toBeInTheDocument();
     expect(screen.getByTestId("wf-inspector-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens selected edge details as a dismissible full-screen mobile stage", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    await screen.findByText("Save");
+    await screen.findByTestId("mobile-wf-graph");
+
+    const mobileEdgeChip = await screen.findByTestId("mobile-wf-edge-e-step-end-1");
+    fireEvent.click(mobileEdgeChip);
+
+    const edgeInspector = await screen.findByTestId("wf-edge-inspector");
+    const editorBody = edgeInspector.closest(".wf-editor-body");
+    expect(editorBody).toHaveClass("wf-editor-body--mobile-edge-detail");
+    expect(editorBody).not.toHaveClass("wf-editor-body--mobile-node-detail");
+    expect(within(edgeInspector).getByRole("button", { name: /delete edge/i })).toBeInTheDocument();
+    expect(screen.getByTestId("wf-mobile-shell").closest(".wf-editor-canvas-wrap")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-edge-inspector-close"));
+    await waitFor(() => expect(screen.queryByTestId("wf-edge-inspector")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("mobile-wf-graph")).toBeVisible();
+
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-step")).getByRole("button"));
+
+    const nodeInspector = await screen.findByTestId("wf-node-inspector");
+    expect(nodeInspector.closest(".wf-editor-body")).toHaveClass("wf-editor-body--mobile-node-detail");
+    expect(nodeInspector.closest(".wf-editor-body")).not.toHaveClass("wf-editor-body--mobile-edge-detail");
   });
 
   it("auto-expands the mobile inspector when selecting another node", async () => {

@@ -129,6 +129,7 @@ import { detectAlreadyLandedOnMain, type AlreadyMergedDetectionStrategy } from "
 import { decideAutoPrerebase, probeDivergence, runAutoPrerebase } from "./merger-auto-prerebase.js";
 import {
   acquireReuseHandoff,
+  ensureUsableMergeIntegrationRoot,
   MergeHandoffRefusedError,
   probeIntegrationWorktreeState,
   releaseReuseHandoff,
@@ -4055,6 +4056,7 @@ async function buildDeterministicMergeMessage(params: {
 }
 
 export { buildDeterministicMergeMessage as __testOnlyBuildDeterministicMergeMessage };
+export { resolveSafeCommitBody as __testOnlyResolveSafeCommitBody };
 export { resolveComplexRebaseConflictsWithAi as __testOnlyResolveComplexRebaseConflictsWithAi };
 
 /**
@@ -4967,18 +4969,31 @@ export class FileScopeViolationError extends Error {
   }
 }
 
+export type StagedFilesReader = (cwd: string) => Promise<string[]>;
+
+async function readStagedFileNames(cwd: string): Promise<string[]> {
+  const { stdout } = await execAsync("git diff --cached --name-only", {
+    cwd,
+    encoding: "utf-8",
+  });
+  return stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
 export async function assertSquashOverlapsFileScope(params: {
   store: TaskStore;
   taskId: string;
   rootDir: string;
   task: Task;
+  /** Test seam for deterministic file-scope invariant coverage. Production
+   * callers use the default real-git staged-file reader. */
+  stagedFilesReader?: StagedFilesReader;
   /** U7 (R10): when the merge trait's `fileScope: "custom"` mode is active,
    *  these glob/path rules replace the task's File Scope section as the
    *  declared scope. `scopeOverride` is a documented no-op only under
    *  `fileScope: "off"` (handled by the caller, which skips this assert). */
   customScopeRules?: string[];
 }): Promise<void> {
-  const { store, taskId, rootDir, task, customScopeRules } = params;
+  const { store, taskId, rootDir, task, customScopeRules, stagedFilesReader = readStagedFileNames } = params;
   const hasCustomRules = Array.isArray(customScopeRules) && customScopeRules.length > 0;
 
   if (!hasCustomRules && task.scopeOverride === true) {
@@ -5009,11 +5024,7 @@ export async function assertSquashOverlapsFileScope(params: {
     return;
   }
 
-  const { stdout } = await execAsync("git diff --cached --name-only", {
-    cwd: rootDir,
-    encoding: "utf-8",
-  });
-  const stagedFiles = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  const stagedFiles = await stagedFilesReader(rootDir);
   const hasOverlap = stagedFiles.some((file) => matchesScope(file, declaredScope));
   if (!hasOverlap) {
     throw new FileScopeViolationError(taskId, stagedFiles, declaredScope);
@@ -5037,6 +5048,7 @@ export async function enforceSquashFileScopeInvariant(params: {
   rootDir: string;
   task: Task;
   resetLabel: string;
+  stagedFilesReader?: StagedFilesReader;
   auditor?: RunAuditor;
 }): Promise<void> {
   // U7 (R10): resolve the file-scope enforcement mode from the merge trait
@@ -6671,25 +6683,12 @@ async function resolveSafeCommitBody(opts: {
   const cleanStat = opts.diffStat.trim();
   if (cleanStat.length > 0) {
     if (opts.settings.useAiMergeCommitSummary) {
-      // Prefer the dedicated title-summarization model — a small, fast tier
-      // intended for short summarization. Falls back to the project / global
-      // default model when the summarizer lane isn't configured. The core
-      // `summarizeCommitBody` helper handles missing-runtime / timeout / empty
-      // response gracefully and returns null.
-      const useTitleSummarizer =
-        !!opts.settings.titleSummarizerProvider && !!opts.settings.titleSummarizerModelId;
-      const provider = useTitleSummarizer
-        ? opts.settings.titleSummarizerProvider!
-        : (opts.settings.defaultProviderOverride && opts.settings.defaultModelIdOverride
-            ? opts.settings.defaultProviderOverride
-            : opts.settings.defaultProvider);
-      const modelId = useTitleSummarizer
-        ? opts.settings.titleSummarizerModelId!
-        : (opts.settings.defaultProviderOverride && opts.settings.defaultModelIdOverride
-            ? opts.settings.defaultModelIdOverride
-            : opts.settings.defaultModelId);
+      // Prefer the dedicated title-summarization lane and its documented
+      // fallbacks. The core `summarizeCommitBody` helper handles missing-runtime
+      // / timeout / empty response gracefully and returns null.
+      const resolved = resolveTitleSummarizerSettingsModel(opts.settings);
 
-      const ai = await summarizeCommitBody(cleanStat, opts.rootDir, provider, modelId, {
+      const ai = await summarizeCommitBody(cleanStat, opts.rootDir, resolved.provider, resolved.modelId, {
         branch: opts.branch,
         taskId: opts.taskId,
         signal: opts.signal,
@@ -7313,15 +7312,20 @@ async function removePostMergeWorktree(
   postMergeWorktree: string,
   taskId: string,
   settings: Partial<Settings>,
+  audit?: RunAuditor,
 ): Promise<void> {
   try {
-    await removeWorktree({
+    const outcome = await removeWorktree({
       rootDir,
       worktreePath: postMergeWorktree,
       settings,
       taskId,
       reason: RemovalReason.MergerPostMerge,
+      audit,
     });
+    if ("harmless" in outcome && outcome.harmless) {
+      mergerLog.warn(`${taskId}: post-merge worktree cleanup classified harmless for ${postMergeWorktree}: ${outcome.message}`);
+    }
   } catch (err: unknown) {
     mergerLog.warn(`${taskId}: failed to remove post-merge worktree ${postMergeWorktree}: ${getCommandErrorMessage(err)}`);
   }
@@ -8170,19 +8174,15 @@ export async function aiMergeTask(
 
   let reuseHandoff: HandoffResult | undefined;
   if (integrationRoot.mode === "reuse-task-worktree") {
-    const reusableWorktreePath = task.worktree?.trim();
-    if (!reusableWorktreePath) {
-      await reacquireReuseIntegrationWorktree("missing-task-worktree", {
+    const preflight = await ensureUsableMergeIntegrationRoot({
+      resolution: integrationRoot,
+      projectRoot: projectRootDir,
+    });
+    if (!preflight.ok) {
+      await reacquireReuseIntegrationWorktree(preflight.reason, {
         requestedMode: requestedIntegrationMode,
+        classification: preflight.classification ?? null,
       });
-    } else {
-      const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
-      if (!classification.ok) {
-        await reacquireReuseIntegrationWorktree("unusable-task-worktree", {
-          requestedMode: requestedIntegrationMode,
-          classification,
-        });
-      }
     }
   }
 
@@ -10522,7 +10522,7 @@ export async function aiMergeTask(
       // Non-fatal — task still moves to done
     } finally {
       if (postMergeWorktree) {
-        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings);
+        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings, audit);
       }
     }
   }
@@ -10574,7 +10574,7 @@ export async function aiMergeTask(
             metadata: { taskId, reason: RemovalReason.MergerCleanup, kind: "merger" },
           });
         } else {
-          await removeWorktree({
+          const outcome = await removeWorktree({
             rootDir,
             worktreePath,
             settings,
@@ -10582,7 +10582,10 @@ export async function aiMergeTask(
             audit,
             reason: RemovalReason.MergerCleanup,
           });
-          result.worktreeRemoved = true;
+          if ("harmless" in outcome && outcome.harmless) {
+            mergerLog.warn(`${taskId}: merge worktree cleanup classified harmless for ${worktreePath}: ${outcome.message}`);
+          }
+          result.worktreeRemoved = outcome.removed || ("harmless" in outcome && outcome.harmless);
         }
         if (result.worktreeRemoved) {
           try {

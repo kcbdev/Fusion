@@ -92,6 +92,16 @@ export async function resumeSession(sessionId: string, projectId?: string): Prom
   return data.session;
 }
 
+/** Cancel an in-flight session without deleting it. `projectId` must match start (see answerSession). */
+export async function cancelSession(sessionId: string, projectId?: string): Promise<CeSession> {
+  const data = await request<{ session: CeSession }>(`/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectId }),
+  });
+  return data.session;
+}
+
 /** List CE sessions, newest-activity first (optionally filtered by status/stage). */
 export async function listSessions(
   opts: { projectId?: string; status?: string; stage?: string } = {},

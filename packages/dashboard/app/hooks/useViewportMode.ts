@@ -5,12 +5,34 @@ export type ViewportMode = "mobile" | "tablet" | "desktop";
 // `(max-height: 480px)` catches phones held in landscape, which can exceed
 // 768 CSS px wide but stay short. Without it, landscape phones fall out of
 // mobile mode and lose the bottom nav bar + get the desktop horizontally-
-// scrollable board.
+// scrollable board. Runtime mode resolution additionally gates this height
+// clause on phone-class physical screen size so virtual keyboards cannot flip
+// tablet/desktop layouts into mobile mode by shrinking the CSS viewport height.
 export const MOBILE_MEDIA_QUERY = "(max-width: 768px), (max-height: 480px)";
+
+const MOBILE_WIDTH_MEDIA_QUERY = "(max-width: 768px)";
+const MOBILE_HEIGHT_MEDIA_QUERY = "(max-height: 480px)";
+
+// The virtual keyboard shrinks the CSS/visual viewport height (matching
+// `(max-height: 480px)`) but never the device's physical screen. Only treat a
+// short viewport as a landscape phone when the smaller physical screen edge is
+// phone-class. Fail safe (return false) when screen data is unavailable.
+function isPhoneClassScreen(): boolean {
+  if (typeof window === "undefined" || !window.screen) return false;
+  const { width, height } = window.screen;
+  if (!width || !height) return false;
+  return Math.min(width, height) <= 480;
+}
+
+export function isMobileViewport(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(MOBILE_WIDTH_MEDIA_QUERY).matches ||
+    (window.matchMedia(MOBILE_HEIGHT_MEDIA_QUERY).matches && isPhoneClassScreen());
+}
 
 export function getViewportMode(): ViewportMode {
   if (typeof window === "undefined") return "desktop";
-  if (window.matchMedia(MOBILE_MEDIA_QUERY).matches) return "mobile";
+  if (isMobileViewport()) return "mobile";
   if (window.matchMedia("(min-width: 769px) and (max-width: 1024px)").matches) return "tablet";
   return "desktop";
 }

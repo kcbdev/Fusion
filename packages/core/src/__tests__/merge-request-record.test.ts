@@ -38,7 +38,7 @@ describe("TaskStore merge request record + completion handoff marker", () => {
       .all() as Array<{ name: string }>;
 
     expect(tableRows).toEqual([{ name: "completion_handoff_markers" }, { name: "merge_requests" }]);
-    expect(db.getSchemaVersion()).toBe(115);
+    expect(db.getSchemaVersion()).toBe(118);
   });
 
   it("upserts merge request records", async () => {
@@ -67,6 +67,87 @@ describe("TaskStore merge request record + completion handoff marker", () => {
     expect(store.transitionMergeRequestState(taskId, "queued", { now: "2026-05-30T00:00:03.000Z" }).state).toBe("queued");
     expect(store.transitionMergeRequestState(taskId, "running", { now: "2026-05-30T00:00:04.000Z" }).state).toBe("running");
     expect(store.transitionMergeRequestState(taskId, "succeeded", { now: "2026-05-30T00:00:05.000Z" }).state).toBe("succeeded");
+  });
+
+  it("projects merge request states onto workflow work items", async () => {
+    const cases = [
+      { mergeState: "queued", workState: "runnable", kind: "merge" },
+      { mergeState: "running", workState: "running", kind: "merge" },
+      { mergeState: "retrying", workState: "retrying", kind: "merge" },
+      { mergeState: "manual-required", workState: "manual-required", kind: "manual-hold" },
+      { mergeState: "succeeded", workState: "succeeded", kind: "merge" },
+      { mergeState: "exhausted", workState: "exhausted", kind: "merge" },
+      { mergeState: "cancelled", workState: "cancelled", kind: "merge" },
+    ] as const;
+
+    for (const { mergeState, workState, kind } of cases) {
+      const taskId = await createTask();
+      store.upsertMergeRequestRecord(taskId, {
+        state: mergeState,
+        attemptCount: 3,
+        lastError: mergeState === "manual-required" ? "needs human" : "last failure",
+        now: "2026-05-30T00:00:00.000Z",
+      });
+
+      const item = store.projectMergeRequestToWorkflowWorkItem(taskId, {
+        now: "2026-05-30T00:00:01.000Z",
+      });
+
+      expect(item).toMatchObject({
+        runId: `merge-request:${taskId}`,
+        taskId,
+        nodeId: "builtin.merge.request",
+        kind,
+        state: workState,
+        attempt: 3,
+      });
+    }
+  });
+
+  it("projects merge requests idempotently across restart-style replays", async () => {
+    const taskId = await createTask();
+    store.upsertMergeRequestRecord(taskId, {
+      state: "retrying",
+      attemptCount: 2,
+      lastError: "network reset",
+      now: "2026-05-30T00:00:00.000Z",
+    });
+
+    const first = store.projectMergeRequestToWorkflowWorkItem(taskId, { now: "2026-05-30T00:00:01.000Z" });
+    const second = store.projectMergeRequestToWorkflowWorkItem(taskId, { now: "2026-05-30T00:00:02.000Z" });
+
+    expect(second?.id).toBe(first?.id);
+    expect(store.listWorkflowWorkItemsForTask(taskId, { kinds: ["merge"] })).toHaveLength(1);
+    expect(second).toMatchObject({ state: "retrying", attempt: 2, lastError: "network reset" });
+  });
+
+  it("cancels stale manual-hold projection when the same merge request succeeds", async () => {
+    const taskId = await createTask();
+    store.upsertMergeRequestRecord(taskId, {
+      state: "manual-required",
+      attemptCount: 1,
+      lastError: "needs human",
+      now: "2026-05-30T00:00:00.000Z",
+    });
+
+    const hold = store.projectMergeRequestToWorkflowWorkItem(taskId, { now: "2026-05-30T00:00:01.000Z" });
+    store.upsertMergeRequestRecord(taskId, {
+      state: "succeeded",
+      attemptCount: 1,
+      lastError: null,
+      now: "2026-05-30T00:00:02.000Z",
+    });
+    const merge = store.projectMergeRequestToWorkflowWorkItem(taskId, { now: "2026-05-30T00:00:03.000Z" });
+
+    expect(merge).toMatchObject({ kind: "merge", state: "succeeded" });
+    expect(store.getWorkflowWorkItem(hold?.id ?? "")).toMatchObject({
+      kind: "manual-hold",
+      state: "cancelled",
+      lastError: "superseded-by-merge-request-projection",
+    });
+    expect(store.listWorkflowWorkItemsForTask(taskId).filter((item) => item.state !== "cancelled")).toEqual([
+      expect.objectContaining({ id: merge?.id, kind: "merge", state: "succeeded" }),
+    ]);
   });
 
   it("rejects invalid merge-request transitions", async () => {
@@ -111,5 +192,34 @@ describe("TaskStore merge request record + completion handoff marker", () => {
 
     expect(store.getMergeRequestRecord(taskId)?.state).toBe("cancelled");
     expect(store.getCompletionHandoffAcceptedMarker(taskId)).toBeNull();
+  });
+
+  it("cancels active workflow merge work on user hard-cancel from in-review to todo", async () => {
+    const taskId = await createTask();
+    await store.moveTask(taskId, "todo");
+    await store.moveTask(taskId, "in-progress");
+    await store.handoffToReview(taskId, {
+      ownerAgentId: "agent-test",
+      evidence: { reason: "fn_task_done", runId: "run-1", agentId: "agent-test" },
+    });
+    store.setCompletionHandoffAcceptedMarker(taskId, { source: "executor:fn_task_done" });
+    const mergeWork = store.upsertWorkflowWorkItem({
+      runId: "run-merge",
+      taskId,
+      nodeId: "builtin.merge.request",
+      kind: "merge",
+      state: "running",
+      leaseOwner: "worker-a",
+      leaseExpiresAt: "2026-05-30T00:05:00.000Z",
+    });
+
+    await store.moveTask(taskId, "todo", { moveSource: "user" });
+
+    expect(store.getWorkflowWorkItem(mergeWork.id)).toMatchObject({
+      state: "cancelled",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: "cancelled-by-user-hard-cancel",
+    });
   });
 });

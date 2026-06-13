@@ -8,7 +8,12 @@ import {
   getAvailableTemplates,
   getTemplatesForRole,
 } from "../agent-prompts.js";
+import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { BUILTIN_SEAM_PROMPTS, builtinSeamPrompt } from "../builtin-workflow-prompts.js";
+import { renderTriagePolicyPlaceholders } from "../builtin-workflow-settings.js";
+import { resolvePlanningPromptFromIr, resolveSeamPromptFromIr } from "../workflow-ir-resolver.js";
 import type { AgentPromptsConfig, AgentPromptTemplate } from "../types.js";
+import type { WorkflowIr } from "../workflow-ir-types.js";
 
 // ---------------------------------------------------------------------------
 // resolveAgentPrompt
@@ -257,36 +262,65 @@ describe("resolveAgentPrompt", () => {
     expect(result).toContain("task_document_write");
   });
 
-  it("triage prompt broad-scope decomposition block is present and identical in core and engine templates", () => {
+  it("fast triage prompt is sourced from built-in workflow seam data", () => {
+    const fastTemplate = BUILTIN_AGENT_PROMPTS.find((prompt) => prompt.id === "default-triage-fast");
+
+    expect(fastTemplate).toBeDefined();
+    expect(fastTemplate?.role).toBe("triage");
+    expect(BUILTIN_SEAM_PROMPTS["planning-fast"]).toBe(fastTemplate?.prompt);
+    expect(builtinSeamPrompt("planning-fast")).toBe(fastTemplate?.prompt);
+    expect(builtinSeamPrompt("planning-fast")).toContain("This task is running in **fast mode**");
+    expect(builtinSeamPrompt("planning-fast")).not.toContain("## Review Level");
+  });
+
+  it("triage planning prompt is sourced from workflow IR without an engine duplicate", () => {
     const corePrompt = resolveAgentPrompt("triage");
+    const planningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR);
     const triageSource = readFileSync(
       resolve(fileURLToPath(new URL("..", import.meta.url)), "..", "..", "engine", "src", "triage.ts"),
       "utf8",
     );
-    const enginePromptMatch = triageSource.match(/export const TRIAGE_SYSTEM_PROMPT = `([\s\S]*?)`;/);
-    expect(enginePromptMatch?.[1]).toBeTruthy();
-    const enginePrompt = enginePromptMatch![1].replaceAll("\\`", "`");
 
-    for (const prompt of [corePrompt, enginePrompt]) {
-      expect(prompt).toContain("**Broad-scope decomposition signals:**");
-      expect(prompt).toContain("step count would reach 9 or more");
-      expect(prompt).toContain("would reach 12 or more");
-      expect(prompt).toContain("20 or more entries");
-      expect(prompt).toContain("at or above 30 items");
-    }
+    expect(triageSource).not.toContain(["FAST", "TRIAGE", "SYSTEM", "PROMPT"].join("_"));
+    expect(triageSource).not.toMatch(/export const [A-Z_]*TRIAGE[A-Z_]*SYSTEM_PROMPT\s*=/);
+    expect(planningPrompt).toBe(corePrompt);
+    expect(corePrompt).toContain("**Broad-scope decomposition signals:**");
+    expect(corePrompt).toContain("step count would reach {{triageSubtaskLargeStepSignal}} or more");
+    expect(corePrompt).toContain("would reach {{triageSubtaskAdditiveStepSignal}} or more");
+    expect(corePrompt).toContain("{{triageSubtaskFileScopeThreshold}} or more entries");
+    expect(corePrompt).toContain("at or above {{triageSubtaskRemediationBatchThreshold}} items");
 
-    const marker = "**Broad-scope decomposition signals:**";
-    const blockRegex = /\*\*Broad-scope decomposition signals:\*\*[\s\S]*?(?=\n\n(?:##|\*\*))/;
-    const coreStart = corePrompt.indexOf(marker);
-    const engineStart = enginePrompt.indexOf(marker);
-    expect(coreStart).toBeGreaterThanOrEqual(0);
-    expect(engineStart).toBeGreaterThanOrEqual(0);
+    const renderedPrompt = renderTriagePolicyPlaceholders(corePrompt, {});
+    expect(renderedPrompt).toContain("step count would reach 9 or more");
+    expect(renderedPrompt).toContain("would reach 12 or more");
+    expect(renderedPrompt).toContain("20 or more entries");
+    expect(renderedPrompt).toContain("at or above 30 items");
+    expect(renderedPrompt).not.toContain("{{");
+  });
 
-    const coreBlock = corePrompt.slice(coreStart).match(blockRegex)?.[0];
-    const engineBlock = enginePrompt.slice(engineStart).match(blockRegex)?.[0];
-    expect(coreBlock).toBeTruthy();
-    expect(engineBlock).toBeTruthy();
-    expect(coreBlock).toBe(engineBlock);
+  it("resolves custom seam prompts and ignores IRs without matching prompts", () => {
+    const customIr: WorkflowIr = {
+      version: "v1",
+      name: "custom",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "planning", kind: "prompt", config: { seam: "planning", prompt: "custom planning prompt" } },
+        { id: "review", kind: "prompt", config: { seam: "review", prompt: "custom review prompt" } },
+      ],
+      edges: [],
+    };
+    const noPlanningIr: WorkflowIr = {
+      version: "v1",
+      name: "no-planning",
+      nodes: [{ id: "execute", kind: "prompt", config: { seam: "execute", prompt: "executor" } }],
+      edges: [],
+    };
+
+    expect(resolvePlanningPromptFromIr(customIr)).toBe("custom planning prompt");
+    expect(resolveSeamPromptFromIr(customIr, "review")).toBe("custom review prompt");
+    expect(resolveSeamPromptFromIr(BUILTIN_CODING_WORKFLOW_IR, "review")).toBe(resolveAgentPrompt("reviewer"));
+    expect(resolvePlanningPromptFromIr(noPlanningIr)).toBeUndefined();
+    expect(resolveSeamPromptFromIr(noPlanningIr, "review")).toBeUndefined();
   });
 
   it("built-in triage prompt requires surface enumeration for bug-fix specs", () => {

@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
-import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
+import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isColumn, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import {
   MOVED_SETTINGS_KEYS,
@@ -77,7 +77,7 @@ import type {
   WorkflowDefinitionUpdate,
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
-import { compileWorkflowToSteps } from "./workflow-compiler.js";
+import { compileWorkflowToSteps, isInterpreterDeferredWorkflowCompileError } from "./workflow-compiler.js";
 import {
   BUILTIN_WORKFLOWS,
   getBuiltinWorkflow,
@@ -191,6 +191,7 @@ interface TaskRow {
   executionStartBranch: string | null;
   branch: string | null;
   autoMerge: number | null;
+  autoMergeProvenance: string | null;
   baseCommitSha: string | null;
   modelPresetId: string | null;
   modelProvider: string | null;
@@ -203,6 +204,7 @@ interface TaskRow {
   workflowStepRetries: number | null;
   stuckKillCount: number | null;
   resumeLimboCount: number | null;
+  graphResumeRetryCount: number | null;
   resumeLimboTipSha: string | null;
   resumeLimboStepSignature: string | null;
   postReviewFixCount: number | null;
@@ -310,6 +312,7 @@ function defineTaskColumn(
 }
 
 const serializeTaskAutoMerge: TaskColumnDescriptor["serialize"] = (task) => task.autoMerge === undefined ? null : (task.autoMerge ? 1 : 0);
+const serializeTaskAutoMergeProvenance: TaskColumnDescriptor["serialize"] = (task) => task.autoMergeProvenance ?? null;
 
 // Keep this descriptor order in lockstep with the named-column INSERT/UPSERT
 // clauses we generate below. SQLite binds by the explicit column list we emit,
@@ -335,6 +338,7 @@ const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("baseBranch", (task) => task.baseBranch ?? null),
   defineTaskColumn("branch", (task) => task.branch ?? null),
   defineTaskColumn("autoMerge", serializeTaskAutoMerge),
+  defineTaskColumn("autoMergeProvenance", serializeTaskAutoMergeProvenance),
   defineTaskColumn("executionStartBranch", (task) => task.executionStartBranch ?? null),
   defineTaskColumn("baseCommitSha", (task) => task.baseCommitSha ?? null),
   defineTaskColumn("modelPresetId", (task) => task.modelPresetId ?? null),
@@ -348,6 +352,7 @@ const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("workflowStepRetries", (task) => task.workflowStepRetries ?? null),
   defineTaskColumn("stuckKillCount", (task) => task.stuckKillCount ?? 0),
   defineTaskColumn("resumeLimboCount", (task) => task.resumeLimboCount ?? 0),
+  defineTaskColumn("graphResumeRetryCount", (task) => task.graphResumeRetryCount === undefined ? 0 : task.graphResumeRetryCount),
   defineTaskColumn("resumeLimboTipSha", (task) => task.resumeLimboTipSha ?? null),
   defineTaskColumn("resumeLimboStepSignature", (task) => task.resumeLimboStepSignature ?? null),
   defineTaskColumn("postReviewFixCount", (task) => task.postReviewFixCount ?? 0),
@@ -623,6 +628,23 @@ interface CompletionHandoffMarkerRow {
   taskId: string;
   acceptedAt: string;
   source: string;
+}
+
+interface WorkflowWorkItemRow {
+  id: string;
+  runId: string;
+  taskId: string;
+  nodeId: string;
+  kind: string;
+  state: string;
+  attempt: number;
+  retryAfter: string | null;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+  lastError: string | null;
+  blockedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Database row shape for the config table. */
@@ -1388,6 +1410,15 @@ interface MoveTaskInternalOptions {
 
 const WORKFLOW_MOVE_POLICY_TIMEOUT_MS = 5000;
 
+export interface LegacyAutoMergeStampReconcileResult {
+  taskId: string;
+  column: string;
+  cleared: boolean;
+}
+
+const LEGACY_AUTO_MERGE_STAMP_MARKER_KEY = "legacyAutoMergeStampMarkedVersion";
+const LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION = "1";
+
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
   /** U6: sentinel effective-workflow id for default-workflow (null-selection)
@@ -1788,6 +1819,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     await this.migrateActiveArchivedTasksToArchiveDb();
     await this.migrateAgentLogEntriesToFilesOnce();
     await this.cleanupNoOpTaskMovedActivityRowsOnce();
+    try {
+      await this.markLegacyAutoMergeStampsOnce();
+    } catch (err) {
+      storeLog.warn("Legacy auto-merge stamp marker failed during init (non-fatal)", {
+        phase: "init:legacy-auto-merge-stamp-marker",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     // U4: one-time per-project hard-move of MOVED_SETTINGS_KEYS into workflow
     // setting values (marker-gated, idempotent, never blocks startup).
     try {
@@ -1901,6 +1940,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       executionStartBranch: row.executionStartBranch || undefined,
       branch: row.branch || undefined,
       autoMerge: row.autoMerge === null ? undefined : row.autoMerge === 1,
+      autoMergeProvenance: row.autoMergeProvenance === "user" || row.autoMergeProvenance === "legacy-stamp"
+        ? row.autoMergeProvenance
+        : undefined,
       baseCommitSha: row.baseCommitSha || undefined,
       scopeOverride: row.scopeOverride ? true : undefined,
       scopeOverrideReason: row.scopeOverrideReason || undefined,
@@ -1916,6 +1958,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       workflowStepRetries: row.workflowStepRetries ?? undefined,
       stuckKillCount: row.stuckKillCount ?? undefined,
       resumeLimboCount: row.resumeLimboCount ?? undefined,
+      graphResumeRetryCount: row.graphResumeRetryCount ?? undefined,
       resumeLimboTipSha: row.resumeLimboTipSha || undefined,
       resumeLimboStepSignature: row.resumeLimboStepSignature || undefined,
       postReviewFixCount: row.postReviewFixCount ?? undefined,
@@ -2089,6 +2132,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: entry.description,
       priority: normalizeTaskPriority(entry.priority),
       column: "archived",
+      preArchiveColumn: entry.preArchiveColumn,
       dependencies: entry.dependencies ?? [],
       steps: entry.steps ?? [],
       currentStep: entry.currentStep ?? 0,
@@ -2222,6 +2266,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: task.description,
       priority: normalizeTaskPriority(task.priority),
       column: "archived",
+      preArchiveColumn: task.preArchiveColumn,
       dependencies: task.dependencies,
       steps: task.steps,
       currentStep: task.currentStep,
@@ -2426,11 +2471,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const prefix = tableAlias ? `${tableAlias}.` : "";
     return [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "autoMergeProvenance", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "graphResumeRetryCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
@@ -2475,11 +2520,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
     const columns = [
       "id", "lineageId", "title", "description", "priority", "\"column\"", "status", "size", "reviewLevel", "currentStep",
-      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "executionStartBranch", "baseCommitSha",
+      "worktree", "blockedBy", "overlapBlockedBy", "paused", "pausedReason", "userPaused", "baseBranch", "branch", "autoMerge", "autoMergeProvenance", "executionStartBranch", "baseCommitSha",
       "modelPresetId", "modelProvider", "modelId",
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
-      "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
+      "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "graphResumeRetryCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
@@ -4438,6 +4483,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       sourceMetadata: withTaskBranchContextInSourceMetadata(input.source?.sourceMetadata, input.branchContext),
       branchContext: input.branchContext,
       autoMerge: input.autoMerge,
+      autoMergeProvenance: input.autoMerge === undefined ? undefined : "user",
       column: input.column || "triage",
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
@@ -6815,11 +6861,6 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       }
     }
 
-    const settingsForInReview =
-      toColumn === "in-review" && task.autoMerge === undefined
-        ? await this.getSettingsFast()
-        : undefined;
-
     const movedAt = internal.now ?? new Date().toISOString();
     task.column = toColumn;
     task.columnMovedAt = movedAt;
@@ -6837,7 +6878,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         moveSource,
         bypassGuards,
         movedAt,
-        settings: settingsForInReview,
+        settings: undefined,
         options: {
           preserveStatus: options?.preserveStatus,
           preserveResumeState: options?.preserveResumeState,
@@ -6941,9 +6982,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       }
 
       if (toColumn === "in-review") {
-        if (task.autoMerge === undefined && settingsForInReview) {
-          task.autoMerge = settingsForInReview.autoMerge;
-        }
+        // Keep this flag-OFF inline path in sync with applyInReviewEnterEffects.
+        // Do not snapshot global autoMerge: undefined follows the live setting,
+        // while explicit per-task true/false overrides remain sticky.
         task.recoveryRetryCount = undefined;
         task.nextRecoveryAt = undefined;
         // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
@@ -7132,6 +7173,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           });
         }
       }
+      this.cancelActiveWorkflowWorkItemsForTask(id, {
+        kinds: ["merge", "manual-hold"],
+        now: movedAt,
+        lastError: "cancelled-by-user-hard-cancel",
+      });
       this.clearCompletionHandoffAcceptedMarker(id);
     }
     if (toColumn === "done") {
@@ -7481,7 +7527,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; customFields?: Record<string, unknown>; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; customFields?: Record<string, unknown>; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; graphResumeRetryCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
@@ -8031,20 +8077,28 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       } else if (updates.baseBranch !== undefined) {
         task.baseBranch = updates.baseBranch;
       }
+      // Explicit task-level auto-merge overrides written through updateTask are
+      // user provenance. Task creation mirrors this for create-time overrides.
       if (updates.autoMerge === null) {
         task.autoMerge = undefined;
+        task.autoMergeProvenance = undefined;
       } else if (updates.autoMerge !== undefined) {
         task.autoMerge = updates.autoMerge;
+        task.autoMergeProvenance = "user";
       }
       if (updates.branch === null) {
         task.branch = undefined;
       } else if (updates.branch !== undefined) {
         task.branch = updates.branch;
       }
+      // Keep in sync with the first autoMerge block above; both legacy update
+      // paths may run before persistence.
       if (updates.autoMerge === null) {
         task.autoMerge = undefined;
+        task.autoMergeProvenance = undefined;
       } else if (updates.autoMerge !== undefined) {
         task.autoMerge = updates.autoMerge;
+        task.autoMergeProvenance = "user";
       }
       if (updates.executionStartBranch === null) {
         task.executionStartBranch = undefined;
@@ -8069,6 +8123,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         task.resumeLimboCount = undefined;
       } else if (updates.resumeLimboCount !== undefined) {
         task.resumeLimboCount = updates.resumeLimboCount;
+      }
+      if (updates.graphResumeRetryCount === null) {
+        task.graphResumeRetryCount = null;
+      } else if (updates.graphResumeRetryCount !== undefined) {
+        task.graphResumeRetryCount = updates.graphResumeRetryCount;
       }
       if (updates.resumeLimboTipSha === null) {
         task.resumeLimboTipSha = undefined;
@@ -8803,6 +8862,72 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     };
   }
 
+  private normalizeWorkflowWorkItemKind(value: string): WorkflowWorkItemKind {
+    switch (value) {
+      case "task":
+      case "merge":
+      case "retry":
+      case "manual-hold":
+      case "recovery":
+        return value;
+      default:
+        return "task";
+    }
+  }
+
+  private normalizeWorkflowWorkItemState(value: string): WorkflowWorkItemState {
+    switch (value) {
+      case "runnable":
+      case "running":
+      case "held":
+      case "retrying":
+      case "manual-required":
+      case "succeeded":
+      case "failed":
+      case "cancelled":
+      case "exhausted":
+        return value;
+      default:
+        return "runnable";
+    }
+  }
+
+  private isTerminalWorkflowWorkItemState(state: WorkflowWorkItemState): boolean {
+    return state === "succeeded" || state === "failed" || state === "cancelled" || state === "exhausted";
+  }
+
+  private workflowStateForMergeRequestState(state: MergeRequestState): WorkflowWorkItemState {
+    const states: Record<MergeRequestState, WorkflowWorkItemState> = {
+      queued: "runnable",
+      running: "running",
+      retrying: "retrying",
+      succeeded: "succeeded",
+      exhausted: "exhausted",
+      cancelled: "cancelled",
+      "manual-required": "manual-required",
+    };
+    return states[state];
+  }
+
+  private rowToWorkflowWorkItem(row: WorkflowWorkItemRow): WorkflowWorkItem {
+    return {
+      id: row.id,
+      runId: row.runId,
+      taskId: row.taskId,
+      nodeId: row.nodeId,
+      kind: this.normalizeWorkflowWorkItemKind(row.kind),
+      state: this.normalizeWorkflowWorkItemState(row.state),
+      attempt: row.attempt,
+      retryAfter: row.retryAfter,
+      leaseOwner: row.leaseOwner,
+      leaseExpiresAt: row.leaseExpiresAt,
+      lastError: row.lastError,
+      blockedReason: row.blockedReason,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   private isValidMergeRequestTransition(from: MergeRequestState, to: MergeRequestState): boolean {
     if (from === to) return true;
     const allowed: Record<MergeRequestState, ReadonlySet<MergeRequestState>> = {
@@ -8890,6 +9015,274 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   getMergeRequestRecord(taskId: string): MergeRequestRecord | null {
     const row = this.db.prepare("SELECT * FROM merge_requests WHERE taskId = ?").get(taskId) as MergeRequestRow | undefined;
     return row ? this.rowToMergeRequestRecord(row) : null;
+  }
+
+  projectMergeRequestToWorkflowWorkItem(
+    taskId: string,
+    opts: MergeRequestWorkflowProjectionOptions = {},
+  ): WorkflowWorkItem | null {
+    return this.db.transactionImmediate(() => {
+      const record = this.getMergeRequestRecord(taskId);
+      if (!record) return null;
+      const state = this.workflowStateForMergeRequestState(record.state);
+      const kind = record.state === "manual-required" ? "manual-hold" : "merge";
+      const item = this.upsertWorkflowWorkItem({
+        runId: opts.runId ?? `merge-request:${taskId}`,
+        taskId,
+        nodeId: opts.nodeId ?? "builtin.merge.request",
+        kind,
+        state,
+        attempt: record.attemptCount,
+        lastError: record.lastError,
+        blockedReason: record.state === "manual-required" ? record.lastError ?? "manual merge required" : null,
+        now: opts.now ?? record.updatedAt,
+      });
+      this.cancelActiveWorkflowWorkItemsForTask(taskId, {
+        kinds: [kind === "manual-hold" ? "merge" : "manual-hold"],
+        now: opts.now ?? record.updatedAt,
+        lastError: "superseded-by-merge-request-projection",
+      });
+      this.insertRunAuditEventRow({
+        taskId,
+        runId: item.runId,
+        domain: "database",
+        mutationType: "mergeRequest:workflow-projection",
+        target: item.id,
+        metadata: { taskId, mergeRequestState: record.state, workflowState: item.state, workItemKind: item.kind },
+      });
+      return item;
+    });
+  }
+
+  upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput): WorkflowWorkItem {
+    return this.db.transactionImmediate(() => {
+      const existing = this.db
+        .prepare("SELECT * FROM workflow_work_items WHERE runId = ? AND taskId = ? AND nodeId = ? AND kind = ?")
+        .get(input.runId, input.taskId, input.nodeId, input.kind) as WorkflowWorkItemRow | undefined;
+      const now = input.now ?? new Date().toISOString();
+      const existingState = existing ? this.normalizeWorkflowWorkItemState(existing.state) : null;
+      const state = input.state ?? existingState ?? "runnable";
+      if (existingState && this.isTerminalWorkflowWorkItemState(existingState) && existingState !== state) {
+        throw new Error(
+          `Workflow work item ${existing?.id ?? input.id ?? input.nodeId} is terminal (${existingState}) and cannot be requeued as ${state}`,
+        );
+      }
+
+      const id = existing?.id ?? input.id ?? randomUUID();
+      this.db
+        .prepare(
+          `INSERT INTO workflow_work_items (
+             id, runId, taskId, nodeId, kind, state, attempt, retryAfter,
+             leaseOwner, leaseExpiresAt, lastError, blockedReason, createdAt, updatedAt
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(runId, taskId, nodeId, kind) DO UPDATE SET
+             state = excluded.state,
+             attempt = excluded.attempt,
+             retryAfter = excluded.retryAfter,
+             leaseOwner = excluded.leaseOwner,
+             leaseExpiresAt = excluded.leaseExpiresAt,
+             lastError = excluded.lastError,
+             blockedReason = excluded.blockedReason,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          id,
+          input.runId,
+          input.taskId,
+          input.nodeId,
+          input.kind,
+          state,
+          input.attempt ?? existing?.attempt ?? 0,
+          input.retryAfter === undefined ? existing?.retryAfter ?? null : input.retryAfter,
+          input.leaseOwner === undefined ? existing?.leaseOwner ?? null : input.leaseOwner,
+          input.leaseExpiresAt === undefined ? existing?.leaseExpiresAt ?? null : input.leaseExpiresAt,
+          input.lastError === undefined ? existing?.lastError ?? null : input.lastError,
+          input.blockedReason === undefined ? existing?.blockedReason ?? null : input.blockedReason,
+          existing?.createdAt ?? now,
+          now,
+        );
+
+      const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!row) throw new Error(`Failed to upsert workflow work item ${id}`);
+      this.insertRunAuditEventRow({
+        taskId: row.taskId,
+        runId: row.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:upsert",
+        target: row.id,
+        metadata: { id: row.id, nodeId: row.nodeId, kind: row.kind, state: row.state, attempt: row.attempt },
+      });
+      return this.rowToWorkflowWorkItem(row);
+    });
+  }
+
+  transitionWorkflowWorkItem(
+    id: string,
+    state: WorkflowWorkItemState,
+    patch: WorkflowWorkItemTransitionPatch = {},
+  ): WorkflowWorkItem {
+    return this.db.transactionImmediate(() => {
+      const now = patch.now ?? new Date().toISOString();
+      const existing = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!existing) throw new Error(`Workflow work item ${id} not found`);
+      const fromState = this.normalizeWorkflowWorkItemState(existing.state);
+      if (this.isTerminalWorkflowWorkItemState(fromState) && fromState !== state) {
+        throw new Error(`Workflow work item ${id} is terminal (${fromState}) and cannot transition to ${state}`);
+      }
+
+      this.db
+        .prepare(
+          `UPDATE workflow_work_items
+              SET state = ?,
+                  attempt = ?,
+                  retryAfter = ?,
+                  leaseOwner = ?,
+                  leaseExpiresAt = ?,
+                  lastError = ?,
+                  blockedReason = ?,
+                  updatedAt = ?
+            WHERE id = ?`,
+        )
+        .run(
+          state,
+          patch.attempt ?? existing.attempt,
+          patch.retryAfter === undefined ? existing.retryAfter : patch.retryAfter,
+          patch.leaseOwner === undefined ? existing.leaseOwner : patch.leaseOwner,
+          patch.leaseExpiresAt === undefined ? existing.leaseExpiresAt : patch.leaseExpiresAt,
+          patch.lastError === undefined ? existing.lastError : patch.lastError,
+          patch.blockedReason === undefined ? existing.blockedReason : patch.blockedReason,
+          now,
+          id,
+        );
+
+      const updated = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!updated) throw new Error(`Workflow work item ${id} disappeared`);
+      this.insertRunAuditEventRow({
+        taskId: updated.taskId,
+        runId: updated.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:transition",
+        target: updated.id,
+        metadata: { id: updated.id, fromState, toState: state, attempt: updated.attempt },
+      });
+      return this.rowToWorkflowWorkItem(updated);
+    });
+  }
+
+  getWorkflowWorkItem(id: string): WorkflowWorkItem | null {
+    const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+    return row ? this.rowToWorkflowWorkItem(row) : null;
+  }
+
+  listWorkflowWorkItemsForTask(taskId: string, opts: { kinds?: WorkflowWorkItemKind[] } = {}): WorkflowWorkItem[] {
+    const conditions = ["taskId = ?"];
+    const params: unknown[] = [taskId];
+    if (opts.kinds?.length) {
+      conditions.push(`kind IN (${opts.kinds.map(() => "?").join(", ")})`);
+      params.push(...opts.kinds);
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT *
+           FROM workflow_work_items
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY createdAt ASC, id ASC`,
+      )
+      .all(...params) as WorkflowWorkItemRow[];
+    return rows.map((row) => this.rowToWorkflowWorkItem(row));
+  }
+
+  cancelActiveWorkflowWorkItemsForTask(
+    taskId: string,
+    opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null } = {},
+  ): WorkflowWorkItem[] {
+    return this.db.transactionImmediate(() => {
+      const activeStates: WorkflowWorkItemState[] = ["runnable", "running", "held", "retrying", "manual-required"];
+      const items = this.listWorkflowWorkItemsForTask(taskId, opts).filter((item) => activeStates.includes(item.state));
+      return items.map((item) =>
+        this.transitionWorkflowWorkItem(item.id, "cancelled", {
+          now: opts.now,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          lastError: opts.lastError ?? item.lastError ?? "cancelled-by-user-hard-cancel",
+        }),
+      );
+    });
+  }
+
+  listDueWorkflowWorkItems(filter: WorkflowWorkItemDueFilter = {}): WorkflowWorkItem[] {
+    const now = filter.now ?? new Date().toISOString();
+    const includeExpiredRunning = !filter.states || filter.states.includes("running");
+    const states = filter.states?.length ? filter.states : ["runnable", "retrying"];
+    const stateConditions = [`(state IN (${states.map(() => "?").join(", ")}) AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?))`];
+    const params: unknown[] = [...states, now];
+    if (includeExpiredRunning) {
+      stateConditions.push("(state = 'running' AND leaseExpiresAt IS NOT NULL AND leaseExpiresAt <= ?)");
+      params.push(now);
+    }
+    const conditions = [
+      `(${stateConditions.join(" OR ")})`,
+      "(retryAfter IS NULL OR retryAfter <= ?)",
+    ];
+    params.push(now);
+    if (filter.kinds?.length) {
+      conditions.push(`kind IN (${filter.kinds.map(() => "?").join(", ")})`);
+      params.push(...filter.kinds);
+    }
+    params.push(filter.limit ?? 100);
+
+    const rows = this.db
+      .prepare(
+        `SELECT *
+           FROM workflow_work_items
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY retryAfter IS NOT NULL, retryAfter ASC, createdAt ASC
+          LIMIT ?`,
+      )
+      .all(...params) as WorkflowWorkItemRow[];
+    return rows.map((row) => this.rowToWorkflowWorkItem(row));
+  }
+
+  acquireWorkflowWorkItemLease(
+    id: string,
+    leaseOwner: string,
+    opts: { leaseDurationMs: number; now?: string },
+  ): WorkflowWorkItem | null {
+    if (opts.leaseDurationMs <= 0) {
+      throw new Error(`workflow work item leaseDurationMs must be > 0 (received ${opts.leaseDurationMs})`);
+    }
+
+    return this.db.transactionImmediate(() => {
+      const now = opts.now ?? new Date().toISOString();
+      const leaseExpiresAt = new Date(new Date(now).getTime() + opts.leaseDurationMs).toISOString();
+      const result = this.db
+        .prepare(
+          `UPDATE workflow_work_items
+              SET state = 'running',
+                  leaseOwner = ?,
+                  leaseExpiresAt = ?,
+                  updatedAt = ?
+            WHERE id = ?
+              AND state IN ('runnable', 'retrying', 'running')
+              AND (retryAfter IS NULL OR retryAfter <= ?)
+              AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?)`,
+        )
+        .run(leaseOwner, leaseExpiresAt, now, id, now, now);
+      if (result.changes === 0) return null;
+
+      const row = this.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
+      if (!row) throw new Error(`Workflow work item ${id} disappeared`);
+      this.insertRunAuditEventRow({
+        taskId: row.taskId,
+        runId: row.runId,
+        domain: "database",
+        mutationType: "workflowWorkItem:lease-acquired",
+        target: row.id,
+        metadata: { id: row.id, leaseOwner: row.leaseOwner, leaseExpiresAt: row.leaseExpiresAt },
+      });
+      return this.rowToWorkflowWorkItem(row);
+    });
   }
 
   setCompletionHandoffAcceptedMarker(
@@ -9003,6 +9396,118 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     });
 
     return event;
+  }
+
+  private isLegacyAutoMergeStampCandidate(task: Pick<Task, "column" | "autoMerge" | "autoMergeProvenance">): boolean {
+    return task.column === "in-review" && task.autoMerge === true && task.autoMergeProvenance !== "user";
+  }
+
+  private async listLegacyAutoMergeStampCandidates(): Promise<Task[]> {
+    const inReview = await this.listTasks({ column: "in-review" });
+    return inReview.filter((task) => this.isLegacyAutoMergeStampCandidate(task));
+  }
+
+  /**
+   * Dry-run or apply the operator-driven cleanup for legacy review-entry
+   * auto-merge stamps. Dry-run is the default and only reports candidates.
+   * With apply=true, ambiguous legacy stamps are cleared so the task follows the
+   * live global autoMerge setting again. Explicit user overrides are never
+   * candidates and are preserved.
+   */
+  async reconcileLegacyAutoMergeStamps(options?: { apply?: boolean }): Promise<LegacyAutoMergeStampReconcileResult[]> {
+    const candidates = await this.listLegacyAutoMergeStampCandidates();
+    const results: LegacyAutoMergeStampReconcileResult[] = [];
+
+    if (options?.apply !== true) {
+      return candidates.map((task) => ({ taskId: task.id, column: task.column, cleared: false }));
+    }
+
+    for (const candidate of candidates) {
+      const current = await this.getTask(candidate.id);
+      if (!current || !this.isLegacyAutoMergeStampCandidate(current)) {
+        continue;
+      }
+
+      const priorAutoMerge = current.autoMerge;
+      const priorProvenance = current.autoMergeProvenance;
+      current.autoMerge = undefined;
+      current.autoMergeProvenance = undefined;
+      current.updatedAt = new Date().toISOString();
+
+      await this.atomicWriteTaskJson(this.taskDir(current.id), current);
+      if (this.isWatching) this.taskCache.set(current.id, { ...current });
+      this.emitTaskLifecycleEventSafely("task:updated", [current]);
+
+      this.recordRunAuditEvent({
+        taskId: current.id,
+        agentId: "system",
+        runId: `legacy-auto-merge-stamp-clear-${current.id}-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:auto-merge-legacy-stamp-cleared",
+        target: current.id,
+        metadata: {
+          taskId: current.id,
+          priorAutoMerge,
+          priorAutoMergeProvenance: priorProvenance ?? null,
+          action: "cleared-to-follow-global-autoMerge",
+        },
+      });
+      results.push({ taskId: current.id, column: current.column, cleared: true });
+    }
+
+    return results;
+  }
+
+  private async markLegacyAutoMergeStampsOnce(): Promise<void> {
+    const markerRow = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(LEGACY_AUTO_MERGE_STAMP_MARKER_KEY) as
+      | { value: string }
+      | undefined;
+    if (markerRow?.value === LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION) {
+      return;
+    }
+
+    const candidates = await this.listLegacyAutoMergeStampCandidates();
+    const markedTaskIds: string[] = [];
+    for (const candidate of candidates) {
+      const current = await this.getTask(candidate.id);
+      if (!current || !this.isLegacyAutoMergeStampCandidate(current)) {
+        continue;
+      }
+      current.autoMergeProvenance = "legacy-stamp";
+      current.updatedAt = new Date().toISOString();
+      await this.atomicWriteTaskJson(this.taskDir(current.id), current);
+      if (this.isWatching) this.taskCache.set(current.id, { ...current });
+      this.emitTaskLifecycleEventSafely("task:updated", [current]);
+      markedTaskIds.push(current.id);
+
+      this.recordRunAuditEvent({
+        taskId: current.id,
+        agentId: "system",
+        runId: `legacy-auto-merge-stamp-mark-${current.id}-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:auto-merge-legacy-stamp-marked",
+        target: current.id,
+        metadata: {
+          taskId: current.id,
+          autoMerge: true,
+          autoMergeProvenance: "legacy-stamp",
+          action: "marked-only-no-behavior-change",
+        },
+      });
+    }
+
+    this.db.prepare(`
+      INSERT INTO __meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(LEGACY_AUTO_MERGE_STAMP_MARKER_KEY, LEGACY_AUTO_MERGE_STAMP_MARKER_VERSION);
+    this.db.bumpLastModified();
+
+    storeLog.log("legacy auto-merge stamp marker completed", {
+      phase: "legacy-auto-merge-stamp-marker",
+      markedCount: markedTaskIds.length,
+      markedTaskIds: markedTaskIds.slice(0, 50),
+      truncated: markedTaskIds.length > 50,
+    });
   }
 
   /**
@@ -10298,7 +10803,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   /**
-   * Archive a done task (move from done → archived).
+   * Archive a live task (move from any non-archived column → archived).
    * Logs the action and emits `task:moved` event.
    * @param optionsOrCleanup - Boolean cleanup flag for backward compatibility,
    * or an options object that also allows removeLineageReferences.
@@ -10316,11 +10821,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         task.log = [];
       }
 
-      if (task.column !== "done") {
+      if (task.column === "archived") {
         throw new Error(
-          `Cannot archive ${id}: task is in '${task.column}', must be in 'done'`,
+          `Cannot archive ${id}: task is already archived`,
         );
       }
+
+      const fromColumn = task.column as Column;
+      task.preArchiveColumn = fromColumn;
 
       const cleanup = typeof optionsOrCleanup === "boolean" ? optionsOrCleanup : optionsOrCleanup.cleanup !== false;
       const removeLineageReferences = typeof optionsOrCleanup === "object" && optionsOrCleanup.removeLineageReferences === true;
@@ -10349,11 +10857,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         });
 
         await this.atomicWriteTaskJson(dir, task);
+        await this.writeTaskJsonFile(dir, task);
         if (this.isWatching) this.taskCache.set(id, { ...task });
         for (const lineageChild of rewrittenLineageChildren) {
           this.emit("task:updated", lineageChild);
         }
-        this.emit("task:moved", { task, from: "done" as Column, to: "archived" as Column, source: "engine" });
+        this.emit("task:moved", { task, from: fromColumn, to: "archived" as Column, source: "engine" });
         return task;
       }
 
@@ -10386,7 +10895,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       for (const lineageChild of rewrittenLineageChildren) {
         this.emit("task:updated", lineageChild);
       }
-      this.emit("task:moved", { task, from: "done" as Column, to: "archived" as Column, source: "engine" });
+      this.emit("task:moved", { task, from: fromColumn, to: "archived" as Column, source: "engine" });
       return this.archiveEntryToTask(entry, false);
     });
   }
@@ -10399,8 +10908,28 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return this.archiveTask(id, true);
   }
 
+  private resolveUnarchiveTargetColumn(preArchiveColumn: unknown): Column {
+    if (!isColumn(preArchiveColumn) || preArchiveColumn === "archived") {
+      return "done";
+    }
+    if (preArchiveColumn === "in-progress" || preArchiveColumn === "in-review") {
+      return "todo";
+    }
+    return preArchiveColumn;
+  }
+
+  private async readPreArchiveColumnFromTaskFile(dir: string): Promise<Column | undefined> {
+    try {
+      const raw = await readFile(join(dir, "task.json"), "utf-8");
+      const parsed = JSON.parse(raw) as { preArchiveColumn?: unknown };
+      return isColumn(parsed.preArchiveColumn) ? parsed.preArchiveColumn : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
-   * Unarchive an archived task (move from archived → done).
+   * Unarchive an archived task (move from archived → its recorded source column).
    * If the active task row was cleaned up, restores from archive.db first.
    * Logs the action and emits `task:moved` event.
    */
@@ -10438,16 +10967,18 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       // NOTE: No getTaskMergeBlocker check here — intentionally.
       // The merge blocker validates in-review → done transitions (ensuring code
       // has been properly reviewed before merging). An unarchived task was already
-      // merged in its previous lifecycle; this is just a restoration. The transient
-      // field clearing above ensures no stale blocker state leaks through.
-      task.column = "done";
+      // archived in its previous lifecycle; this is just a restoration. The transient
+      // field clearing below ensures no stale blocker state leaks through.
+      const preArchiveColumn = task.preArchiveColumn ?? await this.readPreArchiveColumnFromTaskFile(dir);
+      const toColumn = this.resolveUnarchiveTargetColumn(preArchiveColumn);
+      task.column = toColumn;
+      task.preArchiveColumn = undefined;
       task.columnMovedAt = new Date().toISOString();
       task.updatedAt = task.columnMovedAt;
 
-      // Clear transient fields that should not persist into "done" column.
-      // Matches the clearing done by moveTask() for consistency — archived
-      // tasks may have been archived with stale state that should not reappear
-      // after unarchiving.
+      // Clear transient fields regardless of the restored column. Archived tasks
+      // may have been archived with stale execution state that should not reappear
+      // after unarchiving, especially when active columns are downgraded to todo.
       this.clearDoneTransientFields(task);
 
       task.log.push({
@@ -10461,7 +10992,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       // Update cache if watcher is active
       if (this.isWatching) this.taskCache.set(id, { ...task });
 
-      this.emit("task:moved", { task, from: "archived" as Column, to: "done" as Column, source: "engine" });
+      this.emit("task:moved", { task, from: "archived" as Column, to: toColumn, source: "engine" });
       return task;
     });
   }
@@ -10539,6 +11070,15 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     this.taskCache.clear();
     for (const task of tasks) {
       this.taskCache.set(task.id, { ...task });
+    }
+
+    try {
+      await this.markLegacyAutoMergeStampsOnce();
+    } catch (err) {
+      storeLog.warn("Legacy auto-merge stamp marker failed during watch startup (non-fatal)", {
+        phase: "watch:legacy-auto-merge-stamp-marker",
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     if (!this.donePauseBackfillDone) {
@@ -12678,7 +13218,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       title: entry.title,
       description: entry.description,
       priority: normalizeTaskPriority(entry.priority),
-      column: "archived", // Will be changed to "done" by unarchiveTask
+      column: "archived", // Will be changed by unarchiveTask
+      preArchiveColumn: entry.preArchiveColumn,
       dependencies: entry.dependencies,
       steps: entry.steps,
       currentStep: entry.currentStep,
@@ -14521,8 +15062,21 @@ ${stepsSection}`;
     // selectable workflow); fall back to no default rather than materializing it.
     if (def.kind === "fragment") return undefined;
     // Compile (and validate) before creating any rows so a non-compilable
-    // default falls back cleanly with nothing written.
-    const inputs = compileWorkflowToSteps(def.ir);
+    // default falls back cleanly with nothing written. Interpreter-deferred
+    // built-ins are valid selectable workflows but not lowerable to legacy
+    // WorkflowStep rows, so default materialization falls back to legacy defaults.
+    // Built-ins that compile to zero steps still record a stepless selection,
+    // mirroring explicit workflow materialization.
+    let inputs: import("./types.js").WorkflowStepInput[];
+    try {
+      inputs = compileWorkflowToSteps(def.ir);
+    } catch (err) {
+      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return undefined;
+      throw err;
+    }
+    if (isBuiltinWorkflowId(workflowId) && inputs.length === 0) {
+      return { workflowId, stepIds: [] };
+    }
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
     return { workflowId, stepIds };
   }
@@ -14541,16 +15095,23 @@ ${stepsSection}`;
     if (def.kind === "fragment") {
       throw new Error(`Workflow '${workflowId}' is a fragment and cannot be selected for a task`);
     }
-    const inputs = compileWorkflowToSteps(def.ir);
+    let inputs: import("./types.js").WorkflowStepInput[];
+    try {
+      inputs = compileWorkflowToSteps(def.ir);
+    } catch (err) {
+      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return { workflowId, stepIds: [] };
+      throw err;
+    }
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
     return { workflowId, stepIds };
   }
 
   /**
-   * Select a workflow for a task: compile it, materialize its steps, and write
-   * their ids into the task's enabledWorkflowSteps. Replaces any prior selection
-   * (no orphaned steps). Throws WorkflowCompileError for non-linear graphs
-   * before any state is written.
+   * Select a workflow for a task: compile it when possible, materialize its
+   * steps, and write their ids into the task's enabledWorkflowSteps. Replaces
+   * any prior selection (no orphaned steps). Interpreter-deferred workflow IRs
+   * record the selection with zero materialized steps; genuinely invalid graphs
+   * still throw before any state is written.
    */
   async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
     // Hold the task lock across the whole sequence (materialize → owner write →
@@ -14566,8 +15127,16 @@ ${stepsSection}`;
       if (def.kind === "fragment") {
         throw new Error(`Workflow '${workflowId}' is a fragment and cannot be selected for a task`);
       }
-      // Compile once up front: a non-linear graph aborts before any mutation.
-      const inputs = compileWorkflowToSteps(def.ir);
+      // Compile once up front: invalid graphs abort before any mutation, while
+      // interpreter-deferred graphs keep the selection but materialize no legacy
+      // WorkflowStep rows.
+      let inputs: import("./types.js").WorkflowStepInput[];
+      try {
+        inputs = compileWorkflowToSteps(def.ir);
+      } catch (err) {
+        if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) inputs = [];
+        else throw err;
+      }
 
       // Materialize the new steps and point the task at them BEFORE deleting the
       // prior selection's rows, so a mid-flight failure never leaves the task

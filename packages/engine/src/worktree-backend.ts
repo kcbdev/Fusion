@@ -30,6 +30,151 @@ const NATIVE_TIMEOUT_MS = 120_000;
 const REMOVE_TIMEOUT_MS = 60_000;
 const MAX_BUFFER = 10 * 1024 * 1024;
 
+
+export type WorktreeRemoveOutcome =
+  | { removed: true; classification: "removed" }
+  | {
+      removed: false;
+      harmless: true;
+      classification: "not-registered-after-prune";
+      message: string;
+      stderrPreview: string;
+      pathExists: boolean;
+      gitFileExists: boolean;
+    };
+
+const HARMLESS_MERGE_REMOVE_ERROR_PATTERNS = [
+  /validation failed, cannot remove working tree/i,
+  /is not a \.git file/i,
+  /is not a working tree/i,
+  /not a git repository/i,
+  /No such file or directory/i,
+] as const;
+
+function previewError(error: unknown): string {
+  const stderr = getErrorStderr(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return (stderr || message).slice(0, 4096);
+}
+
+function normalizeComparablePath(value: string): string {
+  const resolved = resolve(value);
+  return resolved.startsWith("/private/var/") ? resolved.slice("/private".length) : resolved;
+}
+
+function porcelainContainsWorktree(stdout: string, worktreePath: string): boolean {
+  const target = normalizeComparablePath(worktreePath);
+  const privateTarget = target.startsWith("/var/") ? `/private${target}` : target;
+  for (const line of stdout.split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    const candidate = normalizeComparablePath(line.slice("worktree ".length).trim());
+    if (candidate === target || candidate === privateTarget) return true;
+  }
+  return false;
+}
+
+function isMergeTempCleanupCandidate(input: { worktreePath: string; reason: RemovalReason }, error: unknown): boolean {
+  if (input.reason !== RemovalReason.MergerCleanup && input.reason !== RemovalReason.MergerPostMerge) return false;
+  const base = basename(input.worktreePath);
+  const looksLikeFusionMergeTemp = base.startsWith("fusion-ai-merge-") || base.startsWith("post-merge-");
+  if (!looksLikeFusionMergeTemp) return false;
+  const detail = previewError(error);
+  return HARMLESS_MERGE_REMOVE_ERROR_PATTERNS.some((pattern) => pattern.test(detail));
+}
+
+async function classifyHarmlessMergeRemoveFailure(input: {
+  rootDir: string;
+  worktreePath: string;
+  reason: RemovalReason;
+  taskId?: string;
+  audit?: RunAuditor;
+}, error: unknown): Promise<WorktreeRemoveOutcome | null> {
+  if (!isMergeTempCleanupCandidate(input, error)) return null;
+
+  const stderrPreview = previewError(error);
+  const pathExists = existsSync(input.worktreePath);
+  const gitFileExists = existsSync(resolve(input.worktreePath, ".git"));
+
+  let stdout: string;
+  try {
+    await execAsync("git worktree prune", {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: NATIVE_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    });
+
+    const listResult = await execAsync("git worktree list --porcelain", {
+      cwd: input.rootDir,
+      encoding: "utf-8",
+      timeout: 10_000,
+      maxBuffer: MAX_BUFFER,
+    });
+    stdout = typeof listResult === "string" ? listResult : String(listResult.stdout ?? "");
+  } catch (probeError) {
+    await input.audit?.git({
+      type: "worktree:remove-classification-probe-failed",
+      target: input.worktreePath,
+      metadata: {
+        taskId: input.taskId,
+        reason: input.reason,
+        stderrPreview,
+        probeError: previewError(probeError),
+        pathExists,
+        gitFileExists,
+      },
+    });
+    return null;
+  }
+  const registeredAfterPrune = porcelainContainsWorktree(stdout, input.worktreePath);
+
+  if (registeredAfterPrune) {
+    await input.audit?.git({
+      type: "worktree:remove-leaked-registered-worktree",
+      target: input.worktreePath,
+      metadata: {
+        taskId: input.taskId,
+        reason: input.reason,
+        registeredAfterPrune: true,
+        stderrPreview,
+        pathExists,
+        gitFileExists,
+      },
+    });
+    return null;
+  }
+
+  const message = pathExists
+    ? "cleanup remove failed, but no registered worktree remains after prune; leftover directory was not deleted automatically"
+    : "cleanup remove failed, but no registered worktree remains after prune";
+  await input.audit?.git({
+    type: "worktree:remove-classified-harmless",
+    target: input.worktreePath,
+    metadata: {
+      taskId: input.taskId,
+      reason: input.reason,
+      classification: "not-registered-after-prune",
+      registeredAfterPrune: false,
+      stderrPreview,
+      pathExists,
+      gitFileExists,
+      nextAction: pathExists
+        ? "inspect the leftover temp directory before deleting filesystem residue"
+        : "no operator action required",
+    },
+  });
+
+  return {
+    removed: false,
+    harmless: true,
+    classification: "not-registered-after-prune",
+    message,
+    stderrPreview,
+    pathExists,
+    gitFileExists,
+  };
+}
+
 /**
  * worktrunk CLI mapping (verified 2026-05-15 from README + worktrunk.dev docs):
  * - create -> `wt switch --create <branch> [--base <startPoint>]`
@@ -135,6 +280,22 @@ function getErrorExitCode(error: unknown): number | null {
   if (typeof value.status === "number") return value.status;
   if (typeof value.code === "number") return value.code;
   return null;
+}
+
+function getErrorMessageWithStderr(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? String((error as { message?: unknown }).message)
+        : String(error);
+  const stderr = getErrorStderr(error);
+  return stderr ? `${message}\n${stderr}` : message;
+}
+
+function isRecoverableNativeWorktreeRemoveError(error: unknown): boolean {
+  const message = getErrorMessageWithStderr(error);
+  return /Directory not empty/i.test(message) || /failed to delete/i.test(message) || /contains modified or untracked files/i.test(message);
 }
 
 function findStringByKey(value: unknown, key: string): string | null {
@@ -396,12 +557,41 @@ export class NativeWorktreeBackend implements WorktreeBackend {
   }
 
   async remove(input: WorktreeRemoveInput): Promise<void> {
-    await execAsync(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, {
-      cwd: input.rootDir,
-      encoding: "utf-8",
-      timeout: REMOVE_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-    });
+    try {
+      await execAsync(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, {
+        cwd: input.rootDir,
+        encoding: "utf-8",
+        timeout: REMOVE_TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+      });
+      return;
+    } catch (error) {
+      if (!isRecoverableNativeWorktreeRemoveError(error)) {
+        throw error;
+      }
+
+      const errorMessage = getErrorMessageWithStderr(error);
+      this.deps.logger?.warn?.(
+        `[worktree-backend] git worktree remove failed for ${input.worktreePath}: ${errorMessage} — falling back to filesystem removal`,
+      );
+      await this.deps.audit?.git({
+        type: "worktree:remove-fallback",
+        target: input.worktreePath,
+        metadata: {
+          fallback: "filesystem-non-empty",
+          error: errorMessage,
+        },
+      });
+
+      await rm(input.worktreePath, { recursive: true, force: true });
+      await pruneWorktreeAdminEntries({
+        rootDir: input.rootDir,
+        auditor: this.deps.audit,
+        reason: "remove-non-empty-fallback",
+        target: input.worktreePath,
+        logger: this.deps.logger,
+      });
+    }
   }
 
   async sync(input: WorktreeSyncInput): Promise<{ skipped: boolean }> {
@@ -777,7 +967,7 @@ export async function removeWorktree(input: {
   liveOwnerProbe?: LiveBindingProbe;
   processActiveProbe?: ProcessActiveProbe;
   reconcileMinIdleMs?: number;
-}): Promise<void> {
+}): Promise<WorktreeRemoveOutcome> {
   const logger = {
     log: (_message: string): void => {},
     warn: (_message: string): void => {},
@@ -851,8 +1041,11 @@ export async function removeWorktree(input: {
         target: input.worktreePath,
       });
     }
-    return;
+    return { removed: true, classification: "removed" };
   } catch (error) {
+    const classified = await classifyHarmlessMergeRemoveFailure(input, error);
+    if (classified) return classified;
+
     if (!(error instanceof WorktrunkOperationError) || input.settings.worktrunk?.onFailure !== "fallback-native") {
       throw error;
     }
@@ -870,8 +1063,15 @@ export async function removeWorktree(input: {
     });
 
     const native = new NativeWorktreeBackend({ logger, settings: input.settings });
-    await native.remove(removeInput);
-    await input.audit?.git({ type: "worktree:remove", target: input.worktreePath });
+    try {
+      await native.remove(removeInput);
+      await input.audit?.git({ type: "worktree:remove", target: input.worktreePath });
+      return { removed: true, classification: "removed" };
+    } catch (nativeError) {
+      const classified = await classifyHarmlessMergeRemoveFailure(input, nativeError);
+      if (classified) return classified;
+      throw nativeError;
+    }
   }
 }
 

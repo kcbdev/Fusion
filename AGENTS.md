@@ -19,6 +19,20 @@ Any task integrating a third-party tool (CLI, daemon, downloadable binary, insta
 
 Missing evidence is a blocking REVISE. Never invent release URLs, binary names, or hashes.
 
+Example evidence section shape:
+
+```markdown
+## External Integration Evidence
+
+- Canonical upstream repo URL: https://github.com/max-sixty/worktrunk
+- Docs / homepage URL: https://worktrunk.dev/
+- Release / download URL: https://github.com/max-sixty/worktrunk/releases/latest/download/wt-linux-x64.tar.gz
+- Binary / CLI name: `wt`
+- Checksum: `sha256-<digest>` (or `upstream-pending-verification` until the checksum is pinned)
+```
+
+See `docs/contributing.md` for the fuller spec-authoring guidance and accepted labeled layout variants.
+
 ### Finalizing Changes
 
 When a change affects published `@runfusion/fusion`, add a changeset (example: `.changeset/<name>.md` with `"@runfusion/fusion": patch`).
@@ -98,6 +112,7 @@ pnpm verify:workspace  # deep opt-in verification (lint -> test:full -> build); 
 ### Standing Rule: Fix the Invariant, Not the Repro (FN-5893)
 
 - When fixing a bug, the regression test must assert the general invariant across ALL known surfaces — not only the single reported reproduction.
+- Symptom-based acceptance is mandatory for bug-class tasks: the final verification must reproduce the original failure condition and assert it no longer occurs via a real automated test. Encode this as a `## Symptom Verification` section in PROMPT.md with **Original symptom**, **Exact reproduction**, and **Assertion it is gone**; green build/tests alone are insufficient. This marker is the contract consumed by the GitHub auto-close gate (FN-6230).
 - Surface enumeration is now an enforced bug-fix artifact: the spec must include a `## Surface Enumeration` section, planning must REVISE when that section is missing, and review must REVISE any repro-only regression test.
 - The Surface Enumeration gate also applies to tasks that add or remove UI affordances (icons, buttons, chevrons, toggles, badges, menu entries, click targets), including Review Level 0 cosmetic tasks.
 - Enumerate the surfaces before filing or closing the fix: every provider/bridge for streaming and agent paths, both desktop and mobile breakpoints for UI behavior, empty/undefined/duplicate/populated data states, and every shared hook/component/module/helper that reuses the affected logic.
@@ -110,6 +125,12 @@ pnpm verify:workspace  # deep opt-in verification (lint -> test:full -> build); 
 ### Port 4040 is Reserved
 
 Never kill processes on port 4040 and never start test servers on 4040. Use `--port 0` or another free port.
+
+### Never run an unbounded `find` against the system temp directory
+
+Do not issue a recursive `find` (or any unbounded recursive directory walk) rooted at the OS temp directory — `$TMPDIR`, `/tmp`, or macOS `/var/folders/...` (canonical `/private/var/...`). The temp root can hold an enormous number of entries on CI and long-lived dev hosts, so a broad scan can hang for minutes and pin I/O.
+
+When you need a Fusion temp artifact, target the known prefix directly and list a single level with a prefix filter — never walk the whole temp tree. The canonical bounded pattern is the engine's own sweep: non-recursive `readdirSync(...)` passes over the configured `<worktreesDir>/.ai-merge/` root plus legacy `.fusion/ai-merge/` and `tmpdir()` leftovers, filtered by a known prefix such as `fusion-ai-merge-` (`SelfHealingManager.cleanupStaleTempMergeWorktrees()` in `packages/engine/src/self-healing.ts`). Scoped `find` calls under a project worktree or `.fusion/` are fine; only the broad temp-root scan is forbidden.
 
 ### Engine Process Rules
 
@@ -168,6 +189,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 ### Run Audit
 
 - FN-5419: git run-audit now includes `pull:fast-forward` and `stash:pop-conflict`; dashboard git surfaces now include the extended `POST /api/git/pull` integration-worktree path plus companion `POST /api/git/stash-resolve`, `POST /api/git/stash-drop`, and `POST /api/git/stash-apply` routes.
+- FN-6292: self-healing emits `task:reconcile-dependency-blocking-lease` when it rebounds an in-progress holder whose stale file-scope lease blocks an unmet dependency, and `task:reconcile-dependency-blocking-lease-no-action` when triple-proof blocks that backward move.
 
 
 ## Reference docs (deeper detail)

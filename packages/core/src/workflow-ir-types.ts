@@ -5,6 +5,10 @@
  *  verdicts as outcome edges), `parse-steps` (graph-native step-list parsing),
  *  `code` (sandboxed TypeScript), `notify` (workflow-authored notifications),
  *  and `loop` (bounded repeat-until region);
+ *  and the workflow-owned merge/retry/recovery policy additions:
+ *  `merge-gate`, `merge-attempt`, `manual-merge-hold`, `retry-backoff`,
+ *  `recovery-router`, `branch-group-member-integration`, and
+ *  `branch-group-promotion`;
  *  and the unified PR-entity additions (U3):
  *  `pr-create` (open/reuse the PR + write the entity), `pr-respond` (the
  *  review-response run), and `pr-merge` (tool-side merge with expectedHeadOid). */
@@ -23,6 +27,13 @@ export type WorkflowIrNodeKind =
   | "parse-steps"
   | "code"
   | "notify"
+  | "merge-gate"
+  | "merge-attempt"
+  | "manual-merge-hold"
+  | "retry-backoff"
+  | "recovery-router"
+  | "branch-group-member-integration"
+  | "branch-group-promotion"
   | "pr-create"
   | "pr-respond"
   | "pr-merge";
@@ -300,6 +311,14 @@ export interface WorkflowIrV1 {
   edges: WorkflowIrEdge[];
 }
 
+/** Workflow-declared optional step backed by a workflow-step template.
+ *  Execution-inert: consumed by create/edit UI to seed per-task
+ *  `enabledWorkflowSteps`, never by the graph executor. Absent on legacy graphs. */
+export interface WorkflowOptionalStep {
+  templateId: string;
+  defaultOn?: boolean;
+}
+
 /** A v2 workflow IR graph: v1 plus workflow-defined columns and node placement.
  *  Step-inversion adds optional `artifacts` (KTD-12) and `fields` (KTD-13)
  *  declarations — both additive; absent on legacy graphs. */
@@ -314,6 +333,9 @@ export interface WorkflowIrV2 {
   /** Workflow-settings (U1, R1): typed setting declarations. Additive; absent on
    *  legacy graphs. Values persist per-`(workflowId, projectId)` (U2), not here. */
   settings?: WorkflowSettingDefinition[];
+  /** Optional workflow-step templates tasks may independently enable/disable via
+   *  `enabledWorkflowSteps`. Execution-inert; the graph executor ignores this facet. */
+  optionalSteps?: WorkflowOptionalStep[];
 }
 
 /** Either IR version. v1 graphs upgrade to v2 on parse (see parseWorkflowIr). */

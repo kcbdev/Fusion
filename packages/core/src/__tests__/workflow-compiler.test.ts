@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 
+import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "../builtin-stepwise-coding-workflow-ir.js";
 import {
   compileWorkflowToSteps,
+  MERGE_REGION_NODE_KINDS,
   validateLinearity,
   WorkflowCompileError,
+  WORKFLOW_INTERPRETER_DEFERRED_SUFFIX,
 } from "../workflow-compiler.js";
 import { serializeWorkflowIr, parseWorkflowIr } from "../workflow-ir.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
@@ -116,8 +120,74 @@ describe("compileWorkflowToSteps (U2)", () => {
         { from: "b", to: "end", condition: "success" },
       ],
     };
+    const err = validateLinearity(ir);
+    expect(err).toBeInstanceOf(WorkflowCompileError);
+    expect(err?.message).toContain(WORKFLOW_INTERPRETER_DEFERRED_SUFFIX);
     expect(() => compileWorkflowToSteps(ir)).toThrow(WorkflowCompileError);
     expect(() => compileWorkflowToSteps(ir)).toThrow(/interpreter \(deferred\)/i);
+  });
+
+  it("validates builtin workflow linearity while preserving stepwise interpreter deferral", () => {
+    expect(validateLinearity(BUILTIN_CODING_WORKFLOW_IR)).toBeNull();
+
+    const stepwiseErr = validateLinearity(BUILTIN_STEPWISE_CODING_WORKFLOW_IR);
+    expect(stepwiseErr).toBeInstanceOf(WorkflowCompileError);
+    expect(stepwiseErr?.message).toContain(WORKFLOW_INTERPRETER_DEFERRED_SUFFIX);
+  });
+
+  it("compiles the builtin coding workflow without merge-region steps", () => {
+    const steps = compileWorkflowToSteps(BUILTIN_CODING_WORKFLOW_IR);
+    const mergeRegionNodeIds = BUILTIN_CODING_WORKFLOW_IR.nodes
+      .filter((node) => MERGE_REGION_NODE_KINDS.has(node.kind))
+      .map((node) => node.id);
+
+    expect(steps.map((step) => step.name)).toEqual([]);
+    expect(mergeRegionNodeIds).toEqual(
+      expect.arrayContaining([
+        "merge-gate",
+        "merge-retry",
+        "merge-manual-hold",
+        "branch-group-member-integration",
+        "branch-group-promotion",
+        "merge-attempt",
+        "recovery-router",
+      ]),
+    );
+    expect(steps.some((step) => mergeRegionNodeIds.includes(step.name))).toBe(false);
+  });
+
+  it("compiles a workflow whose post-review merge region branches into primitives (FN-6035)", () => {
+    // Mirrors the builtin:coding shape: review → merge-gate fans out into the
+    // engine-owned merge/branch-group/retry subgraph. These primitive kinds are a
+    // terminal boundary, so the graph still compiles to its pre-merge step list
+    // instead of failing as interpreter-only.
+    const ir: WorkflowIr = {
+      version: "v1",
+      name: "merge-region",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "spec", kind: "prompt", config: { name: "Spec", prompt: "spec" } },
+        { id: "review", kind: "prompt", config: { seam: "review" } },
+        { id: "merge-gate", kind: "merge-gate", config: { gate: "auto-merge" } },
+        { id: "merge-attempt", kind: "merge-attempt" },
+        { id: "merge-hold", kind: "manual-merge-hold" },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "spec", condition: "success" },
+        { from: "spec", to: "review", condition: "success" },
+        { from: "review", to: "merge-gate", condition: "success" },
+        { from: "review", to: "end", condition: "failure" },
+        { from: "merge-gate", to: "merge-attempt", condition: "outcome:auto-on" },
+        { from: "merge-gate", to: "merge-hold", condition: "outcome:auto-off" },
+        { from: "merge-attempt", to: "end", condition: "success" },
+        { from: "merge-hold", to: "merge-attempt", condition: "success" },
+      ],
+    };
+    expect(validateLinearity(parseWorkflowIr(ir))).toBeNull();
+    const steps = compileWorkflowToSteps(ir);
+    // Only the pre-merge user node lowers; the merge primitives emit no steps.
+    expect(steps.map((s) => s.name)).toEqual(["Spec"]);
   });
 
   it("rejects a graph missing the start/end nodes via parse", () => {
@@ -143,6 +213,8 @@ describe("compileWorkflowToSteps (U2)", () => {
     };
     const err = validateLinearity(ir);
     expect(err).toBeInstanceOf(WorkflowCompileError);
+    expect(err?.message).toContain(WORKFLOW_INTERPRETER_DEFERRED_SUFFIX);
+    expect(err?.message).toMatch(/disconnected nodes/);
   });
 
   it("rejects seams that are out of the planning -> execute -> workflow-step -> review -> merge order", () => {

@@ -13,6 +13,31 @@ function selectorBlocks(selector: string): string[] {
   return css.match(pattern) ?? [];
 }
 
+function selectorGroupBlocks(selector: string): string[] {
+  const blocks: string[] = [];
+  const rulePattern = /([^{}]+)\{([^}]*)\}/g;
+  for (const match of css.matchAll(rulePattern)) {
+    const selectors = match[1]
+      .split(",")
+      .map((candidate) => candidate.trim())
+      .filter(Boolean);
+    if (selectors.includes(selector)) {
+      blocks.push(match[0]);
+    }
+  }
+  return blocks;
+}
+
+function expectTextareaThemeTokens(selector: string, surfaceName: string) {
+  const blocks = selectorGroupBlocks(selector);
+  expect(blocks, `expected themed textarea block for ${surfaceName} (${selector})`).not.toHaveLength(0);
+  const block = blocks.join("\n");
+  expect(block, `expected ${surfaceName} to set theme surface background`).toMatch(/background:\s*var\(--surface\)\s*;/);
+  expect(block, `expected ${surfaceName} to set theme text color`).toMatch(/color:\s*var\(--text\)\s*;/);
+  expect(block, `expected ${surfaceName} to set theme border`).toMatch(/border:\s*1px\s+solid\s+var\(--border\)\s*;/);
+  expect(block, `expected ${surfaceName} not to rely on a transparent background`).not.toMatch(/background:\s*transparent\s*;/);
+}
+
 describe("CompoundEngineeringView theme tokens", () => {
   it("does not use hardcoded legacy color fallbacks", () => {
     const forbiddenPatterns = [
@@ -61,6 +86,52 @@ describe("CompoundEngineeringView theme tokens", () => {
     const [viewBlock] = selectorBlocks(".ce-view");
     expect(viewBlock).toBeDefined();
     expect(viewBlock).toMatch(/color:\s*var\(--text\)\s*;/);
+  });
+
+  it("themes every CE free-text textarea with dashboard input tokens", () => {
+    const textareaSurfaces = [
+      {
+        name: 'standard question/answer textarea (data-testid="ce-flow-text-input")',
+        selector: ".ce-flow-text textarea",
+      },
+      {
+        name: 'degraded chat fallback textarea (data-testid="ce-flow-degraded-input")',
+        selector: ".ce-flow-text textarea",
+      },
+      {
+        name: 'guidance textarea (data-testid="ce-flow-guidance-input")',
+        selector: ".ce-flow-guidance-row textarea",
+      },
+    ];
+
+    for (const surface of textareaSurfaces) {
+      expectTextareaThemeTokens(surface.selector, surface.name);
+    }
+  });
+
+  it("themes CE textarea focus and placeholder states", () => {
+    const textFocusBlocks = selectorGroupBlocks(".ce-flow-text textarea:focus");
+    const guidanceFocusBlocks = selectorGroupBlocks(".ce-flow-guidance-row textarea:focus");
+    const textPlaceholderBlocks = selectorGroupBlocks(".ce-flow-text textarea::placeholder");
+    const guidancePlaceholderBlocks = selectorGroupBlocks(".ce-flow-guidance-row textarea::placeholder");
+
+    for (const [selector, blocks] of [
+      [".ce-flow-text textarea:focus", textFocusBlocks],
+      [".ce-flow-guidance-row textarea:focus", guidanceFocusBlocks],
+    ] as const) {
+      expect(blocks, `expected focus block for ${selector}`).not.toHaveLength(0);
+      const block = blocks.join("\n");
+      expect(block, `expected ${selector} to use themed focus border`).toMatch(/border-color:\s*var\(--todo\)\s*;/);
+      expect(block, `expected ${selector} to use themed focus ring`).toMatch(/box-shadow:\s*var\(--focus-ring\)\s*;/);
+    }
+
+    for (const [selector, blocks] of [
+      [".ce-flow-text textarea::placeholder", textPlaceholderBlocks],
+      [".ce-flow-guidance-row textarea::placeholder", guidancePlaceholderBlocks],
+    ] as const) {
+      expect(blocks, `expected placeholder block for ${selector}`).not.toHaveLength(0);
+      expect(blocks.join("\n"), `expected ${selector} to use dim text token`).toMatch(/color:\s*var\(--text-dim\)\s*;/);
+    }
   });
 
   it("does not use opacity to dim text selectors", () => {

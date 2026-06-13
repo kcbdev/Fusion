@@ -238,6 +238,12 @@ function clickSave() {
   fireEvent.click(screen.getByTestId("quick-entry-save"));
 }
 
+async function flushPendingTimers() {
+  await act(async () => {
+    vi.runOnlyPendingTimers();
+  });
+}
+
 function openPriorityMenu() {
   fireEvent.click(screen.getByTestId("quick-entry-priority-button"));
 }
@@ -347,26 +353,163 @@ describe("QuickEntryBox", () => {
     expect((textarea as HTMLTextAreaElement).rows).toBe(2);
   });
 
-  it("focuses the quick-entry textarea on mount at desktop width", async () => {
-    mockDesktopViewport();
-    renderQuickEntryBox({});
-    const textarea = screen.getByTestId("quick-entry-input");
+  describe("post-submission focus restoration (FN-6217)", () => {
+    it("does not auto-focus the quick-entry textarea on empty desktop mount", async () => {
+      mockDesktopViewport();
+      renderQuickEntryBox({});
+      const textarea = screen.getByTestId("quick-entry-input");
 
-    await waitFor(() => {
-      expect(document.activeElement).toBe(textarea);
-    });
-  });
+      await flushPendingTimers();
 
-  it("does not focus the quick-entry textarea on mount at mobile width", async () => {
-    const innerWidthSpy = vi.spyOn(window, "innerWidth", "get").mockReturnValue(375);
-    renderQuickEntryBox({});
-    const textarea = screen.getByTestId("quick-entry-input");
-
-    await waitFor(() => {
       expect(document.activeElement).not.toBe(textarea);
     });
 
-    innerWidthSpy.mockRestore();
+    it("does not auto-focus the quick-entry textarea when restoring a non-empty draft on desktop mount", async () => {
+      mockDesktopViewport();
+      localStorage.setItem(QUICK_ENTRY_STORAGE_KEY, "restored draft");
+      renderQuickEntryBox({});
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+
+      await flushPendingTimers();
+
+      expect(textarea.value).toBe("restored draft");
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("does not auto-focus the quick-entry textarea on desktop remount or visibility restoration", async () => {
+      mockDesktopViewport();
+      const { unmount } = renderQuickEntryBox({});
+      let textarea = screen.getByTestId("quick-entry-input");
+
+      await flushPendingTimers();
+      expect(document.activeElement).not.toBe(textarea);
+
+      unmount();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      renderQuickEntryBox({});
+      textarea = screen.getByTestId("quick-entry-input");
+
+      await flushPendingTimers();
+
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("focuses the quick-entry textarea after a successful Enter submission on desktop", async () => {
+      mockDesktopViewport();
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      const focusSpy = vi.spyOn(textarea, "focus");
+
+      fireEvent.change(textarea, { target: { value: "Create from Enter" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      await flushPendingTimers();
+
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("focuses the quick-entry textarea after a successful Save-button submission on desktop", async () => {
+      mockDesktopViewport();
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      const focusSpy = vi.spyOn(textarea, "focus");
+
+      fireEvent.change(textarea, { target: { value: "Create from Save" } });
+      clickSave();
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      await flushPendingTimers();
+
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("focuses the quick-entry textarea only after duplicate-confirmed creation completes on desktop", async () => {
+      mockDesktopViewport();
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      vi.mocked(checkDuplicateTasks).mockResolvedValueOnce([
+        { id: "FN-456", title: "Duplicate", description: "desc", column: "todo", score: 0.7 },
+      ]);
+      renderQuickEntryBox({ onCreate });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      const focusSpy = vi.spyOn(textarea, "focus");
+
+      fireEvent.change(textarea, { target: { value: "maybe duplicate" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(await screen.findByText("Possible duplicates")).toBeInTheDocument();
+      await flushPendingTimers();
+      expect(focusSpy).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Create anyway" }));
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(textarea.value).toBe(""));
+      await flushPendingTimers();
+
+      expect(focusSpy).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("never auto-focuses the quick-entry textarea on mobile, including after a successful submission", async () => {
+      mockMobileViewport();
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      const focusSpy = vi.spyOn(textarea, "focus");
+
+      await flushPendingTimers();
+      expect(document.activeElement).not.toBe(textarea);
+
+      fireEvent.change(textarea, { target: { value: "Mobile submission" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+      await flushPendingTimers();
+
+      expect(focusSpy).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("does not auto-focus after Escape clears a non-empty draft", async () => {
+      mockDesktopViewport();
+      renderQuickEntryBox({});
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+
+      textarea.focus();
+      fireEvent.focus(textarea);
+      fireEvent.change(textarea, { target: { value: "Clear me" } });
+      fireEvent.keyDown(textarea, { key: "Escape" });
+      await flushPendingTimers();
+
+      expect(textarea.value).toBe("");
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("does not auto-focus after Plan or Subtask handoff reset the form", async () => {
+      mockDesktopViewport();
+      const onPlanningMode = vi.fn();
+      const onSubtaskBreakdown = vi.fn();
+      renderQuickEntryBox({ onPlanningMode, onSubtaskBreakdown });
+      let textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+
+      fireEvent.change(textarea, { target: { value: "Plan this" } });
+      fireEvent.click(screen.getByTestId("plan-button"));
+      await flushPendingTimers();
+      expect(onPlanningMode).toHaveBeenCalledWith("Plan this");
+      expect(document.activeElement).not.toBe(textarea);
+
+      fireEvent.change(textarea, { target: { value: "Break this down" } });
+      fireEvent.click(screen.getByTestId("subtask-button"));
+      await flushPendingTimers();
+      textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      expect(onSubtaskBreakdown).toHaveBeenCalledWith("Break this down");
+      expect(document.activeElement).not.toBe(textarea);
+    });
   });
 
   describe("button focus preservation (FN-6122)", () => {
@@ -480,6 +623,10 @@ describe("QuickEntryBox", () => {
       await waitFor(() => {
         expect(screen.getByTestId("quick-entry-github-toggle")).not.toBeDisabled();
       });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      textarea.focus();
+      fireEvent.focus(textarea);
+      expect(document.activeElement).toBe(textarea);
       return result;
     }
 
@@ -705,6 +852,150 @@ describe("QuickEntryBox", () => {
         await touchActionButton(button);
         expect(document.activeElement).toBe(textarea);
       }
+    });
+  });
+
+  describe("button focus — no refocus when textarea is blurred (FN-6211)", () => {
+    async function renderBlurredMobileQuickEntry() {
+      mockMobileViewport();
+      vi.mocked(fetchSettings).mockResolvedValueOnce({
+        githubTrackingEnabledByDefault: true,
+      } as any);
+      const onPlanningMode = vi.fn();
+      const onSubtaskBreakdown = vi.fn();
+      const result = renderQuickEntryBox({ onPlanningMode, onSubtaskBreakdown });
+      expandQuickEntry();
+      await waitFor(() => {
+        expect(screen.getByTestId("quick-entry-github-toggle")).not.toBeDisabled();
+      });
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      textarea.focus();
+      fireEvent.focus(textarea);
+      fireEvent.change(textarea, { target: { value: "Adjust options without keyboard" } });
+      textarea.blur();
+      fireEvent.blur(textarea);
+      expect(document.activeElement).not.toBe(textarea);
+      return { ...result, textarea, onPlanningMode, onSubtaskBreakdown };
+    }
+
+    function fireCancelableTouchStart(target: Element) {
+      const event = new Event("touchstart", { bubbles: true, cancelable: true });
+      const preventDefaultSpy = vi.spyOn(event, "preventDefault");
+      fireEvent(target, event);
+      return { preventDefaultSpy };
+    }
+
+    async function touchActionButtonWithoutRefocus(button: Element, textarea: HTMLTextAreaElement) {
+      const { preventDefaultSpy } = fireCancelableTouchStart(button);
+      expect(preventDefaultSpy).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(textarea);
+      await act(async () => {
+        fireEvent(button, new Event("touchend", { bubbles: true, cancelable: true }));
+        fireEvent.click(button);
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+      expect(document.activeElement).not.toBe(textarea);
+    }
+
+    async function assertBlurredButtonActionStillWorks(
+      testId: string,
+      helpers: Awaited<ReturnType<typeof renderBlurredMobileQuickEntry>>,
+      attachClickSpy?: ReturnType<typeof vi.spyOn>,
+    ) {
+      switch (testId) {
+        case "quick-entry-fast-toggle":
+          expect(screen.getByTestId(testId)).toHaveAttribute("aria-pressed", "true");
+          break;
+        case "quick-entry-github-toggle":
+          expect(screen.getByTestId(testId)).toHaveAttribute("aria-pressed", "false");
+          break;
+        case "quick-entry-priority-button":
+          expect(await screen.findByTestId("quick-entry-priority-option-normal")).toBeTruthy();
+          break;
+        case "quick-entry-deps":
+          expect(document.querySelector(".dep-dropdown")).toBeTruthy();
+          break;
+        case "quick-entry-models":
+          expect(await screen.findByTestId("model-nested-menu")).toBeTruthy();
+          break;
+        case "quick-entry-node-button":
+          expect(document.querySelector(".node-picker-dropdown")).toBeTruthy();
+          break;
+        case "quick-entry-agent-button":
+          expect(document.querySelector(".agent-picker-dropdown")).toBeTruthy();
+          break;
+        case "quick-entry-attach":
+          expect(attachClickSpy).toHaveBeenCalled();
+          break;
+        case "refine-button":
+          expect(await screen.findByTestId("refine-clarify")).toBeTruthy();
+          break;
+        case "plan-button":
+          expect(helpers.onPlanningMode).toHaveBeenCalledWith("Adjust options without keyboard");
+          break;
+        case "subtask-button":
+          expect(helpers.onSubtaskBreakdown).toHaveBeenCalledWith("Adjust options without keyboard");
+          break;
+        case "quick-entry-save":
+          await waitFor(() => {
+            expect(helpers.props.onCreate).toHaveBeenCalled();
+          });
+          break;
+        default:
+          throw new Error(`Unhandled QuickEntry action test id: ${testId}`);
+      }
+    }
+
+    it.each(QUICK_ENTRY_ACTION_BUTTONS)(
+      "does not refocus textarea when tapping %s with textarea blurred",
+      async (_label, testId) => {
+        const helpers = await renderBlurredMobileQuickEntry();
+        const fileInput = screen.getByTestId("quick-entry-file-input") as HTMLInputElement;
+        const attachClickSpy = vi.spyOn(fileInput, "click");
+        const button = screen.getByTestId(testId);
+
+        await touchActionButtonWithoutRefocus(button, helpers.textarea);
+        await assertBlurredButtonActionStillWorks(testId, helpers, attachClickSpy);
+        expect(document.activeElement).not.toBe(helpers.textarea);
+      },
+    );
+
+    it("does not refocus textarea when selecting a priority option after blurred touch open", async () => {
+      const { textarea } = await renderBlurredMobileQuickEntry();
+      const priorityButton = screen.getByTestId("quick-entry-priority-button");
+
+      await touchActionButtonWithoutRefocus(priorityButton, textarea);
+      const highOption = await screen.findByTestId("quick-entry-priority-option-high");
+      await act(async () => {
+        fireEvent.touchStart(highOption);
+        fireEvent.touchEnd(highOption);
+        fireEvent.click(highOption);
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(priorityButton.textContent).toContain("High");
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("does not refocus textarea when selecting a dependency after blurred touch open", async () => {
+      const { textarea } = await renderBlurredMobileQuickEntry();
+      const depsButton = screen.getByTestId("quick-entry-deps");
+
+      await touchActionButtonWithoutRefocus(depsButton, textarea);
+      const depItem = document.querySelector(".dep-dropdown-item");
+      expect(depItem).toBeTruthy();
+      await act(async () => {
+        fireEvent.touchStart(depItem!);
+        fireEvent.touchEnd(depItem!);
+        fireEvent.click(depItem!);
+        vi.runOnlyPendingTimers();
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(depsButton.textContent).toContain("1 dep");
+      expect(document.activeElement).not.toBe(textarea);
     });
   });
 

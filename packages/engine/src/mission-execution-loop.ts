@@ -34,7 +34,7 @@ import { mergeEffectiveSettings } from "./effective-settings.js";
 import {
   createResolvedAgentSession,
   extractRuntimeHint,
-  extractRuntimeModel,
+  resolveValidatorSessionModel,
 } from "./agent-session-helpers.js";
 import { createLogger } from "./logger.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
@@ -799,30 +799,12 @@ export class MissionExecutionLoop extends EventEmitter {
     settings: Partial<Settings> | undefined,
     assignedAgentRuntimeConfig?: Record<string, unknown>,
   ): { provider: string | undefined; modelId: string | undefined } {
-    if (isTestModeActive(settings)) {
-      return {
-        provider: TEST_MODE_RESOLVED.provider,
-        modelId: TEST_MODE_RESOLVED.modelId,
-      };
-    }
-
-    const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
-    if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
-      return assignedRuntimeModel;
-    }
-
-    const resolvedTaskModel = resolveTaskValidatorModel(
-      {
-        validatorModelProvider: task?.validatorModelProvider,
-        validatorModelId: task?.validatorModelId,
-      },
+    return resolveValidatorSessionModel(
+      task?.validatorModelProvider,
+      task?.validatorModelId,
       settings,
+      assignedAgentRuntimeConfig,
     );
-
-    return {
-      provider: resolvedTaskModel.provider,
-      modelId: resolvedTaskModel.modelId,
-    };
   }
 
   /**
