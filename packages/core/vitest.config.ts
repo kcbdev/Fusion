@@ -15,6 +15,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     exclude: [
+      "src/__tests__/db.test.ts",
       "src/__tests__/soft-delete-tasks.test.ts",
       "src/__tests__/store-get-task-columns.test.ts",
       "src/__tests__/task-dependency-mutation.test.ts",

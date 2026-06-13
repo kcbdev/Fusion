@@ -1785,7 +1785,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
-  // Archive task (done → archived)
+  // Archive task (any live column → archived)
   router.post("/tasks/:id/archive", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -1814,12 +1814,13 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         });
       }
 
-      const status = (err instanceof Error ? err.message : String(err)).includes("must be in") ? 400 : 500;
-      throw new ApiError(status, err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes("must be in") || message.includes("already archived") ? 400 : 500;
+      throw new ApiError(status, message);
     }
   });
 
-  // Unarchive task (archived → done)
+  // Unarchive task (archived → restored column)
   router.post("/tasks/:id/unarchive", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);

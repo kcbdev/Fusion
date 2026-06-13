@@ -1763,7 +1763,7 @@ export function TaskDetailContent({
   const handleDelete = useCallback(async () => {
     let allowResurrection = false;
 
-    if (task.column === "done" && onArchiveTask) {
+    if (task.column !== "archived" && onArchiveTask) {
       const deleteChoice = await confirmWithChoice({
         title: t("taskDetail.delete.title", "Delete Task"),
         message: t("taskDetail.delete.message", "Delete {{id}}?", { id: task.id }),

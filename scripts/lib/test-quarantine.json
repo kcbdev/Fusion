@@ -50,6 +50,11 @@
       "file": "packages/core/src/__tests__/task-node-override.test.ts",
       "reason": "Flake observed during FN-6324 verification: broad `pnpm test` failed with `Task FN-001 not found` after temp-root disappearance symptoms in adjacent core tests, alongside a leaked fusion-test-workers temp root. The task only changed agent role policy/settings/heartbeat routing, so this is unrelated temp redirect suite-order/concurrency sensitivity.",
       "quarantinedAt": "2026-06-12"
+    },
+    {
+      "file": "packages/core/src/__tests__/db.test.ts",
+      "reason": "Flake observed during FN-6299 verification: broad `pnpm --filter @fusion/core test` timed out in `Database.recoverIfCorrupt startup guard > rebuilds a malformed database and preserves the corrupt original` after 15s; earlier `pnpm test` attempt SIGTERM'd the core package and leaked a fusion-test-workers temp dir. Follow-up FN-6334.",
+      "quarantinedAt": "2026-06-12"
     }
   ]
 }

@@ -2070,6 +2070,8 @@ export interface Task {
   /** The task's current column id. Widened to {@link ColumnId} so workflow-defined
    *  custom columns are representable; flag-OFF paths only ever store legacy ids. */
   column: ColumnId;
+  /** Source column captured when this task is archived; used to restore sensibly. */
+  preArchiveColumn?: Column;
   dependencies: string[];
   /** User-requested hint for triage: prefer splitting into child tasks when appropriate. */
   breakIntoSubtasks?: boolean;
@@ -4380,6 +4382,8 @@ export interface ArchivedTaskEntry {
    */
   priority?: TaskPriority;
   column: "archived"; // Always archived when in the log
+  /** Source column captured at archive time; absent on legacy archive entries. */
+  preArchiveColumn?: Column;
   dependencies: string[];
   steps: TaskStep[];
   currentStep: number;

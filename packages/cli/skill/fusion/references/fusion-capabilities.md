@@ -22,8 +22,8 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_task_retry` | Retry a failed task — clears the error state. Non-review failures move to todo; in-review execution failures move to todo preserving progress; in-review merge failures stay in-place for auto-merge retry. |
 | `fn_task_duplicate` | Duplicate an existing task, creating a fresh copy in planning. Copies the title and description but resets all execution state. The AI planning agent will replan the new task. |
 | `fn_task_refine` | Request a refinement of a completed or in-review task. Creates a new follow-up task in planning that references the original task as a dependency. Use this when a done or in-review task needs additional work, improvements, or follow-up changes. |
-| `fn_task_archive` | Archive a done task (move from done → archived). Archived tasks are preserved for historical reference but moved out of the main board view. |
-| `fn_task_unarchive` | Unarchive an archived task (move from archived → done). Restores the task to the done column. |
+| `fn_task_archive` | Archive a task from any live column (move to archived). Archived tasks are preserved for historical reference but moved out of the main board view. |
+| `fn_task_unarchive` | Unarchive an archived task (move from archived → its restore column). Restores to the pre-archive column when available, with active execution columns downgraded to todo. |
 | `fn_task_delete` | Soft-delete a task from active Fusion board views. The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation. |
 | `fn_task_import_github` | Import GitHub issues as Fusion tasks. Fetches open issues from a repository and creates tasks in the planning column. Each task includes the issue title and body with a link to the source issue. |
 | `fn_task_import_github_issue` | Import a specific GitHub issue as a Fusion task. Fetches the issue by number and creates a single task in the planning column with the issue title and body. |

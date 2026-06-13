@@ -610,8 +610,9 @@ Behavior:
 
 ### Archive behavior
 
-- `fn task archive <id>` moves done task to `archived`
-- Dashboard delete confirmations for `done` tasks now include an **Archive Instead** action so users can preserve history without soft-deleting the task. This option is shown only for `done` tasks because the store-level archive contract only allows archiving from the `done` column.
+- `fn task archive <id>` moves any live-board task (`triage`, `todo`, `in-progress`, `in-review`, or `done`) to `archived`; tasks already in `archived` are rejected.
+- Archive records the task's `preArchiveColumn` so restore can return to the original live column instead of always assuming `done`.
+- Dashboard delete confirmations for live tasks include an **Archive Instead** action so users can preserve history without soft-deleting the task.
 - Cleanup mode can persist compact metadata and remove the task directory
 - Archived tasks are read-only for task log/document writes:
   - `logEntry()` throws `Task <id> is archived — logging is read-only`
@@ -627,7 +628,7 @@ Behavior:
 
 Archive entries preserve key metadata needed for restoration, including:
 
-- `id`, `title`, `description`, `priority`, `column`
+- `id`, `title`, `description`, `priority`, `column`, `preArchiveColumn`
 - `dependencies`, `steps`, `currentStep`
 - `size`, `reviewLevel`, `prInfo` (primary mirror), `prInfos` (canonical linked PR list), `issueInfo`
 - `attachments` metadata
@@ -643,7 +644,7 @@ Archive entries preserve key metadata needed for restoration, including:
 
 - Restores archive entry if directory is missing
 - Rebuilds `PROMPT.md`
-- Moves task to `done`
+- Moves task back to its recorded `preArchiveColumn` when available, falling back to the archived snapshot's prior `column`, then to `done` for legacy archive entries.
 - Logs “Task restored from archive” when recovering from compact archive entry
 
 ### Task-ID collision safety and operator recovery

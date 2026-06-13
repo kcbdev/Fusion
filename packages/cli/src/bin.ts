@@ -305,7 +305,7 @@ Usage:
   fn task merge <id>                  Merge an in-review task and close it
   fn task duplicate <id>              Duplicate a task (creates copy in triage)
   fn task refine <id> [opts]          Create a refinement task from done/in-review
-  fn task archive <id>                Archive a done task
+  fn task archive <id>                Archive a task (from any column)
   fn task unarchive <id>              Unarchive an archived task
   fn task delete <id> [--force] [--allow-resurrection]
                                       Delete a task (use --force to skip confirmation; --allow-resurrection permits intentional ID recreation)

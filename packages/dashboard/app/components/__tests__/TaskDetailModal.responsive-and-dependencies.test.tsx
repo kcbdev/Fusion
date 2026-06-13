@@ -424,6 +424,32 @@ describe("TaskDetailModal", () => {
       });
     });
 
+    it("offers archive instead when deleting a non-done live task", async () => {
+      const onArchiveTask = vi.fn().mockResolvedValue({} as Task);
+      mockConfirmWithChoice.mockResolvedValueOnce("tertiary");
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ column: "todo" as any })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onArchiveTask={onArchiveTask}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /actions/i }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+      await waitFor(() => {
+        expect(onArchiveTask).toHaveBeenCalledWith("FN-099");
+      });
+      expect(noopDelete).not.toHaveBeenCalled();
+    });
+
     it("retries archive after lineage-conflict confirmation", async () => {
       const onArchiveTask = vi.fn();
       const conflict = new Error("Cannot archive task FN-099: still referenced as a lineage parent by FN-201.") as Error & {

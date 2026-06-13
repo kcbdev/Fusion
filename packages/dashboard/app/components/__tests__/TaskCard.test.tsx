@@ -462,6 +462,37 @@ describe("TaskCard", () => {
     expect(screen.getByLabelText("Archive task")).toBeDefined();
   });
 
+  it.each(["triage", "todo", "in-progress", "in-review", "done"] as const)(
+    "renders archive action for %s tasks",
+    (column) => {
+      render(
+        <TaskCard
+          task={makeTask({ column })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+        />,
+      );
+
+      expect(screen.getByLabelText("Archive task")).toBeDefined();
+    },
+  );
+
+  it("does not render archive action for archived tasks", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "archived" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+        onUnarchiveTask={vi.fn(async () => makeTask({ column: "done" }))}
+      />,
+    );
+
+    expect(screen.queryByLabelText("Archive task")).toBeNull();
+    expect(screen.getByLabelText("Unarchive task")).toBeDefined();
+  });
+
   it("keeps two-button delete flow for non-done task", async () => {
     const onDeleteTask = vi.fn(async () => makeTask());
     mockConfirm.mockResolvedValueOnce(false);
@@ -1963,10 +1994,10 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(editBtn)).toBe(true);
   });
 
-  it("renders archive button inside card-header-actions for done column", () => {
+  it("renders archive button inside card-header-actions for live columns", () => {
     const { container } = render(
       <TaskCard 
-        task={makeTask({ column: "done", size: "L" })} 
+        task={makeTask({ column: "todo", size: "L" })} 
         onOpenDetail={noop} 
         addToast={noop}
         onArchiveTask={async () => makeTask()}

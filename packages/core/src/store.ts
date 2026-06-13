@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
-import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
+import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isColumn, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import {
   MOVED_SETTINGS_KEYS,
@@ -2109,6 +2109,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: entry.description,
       priority: normalizeTaskPriority(entry.priority),
       column: "archived",
+      preArchiveColumn: entry.preArchiveColumn,
       dependencies: entry.dependencies ?? [],
       steps: entry.steps ?? [],
       currentStep: entry.currentStep ?? 0,
@@ -2242,6 +2243,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       description: task.description,
       priority: normalizeTaskPriority(task.priority),
       column: "archived",
+      preArchiveColumn: task.preArchiveColumn,
       dependencies: task.dependencies,
       steps: task.steps,
       currentStep: task.currentStep,
@@ -10657,7 +10659,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   /**
-   * Archive a done task (move from done → archived).
+   * Archive a live task (move from any non-archived column → archived).
    * Logs the action and emits `task:moved` event.
    * @param optionsOrCleanup - Boolean cleanup flag for backward compatibility,
    * or an options object that also allows removeLineageReferences.
@@ -10675,11 +10677,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         task.log = [];
       }
 
-      if (task.column !== "done") {
+      if (task.column === "archived") {
         throw new Error(
-          `Cannot archive ${id}: task is in '${task.column}', must be in 'done'`,
+          `Cannot archive ${id}: task is already archived`,
         );
       }
+
+      const fromColumn = task.column as Column;
+      task.preArchiveColumn = fromColumn;
 
       const cleanup = typeof optionsOrCleanup === "boolean" ? optionsOrCleanup : optionsOrCleanup.cleanup !== false;
       const removeLineageReferences = typeof optionsOrCleanup === "object" && optionsOrCleanup.removeLineageReferences === true;
@@ -10708,11 +10713,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         });
 
         await this.atomicWriteTaskJson(dir, task);
+        await this.writeTaskJsonFile(dir, task);
         if (this.isWatching) this.taskCache.set(id, { ...task });
         for (const lineageChild of rewrittenLineageChildren) {
           this.emit("task:updated", lineageChild);
         }
-        this.emit("task:moved", { task, from: "done" as Column, to: "archived" as Column, source: "engine" });
+        this.emit("task:moved", { task, from: fromColumn, to: "archived" as Column, source: "engine" });
         return task;
       }
 
@@ -10745,7 +10751,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       for (const lineageChild of rewrittenLineageChildren) {
         this.emit("task:updated", lineageChild);
       }
-      this.emit("task:moved", { task, from: "done" as Column, to: "archived" as Column, source: "engine" });
+      this.emit("task:moved", { task, from: fromColumn, to: "archived" as Column, source: "engine" });
       return this.archiveEntryToTask(entry, false);
     });
   }
@@ -10758,8 +10764,28 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return this.archiveTask(id, true);
   }
 
+  private resolveUnarchiveTargetColumn(preArchiveColumn: unknown): Column {
+    if (!isColumn(preArchiveColumn) || preArchiveColumn === "archived") {
+      return "done";
+    }
+    if (preArchiveColumn === "in-progress" || preArchiveColumn === "in-review") {
+      return "todo";
+    }
+    return preArchiveColumn;
+  }
+
+  private async readPreArchiveColumnFromTaskFile(dir: string): Promise<Column | undefined> {
+    try {
+      const raw = await readFile(join(dir, "task.json"), "utf-8");
+      const parsed = JSON.parse(raw) as { preArchiveColumn?: unknown };
+      return isColumn(parsed.preArchiveColumn) ? parsed.preArchiveColumn : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
-   * Unarchive an archived task (move from archived → done).
+   * Unarchive an archived task (move from archived → its recorded source column).
    * If the active task row was cleaned up, restores from archive.db first.
    * Logs the action and emits `task:moved` event.
    */
@@ -10797,16 +10823,18 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       // NOTE: No getTaskMergeBlocker check here — intentionally.
       // The merge blocker validates in-review → done transitions (ensuring code
       // has been properly reviewed before merging). An unarchived task was already
-      // merged in its previous lifecycle; this is just a restoration. The transient
-      // field clearing above ensures no stale blocker state leaks through.
-      task.column = "done";
+      // archived in its previous lifecycle; this is just a restoration. The transient
+      // field clearing below ensures no stale blocker state leaks through.
+      const preArchiveColumn = task.preArchiveColumn ?? await this.readPreArchiveColumnFromTaskFile(dir);
+      const toColumn = this.resolveUnarchiveTargetColumn(preArchiveColumn);
+      task.column = toColumn;
+      task.preArchiveColumn = undefined;
       task.columnMovedAt = new Date().toISOString();
       task.updatedAt = task.columnMovedAt;
 
-      // Clear transient fields that should not persist into "done" column.
-      // Matches the clearing done by moveTask() for consistency — archived
-      // tasks may have been archived with stale state that should not reappear
-      // after unarchiving.
+      // Clear transient fields regardless of the restored column. Archived tasks
+      // may have been archived with stale execution state that should not reappear
+      // after unarchiving, especially when active columns are downgraded to todo.
       this.clearDoneTransientFields(task);
 
       task.log.push({
@@ -10820,7 +10848,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       // Update cache if watcher is active
       if (this.isWatching) this.taskCache.set(id, { ...task });
 
-      this.emit("task:moved", { task, from: "archived" as Column, to: "done" as Column, source: "engine" });
+      this.emit("task:moved", { task, from: "archived" as Column, to: toColumn, source: "engine" });
       return task;
     });
   }
@@ -13037,7 +13065,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       title: entry.title,
       description: entry.description,
       priority: normalizeTaskPriority(entry.priority),
-      column: "archived", // Will be changed to "done" by unarchiveTask
+      column: "archived", // Will be changed by unarchiveTask
+      preArchiveColumn: entry.preArchiveColumn,
       dependencies: entry.dependencies,
       steps: entry.steps,
       currentStep: entry.currentStep,

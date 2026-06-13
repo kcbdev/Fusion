@@ -577,6 +577,10 @@ fn task unarchive FN-001
 fn task delete FN-001 --force
 ```
 
+Notes:
+- `fn task archive` accepts any live-board task (`triage`, `todo`, `in-progress`, `in-review`, or `done`) and preserves the original column for restore.
+- `fn task unarchive` restores to the saved pre-archive column when available, with legacy archives falling back to `done`.
+
 ### Branch conflict handling
 
 When executor branch allocation fails because `fusion/<task-id>` is already checked out, Fusion marks the task failed/investigable and logs conflict details (existing worktree path, tip SHA, stranded commits). Operators should inspect and resolve conflicting local branches/worktrees with standard git tooling, then retry the task.

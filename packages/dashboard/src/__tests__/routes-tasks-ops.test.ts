@@ -1487,7 +1487,7 @@ describe("POST /tasks/:id/archive", () => {
     return app;
   }
 
-  it("archives a done task and returns the updated task", async () => {
+  it("archives a task from any live column and returns the updated task", async () => {
     const archivedTask = { ...FAKE_TASK_DETAIL, column: "archived" };
     (store.archiveTask as ReturnType<typeof vi.fn>).mockResolvedValue(archivedTask);
 
@@ -1537,15 +1537,15 @@ describe("POST /tasks/:id/archive", () => {
     });
   });
 
-  it("returns 400 when task is not in done column", async () => {
-    (store.archiveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Cannot archive FN-001: task is in 'triage', must be in 'done'"));
+  it("returns 400 when task is already archived", async () => {
+    (store.archiveTask as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Cannot archive FN-001: task is already archived"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/archive", JSON.stringify({}), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain("must be in 'done'");
+    expect(res.body.error).toContain("already archived");
   });
 
   it("returns 500 on unexpected errors", async () => {
