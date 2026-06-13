@@ -254,6 +254,52 @@ describe("TaskChatTab", () => {
     expect(screen.getByLabelText("Reviewer messages")).toBeTruthy();
   });
 
+  it("renders a single text entry as one text bubble", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", text: "single response" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const textBubbles = screen.getAllByTestId("task-chat-entry-text");
+    expect(textBubbles).toHaveLength(1);
+    expect(within(textBubbles[0]).getByText("single response")).toBeVisible();
+  });
+
+  it("combines consecutive text entries into one continuous text bubble", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", text: "first chunk " }),
+      makeEntry({ agent: "executor", text: "second chunk" }),
+      makeEntry({ agent: "executor", text: " third chunk" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const textBubbles = screen.getAllByTestId("task-chat-entry-text");
+    expect(textBubbles).toHaveLength(1);
+    expect(textBubbles[0]).toHaveClass("task-chat-entry", "task-chat-entry--text");
+    expect(textBubbles[0]).toHaveTextContent("first chunk second chunk third chunk");
+    expect(within(textBubbles[0]).queryByRole("separator")).not.toBeInTheDocument();
+  });
+
+  it("keeps text entries on different agent-role runs in separate bubbles", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", text: "executor first" }),
+      makeEntry({ agent: "executor", text: " executor second" }),
+      makeEntry({ agent: "reviewer", text: "reviewer first" }),
+      makeEntry({ agent: "reviewer", text: " reviewer second" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const textBubbles = screen.getAllByTestId("task-chat-entry-text");
+    expect(textBubbles).toHaveLength(2);
+    expect(within(screen.getByLabelText("Executor messages")).getByTestId("task-chat-entry-text"))
+      .toHaveTextContent("executor first executor second");
+    expect(within(screen.getByLabelText("Reviewer messages")).getByTestId("task-chat-entry-text"))
+      .toHaveTextContent("reviewer first reviewer second");
+  });
+
   it("counts a tool call plus result as one collapsed invocation and shows the tool name", async () => {
     const user = userEvent.setup();
     mockLogs([
@@ -423,6 +469,7 @@ describe("TaskChatTab", () => {
     expect(screen.getAllByText("1 tool call")).toHaveLength(2);
     expect(within(toolGroups[0]).getByLabelText("Tool names")).toHaveTextContent("first tool");
     expect(within(toolGroups[1]).getByLabelText("Tool names")).toHaveTextContent("second tool");
+    expect(screen.getAllByTestId("task-chat-entry-text")).toHaveLength(1);
     expect(screen.getByText("plain response")).toBeVisible();
     expect(screen.getByText("thinking between tools")).toBeVisible();
   });
@@ -446,6 +493,7 @@ describe("TaskChatTab", () => {
     expect(toolGroup).not.toHaveAttribute("open");
     expect(screen.getByText("1 tool call")).toBeVisible();
     expect(screen.getByText("streamed detail")).not.toBeVisible();
+    expect(screen.getAllByTestId("task-chat-entry-text")).toHaveLength(2);
     expect(screen.getByText("second live chunk")).toBeVisible();
   });
 

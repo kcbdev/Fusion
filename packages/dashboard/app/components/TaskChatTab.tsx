@@ -32,7 +32,7 @@ interface AgentLogGroup {
 type TaskChatSegment =
   | { kind: "tool"; entries: AgentLogEntry[]; startIndex: number }
   | { kind: "thinking"; entries: AgentLogEntry[]; startIndex: number }
-  | { kind: "text"; entry: AgentLogEntry; index: number };
+  | { kind: "text"; entries: AgentLogEntry[]; startIndex: number };
 
 type TaskChatToolGroupRow =
   | { kind: "invocation"; call: AgentLogEntry; completion?: AgentLogEntry; callIndex: number; completionIndex?: number }
@@ -175,22 +175,30 @@ function segmentGroupEntries(entries: AgentLogEntry[]): TaskChatSegment[] {
       continue;
     }
 
-    segments.push({ kind: "text", entry, index });
-    index += 1;
+    const startIndex = index;
+    const textEntries: AgentLogEntry[] = [];
+    while (index < entries.length && !isToolLikeEntry(entries[index]) && entries[index].type !== "thinking") {
+      textEntries.push(entries[index]);
+      index += 1;
+    }
+    segments.push({ kind: "text", entries: textEntries, startIndex });
   }
 
   return segments;
 }
 
-function TaskChatTextEntry({ entry }: { entry: AgentLogEntry }) {
+function TaskChatText({ entries }: { entries: AgentLogEntry[] }) {
+  const firstEntry = entries[0];
+  if (!firstEntry) return null;
+
   return (
     <article
-      className={`task-chat-entry task-chat-entry--${entry.type.replace("_", "-")}`}
-      data-testid={`task-chat-entry-${entry.type}`}
+      className={`task-chat-entry task-chat-entry--${firstEntry.type.replace("_", "-")}`}
+      data-testid={`task-chat-entry-${firstEntry.type}`}
     >
       <div className="markdown-body task-chat-markdown">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {entry.text}
+          {entries.map((entry) => entry.text).join("")}
         </ReactMarkdown>
       </div>
     </article>
@@ -327,7 +335,7 @@ function TaskChatSegmentView({ segment }: { segment: TaskChatSegment }) {
   if (segment.kind === "thinking") {
     return <TaskChatThinking entries={segment.entries} />;
   }
-  return <TaskChatTextEntry entry={segment.entry} />;
+  return <TaskChatText entries={segment.entries} />;
 }
 
 export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: TaskChatTabProps) {
@@ -507,9 +515,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive }: 
                 </header>
                 <div className="task-chat-group-bubbles">
                   {segments.map((segment) => {
-                    const segmentKey = segment.kind === "text"
-                      ? `text-${getEntryKey(segment.entry, segment.index)}`
-                      : `${segment.kind}-${segment.startIndex}-${segment.entries.length}`;
+                    const segmentKey = `${segment.kind}-${segment.startIndex}-${segment.entries.length}`;
                     return <TaskChatSegmentView key={segmentKey} segment={segment} />;
                   })}
                 </div>
