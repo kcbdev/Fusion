@@ -858,6 +858,22 @@ describe("TaskChatTab", () => {
     expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
   });
 
+  it.each(["done", "dead", "needsAttention", null] as const)("falls back to static task fields when the CLI session is not live: %s", (agentState) => {
+    const sessionLive = agentState === null ? isCliSessionLive(null) : isCliSessionLive(makeCliSession(agentState));
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })}
+        active
+        addToast={vi.fn()}
+        sessionLive={sessionLive}
+      />,
+    );
+
+    expect(screen.getByText(/No active steerable agent session/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
   it.each(["busy", "ready", "starting", "waitingOnInput"] as const)("treats %s CLI sessions as live", (agentState) => {
     expect(isCliSessionLive(makeCliSession(agentState))).toBe(true);
   });
@@ -873,12 +889,38 @@ describe("TaskChatTab", () => {
   it.each([undefined, null, "queued", "planning", "merging", "merging-fix"])(
     "enables in-progress steering for assigned agents with %s status",
     (status) => {
-      render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
+      render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} sessionLive={false} />);
 
       expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
       expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
     },
   );
+
+  it("enables a non-CLI engine agent when the forwarded task carries full-detail agent fields", async () => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({ column: "in-progress", assignedAgentId: "agent-full", checkedOutBy: "agent-full", status: "queued" }));
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-progress", assignedAgentId: "agent-full", checkedOutBy: "agent-full", status: "queued" })}
+        projectId="project-1"
+        active
+        addToast={vi.fn()}
+        sessionLive={false}
+      />,
+    );
+
+    expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    await user.type(input, "Continue from the worktree");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Continue from the worktree", "project-1");
+    });
+  });
 
   it("enables in-progress steering with checkedOutBy when no assignedAgentId exists", async () => {
     const user = userEvent.setup();
@@ -1019,6 +1061,23 @@ describe("TaskChatTab", () => {
       expect(screen.queryByTestId("task-chat-entry-user")).not.toBeInTheDocument();
       expect(addToast).toHaveBeenCalledWith("Unable to send message: network down", "error");
     });
+  });
+
+  it("renders the same composer affordance shell on desktop and mobile breakpoints", () => {
+    mockMatchMedia(false);
+    const desktop = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.getByTestId("task-chat-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("task-chat-transcript")).toBeInTheDocument();
+    expect(screen.getByLabelText("Message active agent session")).toHaveClass("task-chat-input");
+    expect(screen.getByRole("button", { name: "Send" })).toHaveClass("task-chat-send");
+    desktop.unmount();
+
+    mockMatchMedia(true);
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.getByTestId("task-chat-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("task-chat-transcript")).toBeInTheDocument();
+    expect(screen.getByLabelText("Message active agent session")).toHaveClass("task-chat-input");
+    expect(screen.getByRole("button", { name: "Send" })).toHaveClass("task-chat-send");
   });
 
   it("keeps mobile breakpoint scaffolding for the transcript, composer, and collapsible groups", () => {

@@ -624,6 +624,13 @@ export function TaskDetailContent({
       prompt: fullDetail.prompt,
       log: fullDetail.log,
       githubTracking: task.githubTracking ?? fullDetail.githubTracking,
+      assignedAgentId: task.assignedAgentId === undefined ? fullDetail.assignedAgentId : task.assignedAgentId,
+      checkedOutBy: task.checkedOutBy === undefined ? fullDetail.checkedOutBy : task.checkedOutBy,
+      status: task.status === undefined ? fullDetail.status : task.status,
+      column: task.column === undefined ? fullDetail.column : task.column,
+      paused: task.paused === undefined ? fullDetail.paused : task.paused,
+      userPaused: task.userPaused === undefined ? fullDetail.userPaused : task.userPaused,
+      pausedReason: task.pausedReason === undefined ? fullDetail.pausedReason : task.pausedReason,
     } as TaskDetail)
     : ({ ...task, prompt: "" } as TaskDetail);
   const canRetryTask =
