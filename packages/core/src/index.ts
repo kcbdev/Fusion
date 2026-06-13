@@ -455,6 +455,7 @@ export {
   InvalidMergeQueueLeaseDurationError,
   HandoffInvariantViolationError,
   TransitionRejectionError,
+  type LegacyAutoMergeStampReconcileResult,
 } from "./store.js";
 export {
   STOPWORDS,
