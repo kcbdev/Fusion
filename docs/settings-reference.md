@@ -295,7 +295,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |
 | `heartbeatPromptTemplate` | `"default" \| "compact"` | `"default"` | Heartbeat execution-prompt trim template default. Per-agent `runtimeConfig.heartbeatPromptTemplate` overrides this value. Role fallback when unset everywhere is `executor`→`default`, non-executor coordination roles→`compact`. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Default no-task heartbeat candidate list length. Integer range `0-10`; `0` suppresses candidate prompt injection. |
-| `engineerBacklogAutoClaim` | `boolean` | `false` | Opt engineer-role agents into no-task backlog auto-claim for implementation tasks. The default remains executor-only; per-agent `runtimeConfig.engineerBacklogAutoClaim` overrides this project default, and explicit routing/delegation is unchanged. |
+| `engineerBacklogAutoClaim` | `boolean` | `false` | Opt engineer-role agents into no-task backlog auto-claim for implementation tasks. The default remains executor-only; per-agent `runtimeConfig.engineerBacklogAutoClaim` overrides this project default, and explicit routing/delegation is unchanged. Configure the project default in **Settings → Scheduling & Capacity → Let engineer agents auto-claim backlog tasks**; configure the per-agent override in **Agents → Agent Detail → Settings → Heartbeat Settings → Engineer Backlog Auto-Claim**. |
 | `defaultNodeId` | `string` | `undefined` | Optional project default execution node for task dispatch. When set, tasks without a per-task `nodeId` override resolve to this node (`routing source: project-default`). See [Task Management → Node Routing](./task-management.md#node-routing). |
 | `unavailableNodePolicy` | `"block" \| "fallback-local"` | `"block"` | Project routing policy used during scheduler dispatch when a task resolves to a remote node and node health is known. `"block"` keeps the task in `todo` if the node is unhealthy; `"fallback-local"` reroutes dispatch to local execution. See [Architecture → Task Routing Architecture](./architecture.md#task-routing-architecture). |
 | `secretsAccessPolicy` | `"auto" \| "prompt" \| "deny"` | `undefined` | Project-level default secret access policy (overrides global default when present). |
@@ -1173,7 +1173,7 @@ Common heartbeat/runtime keys on `runtimeConfig` include:
 | `selfImproveIntervalMs` | `number` | Delay between self-improvement cycles (default 4h, minimum 1h) |
 | `lastSelfImproveAt` | `string` | Last self-improvement checkpoint timestamp (managed by heartbeat monitor) |
 
-Configure these per agent in **Agents → Agent Detail → Settings → Heartbeat Settings** (dashboard), or by updating agent `runtimeConfig` via the Agents API/CLI config flows.
+Configure these per agent in **Agents → Agent Detail → Settings → Heartbeat Settings** (dashboard), or by updating agent `runtimeConfig` via the Agents API/CLI config flows. The **Engineer Backlog Auto-Claim** checkbox in this card controls `runtimeConfig.engineerBacklogAutoClaim` for that agent and only affects no-task backlog pickup; explicit assignment and delegation behavior are unchanged.
 
 These examples show agents configured to use Paperclip, Hermes, and OpenClaw runtime hints:
 

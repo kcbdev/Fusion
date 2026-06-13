@@ -2648,6 +2648,72 @@ describe("SettingsModal", () => {
       const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
       expect(payload.heartbeatScopeDiscipline).toBe("off");
     });
+
+    it.each([
+      ["undefined", undefined, false],
+      ["false", false, false],
+      ["true", true, true],
+    ] as const)("renders engineer backlog auto-claim from %s project setting", async (_label, engineerBacklogAutoClaim, expectedChecked) => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        ...(engineerBacklogAutoClaim === undefined ? {} : { engineerBacklogAutoClaim }),
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      expect((screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement).checked).toBe(expectedChecked);
+    });
+
+    it("routes enabled engineer backlog auto-claim through the project settings save payload", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        engineerBacklogAutoClaim: false,
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
+      expect(toggle.checked).toBe(false);
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.engineerBacklogAutoClaim).toBe(true);
+    });
+
+    it("routes disabled engineer backlog auto-claim through the project settings save payload", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        engineerBacklogAutoClaim: true,
+      });
+
+      renderModal();
+      await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByText("Scheduling & Capacity"));
+
+      const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
+      expect(toggle.checked).toBe(true);
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.engineerBacklogAutoClaim).toBe(false);
+    });
   });
 
   describe("Number input clearing", () => {
