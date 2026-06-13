@@ -969,6 +969,124 @@ test("pruneFusionTestWorkers: bounded — removes at most maxEntries per call", 
   }
 });
 
+function createNonEmptyPruneRoot(prefix, label) {
+  const root = mkdtempSync(path.join(tmpdir(), `${prefix}${label}-${process.pid}-`));
+  const childDir = path.join(root, `w-${process.pid}-busy`);
+  mkdirSync(childDir, { recursive: true });
+  writeFileSync(path.join(childDir, "busy.txt"), "busy\n");
+  return root;
+}
+
+function capturePruneWarnings(fn) {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (msg) => warnings.push(String(msg));
+  try {
+    fn(warnings);
+  } finally {
+    console.warn = originalWarn;
+  }
+  return warnings;
+}
+
+function withTransientPruneFailure(root, pruneFn) {
+  const error = Object.assign(new Error("simulated ENOTEMPTY"), { code: "ENOTEMPTY" });
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      if (calls === 1) throw error;
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(64, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), false);
+    assert.equal(calls, 2);
+    assert.deepEqual(warnings, []);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function withPersistentPruneFailure(root, pruneFn) {
+  const error = Object.assign(new Error("simulated EBUSY"), { code: "EBUSY" });
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      throw error;
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(1024, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), true);
+    assert.equal(calls, 3);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /failed to prune leftover/);
+    assert.match(warnings[0], /after 3 attempts/);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("pruneFusionTestWorkers: reclaims non-empty root after transient ENOTEMPTY", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "transient");
+  withTransientPruneFailure(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestWorkers: persistent busy root warns once after bounded retries", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "persistent");
+  withPersistentPruneFailure(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestHomes: reclaims non-empty root after transient ENOTEMPTY", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "transient");
+  withTransientPruneFailure(root, pruneFusionTestHomes);
+});
+
+test("pruneFusionTestHomes: persistent busy root warns once after bounded retries", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "persistent");
+  withPersistentPruneFailure(root, pruneFusionTestHomes);
+});
+
+function withEnoentPruneSuccess(root, pruneFn) {
+  let calls = 0;
+  __setCleanupRmSyncForTests((target, options) => {
+    if (target === root) {
+      calls += 1;
+      rmSync(root, { recursive: true, force: true });
+      throw Object.assign(new Error("simulated ENOENT"), { code: "ENOENT" });
+    }
+    return rmSync(target, options);
+  });
+
+  try {
+    const warnings = capturePruneWarnings(() => pruneFn(1024, { retries: 3, delayMs: 0 }));
+    assert.equal(existsSync(root), false);
+    assert.equal(calls, 1);
+    assert.deepEqual(warnings, []);
+  } finally {
+    __setCleanupRmSyncForTests(null);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("pruneFusionTestWorkers: ENOENT during prune is success without warning", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-workers-", "enoent");
+  withEnoentPruneSuccess(root, pruneFusionTestWorkers);
+});
+
+test("pruneFusionTestHomes: ENOENT during prune is success without warning", () => {
+  const root = createNonEmptyPruneRoot("fusion-test-home-root-", "enoent");
+  withEnoentPruneSuccess(root, pruneFusionTestHomes);
+});
+
 // ---------------------------------------------------------------------------
 // U4: real-git-fixture integration (dirty working tree + transitive deps).
 //

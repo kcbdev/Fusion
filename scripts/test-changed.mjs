@@ -169,36 +169,54 @@ export function shouldRunIsolationGuard(env = process.env) {
 // can't spend unbounded time rm-rf'ing a tmpdir that accumulated thousands of
 // stale homes — and so the cache-fresh fast path can skip it entirely.
 const PRUNE_MAX_ENTRIES = 64;
+let cleanupRmSync = rmSync;
+const PRUNE_REMOVE_RETRIES = 3;
+const PRUNE_REMOVE_DELAY_MS = 75;
+const PRUNE_DIAGNOSTIC_CHILD_LIMIT = 8;
 
-export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES) {
-  let tmpEntries = [];
+function isEnoentError(err) {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
+}
+
+function listImmediateChildrenForPruneWarning(rootPath) {
   try {
-    tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
+    const children = readdirSync(rootPath).slice(0, PRUNE_DIAGNOSTIC_CHILD_LIMIT);
+    if (children.length === 0) return "";
+    const suffix = children.length === PRUNE_DIAGNOSTIC_CHILD_LIMIT ? ", ..." : "";
+    return `; remaining children: ${children.join(", ")}${suffix}`;
   } catch {
-    return;
-  }
-
-  let removed = 0;
-  for (const entry of tmpEntries) {
-    if (removed >= maxEntries) break;
-    if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-home-root-")) continue;
-    const rawPath = path.join(tmpdir(), entry.name);
-    try {
-      realpathSync(rawPath);
-    } catch {
-      // Keep raw path fallback.
-    }
-    try {
-      rmSync(rawPath, { recursive: true, force: true });
-      removed++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[test-changed] failed to prune leftover ${rawPath}: ${message}`);
-    }
+    return "";
   }
 }
 
-export function pruneFusionTestWorkers(maxEntries = PRUNE_MAX_ENTRIES) {
+function removePrunedRootWithRetry(rawPath, { retries = PRUNE_REMOVE_RETRIES, delayMs = PRUNE_REMOVE_DELAY_MS } = {}) {
+  if (!existsSync(rawPath)) return true;
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      // FN-6371/FN-6360: macOS can report a transient ENOTEMPTY/EBUSY while
+      // child handles inside an orphaned fusion-test-* root are still closing.
+      // Keep this a short bounded retry (not a long live-root deletion loop) and
+      // keep the surrounding scan single-level/prefix-capped.
+      cleanupRmSync(rawPath, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      if (isEnoentError(err)) return true;
+      lastError = err;
+      if (attempt < retries) {
+        sleepMsSync(delayMs);
+      }
+    }
+  }
+
+  const message = lastError instanceof Error ? lastError.message : String(lastError);
+  const children = listImmediateChildrenForPruneWarning(rawPath);
+  console.warn(`[test-changed] failed to prune leftover ${rawPath} after ${retries} attempts: ${message}${children}`);
+  return false;
+}
+
+function pruneFusionTestRoots(prefix, maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
   let tmpEntries = [];
   try {
     tmpEntries = readdirSync(tmpdir(), { withFileTypes: true });
@@ -206,27 +224,27 @@ export function pruneFusionTestWorkers(maxEntries = PRUNE_MAX_ENTRIES) {
     return;
   }
 
-  let removed = 0;
+  let processed = 0;
   for (const entry of tmpEntries) {
-    if (removed >= maxEntries) break;
-    if (!entry.isDirectory() || !entry.name.startsWith("fusion-test-workers-")) continue;
+    if (processed >= maxEntries) break;
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
+    processed++;
     const rawPath = path.join(tmpdir(), entry.name);
     try {
       realpathSync(rawPath);
     } catch {
       // Keep raw path fallback.
     }
-    try {
-      // FN-6360: if a Vitest invocation is SIGKILL'd, globalTeardown never runs.
-      // This capped, single-level prefix prune mirrors pruneFusionTestHomes so
-      // orphaned worker roots are swept before check-test-isolation runs.
-      rmSync(rawPath, { recursive: true, force: true });
-      removed++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[test-changed] failed to prune leftover ${rawPath}: ${message}`);
-    }
+    removePrunedRootWithRetry(rawPath, retryOptions);
   }
+}
+
+export function pruneFusionTestHomes(maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
+  pruneFusionTestRoots("fusion-test-home-root-", maxEntries, retryOptions);
+}
+
+export function pruneFusionTestWorkers(maxEntries = PRUNE_MAX_ENTRIES, retryOptions = {}) {
+  pruneFusionTestRoots("fusion-test-workers-", maxEntries, retryOptions);
 }
 
 function runMaybeIsolated(command, commandArgs, options = {}) {
@@ -947,8 +965,6 @@ const isolatedHomesToCleanup = new Set();
 // Passed to check-test-isolation.mjs via env so it allow-lists them
 // unconditionally, even if cleanup's rm silently failed.
 export const knownIsolatedHomeBasenames = new Set();
-
-let cleanupRmSync = rmSync;
 
 export function __setCleanupRmSyncForTests(nextRmSync) {
   cleanupRmSync = typeof nextRmSync === "function" ? nextRmSync : rmSync;
