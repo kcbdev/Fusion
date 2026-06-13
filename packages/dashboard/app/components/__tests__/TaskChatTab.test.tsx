@@ -106,6 +106,26 @@ function mockLogs(entries: AgentLogEntry[] = [], loading = false) {
   });
 }
 
+function expectComposerSendableAfterDraft(message = "Please continue") {
+  expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
+  const input = screen.getByLabelText("Message active agent session");
+  expect(input).not.toBeDisabled();
+  const sendButton = screen.getByRole("button", { name: "Send" });
+  expect(sendButton).toBeDisabled();
+
+  fireEvent.change(input, { target: { value: message } });
+  expect(sendButton).not.toBeDisabled();
+}
+
+function expectQueuedSessionCopy() {
+  expect(screen.getByText(/picked up by the next session/i)).toBeInTheDocument();
+}
+
+function expectActiveSessionCopy() {
+  expect(screen.getByText(/active agent session/i)).toBeInTheDocument();
+  expect(screen.getByText(/delivered to the running session in real time/i)).toBeInTheDocument();
+}
+
 function restoreMetricDescriptor(name: "scrollTop" | "scrollHeight" | "clientHeight", descriptor: PropertyDescriptor | undefined) {
   if (descriptor) {
     Object.defineProperty(HTMLElement.prototype, name, descriptor);
@@ -828,6 +848,42 @@ describe("TaskChatTab", () => {
     });
   });
 
+  it.each([
+    ["idle todo task without an attached agent", makeTask({ column: "todo", assignedAgentId: undefined, checkedOutBy: undefined, status: undefined })],
+    ["paused task", makeTask({ status: "paused" })],
+  ])("FN-6354 keeps the composer sendable for %s", async (_label, task) => {
+    const user = userEvent.setup();
+    mockedAddSteeringComment.mockResolvedValue(makeTask({
+      ...task,
+      steeringComments: [makeSteeringComment({ id: "steer-new", text: "Queue this for later" })],
+    }));
+    render(
+      <TaskChatTab
+        task={task}
+        projectId="project-1"
+        active
+        addToast={vi.fn()}
+        sessionLive={false}
+      />,
+    );
+
+    expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
+    expect(screen.getByText(/picked up by the next session/i)).toBeInTheDocument();
+    const input = screen.getByLabelText("Message active agent session");
+    expect(input).not.toBeDisabled();
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+
+    await user.type(input, "Queue this for later");
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Queue this for later", "project-1");
+    });
+    expect(within(screen.getByTestId("task-chat-transcript")).getByText("Queue this for later")).toBeVisible();
+  });
+
   it.each(["starting", "ready", "busy", "waitingOnInput"] as const)(
     "enables steering for a live %s CLI session when static task fields are not steerable",
     async (agentState) => {
@@ -871,7 +927,7 @@ describe("TaskChatTab", () => {
     expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
   });
 
-  it.each(["done", "dead", "needsAttention", null] as const)("falls back to static task fields when the CLI session is not live: %s", (agentState) => {
+  it.each(["done", "dead", "needsAttention", null] as const)("shows queued copy but stays sendable when the CLI session is not live: %s", (agentState) => {
     const sessionLive = agentState === null ? isCliSessionLive(null) : isCliSessionLive(makeCliSession(agentState));
     render(
       <TaskChatTab
@@ -882,9 +938,8 @@ describe("TaskChatTab", () => {
       />,
     );
 
-    expect(screen.getByText(/No active steerable agent session/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expectQueuedSessionCopy();
+    expectComposerSendableAfterDraft();
   });
 
   it.each(["busy", "ready", "starting", "waitingOnInput"] as const)("treats %s CLI sessions as live", (agentState) => {
@@ -1004,24 +1059,35 @@ describe("TaskChatTab", () => {
   });
 
   it.each([
-    ["todo task", makeTask({ column: "todo", assignedAgentId: "agent-1", status: undefined })],
-    ["triage task", makeTask({ column: "triage", assignedAgentId: "agent-1", status: undefined })],
-    ["done task", makeTask({ column: "done", assignedAgentId: "agent-1", status: undefined })],
-    ["archived task", makeTask({ column: "archived", assignedAgentId: "agent-1", status: undefined })],
+    ["in-progress task", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: "queued" }), true],
+    ["in-review task", makeTask({ column: "in-review", assignedAgentId: "agent-1", status: "reviewing" }), true],
+    ["todo task", makeTask({ column: "todo", assignedAgentId: "agent-1", status: undefined }), false],
+    ["triage task", makeTask({ column: "triage", assignedAgentId: "agent-1", status: undefined }), false],
+    ["done task", makeTask({ column: "done", assignedAgentId: "agent-1", status: undefined }), false],
+    ["archived task", makeTask({ column: "archived", assignedAgentId: "agent-1", status: undefined }), false],
+  ])("keeps the composer sendable for %s column", (_label, task, showsActiveCopy) => {
+    render(<TaskChatTab task={task} active addToast={vi.fn()} sessionLive={false} />);
+
+    if (showsActiveCopy) {
+      expectActiveSessionCopy();
+    } else {
+      expectQueuedSessionCopy();
+    }
+    expectComposerSendableAfterDraft();
+  });
+
+  it.each([
     ["in-progress task without an assigned or checked-out agent", makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })],
     ["paused in-progress task", makeTask({ column: "in-progress", status: "queued", paused: true })],
     ["user-paused in-progress task", makeTask({ column: "in-progress", status: "queued", userPaused: true })],
     ["in-review task without an assigned or checked-out agent", makeTask({ column: "in-review", status: "reviewing", assignedAgentId: undefined, checkedOutBy: undefined })],
     ["paused in-review task", makeTask({ column: "in-review", status: "reviewing", paused: true })],
     ["user-paused in-review task", makeTask({ column: "in-review", status: "reviewing", userPaused: true })],
-  ])("disables the composer and shows a hint for %s", (_label, task) => {
+  ])("keeps the composer sendable with queued copy for %s", (_label, task) => {
     render(<TaskChatTab task={task} active addToast={vi.fn()} />);
 
-    expect(screen.getByText(/No active steerable agent session/)).toBeTruthy();
-    expect(screen.getByText(/active assigned task agent or live, non-paused CLI session is required/i)).toBeTruthy();
-    expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
-    expect(screen.getByPlaceholderText("Active steerable agent session required")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expectQueuedSessionCopy();
+    expectComposerSendableAfterDraft();
   });
 
   it.each([
@@ -1029,24 +1095,49 @@ describe("TaskChatTab", () => {
     ["user-paused in-progress task with a live session", makeTask({ column: "in-progress", status: "queued", userPaused: true })],
     ["paused in-review task with a live session", makeTask({ column: "in-review", status: "reviewing", paused: true })],
     ["user-paused in-review task with a live session", makeTask({ column: "in-review", status: "reviewing", userPaused: true })],
-  ])("disables the composer for %s", (_label, task) => {
+  ])("keeps the composer sendable with queued copy for %s", (_label, task) => {
     render(<TaskChatTab task={task} active addToast={vi.fn()} sessionLive={true} />);
 
-    expect(screen.getByText(/No active steerable agent session/)).toBeTruthy();
-    expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expectQueuedSessionCopy();
+    expectComposerSendableAfterDraft();
   });
 
   it.each(["paused", "awaiting-user-input", "awaiting-cli-approval", "awaiting-user-review", "failed", "needs-replan"])(
-    "disables in-progress steering for non-steerable %s status",
+    "keeps in-progress steering sendable with queued copy for %s status",
     (status) => {
       render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
 
-      expect(screen.getByText(/No active steerable agent session/)).toBeTruthy();
-      expect(screen.getByLabelText("Message active agent session")).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+      expectQueuedSessionCopy();
+      expectComposerSendableAfterDraft();
     },
   );
+
+  it("disables the composer only while a send is in flight", async () => {
+    const user = userEvent.setup();
+    const send = deferred<Task>();
+    mockedAddSteeringComment.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask({ column: "todo", assignedAgentId: undefined, checkedOutBy: undefined })} active addToast={vi.fn()} sessionLive={false} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(input).not.toBeDisabled();
+    expect(sendButton).toBeDisabled();
+
+    await user.type(input, "Please queue this while idle");
+    expect(sendButton).not.toBeDisabled();
+    await user.click(sendButton);
+
+    expect(screen.getByRole("button", { name: "Sending" })).toBeDisabled();
+    expect(input).toBeDisabled();
+
+    await act(async () => {
+      send.resolve(makeTask({ steeringComments: [makeSteeringComment({ text: "Please queue this while idle" })] }));
+      await send.promise;
+    });
+
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveValue("");
+  });
 
   it("rolls back optimistic messages and surfaces send failures through addToast", async () => {
     const user = userEvent.setup();

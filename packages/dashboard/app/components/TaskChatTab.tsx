@@ -422,7 +422,10 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages), [entries, userMessages]);
   const transcriptItemCount = entries.length + userMessages.length;
   const activeSession = isActiveAgentSession(task, { sessionLive });
-  const canSend = activeSession && draft.trim().length > 0 && !sending;
+  const sessionHint = activeSession
+    ? "Message the active agent session. Guidance is delivered to the running session in real time."
+    : "Message saved here will be picked up by the next session when work resumes.";
+  const canSend = draft.trim().length > 0 && !sending;
 
   const resizeComposer = useCallback(() => {
     const textarea = textareaRef.current;
@@ -532,7 +535,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   const handleSubmit = useCallback(async (event?: React.FormEvent) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || !activeSession || sending) return;
+    if (!text || sending) return;
 
     const optimisticMessage: UserChatMessage = {
       id: `optimistic-${task.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -562,7 +565,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     } finally {
       setSending(false);
     }
-  }, [activeSession, addToast, draft, onTaskUpdated, projectId, sending, task.id]);
+  }, [addToast, draft, onTaskUpdated, projectId, sending, task.id]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -620,20 +623,18 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
       </div>
 
       <form className="task-chat-composer card" onSubmit={handleSubmit}>
-        {!activeSession ? (
-          <div className="task-chat-session-hint" role="status">
-            No active steerable agent session is available. An active assigned task agent or live, non-paused CLI session is required to send guidance.
-          </div>
-        ) : null}
+        <div className="task-chat-session-hint" role="status">
+          {sessionHint}
+        </div>
         <div className="task-chat-composer-row">
           <textarea
             ref={textareaRef}
             className="input task-chat-input"
             value={draft}
-            placeholder={activeSession ? "Message the active agent session…" : "Active steerable agent session required"}
+            placeholder={activeSession ? "Message the active agent session…" : "Message now; it will be picked up by the next session…"}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={!activeSession || sending}
+            disabled={sending}
             aria-label="Message active agent session"
             rows={1}
           />
