@@ -53,6 +53,7 @@ Features:
 - Working-branch and base-branch filter selections are persisted per project and restored across refresh/navigation
 - Column visibility controls
 - Inline quick entry creation
+- The quick-entry GitHub icon is a per-task tracking override: leave it untouched to use the project default, turn it on to opt the next task into tracking when the default is off, or turn it off to opt the next task out when the default is on.
 - PR/issue badges with live updates
 - GitHub provenance marker on task cards imported from GitHub (`sourceType: github_import`), shown alongside existing footer metadata like timers
 - Agent-created provenance badge in task card headers for agent-originated tasks (`sourceType: agent_heartbeat` or `sourceType: automation`, or legacy tasks with `sourceAgentId`), with labels preferring `sourceMetadata.agentName` over raw agent IDs
