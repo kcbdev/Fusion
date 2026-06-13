@@ -11,7 +11,7 @@ import {
 // A mocked element/page/context/browser stack. Real browser automation is NOT
 // exercised in the merge gate — only the driver's wiring against this mock is.
 function makeMockStack(overrides?: {
-  selectorResolver?: (selector: string) => AutomationElement | null | "throw";
+  selectorResolver?: (selector: string) => AutomationElement | null | "throw" | "throw-non-timeout";
   pageUrl?: string;
 }) {
   const clickSpy = vi.fn(async () => {});
@@ -27,7 +27,17 @@ function makeMockStack(overrides?: {
   const gotoSpy = vi.fn(async () => ({}));
   const waitForSelectorSpy = vi.fn(async (selector: string) => {
     const r = overrides?.selectorResolver ? overrides.selectorResolver(selector) : element;
-    if (r === "throw") throw new Error("Timeout 10000ms exceeded waiting for selector");
+    if (r === "throw") {
+      // Mimic Playwright's TimeoutError (identified by `name`): the selector
+      // never appeared → a real `absent` observation.
+      const timeoutErr = new Error("Timeout 10000ms exceeded waiting for selector");
+      timeoutErr.name = "TimeoutError";
+      throw timeoutErr;
+    }
+    if (r === "throw-non-timeout") {
+      // A non-timeout fault (e.g. a malformed selector): NOT absence.
+      throw new Error("Unknown engine 'bogus' while parsing selector");
+    }
     return r;
   });
 
@@ -184,6 +194,15 @@ describe("browser driver — absence is a real observation, not inconclusive", (
     if (launched.status !== "ready") throw new Error("expected ready");
     const out = await launched.session.observe(".gone");
     expect(out.status).toBe("absent");
+  });
+
+  it("observe of a non-timeout waitForSelector fault resolves to inconclusive (not absent)", async () => {
+    const { client } = makeMockStack({ selectorResolver: () => "throw-non-timeout" });
+    const launched = await launchBrowserDriver({ client, executablePath: NODE_BIN });
+    if (launched.status !== "ready") throw new Error("expected ready");
+    const out = await launched.session.observe("css=bogus>>>nonsense");
+    expect(out.status).toBe("inconclusive");
+    if (out.status === "inconclusive") expect(out.reason).toBe("driver-error");
   });
 });
 

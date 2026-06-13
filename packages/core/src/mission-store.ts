@@ -2987,6 +2987,11 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     if (!run) {
       throw new Error(`Validator run ${runId} not found`);
     }
+    if (run.featureId !== sourceFeatureId) {
+      throw new Error(
+        `Validator run ${runId} belongs to feature ${run.featureId}, expected ${sourceFeatureId}`,
+      );
+    }
 
     // R22 — idempotency across re-drives.
     //

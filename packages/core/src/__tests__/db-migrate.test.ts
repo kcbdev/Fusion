@@ -716,7 +716,6 @@ describe("schema migration", () => {
     const row = db.prepare("SELECT deletedAt FROM tasks WHERE id = 'FN-legacy'").get() as { deletedAt: string | null };
     expect(row.deletedAt).toBeNull();
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -749,7 +748,6 @@ describe("schema migration", () => {
       { id: "WS-001", mode: "prompt", gateMode: "advisory" },
       { id: "WS-002", mode: "script", gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -801,7 +799,6 @@ describe("schema migration", () => {
       reviewerFallbackRetryCount: 0,
     });
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
   });
@@ -830,7 +827,6 @@ describe("schema migration", () => {
 
     const columns = db.prepare("PRAGMA table_info(milestones)").all() as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toContain("acceptanceCriteria");
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -873,7 +869,6 @@ describe("schema migration", () => {
     expect(missionColumns.map((column) => column.name)).toContain("autoMerge");
 
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -907,7 +902,6 @@ describe("schema migration", () => {
       { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
       { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -945,7 +939,6 @@ describe("schema migration", () => {
 
     const indexes = db.prepare("PRAGMA index_list(mission_goals)").all() as Array<{ name: string }>;
     expect(indexes.some((index) => index.name === "idxMissionGoalsGoalId")).toBe(true);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -1227,7 +1220,6 @@ describe("schema migration", () => {
     expect(stepRow.migrated_fragment_id).toBeNull();
 
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
@@ -1235,13 +1227,11 @@ describe("schema migration", () => {
     const db = new Database(fusionDir);
     db.init();
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
-    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
 
     // Re-open the same on-disk DB: already at 109, the 109 block must be a no-op.
     const reopened = new Database(fusionDir);
     reopened.init();
-    expect(reopened.getSchemaVersion()).toBe(SCHEMA_VERSION);
     expect(reopened.getSchemaVersion()).toBe(SCHEMA_VERSION);
     const workflowColumns = reopened.prepare("PRAGMA table_info(workflows)").all() as Array<{ name: string }>;
     expect(workflowColumns.filter((c) => c.name === "kind")).toHaveLength(1);

@@ -37,11 +37,12 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { TaskStore } from "@fusion/core";
 import type { SandboxCapabilities } from "./sandbox/index.js";
-import { __setSandboxBackendForTests, resolveSandboxBackend } from "./sandbox/index.js";
+import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/index.js";
 import { detectBwrap } from "./sandbox/bubblewrap-detect.js";
 import { detectSandboxExec } from "./sandbox/sandbox-exec-detect.js";
 import { runVerificationCommand } from "./verification-utils.js";
+import type { VerificationCommandResult } from "./verification-utils.js";
 import { createLogger } from "./logger.js";
 
 const execAsync = promisify(exec);
@@ -474,13 +475,14 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
     const logTaskId = request.taskId ?? `verify-${assertionId}`;
 
     // Route runVerificationCommand through the explicitly-selected isolating
-    // backend rather than the no-arg native fallback (R18). runVerificationCommand
-    // resolves its backend via the no-arg resolveSandboxBackend(), so we pin the
-    // selected isolating backend via the test-override hook for the duration of
-    // the run and unconditionally restore afterwards.
+    // backend (R18). The backend is passed in by argument rather than the no-arg
+    // resolveSandboxBackend()/global test hook: applyBehavioralPosture dispatches
+    // assertions concurrently via Promise.all, so a process-global override would
+    // race — a sibling run could clear it mid-run and the no-arg resolver would
+    // then fall through to the unrestricted native backend, breaking fail-closed
+    // isolation. Threading the backend keeps each run pinned to its own isolating
+    // backend regardless of concurrency.
     const isolating = this.backendFactory(selection.backendId);
-    const restoreBackend = () => __setSandboxBackendForTests(null);
-    __setSandboxBackendForTests(isolating);
 
     let implCheckout: DisposableCheckout | undefined;
     let baselineCheckout: DisposableCheckout | undefined;
@@ -499,7 +501,17 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
         verifyLog,
         "reviewer",
         scrubbedEnv,
+        isolating,
       );
+
+      // An infra failure (timeout / abort / setup error) is NOT behavioral
+      // evidence: it must resolve to inconclusive, never fold into a fail or — on
+      // the baseline — wrongly satisfy `!baselineResult.success` and upgrade a
+      // proof to pass.
+      const implInfra = infraFailureReason(implResult);
+      if (implInfra) {
+        return this.inconclusive(assertionId, `implementation verification could not complete: ${implInfra}`);
+      }
 
       // R5/AE5: agent-supplied proof must fail on the merge-base baseline and
       // pass on the implementation. A test that passes on both is not exercising
@@ -519,7 +531,15 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
           verifyLog,
           "reviewer",
           scrubbedEnv,
+          isolating,
         );
+
+        // A timed-out / aborted baseline is not a real "fails on the baseline"
+        // signal; treating it as one would wrongly upgrade the proof to pass.
+        const baselineInfra = infraFailureReason(baselineResult);
+        if (baselineInfra) {
+          return this.inconclusive(assertionId, `baseline verification could not complete: ${baselineInfra}`);
+        }
 
         if (baselineResult.success && implResult.success) {
           return {
@@ -532,7 +552,7 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
         if (!baselineResult.success && implResult.success) {
           return { verdict: "pass", assertionId, reason: "regression test fails on the pre-fix baseline and passes on the implementation" };
         }
-        // Fails on the implementation → defect still reproduces.
+        // A real (non-infra) failure on the implementation → defect still reproduces.
         return {
           verdict: "fail",
           assertionId,
@@ -541,7 +561,8 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
         };
       }
 
-      // Whole-suite channel: pass only when the suite passes.
+      // Whole-suite channel: pass only when the suite passes; a real (non-infra)
+      // failure is behavioral evidence.
       if (implResult.success) {
         return { verdict: "pass", assertionId, reason: "verification suite passed on the implementation checkout" };
       }
@@ -558,7 +579,6 @@ export class TestExecutionVerificationCapability implements VerificationCapabili
       // non-pass; we route it to inconclusive (infra, not behavioral).
       outcome = this.inconclusive(assertionId, `verification run could not complete: ${message}`);
     } finally {
-      restoreBackend();
       await implCheckout?.dispose();
       await baselineCheckout?.dispose();
     }
@@ -773,6 +793,21 @@ export class AppDrivingVerificationCapability implements VerificationCapability 
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Return a human-readable reason when a verification command result represents an
+ * *infrastructure* outcome (timeout / abort / setup failure) rather than a real
+ * test verdict, or `null` when the result is a genuine pass/fail. Infra outcomes
+ * must resolve to `inconclusive`, never be folded into behavioral evidence
+ * (R9) — a timed-out suite is not a "fail", and a timed-out baseline must not
+ * satisfy the `!baselineResult.success` branch that upgrades a proof to "pass".
+ */
+function infraFailureReason(result: VerificationCommandResult): string | null {
+  if (result.timedOut) return "command timed out";
+  if (result.aborted) return "command aborted";
+  if (result.executionError) return "command could not be executed (setup/sandbox error)";
+  return null;
 }
 
 function joinUrl(baseUrl: string, pathPart: string): string {

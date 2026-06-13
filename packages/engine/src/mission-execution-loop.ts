@@ -587,13 +587,19 @@ export class MissionExecutionLoop extends EventEmitter {
       loopLog.log(`Validation session created for feature ${feature.id}`);
 
       // Run the validation with timeout
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("Validation timeout")), VALIDATION_TIMEOUT_MS);
+        timeoutHandle = setTimeout(() => reject(new Error("Validation timeout")), VALIDATION_TIMEOUT_MS);
       });
 
       const validationPromise = this.runValidationSession(session.session, prompt);
 
-      await Promise.race([validationPromise, timeoutPromise]);
+      try {
+        await Promise.race([validationPromise, timeoutPromise]);
+      } finally {
+        // Always clear the timer so it does not stay armed across validations.
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+      }
 
       // Get the validation result from the session
       // The agent should have returned structured JSON in its response
@@ -656,8 +662,11 @@ export class MissionExecutionLoop extends EventEmitter {
     judgeResult: ValidationResult,
   ): Promise<ValidationResult> {
     // Preserve non-behavioral terminal verdicts untouched (error/blocked from the
-    // judge are not behavioral posture concerns).
-    if (judgeResult.status === "error") {
+    // judge are not behavioral posture concerns). A "blocked" verdict must short-
+    // circuit too: otherwise it falls through to the aggregate recompute below,
+    // which would rewrite it to "fail" and incorrectly route to a Fix Feature
+    // instead of handleValidationBlocked.
+    if (judgeResult.status === "error" || judgeResult.status === "blocked") {
       return judgeResult;
     }
 
@@ -1036,10 +1045,15 @@ export class MissionExecutionLoop extends EventEmitter {
       }
     }
 
-    // If no assertion results but we have assertions, create default results based on status
-    if (results.length === 0 && assertions.length > 0) {
+    // Backfill any linked assertions the judge omitted from its response. A
+    // partial judge response must not silently drop assertions: every linked
+    // assertion needs a result so behavioral assertions still reach
+    // verifyBehavioralAssertion and the aggregate is computed over the full set.
+    if (assertions.length > 0) {
+      const seen = new Set(results.map((r) => r.assertionId));
       const overallPassed = parsed.status === "pass";
       for (const assertion of assertions) {
+        if (seen.has(assertion.id)) continue;
         results.push({
           assertionId: assertion.id,
           passed: overallPassed,
@@ -1256,6 +1270,10 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     runId: string | undefined,
     result: ValidationResult,
   ): Promise<void> {
+    // Tracks how autopilot should be notified. A retry-budget-exhausted feature
+    // transitions to blocked, so autopilot must be told "blocked" (not "failed")
+    // to stay in sync with the validator-run state.
+    let terminalStatus: "failed" | "blocked" = "failed";
     try {
       // Record the failures
       const failures = result.assertions
@@ -1332,6 +1350,7 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
         if (message.includes("retry budget exhausted") || message.includes("exhausted its retry budget")) {
           loopLog.warn(`Feature ${featureId} retry budget exhausted; marking as blocked`);
           // completeValidatorRun already handles the blocked transition when budget is exhausted
+          terminalStatus = "blocked";
           this.logFeatureMissionEvent(featureId, "error", "retry_budget_exhausted", `Feature ${featureId} exhausted its retry budget`, {
             runId: runId ?? null,
           });
@@ -1348,7 +1367,7 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
 
       // Notify autopilot if configured
       if (this.missionAutopilot?.notifyValidationComplete) {
-        await this.missionAutopilot.notifyValidationComplete(featureId, "failed");
+        await this.missionAutopilot.notifyValidationComplete(featureId, terminalStatus);
       }
     } catch (err) {
       loopLog.error(`Error handling validation fail for ${featureId}:`, err);

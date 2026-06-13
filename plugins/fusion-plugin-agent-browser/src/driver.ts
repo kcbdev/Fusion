@@ -247,9 +247,19 @@ function makeSession(browser: AutomationBrowser, context: AutomationContext, pag
       let el: AutomationElement | null;
       try {
         el = await page.waitForSelector(selector, { timeout, state: obsOpts?.expectAbsent ? "attached" : "visible" });
-      } catch {
-        // waitForSelector rejects on timeout: the element never appeared.
-        return { status: "absent", url: page.url() };
+      } catch (err) {
+        // Only a Playwright TimeoutError means the element never appeared — a real
+        // `absent` observation. Any other rejection (e.g. a malformed selector or
+        // invalid options) is a driver fault, not a negative observation, and must
+        // surface as `inconclusive` rather than be silently misreported as absent.
+        if (isTimeoutError(err)) {
+          return { status: "absent", url: page.url() };
+        }
+        return {
+          status: "inconclusive",
+          reason: "driver-error",
+          detail: `observe ${selector} failed at ${page.url()}: ${errMsg(err)}`,
+        };
       }
       if (!el) return { status: "absent", url: page.url() };
       try {
@@ -298,6 +308,18 @@ async function safeClose(closable: { close(): Promise<void> } | undefined): Prom
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * True only for Playwright's `TimeoutError`, which signals the selector never
+ * appeared within the timeout. Detected structurally by `name` so the driver
+ * stays decoupled from playwright-core's type surface (the real client is loaded
+ * lazily, and tests inject a mock that never imports it). `waitForSelector` can
+ * also reject for non-timeout reasons (malformed selectors, invalid options);
+ * those are NOT absence and must not be mapped to `absent`.
+ */
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError";
 }
 
 /**

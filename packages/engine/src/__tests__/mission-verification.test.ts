@@ -325,11 +325,11 @@ describe("TestExecutionVerificationCapability", () => {
         makeScriptedBackend([{ outcome: "timeout", stdout: "", stderr: "", timeoutMs: 1000 }]),
     });
     // A timeout surfaces as a thrown ETIMEDOUT inside runVerificationCommand,
-    // which the capability catches and maps to a non-pass. For the whole-suite
-    // channel a non-success result is a behavioral fail; but a timeout throw is
-    // caught by the capability's try/catch → inconclusive.
+    // which the capability catches and maps deterministically to inconclusive.
+    // An infra timeout must never be surfaced as a behavioral fail — the contract
+    // is that timeout/setup failures stay inconclusive.
     const outcome = await cap.verifyBehavioralAssertion(baseRequest());
-    expect(["inconclusive", "fail"]).toContain(outcome.verdict);
+    expect(outcome.verdict).toBe("inconclusive");
     expect(materializer.cleanCalls).toBe(1);
   });
 
