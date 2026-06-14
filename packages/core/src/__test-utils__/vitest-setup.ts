@@ -225,6 +225,19 @@ let tmpdirRedirectSink: string | null = null;
 let tmpdirRedirectExitCleanupInstalled = false;
 let tmpdirRedirectSweepComplete = false;
 
+function ensureWorkerRoot(): void {
+  /*
+  FNXC:TestIsolation 2026-06-14-01:55:
+  Concurrent Vitest lanes can observe a worker-root cleanup race where the per-invocation root disappears after module initialization but before a worker creates HOME or cwd directories.
+  Recreate the root immediately before every mkdtemp under it so a transient sibling teardown cannot fail suite startup with ENOENT.
+
+  FNXC:TestIsolation 2026-06-14-02:08:
+  When this helper recreates a removed root, it must also restore the owner marker; otherwise the post-test isolation guard reports the still-active rebuilt root as an unowned leak.
+  */
+  mkdirSync(WORKER_ROOT, { recursive: true });
+  writeWorkerRootOwnerMarker(WORKER_ROOT);
+}
+
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -311,6 +324,7 @@ export const __fusionTmpdirRedirectTestHooks = {
 };
 
 function ensureTmpdirRedirectSink(): string {
+  ensureWorkerRoot();
   if (tmpdirRedirectSink) {
     // FN-6310: recovery-timeout cleanup can remove a live worker's cached
     // redirect sink; recreate it on demand so later mkdtemp calls don't ENOENT.
@@ -362,6 +376,7 @@ function ensureIsolatedHome(): void {
     return;
   }
 
+  ensureWorkerRoot();
   const tempHome = realpathSync(mkdtempSync(join(WORKER_ROOT, `${TEST_HOME_PREFIX}${process.pid}-`)));
   process.env.HOME = tempHome;
   process.env.USERPROFILE = tempHome;
@@ -378,6 +393,7 @@ ensureIsolatedHome();
 
 let workerTempDir: string | null = null;
 if (isMainThread) {
+  ensureWorkerRoot();
   workerTempDir = realpathSync(
     mkdtempSync(join(WORKER_ROOT, `w-${process.pid}-`))
   );
