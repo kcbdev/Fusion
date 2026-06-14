@@ -1350,7 +1350,17 @@ export class SelfHealingManager {
           } catch (moveErr: unknown) {
             const moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
             log.warn(`${taskId} moveTask(todo) failed (${moveErrMessage}) after incomplete STUCK_LOOP_EXHAUSTED terminalization — marking failed/paused in place`);
-            await this.store.updateTask(taskId, parkUpdate);
+            try {
+              await this.store.updateTask(taskId, parkUpdate);
+            } catch (patchErr: unknown) {
+              const patchErrMessage = patchErr instanceof Error ? patchErr.message : String(patchErr);
+              log.warn(`${taskId} in-place park patch failed after moveTask(todo) failure during incomplete STUCK_LOOP_EXHAUSTED terminalization: ${patchErrMessage}`);
+              await this.store.logEntry(
+                taskId,
+                `STUCK_LOOP_EXHAUSTED: incomplete task failed to move to todo (${moveErrMessage}), and the in-place park patch also failed (${patchErrMessage}); pre-move park metadata was already applied, but operator verification is required before retry.`,
+              );
+              return false;
+            }
             await this.store.logEntry(
               taskId,
               `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Failed to move task to todo (${moveErrMessage}); task was marked failed/paused in place and will not be automatically retried.`,
