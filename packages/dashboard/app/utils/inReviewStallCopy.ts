@@ -111,7 +111,9 @@ const IN_REVIEW_STALL_DEADLOCK_COPY: InReviewStallDeadlockCopy = {
 };
 
 /**
- * FNXC:TaskLogs 2026-06-14-13:51 Detects in-review deadlock logs while tolerating legacy entries without `action`.
+ * FNXC:TaskLogs 2026-06-14-14:27:
+ * In-review deadlock detection must tolerate legacy/operator task log entries that may not have an `action` field.
+ * Route through getTaskLogEntryAction so older persisted activity logs cannot crash dashboard rendering while checking for the self-healing marker.
  */
 export function getInReviewStallDeadlockCopy(task: Pick<Task, "pausedReason" | "log">): InReviewStallDeadlockCopy | undefined {
   if (task.pausedReason === "in-review-stall-deadlock") {
