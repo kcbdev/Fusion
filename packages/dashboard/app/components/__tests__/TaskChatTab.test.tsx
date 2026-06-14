@@ -283,55 +283,64 @@ describe("TaskChatTab", () => {
     expect(screen.getByText(/No agent output yet/)).toBeTruthy();
   });
 
-  it("renders the collapsed expand toggle inside the transcript and calls the toggle handler", () => {
+  it("renders the collapsed icon-only expand toggle inside the chat view and calls the toggle handler", () => {
     const onToggleExpanded = vi.fn();
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded={false} onToggleExpanded={onToggleExpanded} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
     const transcript = screen.getByTestId("task-chat-transcript");
-    expect(transcript).toContainElement(toggle);
+    expect(screen.getByTestId("task-chat-tab")).toContainElement(toggle);
+    expect(transcript).not.toContainElement(toggle);
     expect(document.querySelector(".task-chat-toolbar")).toBeNull();
+    expect(toggle).toHaveClass("btn-icon");
     expect(toggle).toHaveClass("task-chat-expand-toggle--overlay");
     expect(toggle).toHaveAttribute("aria-label", "Expand chat to full modal");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveTextContent("Expand");
+    expect(toggle).not.toHaveTextContent("Expand");
+    expect(toggle).not.toHaveTextContent("Collapse");
 
     fireEvent.click(toggle);
     expect(onToggleExpanded).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the expanded collapse toggle", () => {
+  it("renders the expanded icon-only collapse toggle", () => {
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded onToggleExpanded={vi.fn()} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
     expect(toggle).toHaveAttribute("aria-label", "Collapse chat");
     expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(toggle).toHaveTextContent("Collapse");
+    expect(toggle).not.toHaveTextContent("Collapse");
+    expect(toggle).not.toHaveTextContent("Expand");
   });
 
-  it("renders the expand toggle while the transcript is loading", () => {
+  it("renders the icon-only expand toggle while the transcript is loading", () => {
     mockLogs([], true);
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
-    expect(screen.getByTestId("task-chat-transcript")).toContainElement(toggle);
+    expect(screen.getByTestId("task-chat-tab")).toContainElement(toggle);
+    expect(toggle).not.toHaveTextContent("Expand");
     expect(screen.getByText("Loading agent output…")).toBeInTheDocument();
   });
 
-  it("renders the expand toggle in the empty transcript state", () => {
+  it("renders the icon-only expand toggle in the empty transcript state", () => {
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
-    expect(screen.getByTestId("task-chat-transcript")).toContainElement(toggle);
+    expect(screen.getByTestId("task-chat-tab")).toContainElement(toggle);
+    expect(toggle).not.toHaveTextContent("Expand");
     expect(screen.getByText(/No agent output yet/)).toBeInTheDocument();
   });
 
-  it("renders the expand toggle in the populated transcript state", () => {
+  it("renders the icon-only expand toggle in the populated transcript state", () => {
     mockLogs([makeEntry({ agent: "executor", text: "executor output" })]);
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} onToggleExpanded={vi.fn()} />);
 
     const transcript = screen.getByTestId("task-chat-transcript");
-    expect(transcript).toContainElement(screen.getByTestId("task-chat-expand-toggle"));
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(screen.getByTestId("task-chat-tab")).toContainElement(toggle);
+    expect(transcript).not.toContainElement(toggle);
+    expect(toggle).not.toHaveTextContent("Expand");
     expect(within(transcript).getByText("executor output")).toBeInTheDocument();
   });
 
@@ -807,6 +816,24 @@ describe("TaskChatTab", () => {
     expect(jumpButton).toBeVisible();
     expect(jumpButton).toHaveAccessibleName("Jump to latest message");
     expect(screen.getByRole("button", { name: "Jump to latest message" })).toBe(jumpButton);
+  });
+
+  it("keeps the icon-only expand toggle accessible after transcript scrolling", () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1200, clientHeight: 240, initialScrollTop: 0 });
+    mockLogs([makeEntry({ agent: "executor", text: "scrollable output" })]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded={false} onToggleExpanded={vi.fn()} />);
+    const transcript = screen.getByTestId("task-chat-transcript");
+
+    metrics.scrollTop = 600;
+    fireEvent.scroll(transcript);
+
+    const toggle = screen.getByTestId("task-chat-expand-toggle");
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).toBeVisible();
+    expect(toggle).toHaveAccessibleName("Expand chat to full modal");
+    expect(toggle).not.toHaveTextContent("Expand");
+    expect(transcript).not.toContainElement(toggle);
   });
 
   it("clicking the jump-to-bottom button snaps to the latest message and removes the control", async () => {
@@ -1612,15 +1639,22 @@ describe("TaskChatTab", () => {
     expect(css).not.toContain("62vh");
   });
 
-  it("positions the expand toggle as a tokenized transcript overlay with no toolbar shell", () => {
+  it("positions the icon-only expand toggle as a tokenized chat-view overlay with no toolbar shell", () => {
     const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const tabRule = getCssRuleBlock(css, ".task-chat-tab");
     const transcriptRule = getCssRuleBlock(css, ".task-chat-transcript");
+    const toggleRule = getCssRuleBlock(css, ".task-chat-expand-toggle");
     const overlayRule = getCssRuleBlock(css, ".task-chat-expand-toggle--overlay");
     const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
     const mobileOverlayRule = getCssRuleBlock(mobileCss, ".task-chat-expand-toggle--overlay");
 
     expect(css).not.toContain(".task-chat-toolbar");
+    expect(tabRule).toContain("position: relative");
     expect(transcriptRule).toContain("position: relative");
+    expect(toggleRule).toContain("justify-content: center");
+    expect(toggleRule).toContain("min-inline-size: var(--space-2xl)");
+    expect(toggleRule).toContain("min-block-size: var(--space-2xl)");
+    expect(toggleRule).not.toContain("gap");
     expect(overlayRule).toContain("position: absolute");
     expect(overlayRule).toContain("top: var(--space-md)");
     expect(overlayRule).toContain("right: var(--space-md)");

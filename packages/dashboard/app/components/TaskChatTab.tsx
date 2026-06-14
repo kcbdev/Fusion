@@ -621,6 +621,19 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
 
   return (
     <div className="task-chat-tab" data-testid="task-chat-tab">
+      {onToggleExpanded ? (
+        <button
+          type="button"
+          className="btn btn-icon btn-sm task-chat-expand-toggle task-chat-expand-toggle--overlay"
+          onClick={onToggleExpanded}
+          aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
+          aria-pressed={expanded}
+          data-testid="task-chat-expand-toggle"
+        >
+          {/* FNXC:TaskChat 2026-06-13-00:00: FN-6425 refines FN-6405 by keeping the task-chat expand affordance icon-only and pinned to the chat view corner so transcript scrolling never removes access to expansion controls. */}
+          {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+        </button>
+      ) : null}
       <div
         className="task-chat-transcript"
         ref={transcriptRef}
@@ -628,19 +641,6 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
         aria-live="polite"
         data-testid="task-chat-transcript"
       >
-        {onToggleExpanded ? (
-          <button
-            type="button"
-            className="btn btn-sm task-chat-expand-toggle task-chat-expand-toggle--overlay"
-            onClick={onToggleExpanded}
-            aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
-            aria-pressed={expanded}
-            data-testid="task-chat-expand-toggle"
-          >
-            {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
-            <span>{expanded ? "Collapse" : "Expand"}</span>
-          </button>
-        ) : null}
         {loading && transcriptItemCount === 0 ? (
           <div className="task-chat-empty" role="status">
             <Loader2 className="animate-spin" aria-hidden="true" />
