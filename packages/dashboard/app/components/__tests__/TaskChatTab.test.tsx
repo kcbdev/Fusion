@@ -902,6 +902,126 @@ describe("TaskChatTab", () => {
     expect(onTaskUpdated).not.toHaveBeenCalled();
   });
 
+  it("sends an in-progress task steering message on plain Enter", async () => {
+    const onTaskUpdated = vi.fn();
+    const updatedTask = makeTask();
+    mockedAddSteeringComment.mockResolvedValue(updatedTask);
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} onTaskUpdated={onTaskUpdated} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "Plain Enter guidance" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Plain Enter guidance", "project-1");
+    });
+    expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1);
+    expect(mockedRefineTask).not.toHaveBeenCalled();
+    expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+  });
+
+  it("sends a done-task refinement on plain Enter", async () => {
+    const refinementTask = makeTask({ id: "FN-224", column: "todo" });
+    mockedRefineTask.mockResolvedValue(refinementTask);
+    render(<TaskChatTab task={makeTask({ column: "done" })} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "Plain Enter refinement" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => {
+      expect(mockedRefineTask).toHaveBeenCalledWith("FN-001", "Plain Enter refinement", "project-1");
+    });
+    expect(mockedRefineTask).toHaveBeenCalledTimes(1);
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+  });
+
+  it("keeps Shift+Enter as textarea newline input without sending", async () => {
+    const user = userEvent.setup();
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    await user.click(input);
+    await user.keyboard("Line one");
+    await user.keyboard("{Shift>}{Enter}{/Shift}Line two");
+
+    expect(input).toHaveValue("Line one\nLine two");
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+    expect(mockedRefineTask).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "   \n  "])("does not send a %s draft on Enter", async (draft) => {
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: draft } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+      expect(mockedRefineTask).not.toHaveBeenCalled();
+    });
+  });
+
+  it("does not submit another Enter while a send is already in flight", async () => {
+    const send = deferred<Task>();
+    mockedAddSteeringComment.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "Only send once" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole("button", { name: "Sending" })).toBeDisabled();
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      send.resolve(makeTask());
+      await send.promise;
+    });
+  });
+
+  it.each([
+    ["isComposing", { isComposing: true }],
+    ["keyCode 229", { keyCode: 229 }],
+  ])("does not send Enter during IME composition signaled by %s", async (_label, eventPatch) => {
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "Composing text" } });
+    const event = new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true });
+    for (const [key, value] of Object.entries(eventPatch)) {
+      Object.defineProperty(event, key, { value });
+    }
+    fireEvent(input, event);
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+      expect(mockedRefineTask).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    ["Cmd+Enter", { metaKey: true }],
+    ["Ctrl+Enter", { ctrlKey: true }],
+  ])("keeps %s sending for backward compatibility", async (_label, modifier) => {
+    mockedAddSteeringComment.mockResolvedValue(makeTask());
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "Shortcut guidance" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", ...modifier });
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "Shortcut guidance", "project-1");
+    });
+    expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1);
+  });
+
   it.each([undefined, null, "failed", "done"])("routes done-task sends to refineTask regardless of %s status", async (status) => {
     const user = userEvent.setup();
     mockedRefineTask.mockResolvedValue(makeTask({ id: "FN-333", column: "todo" }));

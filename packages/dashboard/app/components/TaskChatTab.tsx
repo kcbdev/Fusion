@@ -606,10 +606,17 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     }
   }, [addToast, draft, isDoneTask, onTaskUpdated, projectId, sending, task.id]);
 
+  /**
+   * FNXC:TaskDetailChat 2026-06-13-19:05:
+   * Task-detail chat follows chat composer keyboard expectations: Enter sends, Shift+Enter keeps textarea newline entry, Cmd/Ctrl+Enter remains supported for existing users, and IME composition Enter is ignored so CJK candidate selection is not submitted mid-composition.
+   */
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      void handleSubmit();
-    }
+    if (event.key !== "Enter") return;
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.shiftKey) return;
+
+    event.preventDefault();
+    void handleSubmit();
   }, [handleSubmit]);
 
   return (
