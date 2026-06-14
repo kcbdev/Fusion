@@ -60,6 +60,7 @@ import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inR
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy } from "../utils/taskAgeStalenessCopy";
 import { findInReviewStallLogEntry, IN_REVIEW_STALL_LOG_REGEX } from "../utils/findInReviewStallLogEntry";
+import { getTaskLogEntryAction, getTaskLogEntryOutcome } from "../utils/taskLogEntryDisplay";
 
 interface ModelSelection {
   provider?: string;
@@ -3236,10 +3237,13 @@ export function TaskDetailContent({
                   ) : workingTask.log && workingTask.log.length > 0 ? (
                     <div className="detail-activity-list" ref={activityListRef}>
                       {(() => {
+                        // FNXC:TaskDetail 2026-06-14-13:43 Activity rendering must tolerate legacy `text`/`detail` log entries.
                         let highlightedOnce = false;
                         return [...workingTask.log].reverse().map((entry, i) => {
-                          const stallMatch = entry.action.match(IN_REVIEW_STALL_LOG_REGEX)
-                            ?? entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
+                          const action = getTaskLogEntryAction(entry);
+                          const outcome = getTaskLogEntryOutcome(entry);
+                          const stallMatch = action.match(IN_REVIEW_STALL_LOG_REGEX)
+                            ?? action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
                           const isHighlighted = !highlightedOnce
                             && highlightStallCode != null
                             && stallMatch?.[1] === highlightStallCode;
@@ -3256,10 +3260,10 @@ export function TaskDetailContent({
                                 <span className="detail-log-timestamp">
                                   {formatTimestamp(entry.timestamp)}
                                 </span>
-                                <span className="detail-log-action">{entry.action}</span>
+                                <span className="detail-log-action">{action}</span>
                               </div>
-                              {entry.outcome && (
-                                <div className="detail-log-outcome">{entry.outcome}</div>
+                              {outcome && (
+                                <div className="detail-log-outcome">{outcome}</div>
                               )}
                             </div>
                           );
@@ -3337,7 +3341,7 @@ export function TaskDetailContent({
                   {shouldShowStalePausedReviewBadge(workingTask) && workingTask.stalePausedReview && (() => {
                     const copy = getStalePausedReviewCopy(workingTask.stalePausedReview);
                     const logMatch = [...(workingTask.log ?? [])].reverse().find((entry) => {
-                      const match = entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
+                      const match = getTaskLogEntryAction(entry).match(STALE_PAUSED_REVIEW_LOG_REGEX);
                       return match?.[1] === workingTask.stalePausedReview?.code;
                     });
                     return (
