@@ -7,13 +7,11 @@ const maxWorkers = computeMaxWorkers();
 const quarantinedCoreTests = [
   /*
   FNXC:CoreTests 2026-06-13-17:43:
-  The full workspace suite must not fail on suite-load-sensitive tests that pass standalone or only fail after excessive wall time. Quarantine the observed core offenders after package-lane hook timeouts instead of appeasing them with wider hook timeouts.
+  The full workspace suite must not fail on suite-load-sensitive tests that pass standalone or only fail after excessive wall time. Quarantine observed core offenders after package-lane hook timeouts instead of appeasing them with wider hook timeouts.
+
+  FNXC:CoreTests 2026-06-14-02:14:
+  FN-6433 re-ran the core quarantine batch after FN-6430's shared fixture cleanup and rescued all five files without timeout or assertion changes. Keep this array empty unless a future quarantine is mirrored in scripts/lib/test-quarantine.json in the same commit.
   */
-  "src/__tests__/db.test.ts",
-  "src/__tests__/run-audit.integration.test.ts",
-  "src/__tests__/run-audit.test.ts",
-  "src/__tests__/store-handoff-to-review.test.ts",
-  "src/__tests__/todo-store.test.ts",
 ];
 
 export default defineConfig({

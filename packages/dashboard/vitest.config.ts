@@ -234,16 +234,14 @@ const qualityAppSettingsOnlyTests = ["app/components/__tests__/SettingsModal.tes
 const quarantinedDashboardTests: string[] = [
   /*
   FNXC:Testing 2026-06-13-18:05:
-  Full dashboard API quality runs exposed suite-load-sensitive failures in process-group timeout and git branch-commit route tests, while both files passed standalone immediately afterward.
-  FN-6416 requires the heap wrapper test to stay excluded during the 14-day deletion-ratchet window instead of widening waits or weakening assertions.
+  Full dashboard API quality runs exposed suite-load-sensitive failures in process-group timeout and git branch-commit route tests, while both files passed standalone immediately afterward. FN-6416 required exclusion during the 14-day deletion-ratchet window instead of widening waits or weakening assertions.
 
   FNXC:DashboardTests 2026-06-14-00:43:
-  Vitest project entries must apply the same quarantine list as the exported dashboardQualityProjectGlobs inventory.
-  Some projects define their own exclude arrays, so each runnable project includes these entries explicitly instead of relying on top-level inheritance.
+  Vitest project entries must apply the same quarantine list as the exported dashboardQualityProjectGlobs inventory. Some projects define their own exclude arrays, so each runnable project includes these entries explicitly instead of relying on top-level inheritance.
+
+  FNXC:DashboardTests 2026-06-14-02:24:
+  FN-6433 rescued the dashboard quarantine batch after unquarantined app-backfill and API-quality runs passed with no assertion or timeout changes. Keep this array empty unless a future dashboard quarantine is mirrored in scripts/lib/test-quarantine.json in the same commit.
   */
-  "app/components/__tests__/QuickEntryBox.test.tsx",
-  "scripts/__tests__/run-vitest-with-heap.test.ts",
-  "src/__tests__/routes-git.test.ts",
 ];
 
 const qualityApiTests = [
