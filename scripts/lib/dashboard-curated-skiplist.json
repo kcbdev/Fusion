@@ -4,50 +4,6 @@
     {
       "file": "packages/dashboard/app/__tests__/build-output.test.ts",
       "reason": "asserts the built bundle; runs standalone via `pnpm --filter @fusion/dashboard test:build` (needs a prior vite build), not in the unit gate"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/evals-routes.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/github-tracking-delete.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/github-tracking-periodic-reconcile-sweep.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/insights-routes.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/mission-e2e.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/planning.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/routes-run-audit-goal-events.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/routes-run-cited-goals.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/chat-manager.test.ts",
-      "reason": "pre-existing exclusion from dashboard-api-quality-backfill; tracked for rescue in FN-6444"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/shared-branch-group-entry-points.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/usage.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
     }
   ]
 }
