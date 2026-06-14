@@ -1,3 +1,7 @@
+/*
+FNXC:DashboardTests 2026-06-14-08:31:
+FN-6441 rescued this orphaned component test after standalone dashboard-app execution passed without assertion, timeout, or source-code changes. Keep the terminal modal coverage in app backfill because keyboard, session, and mobile terminal regressions are user-facing and should not remain skip-listed.
+*/
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TerminalModal, _resetInitialViewportHeight, ctrlChar, altChar } from "../TerminalModal";

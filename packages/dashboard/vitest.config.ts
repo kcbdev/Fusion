@@ -241,7 +241,21 @@ const quarantinedDashboardTests: string[] = [
 
   FNXC:DashboardTests 2026-06-14-02:24:
   FN-6433 rescued the dashboard quarantine batch after unquarantined app-backfill and API-quality runs passed with no assertion or timeout changes. Keep this array empty unless a future dashboard quarantine is mirrored in scripts/lib/test-quarantine.json in the same commit.
+
+  FNXC:DashboardTests 2026-06-14-08:28:
+  FN-6441 removed the dashboard component orphan batch from the curated skip-list so passing rescues run in backfill and still-failing tests are excluded only through the dated quarantine ledger. Keep these one-line excludes mirrored with scripts/lib/test-quarantine.json until each file is rescued or deleted under the deletion ratchet.
   */
+  "app/components/__tests__/ChatView.regular-composer-no-right-line.test.tsx",
+  "app/components/__tests__/MissionManager.test.tsx",
+  "app/components/__tests__/ModalReentry.test.tsx",
+  "app/components/__tests__/ModelSelectorTab.test.tsx",
+  "app/components/__tests__/NewAgentDialog.test.tsx",
+  "app/components/__tests__/OAuthReloginBanner.test.tsx",
+  "app/components/__tests__/PlanningModeModal.favorites.test.tsx",
+  "app/components/__tests__/PlanningModeModal.questions.test.tsx",
+  "app/components/__tests__/PlanningModeModal.swipe-back.test.tsx",
+  "app/components/__tests__/SkillsView.css.test.ts",
+  "app/components/__tests__/mobile-css.test.tsx",
 ];
 
 const qualityApiTests = [

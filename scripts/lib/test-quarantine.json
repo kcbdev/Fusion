@@ -1,4 +1,60 @@
 {
   "$comment": "Flaky-test quarantine ledger (deletion ratchet \u2014 see AGENTS.md 'Flaky tests: quarantine on sight' and docs/testing.md 'Quarantine ledger and the deletion ratchet'). A test observed failing without a corresponding real bug is quarantined ON SIGHT: add an entry here AND a matching one-line `exclude` entry in that package's vitest config, in the same commit. Every entry needs a non-empty `reason` (link the failing run) and a `quarantinedAt` date \u2014 the entry expires 14 days later, at which point the test file is DELETED unless someone rescues it with evidence it catches real regressions plus a root-cause fix (never appeasement). There is deliberately no loader module and no automation around this file: it is a dated record, the vitest config exclude is the mechanism, and the sweep is policy executed by whoever touches the suite.",
-  "entries": []
+  "entries": [
+    {
+      "file": "packages/dashboard/app/components/__tests__/ChatView.regular-composer-no-right-line.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone; ChatView emits act warnings and regular-composer right-line invariant assertion fails. Quarantined instead of widening waits or weakening assertions.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/MissionManager.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone with stale mission hierarchy/progress/status expectations while most cases pass. Quarantined for rescue/delete ratchet instead of assertion appeasement.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/ModalReentry.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone because PlanningModal cases render outside ToastProvider. Quarantined for harness rescue instead of product/source changes.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/ModelSelectorTab.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone across model selector cases because expected Executor Model labels/options are no longer rendered by the current component contract. Quarantined for harness/expectation rescue.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/NewAgentDialog.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone across broad dialog flows with duplicate fetch/update calls and stale favorite labels. Quarantined for focused rescue rather than timeout/assertion appeasement.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/OAuthReloginBanner.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test times out every case under current async/polling behavior. Quarantined instead of increasing test timeouts.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/PlanningModeModal.favorites.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone because PlanningModeModal favorite/keyboard cases render outside ToastProvider. Quarantined for harness rescue.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/PlanningModeModal.questions.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone because PlanningModeModal question/summary cases render outside ToastProvider. Quarantined for harness rescue.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/PlanningModeModal.swipe-back.test.tsx",
+      "reason": "FN-6441: orphaned dashboard component test fails standalone because PlanningModeModal mobile navigation cases render outside ToastProvider. Quarantined for harness rescue.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/SkillsView.css.test.ts",
+      "reason": "FN-6441: orphaned dashboard CSS guardrail fails standalone because runtime-card toggle positioning expectation no longer matches current stylesheet. Quarantined for rescue/delete review without weakening assertion.",
+      "quarantinedAt": "2026-06-14"
+    },
+    {
+      "file": "packages/dashboard/app/components/__tests__/mobile-css.test.tsx",
+      "reason": "FN-6441: orphaned dashboard CSS foundation test fails standalone on stale workflow-step-manager modal and breakpoint assertions. Quarantined for rescue/delete review without broad CSS changes.",
+      "quarantinedAt": "2026-06-14"
+    }
+  ]
 }

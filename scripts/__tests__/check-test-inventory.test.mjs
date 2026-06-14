@@ -119,6 +119,38 @@ test("curated guard: a skip-listed file does not trip the unregistered check", (
   assert.equal(ok, true);
 });
 
+test("curated guard: a quarantined file is registered without returning to the skip-list", () => {
+  const { ok, errors } = validateDashboardCurated({
+    includedFiles: new Set(),
+    allTestFiles: ["packages/dashboard/app/quarantined.test.ts"],
+    skipList: [],
+    quarantineList: [
+      {
+        file: "packages/dashboard/app/quarantined.test.ts",
+        reason: "quarantined under deletion ratchet FN-4",
+        quarantinedAt: "2026-06-14",
+      },
+    ],
+  });
+  assert.equal(ok, true, errors.join("; "));
+});
+
+test("curated guard: rejects quarantine entries without a ratchet date", () => {
+  const { ok, errors } = validateDashboardCurated({
+    includedFiles: new Set(),
+    allTestFiles: ["packages/dashboard/app/quarantined.test.ts"],
+    skipList: [],
+    quarantineList: [
+      {
+        file: "packages/dashboard/app/quarantined.test.ts",
+        reason: "quarantined under deletion ratchet FN-4",
+      },
+    ],
+  });
+  assert.equal(ok, false);
+  assert.ok(errors.some((e) => e.includes("quarantinedAt")));
+});
+
 // ---------------------------------------------------------------------------
 // end-to-end curated guard against a synthetic temp fixture dir, exercising
 // the real file walk + skip-list validation in one pass (no real repo file).

@@ -1,7 +1,12 @@
+/*
+FNXC:DashboardTests 2026-06-14-08:31:
+FN-6441 rescued this orphaned component test after standalone dashboard-app execution passed without assertion, timeout, or source-code changes. Keep the planning modal UI-interaction coverage in app backfill so question flow, summary, and breakdown interactions remain executed after leaving the skip-list.
+
+FNXC:DashboardTests 2026-06-14-08:32:
+PlanningModeModal calls useToast(), which throws without a ToastProvider. These tests render it bare, so the hook stays mocked in the same style as PlanningModeModal.autosize.test.tsx instead of introducing broad provider wiring during skip-list rescue.
+*/
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// PlanningModeModal calls useToast(), which throws without a ToastProvider.
-// These tests render it bare, so mock the hook (mirrors PlanningModeModal.autosize.test.tsx).
 vi.mock("../../hooks/useToast", () => ({
   useToast: () => ({
     addToast: vi.fn(),
