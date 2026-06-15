@@ -5,6 +5,11 @@
       "file": "packages/core/src/__tests__/store-concurrent-writes.test.ts",
       "reason": "FN-6481 pnpm test 2026-06-15 failed unrelated core SQLite lock recovery concurrency test with `SQLite BEGIN IMMEDIATE failed after 7 attempts: database is locked`; quarantine on sight per flaky-test policy.",
       "quarantinedAt": "2026-06-15"
+    },
+    {
+      "file": "packages/cli/src/__tests__/extension-task-tools.test.ts",
+      "reason": "FN-6483: @runfusion/fusion package lane under load timed out after 5000ms in uses canonical project root for fn_task_show and fn_task_list from worktree cwd during the 2026-06-15 verification rerun, matching the FN-6482 reported load-only CLI timeout signature. The same file passed standalone immediately afterward (4 tests passed in 5.90s), so quarantine per the deletion ratchet rather than widening timeouts or changing worker knobs.",
+      "quarantinedAt": "2026-06-15"
     }
   ]
 }
