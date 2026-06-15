@@ -108,6 +108,10 @@ export interface AgentRuntimeOptions {
 /**
  * Result of creating an agent session.
  */
+export interface AgentPromptResult {
+  stopReason?: string;
+}
+
 export interface AgentSessionResult {
   /** The created agent session */
   session: AgentSession;
@@ -153,7 +157,7 @@ export interface AgentRuntime {
    * @param prompt - The prompt text
    * @param options - Optional prompt options (e.g., images for vision)
    */
-  promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void>;
+  promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void | AgentPromptResult>;
 
   /**
    * Get a human-readable model description from a session.

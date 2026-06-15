@@ -123,6 +123,10 @@ export interface AcpSession {
 
 export type AgentSession = AcpSession;
 
+export interface AgentPromptResult {
+  stopReason?: string;
+}
+
 export interface AgentSessionResult {
   session: AgentSession;
   sessionFile?: string;
@@ -133,7 +137,7 @@ export interface AgentRuntime {
   id: string;
   name: string;
   createSession(options: AgentRuntimeOptions): Promise<AgentSessionResult>;
-  promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void>;
+  promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void | AgentPromptResult>;
   describeModel(session: AgentSession): string;
   dispose?(session: AgentSession): Promise<void>;
 }

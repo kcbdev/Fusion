@@ -23,6 +23,42 @@ agent over JSON-RPC/stdio. Mirrors the shape of `docs/cursor-cli-contract.md`.
 - The subprocess environment is built from the `acpEnvAllowList` allow-list only
   (inherited `process.env` is **not** forwarded — the agent is untrusted).
 
+## Claude bridge ask profile (Route B)
+
+Route-B planning and validator asks use the `acp` runtime with the bundled
+`claude-code-cli-acp` bridge instead of `claude -p`:
+
+- `claude-code-cli-acp@0.1.1` is pinned under the ACP runtime plugin and the
+  sentinel binary name resolves to this plugin's own `node_modules/.bin` shim,
+  not to a PATH-selected substitute.
+- The read-only ask posture uses `tools: "readonly"`, `acpArgs: []`, and leaves
+  `acpFsRead` / `acpFsWrite` off. Route A's tool-bearing provider path remains
+  deferred and is not implied by this profile.
+- The Claude bridge env allow-list is intentionally narrow: `HOME` is forwarded
+  so the underlying `claude` can read `~/.claude` auth/session state, and `PATH`
+  is forwarded for sub-executable resolution. `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, and inherited `process.env` are not forwarded.
+- `checkSetup` treats the bridge as installed only when the resolved binary is
+  plugin-owned, the ACP handshake succeeds, and no Claude auth hint is returned.
+  Auth-needed statuses tell the operator to run `claude` once to authenticate.
+
+## `askAcpOnce` prose → JSON recovery contract
+
+The engine-side `askAcpOnce` runner creates one readonly ACP session, accumulates
+all `onText` deltas into `text`, runs one `promptWithFallback` turn, optionally
+recovers the trailing JSON object via `extractJsonObjects`, and disposes the
+session in `finally`. Its shape is deliberately close to the old one-shot result:
+
+- Success: `{ ok: true, text, parsed?, stopReason? }`.
+- Failure: `{ ok: false, reason, message, text?, stopReason? }` for session
+  creation errors, turn errors, timeouts, and abnormal stops.
+- `promptWithFallback` surfaces ACP `stopReason` to the runner. Planning tolerates
+  an absent stop reason, but validation treats abnormal/truncated stops such as
+  `max_tokens` and `cancelled` as `error` regardless of any recovered JSON.
+- Validator prose fallback is constrained: prose can infer `fail` or `blocked`,
+  but never `pass`. A pass requires clean structured JSON (`verdict:"pass"` or
+  `passed:true`) from a clean turn.
+
 ## Readiness = the `initialize` handshake
 
 There is no `--version` probe. Readiness is the protocol handshake itself:

@@ -3,6 +3,7 @@ import type { FusionPlugin, PluginRuntimeFactory, PluginRuntimeManifestMetadata 
 import { resolveCliSettings } from "./cli-spawn.js";
 import { AcpRuntimeAdapter } from "./runtime-adapter.js";
 import { killAllProcesses } from "./process-manager.js";
+import { setupHooks, setupManifest } from "./setup.js";
 
 // Reap any live agent subprocesses on hard process exit so none are orphaned
 // (KTD4 — the registry SIGKILL is the authoritative no-orphan guarantee). Scoped
@@ -54,9 +55,20 @@ const plugin: FusionPlugin = definePlugin({
     metadata: acpRuntimeMetadata,
     factory: acpRuntimeFactory,
   },
+  setup: {
+    manifest: setupManifest,
+    hooks: setupHooks,
+  },
 });
 
 export default plugin;
 export { AcpRuntimeAdapter };
-export { resolveCliSettings } from "./cli-spawn.js";
-export type { AcpCliSettings } from "./cli-spawn.js";
+export { checkSetup, setupHooks, setupManifest, validateBundledBridgeIdentity } from "./setup.js";
+export {
+  CLAUDE_CODE_CLI_ACP_BINARY,
+  bundledClaudeBridgeBinPath,
+  resolveBundledClaudeBridgeBinary,
+  resolveClaudeBridgeAskSettings,
+  resolveCliSettings,
+} from "./cli-spawn.js";
+export type { AcpBinaryResolution, AcpCliSettings } from "./cli-spawn.js";

@@ -77,7 +77,7 @@ export class AcpRuntimeAdapter implements AgentRuntime {
       binaryPath: this.settings.binaryPath,
       args: this.settings.args,
       cwd: options.cwd,
-      env: buildSpawnEnv(this.settings.envAllowList),
+      env: buildSpawnEnv(this.settings.envAllowList, { required: this.settings.requiredEnv }),
       advertiseFs: { read: this.settings.fsRead, write: this.settings.fsWrite },
       clientHandler,
     });
@@ -125,7 +125,7 @@ export class AcpRuntimeAdapter implements AgentRuntime {
     session: AgentSession,
     prompt: string,
     _options?: unknown,
-  ): Promise<void> {
+  ): Promise<{ stopReason?: string }> {
     const acp = session as AcpSession;
     if (!acp.connection) {
       throw new Error("ACP session has no live connection (createSession not completed)");
@@ -140,7 +140,12 @@ export class AcpRuntimeAdapter implements AgentRuntime {
     // session/update notifications for the turn before reporting the stopReason.
     // The bridging client handler installed at createSession (U4) has already
     // surfaced streamed text/thinking/tool updates onto session.callbacks.
-    await promptAcpSession(acp.connection, acp.sessionId, blocks);
+    /*
+    FNXC:ACP-RouteB 2026-06-14-20:09:
+    Route-B validation must distinguish clean end_turn answers from truncated or cancelled turns. Surface ACP stopReason to the engine runner instead of discarding it so callers can reject syntactically complete JSON recovered from incomplete output.
+    */
+    const stopReason = await promptAcpSession(acp.connection, acp.sessionId, blocks);
+    return { stopReason };
   }
 
   describeModel(session: AgentSession): string {

@@ -28,7 +28,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "0.24.0",
     "@fusion/core": "workspace:*",
-    "@fusion/plugin-sdk": "workspace:*"
+    "@fusion/plugin-sdk": "workspace:*",
+    "claude-code-cli-acp": "0.1.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
