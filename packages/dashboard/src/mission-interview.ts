@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { AiSessionStore, AiSessionRow, AiSessionStatus, AiSessionSummary } from "./ai-session-store.js";
 import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
+import { registerBeforeExitCleanup } from "./process-lifecycle.js";
 import {
   createSessionDiagnostics,
   resetDiagnosticsSink,
@@ -469,7 +470,7 @@ function cleanupExpiredSessions(): void {
 
 const cleanupInterval = setInterval(cleanupExpiredSessions, CLEANUP_INTERVAL_MS);
 cleanupInterval.unref?.();
-process.on("beforeExit", () => clearInterval(cleanupInterval));
+registerBeforeExitCleanup(() => clearInterval(cleanupInterval));
 
 // ── Stream Manager ──────────────────────────────────────────────────────────
 

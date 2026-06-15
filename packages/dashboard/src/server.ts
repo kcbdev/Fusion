@@ -33,6 +33,7 @@ import type { BadgePubSub } from "./badge-pubsub.js";
 import { createBadgePubSub, type BadgePubSubMessage } from "./badge-pubsub.js";
 import { createRuntimeLogger, type RuntimeLogger } from "./runtime-logger.js";
 import { registerGithubTrackingHook } from "./github-tracking-hook.js";
+import { registerBeforeExitCleanup } from "./process-lifecycle.js";
 import { createTerminalWebSocketDiagnostics } from "./terminal-websocket-diagnostics.js";
 import {
   AiSessionStore,
@@ -149,7 +150,7 @@ function clearAiSessionCleanupInterval(): void {
   aiSessionCleanupIntervalHandle = undefined;
 }
 
-process.on("beforeExit", () => {
+registerBeforeExitCleanup(() => {
   clearAiSessionCleanupInterval();
 });
 
