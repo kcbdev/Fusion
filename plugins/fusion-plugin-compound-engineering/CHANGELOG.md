@@ -1,5 +1,12 @@
 # @fusion-plugin-examples/compound-engineering
 
+## 0.1.6
+
+### Patch Changes
+
+- @fusion/core@0.43.1
+- @fusion/plugin-sdk@0.43.1
+
 ## 0.1.5
 
 ### Patch Changes

@@ -2,6 +2,67 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.43.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.43.1
+- @fusion/engine@0.43.1
+- @fusion/i18n@0.39.6
+- @fusion-plugin-examples/cli-printing-press@0.1.23
+- @fusion-plugin-examples/compound-engineering@0.1.6
+- @fusion-plugin-examples/dependency-graph@0.1.37
+- @fusion-plugin-examples/roadmap@0.1.25
+- @fusion-plugin-examples/cursor-runtime@0.1.25
+- @fusion-plugin-examples/droid-runtime@0.1.32
+- @fusion-plugin-examples/hermes-runtime@0.2.56
+- @fusion-plugin-examples/openclaw-runtime@0.2.56
+- @fusion-plugin-examples/paperclip-runtime@0.2.56
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.43.1
+- @fusion/dashboard@0.43.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.43.1
+- @fusion/pi-claude-cli@0.43.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.43.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- 59f2596: Fix the standalone `fn plugin new` scaffold so generated plugins include the required `state: "installed"` field and build unedited with `pnpm build`. This also lets the documented `fn plugin dev . --once` path complete its pre-load build step instead of failing TypeScript validation for a missing `FusionPlugin.state`.
+
+  Manual end-to-end spot-check for release validation: `npx @runfusion/fusion@<ver> plugin new proof-point-plugin && cd proof-point-plugin && pnpm install && pnpm build && npx @runfusion/fusion@<ver> plugin dev . --once`.
+
+  Registry evidence captured for the original failing release: `npm view @runfusion/fusion@0.43.0 dist.integrity` returned `sha512-kvxicT+e8ulc7FDhBVP9NsgaioZv6NDW81N8cXNS/X8M32Eo3Y33xT6JFW2DrSiFXsJmAaib/GnpQE0nYQYApQ==`.
+
+- 1f540b2: Persist planning-session response history before agent continuation so retry/replay and SQLite session recovery retain answered turns when generation errors or transitions complete.
+- 19eca3d: Park incomplete tasks that exhaust stuck-loop recovery instead of making them scheduler-runnable again.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [59f2596]
+- Updated dependencies [1f540b2]
+- Updated dependencies [19eca3d]
+  - @runfusion/fusion@0.43.1
+
 ## 0.43.0
 
 ### @fusion/dashboard
@@ -8998,6 +9059,14 @@ for reference.
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
 
+## 0.39.6
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.43.1
+
 ## 0.39.5
 
 ### @fusion/i18n
@@ -9037,6 +9106,14 @@ for reference.
 #### Patch Changes
 
 - @fusion/core@0.40.0
+
+## 0.11.32
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.32
 
 ## 0.11.31
 
