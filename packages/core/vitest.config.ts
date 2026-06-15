@@ -14,8 +14,10 @@ const quarantinedCoreTests = [
 
   FNXC:CoreTests 2026-06-15-03:13:
   FN-6481 observed the disk-backed concurrent write test fail in the changed-package workspace lane with a transient SQLite BEGIN IMMEDIATE lock after the gate had already passed. Quarantine the flaky file instead of widening lock-recovery timeouts or weakening assertions.
+
+  FNXC:CoreTests 2026-06-15-07:39:
+  FN-6486 rescued store-concurrent-writes by making the transient lock helper release independent of event-loop timer scheduling, then removed the quarantine in lockstep with scripts/lib/test-quarantine.json. Keep this array empty unless a future observed flake is mirrored in the ledger in the same commit.
   */
-  "src/__tests__/store-concurrent-writes.test.ts",
 ];
 
 export default defineConfig({

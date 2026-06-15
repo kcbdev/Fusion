@@ -21,8 +21,10 @@ const quarantinedCliTests: string[] = [
   FNXC:CliTests 2026-06-15-04:07:
   FN-6483 observed extension-task-tools timing out only under the full @runfusion/fusion package lane while passing standalone immediately afterward.
   Quarantine the suite for the 14-day deletion ratchet instead of appeasing the load-sensitive timeout with wider test timeouts, retries, or worker changes.
+
+  FNXC:CliTests 2026-06-15-07:46:
+  FN-6486 rescued extension-task-tools by closing real TaskStore fixtures and replacing hoisted mock cleanup, then removed the quarantine in lockstep with scripts/lib/test-quarantine.json. Keep this array empty unless a future observed CLI flake is mirrored in the ledger in the same commit.
   */
-  "src/__tests__/extension-task-tools.test.ts",
 ];
 
 export default defineConfig({
