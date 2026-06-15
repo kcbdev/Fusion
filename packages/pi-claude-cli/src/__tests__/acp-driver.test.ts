@@ -5,6 +5,9 @@ import { PassThrough } from "node:stream";
 // Synthetic ACP session/update sequence the mocked prompt() will replay.
 let scriptedUpdates: Array<Record<string, unknown>> = [];
 let scriptedUsage: Record<string, number> | undefined;
+// When set, prompt() never resolves — simulates a turn waiting on the bridge so
+// only an out-of-band event (child death / abort) can end it.
+let scriptedHang = false;
 
 // Driver validates the bridge path with existsSync — make the fake path "exist".
 // writeFileSync/unlinkSync back the R17 auth-failure signal (spied).
@@ -33,6 +36,7 @@ vi.mock("@agentclientprotocol/sdk", () => ({
     this.initialize = vi.fn(async () => ({ protocolVersion: 1 }));
     this.newSession = vi.fn(async () => ({ sessionId: "s1" }));
     this.prompt = vi.fn(async () => {
+      if (scriptedHang) return new Promise(() => {}); // never resolves
       for (const u of scriptedUpdates) await handler.sessionUpdate({ update: u });
       return { stopReason: "end_turn", usage: scriptedUsage };
     });
@@ -54,6 +58,8 @@ vi.mock("@earendil-works/pi-ai", () => ({
   calculateCost: vi.fn(),
 }));
 
+import { spawn } from "node:child_process";
+import { ClientSideConnection } from "@agentclientprotocol/sdk";
 import { streamViaAcp, buildBridgeEnv } from "../acp-driver.js";
 
 const MODEL = { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" } as never;
@@ -66,7 +72,7 @@ function eventsOf(stream: { _events: Array<Record<string, unknown>> }) {
 const flush = () => new Promise((r) => setTimeout(r, 30));
 
 describe("streamViaAcp — ACP→pi translation (U11)", () => {
-  beforeEach(() => { scriptedUpdates = []; scriptedUsage = undefined; });
+  beforeEach(() => { scriptedUpdates = []; scriptedUsage = undefined; scriptedHang = false; });
 
   it("feeds ACP token usage (incl. cache tokens) into the done message (item 2)", async () => {
     scriptedUsage = { inputTokens: 11, outputTokens: 22, cachedReadTokens: 5, cachedWriteTokens: 3 };
@@ -191,6 +197,123 @@ describe("streamViaAcp — ACP→pi translation (U11)", () => {
     const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
     await flush();
     expect(eventsOf(stream).some((e) => e.type === "done")).toBe(true);
+  });
+});
+
+describe("connection reuse (item 1) — gated by FUSION_CLAUDE_ACP_REUSE", () => {
+  const savedReuse = process.env.FUSION_CLAUDE_ACP_REUSE;
+  beforeEach(() => {
+    scriptedUpdates = [];
+    scriptedUsage = undefined;
+    scriptedHang = false;
+    vi.mocked(spawn).mockClear();
+    vi.mocked(ClientSideConnection).mockClear();
+  });
+  afterEach(() => {
+    if (savedReuse === undefined) delete process.env.FUSION_CLAUDE_ACP_REUSE;
+    else process.env.FUSION_CLAUDE_ACP_REUSE = savedReuse;
+  });
+
+  it("reuses one warm bridge connection across turns; turn 2 skips spawn + session/new", async () => {
+    process.env.FUSION_CLAUDE_ACP_REUSE = "1";
+    const reuseOpts = { ...OPTS, sessionId: "conv-reuse-1" };
+
+    // Turn 1 (cold): needs >1 message so reuseKey activates and the connection caches.
+    const ctx1 = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "turn one" } }];
+    streamViaAcp(MODEL, ctx1, reuseOpts);
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ClientSideConnection)).toHaveBeenCalledTimes(1);
+
+    // Turn 2 (warm): same sessionId → no new spawn, no new connection.
+    const ctx2 = { messages: [...(ctx1 as unknown as { messages: unknown[] }).messages, { role: "user", content: "again" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "turn two" } }];
+    const s2 = streamViaAcp(MODEL, ctx2, reuseOpts) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1); // no second spawn
+    expect(vi.mocked(ClientSideConnection)).toHaveBeenCalledTimes(1); // no second connection
+
+    // The single warm connection's prompt() ran once per turn.
+    const conn = vi.mocked(ClientSideConnection).mock.instances[0] as unknown as { prompt: ReturnType<typeof vi.fn>; newSession: ReturnType<typeof vi.fn> };
+    expect(conn.prompt).toHaveBeenCalledTimes(2);
+    expect(conn.newSession).toHaveBeenCalledTimes(1); // session/new only on the cold turn
+    const done = s2._events.find((e) => e.type === "done");
+    expect(done!.reason).toBe("stop");
+
+    // Cleanup: evict the warm connection + clear its (unref'd) idle timer.
+    (vi.mocked(spawn).mock.results[0].value as EventEmitter).emit("close", 0);
+  });
+
+  it("fails a reuse turn FAST when the warm child dies mid-prompt (P0: no 30min hang)", async () => {
+    process.env.FUSION_CLAUDE_ACP_REUSE = "1";
+    const reuseOpts = { ...OPTS, sessionId: "conv-death" };
+
+    // Turn 1 (cold) caches the warm connection.
+    const ctx1 = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "one" } }];
+    streamViaAcp(MODEL, ctx1, reuseOpts);
+    await flush();
+    const child = vi.mocked(spawn).mock.results[0].value as EventEmitter;
+
+    // Turn 2 (warm) hangs on prompt() — only the child-death path can end it.
+    scriptedHang = true;
+    const ctx2 = { messages: [...(ctx1 as unknown as { messages: unknown[] }).messages, { role: "user", content: "again" }] } as never;
+    const s2 = streamViaAcp(MODEL, ctx2, reuseOpts) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    expect(s2._events.some((e) => e.type === "done")).toBe(false); // still waiting
+
+    // The warm child dies. The cold turn's close handler routes failure to the
+    // CURRENT (reuse) turn via router.fail, so it ends immediately.
+    child.emit("close", 1);
+    await flush();
+    const done = s2._events.find((e) => e.type === "done") as { reason?: string; message?: { content?: Array<{ text?: string }> } };
+    expect(done).toBeDefined();
+    expect(done!.reason).toBe("stop");
+    expect(JSON.stringify(done!.message?.content)).toContain("Error");
+
+    // Cache was evicted: a subsequent turn cold-spawns a fresh bridge.
+    scriptedHang = false;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "fresh" } }];
+    const ctx3 = { messages: [...(ctx2 as unknown as { messages: unknown[] }).messages, { role: "assistant", content: "" }, { role: "user", content: "q3" }] } as never;
+    streamViaAcp(MODEL, ctx3, reuseOpts);
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(2); // turn 1 + the post-death cold restart
+  });
+
+  it("cold-starts (no warm reuse) when the resume delta is empty (P1: no empty-prompt hang)", async () => {
+    process.env.FUSION_CLAUDE_ACP_REUSE = "1";
+    const reuseOpts = { ...OPTS, sessionId: "conv-empty" };
+
+    // Turn 1 (cold) caches.
+    const ctx1 = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "one" } }];
+    streamViaAcp(MODEL, ctx1, reuseOpts);
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+
+    // Turn 2 whose context ends in an assistant message → buildResumePrompt is
+    // empty → must NOT take the warm path (would hang); cold-starts instead.
+    const ctx2 = { messages: [...(ctx1 as unknown as { messages: unknown[] }).messages, { role: "user", content: "x" }, { role: "assistant", content: "y" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "two" } }];
+    const s2 = streamViaAcp(MODEL, ctx2, reuseOpts) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(2); // empty resume → fresh spawn
+    const done = s2._events.find((e) => e.type === "done");
+    expect(done!.reason).toBe("stop"); // produced a normal turn, did not hang
+  });
+
+  it("does NOT reuse when the flag is off (default): each turn spawns a fresh bridge", async () => {
+    delete process.env.FUSION_CLAUDE_ACP_REUSE;
+    const reuseOpts = { ...OPTS, sessionId: "conv-off" };
+    const ctx = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "x" }] } as never;
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "a" } }];
+    streamViaAcp(MODEL, ctx, reuseOpts);
+    await flush();
+    streamViaAcp(MODEL, ctx, reuseOpts);
+    await flush();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ClientSideConnection)).toHaveBeenCalledTimes(2);
   });
 });
 
