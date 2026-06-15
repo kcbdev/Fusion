@@ -106,11 +106,14 @@ enabled (writes default OFF).
 <!--
 FNXC:ACPRoute 2026-06-14-21:33:
 FN-6459 originally intended to store the Route-A U9/U14 feasibility decision in a task document, but that task-local deliverable was not recoverable after archive. Keep the security-critical OQ1 decision in this committed contract and the route plan so FN-6460 cannot be re-blocked by lost task metadata.
+
+FNXC:ACPRoute 2026-06-14-22:15:
+FN-6466 reran U9 against pinned `claude-code-cli-acp` 0.1.1 with a real non-empty Fusion MCP payload, but the bridge surfaced `Not logged in · Please run /login` before any MCP tool call. Record that unauthenticated-bridge blocker here so FN-6460 can distinguish "session/new accepted the forwarded server declaration" from "forwarded tool invocation and permission-gate traversal are still unproven."
 -->
 
 ### OQ1 — Route A MCP-over-ACP forwarding and permission-gate traversal
 
-**Status:** UNRESOLVED / BLOCKED as of FN-6465 (2026-06-14). **Combined Route A verdict: NOT GO** until this OQ records both required U9 answers as GO.
+**Status:** UNRESOLVED / BLOCKED as of FN-6466 (2026-06-14). **Combined Route A verdict: NOT GO** until this OQ records both required U9 answers as GO.
 
 **Recovery status:** NOT-RECOVERED. `fn_task_show FN-6459` retained only archived task metadata plus an archive log entry, `.fusion/tasks/FN-6459/` is absent in the FN-6465 worktree, and `fn_task_document_read(key="research")` returned not found from FN-6465's execution context. No surviving authoritative FN-6459 U9 verdict was available to transcribe.
 
@@ -121,6 +124,12 @@ FN-6459 originally intended to store the Route-A U9/U14 feasibility decision in 
 
 **FN-6465 result:** these answers remain unproven. Local binaries were present during recovery (`claude` 2.1.177 and pinned `claude-code-cli-acp` 0.1.1), but FN-6465 did not complete an authenticated, instrumented spike against the real Fusion MCP config with ACP permission telemetry. Do not infer a GO from binary presence.
 
-**Escalation path:** rerun U9 with an authenticated `claude`, the pinned bridge, a non-empty `session/new.mcpServers` generated from the real Fusion MCP config builder, and explicit instrumentation for `session/request_permission`. If MCP servers are ignored, forwarded tool calls cannot be invoked, or tool calls bypass the ACP permission gate without an MCP-layer permission hook or sensitive-tool exclusion, Route A remains blocked and the missing capability must be sponsored upstream in the bridge and/or ACP forwarding layer. A `claude -p` fallback is not an acceptable Route-A completion path.
+**FN-6466 result (real bridge run, still blocked):** The follow-up spike opened ACP `session/new` **directly** with a non-empty Route-A MCP payload so it did not reuse the plugin helper that still hardcodes `mcpServers: []`. The payload matched the real `mcp-config.ts` stdio shape: one server named `custom-tools`, `command: "node"`, `args: [packages/pi-claude-cli/src/mcp-schema-server.cjs, <temp schema file>]`, `env: []`, and a temp schema file containing **62** captured Fusion custom tools sourced from `packages/cli/src/extension.ts`. The bridge accepted `initialize` and `session/new` with that payload, so the transport did **not** reject the forwarded MCP declaration outright. The first prompt turn explicitly instructed Claude to call `fn_task_list`, but the turn ended with assistant text **`Not logged in · Please run /login`**, **zero** tool-call updates, and **zero** ACP `session/request_permission` callbacks.
+
+**Recorded OQ1 state after FN-6466:**
+1. **Can Claude invoke a real forwarded Fusion tool through the bridge?** **UNPROVEN / BLOCKED.** The bridge accepted the non-empty `mcpServers` payload, but the unauthenticated `claude` session stopped the experiment before any forwarded MCP tool invocation happened.
+2. **Do forwarded tool calls traverse ACP `session/request_permission`?** **UNPROVEN / BLOCKED.** No forwarded tool call occurred, so the spike observed no permission callback and cannot classify the path as GATED or BYPASSED.
+
+**Escalation path:** rerun U9 with an authenticated `claude`, the pinned bridge, the same non-empty `session/new.mcpServers` shape, and explicit `session/request_permission` instrumentation. If an authenticated rerun still ignores `mcpServers`, cannot invoke the forwarded tools, or bypasses the ACP permission gate without an MCP-layer permission hook or sensitive-tool exclusion, Route A remains blocked and the missing capability must be sponsored upstream in the bridge and/or ACP forwarding layer. A `claude -p` fallback is not an acceptable Route-A completion path.
 
 **U14 internal mechanisms:** GO for design, subject to U9. Route A should use a second `acp-claude` runtime posture rather than mutating the generic `acp` runtime; inject the ACP bridge client from the engine `registerExtensionProviders` seam into the vendored `@fusion/pi-claude-cli` provider options; and add `AgentRuntimeOptions.mcpServers` to both the engine runtime contract and the ACP plugin-local structural copy, with `newAcpSession` defaulting to `[]` for Route-B compatibility.
