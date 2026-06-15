@@ -6317,11 +6317,33 @@ export class TaskExecutor {
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
       const live = await this.store.getTask(task.id);
-      // A paused/aborted implementation is not a graph failure — leave the
-      // pause machinery in charge instead of parking the task in review.
-      if (live.paused || this.pausedAborted.has(task.id)) {
+      // A paused/aborted implementation is not a graph failure while the task
+      // is still in-progress — leave the pause machinery in charge instead of
+      // parking the task in review.
+      const pausedAborted = this.pausedAborted.has(task.id);
+      if (live.paused || pausedAborted) {
+        /*
+        FNXC:WorkflowLifecycle 2026-06-15-01:45:
+        FN-6478: a graph exit during an in-progress pause is recoverable by explicit unpause, but the same exit after the task has already left in-progress strands the workflow graph. Preserve userPaused and autoMerge:false review parking; surface non-in-progress paused exits as operator-actionable failures without moving the task backward or re-enqueueing execution.
+        */
+        const pauseProvenance = live.userPaused
+          ? "explicit user pause"
+          : pausedAborted
+            ? "engine abort during pause/resume"
+            : "task pause";
+        if (live.column !== "in-progress") {
+          const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
+          const message = `Workflow graph failure surfaced after paused ${pauseProvenance} in '${live.column}' at node '${failedNode}' — operator action required; retry or explicitly unpause/resume after inspecting the task`;
+          executorLog.warn(`${task.id}: ${message}`);
+          await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
+          if (live.column !== "done" && live.column !== "archived" && live.status == null && live.error == null) {
+            await this.store.updateTask(task.id, { error: message, status: "failed" }, this.getRunContextFor(task.id));
+          }
+          await this.persistTokenUsage(task.id);
+          return;
+        }
         const benignMessage = "Workflow graph run ended while task is paused — pause state preserved";
-        executorLog.log(`${task.id}: ${benignMessage}`);
+        executorLog.log(`${task.id}: ${benignMessage} (${pauseProvenance})`);
         await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
