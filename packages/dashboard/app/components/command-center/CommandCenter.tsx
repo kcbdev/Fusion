@@ -2,6 +2,12 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
+import { TokensArea } from "./areas/TokensArea";
+import { ToolsArea } from "./areas/ToolsArea";
+import { ActivityArea } from "./areas/ActivityArea";
+import { ProductivityArea } from "./areas/ProductivityArea";
+import { EcosystemArea } from "./areas/EcosystemArea";
+import { SignalsArea } from "./areas/SignalsArea";
 import "./CommandCenter.css";
 
 type SubViewId =
@@ -11,6 +17,7 @@ type SubViewId =
   | "activity"
   | "productivity"
   | "ecosystem"
+  | "signals"
   | "mission-control";
 
 interface SubView {
@@ -27,6 +34,7 @@ function useSubViews(): SubView[] {
     { id: "activity", label: t("commandCenter.tabs.activity", "Activity") },
     { id: "productivity", label: t("commandCenter.tabs.productivity", "Productivity") },
     { id: "ecosystem", label: t("commandCenter.tabs.ecosystem", "Ecosystem") },
+    { id: "signals", label: t("commandCenter.tabs.signals", "Signals") },
     { id: "mission-control", label: t("commandCenter.tabs.missionControl", "Mission Control") },
   ];
 }
@@ -148,10 +156,26 @@ export function CommandCenter() {
   );
 
   function renderActiveTab() {
-    if (activeTab === "overview") {
-      return <OverviewTab hasData={hasData} />;
+    switch (activeTab) {
+      case "overview":
+        return <OverviewTab hasData={hasData} />;
+      case "tokens":
+        return <TokensArea range={range} />;
+      case "tools":
+        return <ToolsArea range={range} />;
+      case "activity":
+        return <ActivityArea range={range} />;
+      case "productivity":
+        return <ProductivityArea range={range} />;
+      case "ecosystem":
+        return <EcosystemArea range={range} />;
+      case "signals":
+        return <SignalsArea range={range} />;
+      // Mission Control (U6b) is wired in its own unit; placeholder until then.
+      case "mission-control":
+      default:
+        return <PlaceholderTab tabId={activeTab} />;
     }
-    return <PlaceholderTab tabId={activeTab} />;
   }
 
   if (isLoading) {
