@@ -1120,8 +1120,26 @@ export {
   resolveTitleSummarizerSettingsModel,
   resolveValidatorSettingsModel,
   TEST_MODE_RESOLVED,
+  routeTaskExecutionModel,
+  routeTaskPlanningModel,
+  routeTaskValidatorModel,
 } from "./model-resolution.js";
-export type { ResolvedModelSelection } from "./model-resolution.js";
+export type { ResolvedModelSelection, RouterLaneOptions } from "./model-resolution.js";
+export {
+  routeModel,
+  routeModelAndEmit,
+  isMechanicalRoutableContext,
+} from "./model-router.js";
+export type {
+  RouterLane,
+  RouterReason,
+  RouterPair,
+  RouterTaskContext,
+  RouteModelInput,
+  RouterDecision,
+  RouterEscalation,
+  ModelGovernancePredicate,
+} from "./model-router.js";
 
 // ── Memory Compaction ─────────────────────────────────────────────────
 
