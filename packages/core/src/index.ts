@@ -530,6 +530,19 @@ export type {
   UsageEventKind,
   UsageEventRangeQuery,
 } from "./usage-events.js";
+export {
+  costFor,
+  lookupPricing,
+  MODEL_PRICING,
+  pricingAsOf,
+  PRICING_STALE_AFTER_MS,
+} from "./model-pricing.js";
+export type {
+  ModelPricing,
+  ModelRef,
+  UsageForCost,
+  CostResult,
+} from "./model-pricing.js";
 export { aggregateTokenAnalytics } from "./token-analytics.js";
 export type {
   TokenAnalytics,

@@ -1,4 +1,5 @@
 import type { Database } from "./db.js";
+import { costFor, type CostResult } from "./model-pricing.js";
 
 /**
  * Token-consumption analytics over the `tasks` table, generalizing the fixed
@@ -31,6 +32,13 @@ export interface TokenTotals {
 export interface TokenGroupSummary extends TokenTotals {
   /** The group key (model id, provider, nodeId, or agentId); null when unset. */
   key: string | null;
+  /**
+   * Derived USD cost for this group (U3). Each contributing task is priced at
+   * its own model's rates and summed, so the cost is meaningful for any
+   * `groupBy`. `usd` is null when none of the group's tasks had a known price;
+   * `unavailable` is true when at least one task's model was unpriced.
+   */
+  cost: CostResult;
 }
 
 /** Result of {@link aggregateTokenAnalytics}. */
@@ -40,6 +48,12 @@ export interface TokenAnalytics {
   groupBy: TokenGroupBy | null;
   /** Grand total across all matched tasks. */
   totals: TokenTotals;
+  /**
+   * Derived USD cost across all matched tasks (U3), each priced at its own
+   * model's rates. `usd` is null when no task had a known price; `unavailable`
+   * is true when at least one task's model had no pricing entry.
+   */
+  cost: CostResult;
   /** Per-group totals; empty array when no `groupBy` requested. */
   groups: TokenGroupSummary[];
 }
@@ -50,6 +64,11 @@ export interface TokenAnalyticsQuery {
   /** ISO-8601 upper bound (inclusive) on `tokenUsageLastUsedAt`. */
   to?: string;
   groupBy?: TokenGroupBy;
+  /**
+   * Epoch ms "now" used only for pricing-staleness (U3). When omitted, derived
+   * cost is never marked stale. Pure: the module never reads the clock itself.
+   */
+  now?: number;
 }
 
 function emptyTotals(): TokenTotals {
@@ -86,6 +105,52 @@ function groupKeyFor(row: TaskTokenRow, groupBy: TokenGroupBy): string | null {
     case "agent":
       return row.assignedAgentId;
   }
+}
+
+/**
+ * Running cost tally. Each task is priced at its own model, then summed: `usd`
+ * accumulates priced tasks, `anyUnavailable` records whether any task's model
+ * was unpriced, `anyStale` whether the pricing map was stale, and `anyPriced`
+ * whether at least one task had a known price. {@link finalizeCost} converts
+ * this to a {@link CostResult}.
+ */
+interface CostAccumulator {
+  usd: number;
+  anyPriced: boolean;
+  anyUnavailable: boolean;
+  anyStale: boolean;
+}
+
+function emptyCostAccumulator(): CostAccumulator {
+  return { usd: 0, anyPriced: false, anyUnavailable: false, anyStale: false };
+}
+
+function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void {
+  const result = costFor(
+    {
+      inputTokens: row.inputTokens ?? 0,
+      outputTokens: row.outputTokens ?? 0,
+      cachedTokens: row.cachedTokens ?? 0,
+      cacheWriteTokens: row.cacheWriteTokens ?? 0,
+    },
+    { provider: row.modelProvider, model: row.modelId },
+    now,
+  );
+  if (result.stale) acc.anyStale = true;
+  if (result.unavailable || result.usd === null) {
+    acc.anyUnavailable = true;
+  } else {
+    acc.usd += result.usd;
+    acc.anyPriced = true;
+  }
+}
+
+function finalizeCost(acc: CostAccumulator): CostResult {
+  return {
+    usd: acc.anyPriced ? acc.usd : null,
+    unavailable: acc.anyUnavailable,
+    stale: acc.anyStale,
+  };
 }
 
 function addRow(totals: TokenTotals, row: TaskTokenRow): void {
@@ -145,20 +210,31 @@ export function aggregateTokenAnalytics(
     .all(...params) as TaskTokenRow[];
 
   const totals = emptyTotals();
+  const totalCost = emptyCostAccumulator();
   const groupMap = new Map<string | null, TokenGroupSummary>();
+  const groupCostMap = new Map<string | null, CostAccumulator>();
   const groupBy = query.groupBy;
+  const now = query.now;
 
   for (const row of rows) {
     addRow(totals, row);
+    addRowCost(totalCost, row, now);
     if (groupBy) {
       const key = groupKeyFor(row, groupBy);
       let group = groupMap.get(key);
       if (!group) {
-        group = { key, ...emptyTotals() };
+        group = { key, ...emptyTotals(), cost: { usd: null, unavailable: false, stale: false } };
         groupMap.set(key, group);
+        groupCostMap.set(key, emptyCostAccumulator());
       }
       addRow(group, row);
+      addRowCost(groupCostMap.get(key)!, row, now);
     }
+  }
+
+  // Finalize per-group cost from each group's accumulator.
+  for (const [key, group] of groupMap) {
+    group.cost = finalizeCost(groupCostMap.get(key)!);
   }
 
   const groups = [...groupMap.values()].sort(
@@ -170,6 +246,7 @@ export function aggregateTokenAnalytics(
     to: query.to ?? null,
     groupBy: groupBy ?? null,
     totals,
+    cost: finalizeCost(totalCost),
     groups,
   };
 }
