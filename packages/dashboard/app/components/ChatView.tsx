@@ -1140,14 +1140,13 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const mentionCursorPosRef = useRef(0);
   const copyFeedbackTimeoutsRef = useRef<Map<string, number>>(new Map());
   const roomSendInFlightRef = useRef(false);
-  // Mobile send-button tap latch. iOS suppresses the trailing synthetic click
-  // after preventDefault() in the touch sequence, so the send must fire from
-  // pointerdown/touchstart. This latch dedupes the multiple events of one tap
-  // (pointerdown + touchstart, plus any surviving click) into a single send,
-  // and self-clears on a timer so a suppressed click can't leave it stuck true
-  // (which would swallow the next real tap and make the button look dead).
+  /*
+  FNXC:ChatSendDedupe 2026-06-17-08:36:
+  FN-6576 refines FN-6563 by matching QuickChatFAB's two-latch touch contract: pointerdown/touchstart claim a per-input-task gesture so one mobile tap sends exactly once, while the separate 700ms latch is consumed only by a trailing click. A suppressed iOS click must never leave the long latch blocking the next tap; a send-to-stop DOM swap must consume the trailing click without swallowing a genuine later stop tap.
+  */
   const handledSendTouchRef = useRef(false);
   const handledSendTouchTimerRef = useRef<number | null>(null);
+  const touchActionGestureRef = useRef(false);
   const mode = useViewportMode();
   const isMobile = mode === "mobile";
   const isTablet = mode === "tablet";
@@ -1957,9 +1956,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     });
   }, [activeDraftKey]);
 
-  // Mark that a touch gesture already triggered the send so the trailing
-  // onClick (if it survives) bails. Auto-resets so a suppressed click never
-  // leaves the latch stuck.
+  // Mark that a mobile pointer/touch handler already performed the action so
+  // the trailing onClick (if it survives) bails. This long latch is intentionally
+  // never consulted by pointerdown/touchstart, because iOS may suppress the
+  // click that would consume it.
   const markHandledSendTouch = useCallback(() => {
     handledSendTouchRef.current = true;
     if (handledSendTouchTimerRef.current != null) {
@@ -1969,6 +1969,18 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       handledSendTouchRef.current = false;
       handledSendTouchTimerRef.current = null;
     }, 700);
+  }, []);
+
+  // Claim one input task's touch gesture. Real mobile taps can dispatch both
+  // pointerdown and touchstart before React flushes state; only the first should
+  // run the action, and the claim must clear before the next tap.
+  const beginTouchActionGesture = useCallback(() => {
+    if (touchActionGestureRef.current) return false;
+    touchActionGestureRef.current = true;
+    window.setTimeout(() => {
+      touchActionGestureRef.current = false;
+    }, 0);
+    return true;
   }, []);
 
   // Consume the latch (cancelling its timer) so a trailing onClick bails once.
@@ -3092,7 +3104,27 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         {isStreaming ? (
           <button
             className="chat-input-stop"
-            onClick={stopStreaming}
+            onPointerDown={(event) => {
+              if (event.pointerType && event.pointerType !== "mouse") {
+                event.preventDefault();
+                if (!beginTouchActionGesture()) return;
+                markHandledSendTouch();
+                stopStreaming();
+              }
+            }}
+            onTouchStart={(event) => {
+              event.preventDefault();
+              if (!beginTouchActionGesture()) return;
+              markHandledSendTouch();
+              stopStreaming();
+            }}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={() => {
+              if (consumeHandledSendTouch()) return;
+              stopStreaming();
+            }}
             aria-label={t("chat.stopGeneration", "Stop generation")}
             data-testid="chat-stop-btn"
           >
@@ -3107,13 +3139,14 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                 // iOS suppresses the trailing click after this preventDefault,
                 // so fire the send here (deduped) rather than relying on onClick.
                 event.preventDefault();
-                if (handledSendTouchRef.current) return;
+                if (!beginTouchActionGesture()) return;
                 markHandledSendTouch();
                 void handleSend();
               }
             }}
-            onTouchStart={() => {
-              if (handledSendTouchRef.current) return;
+            onTouchStart={(event) => {
+              event.preventDefault();
+              if (!beginTouchActionGesture()) return;
               markHandledSendTouch();
               void handleSend();
             }}
@@ -3739,19 +3772,20 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   type="button"
                   className="chat-input-send"
                   /*
-                  FNXC:ChatRoomSend 2026-06-17-02:56:
-                  FN-6563 requires the room composer send button to share the direct-chat touch/pointer dedupe contract: a single mobile tap must dispatch exactly one room send, even when iOS suppresses the trailing click after pointerdown preventDefault or Android emits pointerdown, touchstart, and click.
+                  FNXC:ChatRoomSend 2026-06-17-08:36:
+                  FN-6576 requires the room composer to share the direct-chat two-latch dedupe contract: pointerdown/touchstart use the short per-gesture claim, while the 700ms latch is reserved for a trailing click. This preserves room routing through handleSendDispatch() and ensures a second iOS tap within the suppressed-click window still dispatches exactly one room send.
                   */
                   onPointerDown={(event) => {
                     if (event.pointerType && event.pointerType !== "mouse") {
                       event.preventDefault();
-                      if (handledSendTouchRef.current) return;
+                      if (!beginTouchActionGesture()) return;
                       markHandledSendTouch();
                       void handleSendDispatch();
                     }
                   }}
-                  onTouchStart={() => {
-                    if (handledSendTouchRef.current) return;
+                  onTouchStart={(event) => {
+                    event.preventDefault();
+                    if (!beginTouchActionGesture()) return;
                     markHandledSendTouch();
                     void handleSendDispatch();
                   }}

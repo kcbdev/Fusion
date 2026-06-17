@@ -1575,6 +1575,38 @@ describe("ChatView", () => {
     }
   });
 
+  it("FN-6576 sends each of two consecutive direct iOS taps within the click-latch window", async () => {
+    const viewportSpy = mockViewportMode("mobile");
+    const sendMessage = vi.fn();
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [],
+      sendMessage,
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Direct first" } });
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-send-btn"), { pointerType: "touch" });
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenLastCalledWith("Direct first", []);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "Direct second" } });
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-send-btn"), { pointerType: "touch" });
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenLastCalledWith("Direct second", []);
+    viewportSpy.mockRestore();
+  });
+
   it("clears room composer on Enter after successful room send", async () => {
     localStorage.setItem("fusion:chat-scope", "rooms");
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
@@ -2211,6 +2243,106 @@ describe("ChatView", () => {
 
     await userEvent.click(screen.getByTestId("chat-stop-btn"));
     expect(stopStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it("FN-6576 does not let a send gesture trailing click press the swapped stop button", async () => {
+    const viewportSpy = mockViewportMode("mobile");
+    const sendMessage = vi.fn();
+    const stopStreaming = vi.fn();
+    mockUseChat.mockImplementation(() => {
+      const [isStreaming, setIsStreaming] = useState(false);
+      return {
+        ...defaultChatState,
+        activeSession: activeSessionFixture,
+        sessions: [activeSessionFixture],
+        filteredSessions: [activeSessionFixture],
+        messages: [],
+        isStreaming,
+        sendMessage: (message, files) => {
+          sendMessage(message, files);
+          setIsStreaming(true);
+        },
+        stopStreaming,
+      } satisfies UseChatReturn;
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "Start streaming" } });
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-send-btn"), { pointerType: "touch" });
+      fireEvent.touchStart(screen.getByTestId("chat-send-btn"));
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith("Start streaming", []);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-stop-btn"));
+    });
+    expect(stopStreaming).not.toHaveBeenCalled();
+    viewportSpy.mockRestore();
+  });
+
+  it("FN-6576 allows a standalone mobile stop tap exactly once", async () => {
+    const viewportSpy = mockViewportMode("mobile");
+    const stopStreaming = vi.fn();
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [],
+      isStreaming: true,
+      stopStreaming,
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-stop-btn"), { pointerType: "touch" });
+      fireEvent.touchStart(screen.getByTestId("chat-stop-btn"));
+      fireEvent.click(screen.getByTestId("chat-stop-btn"));
+    });
+    expect(stopStreaming).toHaveBeenCalledTimes(1);
+    viewportSpy.mockRestore();
+  });
+
+  it("FN-6576 allows a genuine stop tap within the send click-latch window", async () => {
+    const viewportSpy = mockViewportMode("mobile");
+    const sendMessage = vi.fn();
+    const stopStreaming = vi.fn();
+    mockUseChat.mockImplementation(() => {
+      const [isStreaming, setIsStreaming] = useState(false);
+      return {
+        ...defaultChatState,
+        activeSession: activeSessionFixture,
+        sessions: [activeSessionFixture],
+        filteredSessions: [activeSessionFixture],
+        messages: [],
+        isStreaming,
+        sendMessage: (message, files) => {
+          sendMessage(message, files);
+          setIsStreaming(true);
+        },
+        stopStreaming,
+      } satisfies UseChatReturn;
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "Start then stop" } });
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-send-btn"), { pointerType: "touch" });
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      fireEvent.pointerDown(screen.getByTestId("chat-stop-btn"), { pointerType: "touch" });
+      fireEvent.touchStart(screen.getByTestId("chat-stop-btn"));
+      fireEvent.click(screen.getByTestId("chat-stop-btn"));
+    });
+    expect(stopStreaming).toHaveBeenCalledTimes(1);
+    viewportSpy.mockRestore();
   });
 
   it("renders send button when not streaming", async () => {

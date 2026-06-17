@@ -653,6 +653,36 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     mediaSpy.mockRestore();
   });
 
+  it("FN-6576 sends each of two consecutive room iOS taps within the click-latch window", async () => {
+    const mediaSpy = mockMobileViewport();
+    const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
+    setup({}, { sendRoomMessage, activeRoom: roomA });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const input = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Room first" } });
+    const firstSendButton = screen.getByTestId("chat-send-btn");
+    await act(async () => {
+      firstSendButton.dispatchEvent(Object.assign(new Event("pointerdown", { bubbles: true, cancelable: true }), { pointerType: "touch" }));
+    });
+    await waitFor(() => expect(sendRoomMessage).toHaveBeenCalledTimes(1));
+    expect(sendRoomMessage).toHaveBeenLastCalledWith("Room first", { files: [] });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    fireEvent.change(screen.getByTestId("chat-input"), { target: { value: "Room second" } });
+    const secondSendButton = screen.getByTestId("chat-send-btn");
+    await act(async () => {
+      secondSendButton.dispatchEvent(Object.assign(new Event("pointerdown", { bubbles: true, cancelable: true }), { pointerType: "touch" }));
+    });
+
+    await waitFor(() => expect(sendRoomMessage).toHaveBeenCalledTimes(2));
+    expect(sendRoomMessage).toHaveBeenLastCalledWith("Room second", { files: [] });
+    mediaSpy.mockRestore();
+  });
+
   it("FN-6563 sends a room message exactly once for a full Android tap sequence", async () => {
     const mediaSpy = mockMobileViewport();
     const sendRoomMessage = vi.fn().mockResolvedValue(undefined);
