@@ -7,7 +7,7 @@ import {
 describe("workflow branch-group merge subgraphs", () => {
   it("allows shared member integration while global auto-merge is off", () => {
     expect(decideBranchGroupMemberIntegration({
-      task: { id: "FN-MEMBER", autoMerge: false, branchContext: { assignmentMode: "shared", branchName: "shared/fn" } as any },
+      task: { id: "FN-MEMBER", autoMerge: false, branchContext: { assignmentMode: "shared", branchName: "shared/fn" } },
       settings: { autoMerge: false },
     })).toEqual({
       stage: "member-integration",
@@ -18,7 +18,7 @@ describe("workflow branch-group merge subgraphs", () => {
 
   it("gates non-shared member integration when global auto-merge is off", () => {
     expect(decideBranchGroupMemberIntegration({
-      task: { id: "FN-MEMBER", branchContext: { assignmentMode: "exclusive", branchName: "feature/fn" } as any },
+      task: { id: "FN-MEMBER", branchContext: { assignmentMode: "per-task-derived", branchName: "feature/fn" } },
       settings: { autoMerge: false },
     })).toEqual({
       stage: "member-integration",
@@ -30,7 +30,7 @@ describe("workflow branch-group merge subgraphs", () => {
 
   it("keeps group promotion gated by global and group auto-merge", () => {
     const input = {
-      task: { id: "FN-GROUP", branchContext: { assignmentMode: "shared", branchName: "shared/fn" } as any },
+      task: { id: "FN-GROUP", branchContext: { assignmentMode: "shared", branchName: "shared/fn" } },
       settings: { autoMerge: false },
     };
     expect(decideBranchGroupPromotion(input)).toEqual({
@@ -46,7 +46,7 @@ describe("workflow branch-group merge subgraphs", () => {
       reason: "group-auto-merge-disabled",
     });
     expect(decideBranchGroupPromotion({
-      task: { id: "FN-GROUP", autoMerge: false, branchContext: { assignmentMode: "shared", branchName: "shared/fn" } as any },
+      task: { id: "FN-GROUP", autoMerge: false, branchContext: { assignmentMode: "shared", branchName: "shared/fn" } },
       settings: { autoMerge: true },
       groupAutoMerge: true,
     })).toEqual({

@@ -14,8 +14,8 @@ stack_base: feature/workflow-owned-merge-s10-self-healing-recovery-events
 ## Stack Role
 
 This draft PR reserves the S11 review slot in the workflow-owned merge,
-retry, scheduling, and recovery migration stack. It is intentionally a handoff
-artifact, not the completed implementation for this slice.
+retry, scheduling, and recovery migration stack. It includes shipped decision
+logic and tests for branch-group member integration and group promotion.
 
 ## Milestone
 

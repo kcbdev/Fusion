@@ -15,6 +15,7 @@ export interface BranchGroupWorkflowDecision {
   reason?: string;
 }
 
+// FNXC:Branch-Groups – Implements user-facing branch-group member integration policy: shared branches always integrate; non-shared branches require global auto-merge enabled (2026-06-09 S11)
 export function decideBranchGroupMemberIntegration(input: BranchGroupWorkflowInput): BranchGroupWorkflowDecision {
   const assignmentMode = input.task.branchContext?.assignmentMode;
   const isSharedMember = assignmentMode === "shared";
@@ -32,6 +33,7 @@ export function decideBranchGroupMemberIntegration(input: BranchGroupWorkflowInp
   return { stage: "member-integration", allowed: true, outcome: "success" };
 }
 
+// FNXC:Branch-Groups – Implements user-facing branch-group promotion policy: requires both global and group-level auto-merge enabled (2026-06-09 S11)
 export function decideBranchGroupPromotion(input: BranchGroupWorkflowInput): BranchGroupWorkflowDecision {
   if (input.settings.autoMerge === false) {
     return {
