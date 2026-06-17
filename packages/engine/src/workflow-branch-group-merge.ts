@@ -15,7 +15,14 @@ export interface BranchGroupWorkflowDecision {
   reason?: string;
 }
 
-// FNXC:Branch-Groups – Implements user-facing branch-group member integration policy: shared branches always integrate; non-shared branches require global auto-merge enabled (2026-06-09 S11)
+/*
+FNXC:Branch-Groups 2026-06-09-00:00:
+Branch-group member integration policy (S11). A task sharing a group branch always
+integrates regardless of the global auto-merge setting, because the shared branch is
+the group's own integration surface. A non-shared (per-task-derived) member only
+integrates automatically when global auto-merge is enabled; otherwise integration is
+gated to manual so operators retain control over independent branches.
+*/
 export function decideBranchGroupMemberIntegration(input: BranchGroupWorkflowInput): BranchGroupWorkflowDecision {
   const assignmentMode = input.task.branchContext?.assignmentMode;
   const isSharedMember = assignmentMode === "shared";
@@ -33,7 +40,13 @@ export function decideBranchGroupMemberIntegration(input: BranchGroupWorkflowInp
   return { stage: "member-integration", allowed: true, outcome: "success" };
 }
 
-// FNXC:Branch-Groups – Implements user-facing branch-group promotion policy: requires both global and group-level auto-merge enabled (2026-06-09 S11)
+/*
+FNXC:Branch-Groups 2026-06-09-00:00:
+Branch-group promotion policy (S11). Promoting a group branch to its target requires
+BOTH global auto-merge and the group's own auto-merge flag to be enabled. Either one
+being disabled gates promotion to manual, so disabling auto-merge at either the global
+or group level is sufficient to require human approval before the group lands.
+*/
 export function decideBranchGroupPromotion(input: BranchGroupWorkflowInput): BranchGroupWorkflowDecision {
   if (input.settings.autoMerge === false) {
     return {
