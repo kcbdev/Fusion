@@ -43,6 +43,7 @@ import {
   buildSessionSkillContextSync,
   createSendMessageTool,
   createReadMessagesTool,
+  createAskQuestionTool,
   createWorkflowAuthoringTools,
 } from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
@@ -132,6 +133,12 @@ async function ensureEngineReady(): Promise<void> {
 export const CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into the fn task board system. You help users with questions about their project, code, architecture, and tasks. You have access to project files and can read them to provide informed responses, including referencing specific file paths and line numbers when possible. Response length policy: default to a short, crisp reply (a few sentences or a short bulleted list) that directly answers the user; avoid preamble, restating the question, and filler. If a thorough answer genuinely needs long-form content (for example multi-step plans, design proposals, deep analyses, or long file excerpts), keep the chat reply brief with a one- or two-sentence summary and then send the full write-up via \`fn_send_message\` using \`type: "agent-to-user"\` and \`to_id: "dashboard"\`. That mailbox follow-up must add new substantive detail and must not duplicate the chat reply.`;
 
 export const CHAT_AGENT_MESSAGE_ROUTING_GUIDANCE = `## Messaging Semantics\n\nYour chat reply is the primary response to the user. Do not also call \`fn_send_message\` with the same content just to mirror your chat response into mailbox.\n\nUse \`fn_send_message\` only when either (a) the user explicitly asks for mailbox/inbox/notification delivery (for example: "send me this in mail", "ntfy me when…", or "leave me a note in my inbox"), or (b) you are sending a genuinely longer follow-up that did not fit in a short chat reply. In either case, send with \`type: "agent-to-user"\` and target the dashboard user alias (\`to_id: "dashboard"\` is preferred), and ensure the mailbox message is additive rather than a duplicate of the chat reply. Never route that as a user/CLI → agent message.`;
+
+/**
+ * FNXC:ChatAskQuestion 2026-06-17-13:17:
+ * Only the dashboard chat lane registers `fn_ask_question`, so append this guidance during sendMessage prompt assembly instead of baking it into room-responder prompts that do not receive the tool.
+ */
+export const CHAT_ASK_QUESTION_GUIDANCE = `## Asking the User\n\nWhen you need structured input, call \`fn_ask_question\` with one or more questions, then stop and wait for the user's next chat message.`;
 
 /** Rate limiting window in milliseconds (1 minute) */
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -1618,6 +1625,7 @@ export class ChatManager {
           diagnostics.warn(`Failed to build enriched system prompt for ${agent.id}: ${message}`);
         }
       }
+      systemPrompt = `${systemPrompt}\n\n${CHAT_ASK_QUESTION_GUIDANCE}`;
 
       if (agent) {
         const runtimeModel = extractRuntimeModel(agent.runtimeConfig);
@@ -1715,7 +1723,7 @@ export class ChatManager {
         ? createWorkflowAuthoringTools(this.taskStore, "", { stripApprovalFlags: true })
         : [];
 
-      const customTools = [...messagingTools, ...workflowTools];
+      const customTools = [createAskQuestionTool(), ...messagingTools, ...workflowTools];
 
       const sessionOptions = {
         cwd: this.rootDir,

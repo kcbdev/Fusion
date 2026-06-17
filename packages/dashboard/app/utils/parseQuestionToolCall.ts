@@ -8,6 +8,7 @@ export const QUESTION_TOOL_NAMES = [
   "request_user_input",
   "elicit",
   "ask_question",
+  "fn_ask_question",
 ] as const;
 
 const QUESTION_TOOL_NAME_SET = new Set(QUESTION_TOOL_NAMES.map((name) => name.toLowerCase()));
@@ -37,7 +38,7 @@ export type ChatQuestionAnswers = Record<string, ChatQuestionAnswerValue>;
 
 /**
  * FNXC:ChatQuestionResponse 2026-06-16-19:18:
- * Chat question tools from multiple agent CLIs must render as structured response controls in both ChatView and QuickChatFAB instead of exposing raw JSON in generic tool-call details.
+ * Chat question tools from multiple agent CLIs and Fusion's native `fn_ask_question` tool must render as structured response controls in both ChatView and QuickChatFAB instead of exposing raw JSON in generic tool-call details.
  * Keep schema normalization centralized so both chat surfaces recognize the same question tools, synthesize stable ids, and fall back safely when args are malformed.
  */
 export function isQuestionToolName(name: string): boolean {

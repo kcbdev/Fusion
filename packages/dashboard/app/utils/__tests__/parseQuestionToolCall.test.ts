@@ -10,6 +10,7 @@ describe("parseQuestionToolCall", () => {
   it("recognizes question tool names case-insensitively", () => {
     expect(isQuestionToolName("AskUserQuestion")).toBe(true);
     expect(isQuestionToolName("ASK_USER")).toBe(true);
+    expect(isQuestionToolName("fn_ask_question")).toBe(true);
     expect(isQuestionToolName("grep")).toBe(false);
   });
 
@@ -55,6 +56,24 @@ describe("parseQuestionToolCall", () => {
     expect(parsed?.questions).toHaveLength(1);
     expect(parsed?.questions[0]?.type).toBe(expectedType);
     expect(parsed?.questions[0]?.id).toBe("q-0");
+  });
+
+  it("normalizes fn_ask_question across all supported question types", () => {
+    const parsed = parseQuestionToolCall(toolCall("fn_ask_question", {
+      questions: [
+        { question: "Pick one", type: "single_select", options: [{ label: "Alpha" }] },
+        { question: "Pick many", type: "multi_select", options: [{ label: "Beta", description: "Second" }] },
+        { question: "Explain", type: "text", description: "Short answer is fine." },
+        { question: "Proceed?", type: "confirm" },
+      ],
+    }));
+
+    expect(parsed?.questions).toEqual([
+      expect.objectContaining({ id: "q-0", type: "single_select", question: "Pick one", options: [{ id: "opt-0", label: "Alpha", description: undefined }] }),
+      expect.objectContaining({ id: "q-1", type: "multi_select", question: "Pick many", multiSelect: true, options: [{ id: "opt-0", label: "Beta", description: "Second" }] }),
+      expect.objectContaining({ id: "q-2", type: "text", question: "Explain", description: "Short answer is fine." }),
+      expect.objectContaining({ id: "q-3", type: "confirm", question: "Proceed?" }),
+    ]);
   });
 
   it("falls back for malformed, empty option select, and non-question tools", () => {

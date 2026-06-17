@@ -301,6 +301,40 @@ export const postRoomMessageParams = Type.Object({
   mentions: Type.Optional(Type.Array(Type.String(), { description: "Optional agent IDs to mention in the room message" })),
 });
 
+export const askQuestionParams = Type.Object({
+  questions: Type.Array(
+    Type.Object({
+      question: Type.String({
+        description: "The question text shown to the user. Required and must be specific enough to answer.",
+      }),
+      header: Type.Optional(Type.String({
+        description: "Optional short heading for the question card, such as 'Decision needed'.",
+      })),
+      description: Type.Optional(Type.String({
+        description: "Optional helper text explaining why the answer is needed or how it will be used.",
+      })),
+      options: Type.Optional(Type.Array(Type.Object({
+        label: Type.String({ description: "Visible option label the user can choose." }),
+        description: Type.Optional(Type.String({ description: "Optional explanatory text for this option." })),
+      }), {
+        description: "Options for single_select, multi_select, or confirm questions. Select questions require at least one option.",
+      })),
+      multiSelect: Type.Optional(Type.Boolean({
+        description: "Set true when the user may choose multiple options. Prefer type='multi_select' for clarity.",
+      })),
+      type: Type.Optional(Type.Union([
+        Type.Literal("text"),
+        Type.Literal("single_select"),
+        Type.Literal("multi_select"),
+        Type.Literal("confirm"),
+      ], {
+        description: "Question input type: free text, single option, multiple options, or yes/no confirmation.",
+      })),
+    }),
+    { description: "One or more structured questions to present to the user." },
+  ),
+});
+
 export const memorySearchParams = Type.Object({
   query: Type.String({ description: "Search terms for durable project memory. Use focused keywords, not a full prompt." }),
   limit: Type.Optional(Type.Number({ description: "Maximum snippets to return (default: 5, max: 20)" })),
@@ -2867,6 +2901,66 @@ export function createDelegateTaskTool(
         }
         throw err;
       }
+    },
+  };
+}
+
+type AskQuestionInput = Static<typeof askQuestionParams>;
+
+function askQuestionError(message: string) {
+  return {
+    content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+    details: {},
+    isError: true,
+  };
+}
+
+/**
+ * FNXC:ChatAskQuestion 2026-06-17-13:08:
+ * Dashboard chat agents need a provider-agnostic `fn_ask_question` tool that emits the FN-6501 structured question payload, renders through the existing chat question UI, and receives the answer through the normal next user message instead of a blocking tool response.
+ *
+ * Create a `fn_ask_question` tool that asks the dashboard user structured questions.
+ *
+ * @returns ToolDefinition for the `fn_ask_question` tool
+ */
+export function createAskQuestionTool(): ToolDefinition {
+  return {
+    name: "fn_ask_question",
+    label: "Ask User Question",
+    description:
+      "Ask the user a structured question (single-select, multi-select, free-text, or yes/no confirm). " +
+      "The question renders as an interactive card in chat. After calling this tool, end the turn and wait; " +
+      "the user's answer arrives as the next message.",
+    parameters: askQuestionParams,
+    execute: async (_id: string, params: AskQuestionInput) => {
+      if (!Array.isArray(params.questions) || params.questions.length === 0) {
+        return askQuestionError("questions must contain at least one question");
+      }
+
+      for (const [index, question] of params.questions.entries()) {
+        const questionText = typeof question.question === "string" ? question.question.trim() : "";
+        if (!questionText) {
+          return askQuestionError(`questions[${index}].question must be a non-empty string`);
+        }
+
+        const optionCount = Array.isArray(question.options)
+          ? question.options.filter((option) => typeof option.label === "string" && option.label.trim().length > 0).length
+          : 0;
+        const requiresOptions = question.type === "single_select"
+          || question.type === "multi_select"
+          || question.multiSelect === true;
+        if (requiresOptions && optionCount === 0) {
+          return askQuestionError(`questions[${index}] select questions must include at least one option`);
+        }
+      }
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: "Question presented to the user. Stop and wait for their reply on the next turn.",
+        }],
+        details: { questionCount: params.questions.length },
+      };
     },
   };
 }

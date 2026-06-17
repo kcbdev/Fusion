@@ -920,6 +920,7 @@ describe("ChatManager.sendMessage", () => {
     }));
     expect(createResolvedSession).toHaveBeenCalledWith(expect.objectContaining({
       customTools: expect.arrayContaining([
+        expect.objectContaining({ name: "fn_ask_question" }),
         expect.objectContaining({ name: "fn_send_message" }),
         expect.objectContaining({ name: "fn_read_messages" }),
       ]),
@@ -980,7 +981,7 @@ describe("ChatManager.sendMessage", () => {
     }));
   });
 
-  it("does not inject mailbox tools for non-agent chat sessions", async () => {
+  it("injects ask-question but not mailbox tools for non-agent chat sessions", async () => {
     mockChatStore.getSession.mockReturnValue({
       id: "chat-001",
       agentId: null,
@@ -1008,9 +1009,10 @@ describe("ChatManager.sendMessage", () => {
 
     await chatManager.sendMessage("chat-001", "Hello");
 
-    expect(createResolvedSession).toHaveBeenCalledWith(expect.not.objectContaining({
-      customTools: expect.anything(),
-    }));
+    const customTools = createResolvedSession.mock.calls[0]?.[0]?.customTools ?? [];
+    expect(customTools.map((tool: { name: string }) => tool.name)).toContain("fn_ask_question");
+    expect(customTools.map((tool: { name: string }) => tool.name)).not.toContain("fn_send_message");
+    expect(customTools.map((tool: { name: string }) => tool.name)).not.toContain("fn_read_messages");
   });
 
   it("uses the assigned built-in pi agent model when the chat session has no explicit model override", async () => {
