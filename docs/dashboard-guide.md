@@ -108,17 +108,22 @@ Behavior:
 - Nodes support manual drag repositioning with a 4px movement threshold to separate click from drag, using pointer capture and zoom-aware delta scaling for reliable tracking
 - Custom node positions persist per project in browser localStorage (`kb:${projectId}:fusion-plugin-dependency-graph:positions`) across refresh/project switches, and **Fit to graph** clears saved positions and restores auto-layout
 
-## Workflow Editor
+## Workflow Selection and Editor
 
-The workflow editor opens as a full-screen modal editor for authoring custom workflows from the board's workflow selector.
+Workflows define how a task moves through planning, execution, review, workflow steps, merge, and any custom graph policy. Most coding tasks can stay on the default Coding workflow, but task and board workflow controls can select a different built-in or custom workflow per task. For the built-in catalog and runtime semantics, see [Workflow Steps → Workflow overview](./workflow-steps.md#workflow-overview).
+
+The workflow editor opens as a full-screen modal editor for inspecting built-ins and authoring custom workflows.
 
 Navigation:
-- Open a task or board surface that shows the workflow selector, then choose **Manage…**
+- Open a task or board surface that shows the workflow selector, then choose **Manage…**.
 - From the board workflow toolbar, use the edit workflow button beside the selector to open the currently selected workflow directly when one is selected.
+- Use the global **Workflow** / **Workflows** entry point from desktop header, compact header overflow, or mobile **More** navigation to browse definitions.
+- From Settings moved-setting stubs, choose **Open workflow settings** to jump to the default workflow's settings values.
 
 Behavior:
 - Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
 - Read-only built-in workflows are inspectable in the same canvas as custom workflows, including connected success, failure, and rework edges for their graph topology.
+- Custom workflows can be created from blank, duplicated from built-ins/custom definitions, imported/exported, AI-designed, validated, and saved from the editor.
 - The Settings panel is value-first for built-in workflows and groups workflow settings by Models, Review & Approval, Step Execution, and Advanced. Known workflow model values use the same model dropdown picker as **Settings → Project Models** so provider/model pairs are saved together; custom or non-model string values can still use typed inputs. Definitions remain available for custom workflow schema authoring.
 - The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; the modal's primary **Save** action writes those dropdown values as workflow setting values for the active default workflow.
 - On desktop, the editor uses a multi-panel canvas layout for editing the graph and adjacent workflow metadata. The **Show simple editor** toggle switches that same workflow into the graph-outline editor with dedicated **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions** tabs.
