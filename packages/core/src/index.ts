@@ -676,6 +676,7 @@ export {
   IN_REVIEW_STALL_TERMINAL_LOG_PREFIX,
   DEFAULT_STALE_MERGING_MIN_AGE_MS,
   DEFAULT_MAX_AUTO_MERGE_RETRIES,
+  resolveMaxAutoMergeRetries,
 } from "./in-review-stall.js";
 export type { InReviewStallSignal, InReviewStallCode, ProviderErrorClassification } from "./in-review-stall.js";
 export {

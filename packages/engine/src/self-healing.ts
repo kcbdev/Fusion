@@ -30,7 +30,7 @@ import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -392,6 +392,10 @@ const ORPHANED_WITH_WORKTREE_GRACE_MS = 300_000;
  */
 const MAX_TASK_DONE_RETRIES = 3;
 export const MAX_WORKTREE_SESSION_RETRIES = 3;
+/**
+ * FNXC:AutoMergeRetries 2026-06-17-04:20:
+ * Keep this export as the historical default seed for tests and dashboard fallback alignment, but SelfHealingManager must call resolveMaxAutoMergeRetries(settings) at decision points so configured projects do not recover or stall at the old fixed value.
+ */
 export const MAX_AUTO_MERGE_RETRIES = 3;
 /**
  * FN-5627 follow-up: bounded budget for self-healing transient-merge-failure
@@ -4404,6 +4408,7 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
 
       const staleMergingStatusMinAgeMs = this.options.staleMergingStatusMinAgeMs ?? DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS;
       const configuredFanoutMinAgeMs = this.options.staleMergingFanoutMinAgeMs ?? DEFAULT_STALE_MERGING_FANOUT_MIN_AGE_MS;
@@ -4518,10 +4523,10 @@ export class SelfHealingManager {
           } else if (
             blocker.column === "in-review" &&
             blocker.status === "failed" &&
-            (blocker.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES
+            (blocker.mergeRetries ?? 0) >= maxAutoMergeRetries
           ) {
             reasonCode = "failed-retry-exhausted";
-            reason = `blocker ${blockerId} in-review + failed (mergeRetries ${blocker.mergeRetries ?? 0}/${MAX_AUTO_MERGE_RETRIES})`;
+            reason = `blocker ${blockerId} in-review + failed (mergeRetries ${blocker.mergeRetries ?? 0}/${maxAutoMergeRetries})`;
           } else if (
             blocker.column === "in-review" &&
             blocker.status === "failed" &&
@@ -5373,6 +5378,7 @@ export class SelfHealingManager {
       // "pull-request"`) — see GitHub issue #21.
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const mergeable = tasks.filter((t) =>
@@ -5393,7 +5399,7 @@ export class SelfHealingManager {
         // refreshes updatedAt, preventing cooldown-based retries from ever
         // becoming eligible. Also skip tasks explicitly tagged as no-op merges
         // in case updateTask(moveTask) is briefly out-of-order during recovery.
-        (t.mergeRetries ?? 0) < MAX_AUTO_MERGE_RETRIES &&
+        (t.mergeRetries ?? 0) < maxAutoMergeRetries &&
         getTaskMergeBlocker(t) === undefined,
       );
       const unownedMergeable = mergeable.filter((task) => !this.isMergeLaneOwned(task.id));
@@ -5686,6 +5692,7 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
       const cycleStartMs = Date.now();
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
@@ -5703,7 +5710,7 @@ export class SelfHealingManager {
           activeMergeTaskId,
           executingTaskIds,
           staleMergingMinAgeMs: this.options.staleMergingStatusMinAgeMs ?? DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS,
-          maxAutoMergeRetries: MAX_AUTO_MERGE_RETRIES,
+          maxAutoMergeRetries,
           engineActiveSinceMs: settings.engineActiveSinceMs,
           engineActivationGraceMs: settings.engineActivationGraceMs,
         });
@@ -6133,13 +6140,14 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
 
       const slim = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = slim.filter((t) =>
         t.column === "in-review"
         && allowsAutoMergeProcessing(t, settings)
         && t.status === "failed"
-        && (t.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES
+        && (t.mergeRetries ?? 0) >= maxAutoMergeRetries
         && typeof t.error === "string"
         && t.error.length > 0
         && classifyTransientMergeError(t.error) !== null,
@@ -6147,7 +6155,7 @@ export class SelfHealingManager {
       if (candidates.length === 0) return 0;
 
       log.warn(
-        `Found ${candidates.length} in-review task(s) with transient merge failures stuck at mergeRetries=${MAX_AUTO_MERGE_RETRIES}; attempting auto-recovery`,
+        `Found ${candidates.length} in-review task(s) with transient merge failures stuck at mergeRetries=${maxAutoMergeRetries}; attempting auto-recovery`,
       );
 
       let recovered = 0;
@@ -6159,7 +6167,7 @@ export class SelfHealingManager {
         if (
           task.column !== "in-review"
           || task.status !== "failed"
-          || (task.mergeRetries ?? 0) < MAX_AUTO_MERGE_RETRIES
+          || (task.mergeRetries ?? 0) < maxAutoMergeRetries
         ) {
           continue;
         }
@@ -6732,6 +6740,7 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
       const now = Date.now();
       const inReview = await this.store.listTasks({ column: "in-review", slim: true });
       const triage = await this.store.listTasks({ column: "triage", slim: true });
@@ -6757,7 +6766,7 @@ export class SelfHealingManager {
           allowsAutoMergeProcessing(task, settings) &&
           !task.paused &&
           task.status === "failed" &&
-          (task.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES &&
+          (task.mergeRetries ?? 0) >= maxAutoMergeRetries &&
           task.mergeDetails?.mergeConfirmed !== true &&
           (hasBlockedDependents || Boolean(task.worktree)) &&
           cooldownElapsed >= DEADLOCK_RECOVERY_COOLDOWN_MS;
@@ -7089,6 +7098,7 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+      const maxAutoMergeRetries = resolveMaxAutoMergeRetries(settings);
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
@@ -7096,7 +7106,7 @@ export class SelfHealingManager {
         task.column === "in-review" &&
         allowsAutoMergeProcessing(task, settings) &&
         task.status === "failed" &&
-        (task.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES &&
+        (task.mergeRetries ?? 0) >= maxAutoMergeRetries &&
         task.mergeDetails?.mergeConfirmed !== true &&
         !executingIds.has(task.id),
       );

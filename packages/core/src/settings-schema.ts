@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_AUTO_MERGE_RETRIES } from "./in-review-stall.js";
 import type { CliAgentSettings, GlobalSettings, ProjectSettings, Settings } from "./types.js";
 
 export interface MergeRequestContractShadowSettingsSource {
@@ -314,6 +315,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   ],
   prerebaseDivergenceThreshold: 50,
   mergeConflictStrategy: "smart-prefer-main",
+  /**
+   * FNXC:AutoMergeRetries 2026-06-17-04:20:
+   * Project settings own the auto-merge conflict retry cap because existing engine/dashboard consumers already resolve project settings; the default imports core's stall-detection fallback to keep every surface on the historical value of 3.
+   */
+  maxAutoMergeRetries: DEFAULT_MAX_AUTO_MERGE_RETRIES,
   merger: { mode: "ai", maxReviewPasses: 3, allowDirtyLocalCheckoutSync: false },
   mergeDiffVolumeMinLines: undefined,
   mergeDiffVolumeThreshold: undefined,

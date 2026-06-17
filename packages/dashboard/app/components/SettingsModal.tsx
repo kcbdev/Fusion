@@ -214,6 +214,11 @@ type SettingsSection = {
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 768px)";
 const DEFAULT_MEMORY_EDITOR_PATH = ".fusion/memory/DREAMS.md";
 
+function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetries?: unknown } | null): number {
+  const configured = Number(settings?.maxAutoMergeRetries);
+  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 3;
+}
+
 const SETTINGS_SECTIONS: SettingsSection[] = [
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
@@ -630,6 +635,7 @@ export function SettingsModal({
     overlapIgnorePaths: [],
     autoMerge: true,
     mergeStrategy: "direct",
+    maxAutoMergeRetries: 3,
     mergeIntegrationWorktree: "reuse-task-worktree",
     mergeAdvanceAutoSync: "stash-and-ff",
     merger: { mode: "ai", maxReviewPasses: 3, allowDirtyLocalCheckoutSync: false },
@@ -891,6 +897,7 @@ export function SettingsModal({
           ...s,
           mergeIntegrationWorktree: normalizeMergeIntegrationWorktreeMode(s.mergeIntegrationWorktree),
           mergeAdvanceAutoSync: normalizeMergeAdvanceAutoSyncMode(s.mergeAdvanceAutoSync),
+          maxAutoMergeRetries: resolveMaxAutoMergeRetriesForSettingsForm(s),
         };
         setForm(normalizedSettings);
         setInitialValues(normalizedSettings); // Store initial values to detect explicit clears
@@ -2253,6 +2260,7 @@ export function SettingsModal({
           binaryPath: form.worktrunk?.binaryPath?.trim() || undefined,
           onFailure: form.worktrunk?.onFailure ?? "fail",
         },
+        maxAutoMergeRetries: resolveMaxAutoMergeRetriesForSettingsForm(form),
         taskPrefix: form.taskPrefix?.trim() || undefined,
         githubTrackingDefaultRepo: form.githubTrackingDefaultRepo?.trim() || undefined,
         githubAuthToken: form.githubAuthToken?.trim() || undefined,
