@@ -69,6 +69,10 @@ export function projectWorkflowWorkStatus(
   return workflowProjection(active, "merge-queued");
 }
 
+export function hasAuthoritativeWorkflowWork(workItems: WorkflowWorkItem[]): boolean {
+  return workItems.some((item) => item.state !== "cancelled");
+}
+
 function workflowProjection(item: WorkflowWorkItem, status: WorkflowWorkProjectionStatus): WorkflowWorkProjection {
   return {
     status,
