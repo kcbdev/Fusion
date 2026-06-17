@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   clampTaskListText as sourceBarrelClampTaskListText,
   MAX_TASK_LIST_TEXT_CHARS as SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS,
@@ -80,6 +80,18 @@ function executeRuntimeTaskList(
 describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
   const distIndex = resolve(__dirname, "../../dist/index.js");
   const distTaskListFormat = resolve(__dirname, "../../dist/task-list-format.js");
+  let builtDistCore: RuntimeCoreTaskListModule | undefined;
+
+  /*
+  FNXC:CoreTests 2026-06-17-13:40:
+  FN-6591 requires the FN-6515/FN-6535 dist-barrel guard to settle under broad @fusion/core suite load without timeout, retry, or worker appeasement.
+  Load the built dist barrel once for every dist assertion so heartbeat fn_task_list coverage still exercises the real runtime export path while avoiding duplicate dynamic-import pressure in the timed test bodies.
+  */
+  beforeAll(async () => {
+    if (!existsSync(distIndex)) return;
+    expect(existsSync(distTaskListFormat)).toBe(true);
+    builtDistCore = await import(pathToFileURL(distIndex).href) as RuntimeCoreTaskListModule;
+  });
 
   it("re-exports task-list formatting helpers from the source barrel", () => {
     expect(typeof sourceBarrelClampTaskListText).toBe("function");
@@ -87,20 +99,17 @@ describe("@fusion/core dist barrel export wiring (FN-6515/FN-6535)", () => {
     expect(typeof SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS).toBe("number");
   });
 
-  it.skipIf(!existsSync(distIndex))("re-exports task-list formatting helpers from the built dist barrel", async () => {
-    expect(existsSync(distTaskListFormat)).toBe(true);
+  it.skipIf(!existsSync(distIndex))("re-exports task-list formatting helpers from the built dist barrel", () => {
+    const mod = builtDistCore;
 
-    const mod = await import(pathToFileURL(distIndex).href);
-
-    expect(typeof mod.clampTaskListText).toBe("function");
-    expect(typeof mod.formatTaskListText).toBe("function");
-    expect(typeof mod.MAX_TASK_LIST_TEXT_CHARS).toBe("number");
+    expect(mod).toBeDefined();
+    expect(typeof mod?.clampTaskListText).toBe("function");
+    expect(typeof mod?.formatTaskListText).toBe("function");
+    expect(typeof mod?.MAX_TASK_LIST_TEXT_CHARS).toBe("number");
   });
 
-  it.skipIf(!existsSync(distIndex))("executes the fn_task_list surface through the built dist core module", async () => {
-    expect(existsSync(distTaskListFormat)).toBe(true);
-
-    const mod = await import(pathToFileURL(distIndex).href) as RuntimeCoreTaskListModule;
+  it.skipIf(!existsSync(distIndex))("executes the fn_task_list surface through the built dist core module", () => {
+    const mod = builtDistCore as RuntimeCoreTaskListModule;
     const todoAnchor: RuntimeTask = {
       id: "FN-001",
       title: `Runtime todo task 001 ${"x".repeat(260)}`,
