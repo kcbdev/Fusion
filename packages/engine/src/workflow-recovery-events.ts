@@ -18,7 +18,7 @@ export interface WorkflowRecoveryEventInput {
 }
 
 export interface WorkflowRecoveryEventStore {
-  listWorkflowWorkItemsForTask?: (taskId: string, opts?: { kinds?: ["recovery"] }) => WorkflowWorkItem[];
+  listWorkflowWorkItemsForTask: (taskId: string, opts?: { kinds?: ["recovery"] }) => WorkflowWorkItem[];
   upsertWorkflowWorkItem(input: {
     runId: string;
     taskId: string;
@@ -50,7 +50,7 @@ export function publishWorkflowRecoveryEvent(
 }
 
 function recoveryRunIdForPublish(store: WorkflowRecoveryEventStore, taskId: string, baseRunId: string): string {
-  const existing = store.listWorkflowWorkItemsForTask?.(taskId, { kinds: ["recovery"] })
+  const existing = store.listWorkflowWorkItemsForTask(taskId, { kinds: ["recovery"] })
     .find((item) => item.runId === baseRunId && item.nodeId === "recovery-router" && item.kind === "recovery");
   if (!existing) return baseRunId;
   if (existing.state === "succeeded" || existing.state === "failed" || existing.state === "cancelled" || existing.state === "exhausted") {
