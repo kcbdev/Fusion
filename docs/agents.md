@@ -23,6 +23,7 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 - `fn chat <agent-id>` opens an interactive REPL.
 - Each message is stored as a `user-to-agent` MessageStore message from `cli` with `metadata.wakeRecipient=true`.
 - Agent replies are polled from your inbox and printed as they arrive.
+- Dashboard-created agent chat sessions request the target agent's declared `metadata.skills` plus enabled plugin-contributed skills, so skills such as `ce-debug` are available in chat when the contributing plugin is enabled. Model-only QuickChat sessions request enabled plugin skills, and room responder sessions request the responder agent's skills.
 
 ### Flags
 

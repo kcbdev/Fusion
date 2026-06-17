@@ -600,6 +600,131 @@ describe("ChatManager.sendMessage", () => {
     expect(createOptions.tools).toBe("coding");
   });
 
+  it("requests bound agent and enabled plugin skills for regular chat", async () => {
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Skills ready" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: ["agent-debug", "ce-debug"] },
+    });
+    const pluginRunner = {
+      getPluginSkills: vi.fn(() => [
+        { pluginId: "fusion-plugin-compound-engineering", skill: { name: "ce-debug", enabled: true } },
+        { pluginId: "disabled-plugin", skill: { name: "disabled-debug", enabled: false } },
+      ]),
+    };
+
+    const chatManager = createChatManager(pluginRunner);
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(pluginRunner.getPluginSkills).toHaveBeenCalledTimes(1);
+    expect(createOptions.skillSelection).toMatchObject({
+      projectRootDir: "/tmp/test",
+      sessionPurpose: "executor",
+    });
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["agent-debug", "ce-debug"]);
+    expect(createOptions.skillSelection.requestedSkillNames).not.toContain("disabled-debug");
+  });
+
+  it("requests enabled plugin skills for model-only QuickChat sessions", async () => {
+    mockChatStore.getSession.mockReturnValue({
+      id: "chat-001",
+      agentId: null,
+      status: "active",
+    });
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Plugin skill ready" }] },
+        },
+      };
+    });
+    const pluginRunner = {
+      getPluginSkills: vi.fn(() => [
+        { pluginId: "fusion-plugin-compound-engineering", skill: { name: "ce-debug" } },
+      ]),
+    };
+
+    const chatManager = createChatManager(pluginRunner);
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["fusion", "ce-debug"]);
+    expect(createOptions.skillSelection.sessionPurpose).toBe("executor");
+  });
+
+  it("merges plugin skills when a bound chat agent has no metadata skills", async () => {
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Fallback skills ready" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: {},
+    });
+    const pluginRunner = {
+      getPluginSkills: vi.fn(() => [
+        { pluginId: "fusion-plugin-compound-engineering", skill: { name: "ce-debug", enabled: true } },
+      ]),
+    };
+
+    const chatManager = createChatManager(pluginRunner);
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["fusion", "ce-debug"]);
+  });
+
+  it("keeps agent skills when the chat plugin runner lacks skill discovery", async () => {
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Agent skill ready" }] },
+        },
+      };
+    });
+    mockAgentStore.getAgent.mockResolvedValue({
+      id: "agent-001",
+      name: "Avery",
+      role: "executor",
+      runtimeConfig: {},
+      metadata: { skills: ["agent-debug"] },
+    });
+
+    const chatManager = createChatManager({ getRuntimeById: vi.fn() });
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(createOptions.skillSelection.requestedSkillNames).toEqual(["agent-debug"]);
+  });
+
   it("accumulates thinking output separately from text", async () => {
     let onThinkingCb: ((delta: string) => void) | undefined;
     let onTextCb: ((delta: string) => void) | undefined;

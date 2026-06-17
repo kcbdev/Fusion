@@ -39,6 +39,7 @@ import {
   promptWithFallback as enginePromptWithFallback,
   extractRuntimeHint,
   extractRuntimeModel,
+  buildSessionSkillContextSync,
   createSendMessageTool,
   createReadMessagesTool,
   createWorkflowAuthoringTools,
@@ -716,6 +717,11 @@ export class ChatManager {
     private pluginRunner?: {
       getRuntimeById?(runtimeId: string): unknown;
       createRuntimeContext?(pluginId: string): Promise<unknown>;
+      /*
+      FNXC:ChatSkills 2026-06-16-19:10:
+      Agent chat receives the project plugin runner through this narrow structural type, so expose enabled plugin skill contributions here without requiring dashboard code to depend on the full engine runner class.
+      */
+      getPluginSkills?(): Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
     },
     private getSettings?: () => Promise<Pick<Settings,
       | "fallbackProvider"
@@ -740,6 +746,12 @@ export class ChatManager {
     // don't author workflows keep working.
     private taskStore?: TaskStore,
   ) {}
+
+  private getPluginRunnerForSkillSelection(): Parameters<typeof buildSessionSkillContextSync>[3] {
+    return this.pluginRunner?.getPluginSkills
+      ? (this.pluginRunner as unknown as Parameters<typeof buildSessionSkillContextSync>[3])
+      : undefined;
+  }
 
   /**
    * Runner for CLI-agent-backed chat sessions (CLI Agent Executor). When a chat
@@ -1308,10 +1320,22 @@ export class ChatManager {
     const allowFallback = !(input.modelProvider && input.modelId)
       && !(responderRuntimeModel.provider && responderRuntimeModel.modelId);
 
+    const roomSkillContext = buildSessionSkillContextSync(
+      input.responder,
+      "heartbeat",
+      this.rootDir,
+      this.getPluginRunnerForSkillSelection(),
+    );
+
     const resolvedSession = await createResolvedAgentSession({
       sessionPurpose: "heartbeat",
       pluginRunner: this.pluginRunner,
       runtimeHint: extractRuntimeHint(input.responder.runtimeConfig),
+      /*
+      FNXC:ChatSkills 2026-06-16-19:13:
+      Chat-room responder sessions must request the responder agent skills plus enabled plugin skills so chat-only agent replies can use skills such as ce-debug just like heartbeat/executor lanes.
+      */
+      ...(roomSkillContext.skillSelectionContext ? { skillSelection: roomSkillContext.skillSelectionContext } : {}),
       cwd: this.rootDir,
       systemPrompt,
       tools: "coding",
@@ -1748,10 +1772,21 @@ export class ChatManager {
       // `cleanupSessionResources(sessionId)` tear-down across overlapping
       // sessions opened from the same CLI session file.
       const agentRuntimeHint = agent ? extractRuntimeHint(agent.runtimeConfig) : undefined;
+      const chatSkillContext = buildSessionSkillContextSync(
+        agent ?? null,
+        "executor",
+        this.rootDir,
+        this.getPluginRunnerForSkillSelection(),
+      );
       agentResult = await createResolvedAgentSession({
         sessionPurpose: "executor",
         ...(agentRuntimeHint ? { runtimeHint: agentRuntimeHint } : {}),
         pluginRunner: this.pluginRunner,
+        /*
+        FNXC:ChatSkills 2026-06-16-19:13:
+        Regular chat and QuickChat must request bound-agent skills plus enabled plugin skills so dashboard chat loads capabilities such as ce-debug instead of creating skill-less sessions.
+        */
+        ...(chatSkillContext.skillSelectionContext ? { skillSelection: chatSkillContext.skillSelectionContext } : {}),
         ...sessionOptions,
       });
       this.activeGenerations.set(sessionId, { abortController, agentResult, generationId });

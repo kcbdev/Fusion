@@ -366,6 +366,12 @@ export {
   type SkillSelectionResult,
   type SkillDiagnostic,
 } from "./skill-resolver.js";
+/*
+FNXC:ChatSkills 2026-06-16-19:08:
+Dashboard chat consumes the synchronous session skill helper so chat sessions request the same agent and enabled plugin skills as executor sessions.
+Do not re-export the local SessionPurpose from session-skill-context here because runtime-resolution already owns the public SessionPurpose export.
+*/
+export { buildSessionSkillContextSync, type SessionSkillContextResult } from "./session-skill-context.js";
 export { AgentReflectionService, type AgentReflectionServiceOptions } from "./agent-reflection.js";
 export { AgentSelfImproveService, type AgentSelfImproveServiceOptions } from "./agent-self-improve.js";
 export {
