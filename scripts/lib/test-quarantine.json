@@ -10,6 +10,16 @@
       "file": "packages/engine/src/__tests__/cli-agent-executor.test.ts",
       "reason": "FN-6492 verification observed the hard-cancel CLI session test fail only in the full @fusion/engine package lane (activeCliTaskSessions false plus ENOTEMPTY temp cleanup), while an immediate file-specific rerun passed; quarantined as a concurrency/temp-cleanup flake per the deletion ratchet.",
       "quarantinedAt": "2026-06-16"
+    },
+    {
+      "file": "plugins/fusion-plugin-compound-engineering/src/__tests__/orchestrator-flow.test.ts",
+      "reason": "FN-6587 broad pnpm test investigation: this CE orchestrator file was reported as timing out at Vitest's 5000ms test limit only in the broad pnpm test workflow; isolated two-file repro and loaded compound-engineering-node runs passed, and the broad command hit its external 900s workflow timeout before reproducing the named CE timeout. Quarantined per deletion-ratchet policy without timeout bumps, retries, or assertion loosening.",
+      "quarantinedAt": "2026-06-17"
+    },
+    {
+      "file": "plugins/fusion-plugin-compound-engineering/src/__tests__/skill-wiring.test.ts",
+      "reason": "FN-6587 broad pnpm test investigation: this CE skill-wiring file was reported as timing out at Vitest's 5000ms test limit only in the broad pnpm test workflow; isolated two-file repro and loaded compound-engineering-node runs passed, and the broad command hit its external 900s workflow timeout before reproducing the named CE timeout. Quarantined per deletion-ratchet policy without timeout bumps, retries, or assertion loosening.",
+      "quarantinedAt": "2026-06-17"
     }
   ]
 }

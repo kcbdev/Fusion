@@ -9,6 +9,15 @@ const coreSetup = fileURLToPath(
 );
 const dashboardSetup = fileURLToPath(new URL("./src/dashboard/test-setup.ts", import.meta.url));
 
+/*
+FNXC:CompoundEngineeringTests 2026-06-17-12:35:
+FN-6587 quarantines the CE broad-pnpm-test timeout flakes without timeout appeasement. Keep these excludes mirrored in scripts/lib/test-quarantine.json and remove or delete the files when the 14-day ratchet resolves.
+*/
+const quarantinedCompoundEngineeringTests = [
+  "src/__tests__/orchestrator-flow.test.ts",
+  "src/__tests__/skill-wiring.test.ts",
+];
+
 export default defineConfig({
   resolve: {
     alias: [
@@ -56,7 +65,11 @@ export default defineConfig({
           name: "compound-engineering-node",
           environment: "node",
           include: ["src/**/__tests__/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
-          exclude: ["src/dashboard/**/__tests__/**/*.test.{ts,tsx}", "src/dashboard/**/*.test.{ts,tsx}"],
+          exclude: [
+            "src/dashboard/**/__tests__/**/*.test.{ts,tsx}",
+            "src/dashboard/**/*.test.{ts,tsx}",
+            ...quarantinedCompoundEngineeringTests,
+          ],
         },
       },
     ],
