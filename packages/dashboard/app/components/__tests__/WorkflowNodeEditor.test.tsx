@@ -520,6 +520,28 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.queryByTestId(/mobile-wf-connect-/)).not.toBeInTheDocument();
   });
 
+  it("rejects cyclic desktop compact-graph connections with a toast", async () => {
+    mockWorkflowEditorViewport("desktop");
+    const addToast = vi.fn();
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={addToast} />);
+
+    await screen.findByText("Save");
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    fireEvent.click(screen.getByTestId("wf-layout-toggle"));
+    await screen.findByTestId("wf-mobile-shell");
+
+    fireEvent.click(await screen.findByTestId("mobile-wf-connect-merge"));
+    fireEvent.change(screen.getByTestId("mobile-wf-connect-target-merge"), { target: { value: "lint" } });
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(
+      "That connection would create a cycle — only rework edges inside a for-each template may loop back",
+      "warning",
+    ));
+    expect(screen.queryByText("merge → lint")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wf-edge-inspector")).not.toBeInTheDocument();
+  });
+
   it("rejects cyclic simple-graph connections with a toast", async () => {
     mockWorkflowEditorViewport("mobile");
     const addToast = vi.fn();
