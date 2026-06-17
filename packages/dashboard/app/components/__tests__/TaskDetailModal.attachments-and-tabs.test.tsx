@@ -787,22 +787,34 @@ describe("TaskDetailModal", () => {
       expect(mobileSectionRule).toContain("min-height: 0");
     });
 
-    it("FN-6370 defines expanded chat chrome-hiding CSS for desktop and mobile", () => {
+    it("FN-6370/FN-6517 defines expanded chat chrome CSS for desktop and mobile", () => {
       const css = readDashboardStylesSource();
-      const expandedChromeRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-title-row");
+      const titleRule = getCssRuleBlock(css, ".detail-title-row");
+      const expandedTitleRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-title-row");
+      const expandedTabsRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-tabs");
+      const expandedActionsRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .modal-actions");
+      const expandedHeaderRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .modal-header");
       const expandedBodyRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-body--chat");
       const expandedSectionRule = getCssRuleBlock(css, ".task-detail-content--chat-expanded .detail-section--chat");
       const mobileCss = css.slice(css.indexOf("@media (max-width: 768px)"));
+      const mobileTitleRule = getCssRuleBlock(mobileCss, ".task-detail-content--chat-expanded .detail-title-row");
       const mobileTabsRule = getCssRuleBlock(mobileCss, ".task-detail-content--chat-expanded .detail-tabs");
+      const mobileActionsRule = getCssRuleBlock(mobileCss, ".task-detail-content--chat-expanded .modal-actions");
 
-      expect(expandedChromeRule).toContain("display: none");
+      expect(titleRule).toContain("display: flex");
+      expect(expandedTitleRule).not.toContain("display: none");
+      expect(expandedTabsRule).toContain("display: none");
+      expect(expandedActionsRule).toContain("display: none");
+      expect(expandedHeaderRule).toContain("justify-content: space-between");
       expect(expandedBodyRule).toContain("flex: 1");
       expect(expandedBodyRule).toContain("min-height: 0");
       expect(expandedSectionRule).toContain("margin-top: 0");
+      expect(mobileTitleRule).not.toContain("display: none");
       expect(mobileTabsRule).toContain("display: none");
+      expect(mobileActionsRule).toContain("display: none");
     });
 
-    it("FN-6370 expands and collapses chat without leaving chrome hidden", () => {
+    it("FN-6370/FN-6517 expands and collapses chat without leaving chrome hidden", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -817,19 +829,57 @@ describe("TaskDetailModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Chat" }));
       const content = container.querySelector(".task-detail-content");
+      const titleRow = container.querySelector(".detail-title-row");
       expect(content).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(titleRow).toHaveTextContent("FN-099");
       expect(container.querySelector(".detail-tabs")).toBeTruthy();
       expect(container.querySelector(".modal-actions")).toBeTruthy();
 
       fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
       expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(titleRow).toHaveTextContent("FN-099");
+      expect(titleRow).toHaveTextContent("In Progress");
+      expect(container.querySelector(".detail-tabs")).toBeTruthy();
+      expect(container.querySelector(".modal-actions")).toBeTruthy();
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse chat");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
 
       fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
       expect(content).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(titleRow).toHaveTextContent("FN-099");
+      expect(container.querySelector(".detail-tabs")).toBeTruthy();
+      expect(container.querySelector(".modal-actions")).toBeTruthy();
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand chat to full modal");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("FN-6517 keeps the title row visible when embedded chat expands", () => {
+      const { container } = render(
+        <TaskDetailContent
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          embedded
+          initialTab="chat"
+        />,
+      );
+
+      const content = container.querySelector(".task-detail-content");
+      const titleRow = container.querySelector(".detail-title-row");
+      expect(content).toHaveClass("task-detail-content--embedded");
+      expect(content).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(titleRow).toHaveTextContent("FN-099");
+
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(content).toHaveClass("task-detail-content--embedded");
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(titleRow).toHaveTextContent("FN-099");
+      expect(titleRow).toHaveTextContent("In Progress");
+      expect(container.querySelector(".detail-tabs")).toBeTruthy();
+      expect(container.querySelector(".modal-actions")).toBeTruthy();
     });
 
     it("FN-6370 resets expanded chat when the active tab changes", () => {
