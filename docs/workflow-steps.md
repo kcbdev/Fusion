@@ -6,7 +6,7 @@ Workflow steps are reusable quality gates that run around task completion.
 
 ## Workflow IR (v1)
 
-Fusion also defines a separate **Workflow Intermediate Representation (IR)** contract in `@fusion/core` for editor↔interpreter graph exchange. This IR is distinct from the post-implementation quality gates documented on this page (`WorkflowStep` templates and execution policies).
+Fusion also defines a separate **Workflow Intermediate Representation (IR)** contract in `@fusion/core` for editor↔interpreter graph exchange. This IR is distinct from the post-implementation quality gates documented on this page (`WorkflowStep` templates and execution policies). For the user-facing visual authoring surface, see the [Workflow Editor guide](./workflow-editor.md).
 
 Workflow IR v1 is a JSON-safe graph document:
 

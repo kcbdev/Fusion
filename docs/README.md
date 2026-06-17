@@ -36,6 +36,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Research](./research.md) | Research runs, provider setup, dashboard/CLI usage, findings, exports, and task integration |
 | [Research View UX Spec](./research-view-ux-spec.md) | Canonical layout and capability-state messaging spec for the Research dashboard view (FN-4138, informs FN-4134/FN-4135) |
 | [Workflow Steps](./workflow-steps.md) | Reusable quality gates, templates, pre/post-merge phases, and workflow execution results |
+| [Workflow Editor](./workflow-editor.md) | Visual workflow editor guide for opening, viewing, authoring, validating, importing, exporting, and tuning workflows |
 | [Custom Non-Coding Workflows MVP Spec](./custom-workflows-mvp-spec.md) | Decision-ready MVP spec for user-authored non-coding workflow definitions, lifecycle mapping, metrics, and risk checklist |
 | [Task Evaluations](./evals.md) | Eval scoring contract, evidence persistence, score categories, and evaluation pipeline |
 | [Multi-Project](./multi-project.md) | Central registry architecture, project management, isolation modes, and migration paths |
