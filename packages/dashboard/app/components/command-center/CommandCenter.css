@@ -238,6 +238,109 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
   }
 }
 
+/*
+FNXC:CommandCenterStyling 2026-06-18-00:00:
+Overview charts must use dashboard tokens only and keep motion decorative; animations use --duration-* values and are disabled for reduced-motion users so the graph-rich snapshot does not violate accessibility or the mobile scroll contract.
+*/
+.cc-overview-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.cc-overview-chart-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border-color: color-mix(in srgb, var(--color-accent) 22%, var(--border-subtle));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent),
+    var(--surface-1);
+  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--color-accent) 12%, transparent);
+  overflow: hidden;
+  animation: cc-overview-chart-rise var(--duration-normal) ease-out both;
+}
+
+.cc-overview-chart-card--trend {
+  grid-column: 1 / -1;
+}
+
+.cc-overview-chart-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: cc-overview-chart-sheen calc(var(--duration-slow) * 7) ease-in-out infinite;
+}
+
+.cc-overview-chart-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cc-overview-chart-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.cc-overview-chart-card .cc-bar-chart,
+.cc-overview-chart-card .cc-sparkline {
+  position: relative;
+  z-index: 1;
+}
+
+.cc-overview-chart-card .cc-sparkline {
+  height: var(--space-16);
+}
+
+.cc-overview-chart-card .cc-bar-fill,
+.cc-overview-chart-card .cc-sparkline-bar {
+  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+@keyframes cc-overview-chart-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cc-overview-chart-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  45%,
+  55% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-overview-chart-card,
+  .cc-overview-chart-card::before {
+    animation: none;
+  }
+}
+
 @media (max-width: 768px) {
   .cc-live-strip {
     grid-template-columns: 1fr;
@@ -245,6 +348,14 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
 
   .cc-live-strip-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .cc-overview-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .cc-overview-chart-card--trend {
+    grid-column: auto;
   }
 }
 

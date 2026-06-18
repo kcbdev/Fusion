@@ -663,7 +663,7 @@ Navigation:
 
 Features:
 - Global date-range picker in the header scopes the analytics tabs; **Mission Control** remains live rather than historical.
-- **Overview** summarizes token usage/cost, autonomy, active nodes, tasks done, model breadth, and open signals, and includes the SDLC throughput funnel for the selected range. The SDLC completion rate is shown as a radial gauge and is calculated as cohort conversion from in-range triage entrants, so the rate is capped at 100% even when older tasks finish during the range.
+- **Overview** summarizes token usage/cost, autonomy, active nodes, tasks done, model breadth, and open signals, and includes the SDLC throughput funnel for the selected range. It also shows a graph-rich software-factory snapshot with tokens-by-model, tool-category, and daily activity trend charts that reuse the already-loaded tokens, tools, and activity analytics; no extra endpoint is called. The chart reveal/glow accents are decorative and disabled when reduced-motion preferences are active. The SDLC completion rate is shown as a radial gauge and is calculated as cohort conversion from in-range triage entrants, so the rate is capped at 100% even when older tasks finish during the range.
 - **Tokens** breaks down token totals, estimated cost, tasks, and per-model usage.
 - **Tools** shows autonomy ratio, tool-call volume, intervention counts, sessions, and tool categories.
 - **Activity** tracks sessions, messages, active nodes, active agents, stickiness, and daily activity sparklines.

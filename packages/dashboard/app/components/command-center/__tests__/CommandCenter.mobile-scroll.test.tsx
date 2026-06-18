@@ -54,11 +54,65 @@ function emptyActivityFixture() {
   };
 }
 
-function mockEmptyOverviewApi() {
+function populatedTokenFixture() {
+  return {
+    ...emptyTokenFixture(),
+    totals: { inputTokens: 600, outputTokens: 300, cachedTokens: 100, cacheWriteTokens: 0, totalTokens: 1000, nTasks: 3 },
+    cost: { usd: 9, unavailable: false, stale: false },
+    groups: [
+      {
+        key: "gpt-4o",
+        inputTokens: 600,
+        outputTokens: 300,
+        cachedTokens: 100,
+        cacheWriteTokens: 0,
+        totalTokens: 1000,
+        nTasks: 3,
+        cost: { usd: 9, unavailable: false, stale: false },
+      },
+    ],
+  };
+}
+
+function populatedToolsFixture() {
+  return {
+    ...emptyToolsFixture(),
+    toolCalls: 12,
+    byCategory: [{ category: "read", count: 12 }],
+    sessions: 2,
+    autonomyRatio: 6,
+    fullyAutonomous: false,
+  };
+}
+
+function populatedActivityFixture() {
+  return {
+    ...emptyActivityFixture(),
+    sessions: 2,
+    messages: 8,
+    activeNodes: 2,
+    activeAgents: 1,
+    daily: [{ day: "2026-06-08", activeNodes: 2, activeAgents: 1, messages: 8 }],
+    funnel: {
+      ...emptyActivityFixture().funnel,
+      stages: [
+        { stage: "triage", entered: 2, current: 0 },
+        { stage: "in-progress", entered: 1, current: 1 },
+        { stage: "done", entered: 2, current: 2 },
+      ],
+      enteredInRange: 2,
+      doneInRange: 2,
+      completionRate: 1,
+      throughputPerDay: 1,
+    },
+  };
+}
+
+function mockOverviewApi({ populated = false }: { populated?: boolean } = {}) {
   apiMock.mockImplementation((path: string) => {
-    if (path.startsWith("/command-center/tokens")) return Promise.resolve(emptyTokenFixture());
-    if (path.startsWith("/command-center/tools")) return Promise.resolve(emptyToolsFixture());
-    if (path.startsWith("/command-center/activity")) return Promise.resolve(emptyActivityFixture());
+    if (path.startsWith("/command-center/tokens")) return Promise.resolve(populated ? populatedTokenFixture() : emptyTokenFixture());
+    if (path.startsWith("/command-center/tools")) return Promise.resolve(populated ? populatedToolsFixture() : emptyToolsFixture());
+    if (path.startsWith("/command-center/activity")) return Promise.resolve(populated ? populatedActivityFixture() : emptyActivityFixture());
     if (path.startsWith("/command-center/signals")) return Promise.resolve({ totalSignals: 0, open: 0, resolved: 0, mttr: { value: null, unavailable: true }, bySource: [], bySeverity: [] });
     return Promise.reject(new Error(`Unhandled api path: ${path}`));
   });
@@ -111,7 +165,7 @@ function assertScrollOwnerContract(panel: HTMLElement) {
 describe("CommandCenter mobile scroll regression (FN-6595)", () => {
   beforeEach(() => {
     apiMock.mockReset();
-    mockEmptyOverviewApi();
+    mockOverviewApi();
     injectCommandCenterCss();
     mockMobileMatchMedia(true);
   });
@@ -127,6 +181,15 @@ describe("CommandCenter mobile scroll regression (FN-6595)", () => {
     const tokensPanel = screen.getByTestId("command-center-panel-tokens");
     expect(tokensPanel).toBe(screen.getByRole("tabpanel"));
     assertScrollOwnerContract(tokensPanel);
+  });
+
+  it("preserves the mobile scroll owner when the populated Overview charts render", async () => {
+    mockOverviewApi({ populated: true });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-overview-charts");
+    expect(screen.getByTestId("command-center-overview-chart-tokens")).toBeTruthy();
+    assertScrollOwnerContract(screen.getByTestId("command-center-panel-overview"));
   });
 
   it("keeps the same flex-fill scroll-owner contract outside the mobile breakpoint", () => {

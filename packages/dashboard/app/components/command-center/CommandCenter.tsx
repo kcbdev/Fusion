@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
 import type { ActivityAnalytics, TokenAnalytics, ToolAnalytics } from "@fusion/core";
@@ -12,6 +12,7 @@ import { EcosystemArea } from "./areas/EcosystemArea";
 import { SignalsArea } from "./areas/SignalsArea";
 import { MissionControlPanel } from "./MissionControlPanel";
 import { SdlcFunnel } from "./SdlcFunnel";
+import { Bar, type BarDatum } from "./charts/Bar";
 import { Sparkline } from "./charts/Sparkline";
 import { useAnalyticsArea } from "./areas/useAnalyticsArea";
 import { formatCost, formatCount, isInvalidRange, rangeQuery } from "./areas/areaShared";
@@ -105,10 +106,38 @@ function OverviewTab({ range }: { range: DateRange }) {
   const tasksDone = activity.data?.funnel?.doneInRange ?? 0;
   const inProgressTasks = activity.data?.funnel?.stages.find((stage) => stage.stage === "in-progress")?.entered ?? 0;
   const uniqueModels = tokens.data?.groups?.length ?? 0;
+  const tokensByModelData = useMemo<BarDatum[]>(
+    () =>
+      [...(tokens.data?.groups ?? [])]
+        .sort((a, b) => b.totalTokens - a.totalTokens || (a.key ?? "").localeCompare(b.key ?? ""))
+        .slice(0, 8)
+        .map((g) => ({
+          label: g.key ?? t("commandCenter.tokens.unknownModel", "(unknown)"),
+          value: g.totalTokens,
+          valueLabel: formatCount(g.totalTokens),
+        })),
+    [tokens.data?.groups, t],
+  );
+  const toolCategoryData = useMemo<BarDatum[]>(
+    () =>
+      [...(tools.data?.byCategory ?? [])]
+        .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category))
+        .map((c) => ({
+          label: c.category,
+          value: c.count,
+          valueLabel: formatCount(c.count),
+        })),
+    [tools.data?.byCategory],
+  );
+  const dailyActivityValues = useMemo(
+    () => (activity.data?.daily ?? []).map((day) => day.messages + day.activeAgents),
+    [activity.data?.daily],
+  );
   const activityTrendValues =
-    activity.data && activity.data.daily.length > 0
-      ? activity.data.daily.map((day) => day.messages + day.activeAgents)
+    dailyActivityValues.length > 0
+      ? dailyActivityValues
       : [activity.data?.sessions ?? 0, activity.data?.messages ?? 0, activeAgents, activeNodes, tasksDone];
+  const hasOverviewChartData = tokensByModelData.length > 0 || toolCategoryData.length > 0 || dailyActivityValues.length > 0;
   const hasActivityData =
     (activity.data?.sessions ?? 0) > 0 ||
     (activity.data?.messages ?? 0) > 0 ||
@@ -237,6 +266,44 @@ function OverviewTab({ range }: { range: DateRange }) {
           />
         </div>
       </div>
+      {hasOverviewChartData ? (
+        /*
+        FNXC:CommandCenter 2026-06-18-00:00:
+        Overview must present an attractive, graph-rich software-factory snapshot reusing existing tokens/tools/activity analytics with no new endpoint, additive to the live strip and funnel.
+        */
+        <section className="cc-overview-charts" data-testid="command-center-overview-charts">
+          {tokensByModelData.length > 0 ? (
+            <div className="card cc-overview-chart-card" data-testid="command-center-overview-chart-tokens">
+              <div className="cc-overview-chart-header">
+                <h3 className="cc-area-section-title">{t("commandCenter.overview.tokensByModel", "Tokens by model")}</h3>
+                <p>{t("commandCenter.overview.tokensByModelHint", "Top model token consumers in this range")}</p>
+              </div>
+              <Bar data={tokensByModelData} ariaLabel={t("commandCenter.overview.tokensByModel", "Tokens by model")} />
+            </div>
+          ) : null}
+          {toolCategoryData.length > 0 ? (
+            <div className="card cc-overview-chart-card" data-testid="command-center-overview-chart-tools">
+              <div className="cc-overview-chart-header">
+                <h3 className="cc-area-section-title">{t("commandCenter.overview.toolCategories", "Tool categories")}</h3>
+                <p>{t("commandCenter.overview.toolCategoriesHint", "Autonomous work grouped by tool family")}</p>
+              </div>
+              <Bar data={toolCategoryData} ariaLabel={t("commandCenter.overview.toolCategories", "Tool categories")} />
+            </div>
+          ) : null}
+          {dailyActivityValues.length > 0 ? (
+            <div className="card cc-overview-chart-card cc-overview-chart-card--trend" data-testid="command-center-overview-chart-activity">
+              <div className="cc-overview-chart-header">
+                <h3 className="cc-area-section-title">{t("commandCenter.overview.dailyActivity", "Daily activity trend")}</h3>
+                <p>{t("commandCenter.overview.dailyActivityHint", "Messages plus active agents per day")}</p>
+              </div>
+              <Sparkline
+                values={dailyActivityValues}
+                ariaLabel={t("commandCenter.overview.dailyActivityAria", "Daily activity trend")}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {throughputSection}
     </div>
   );

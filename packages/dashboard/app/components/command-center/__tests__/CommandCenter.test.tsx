@@ -163,7 +163,9 @@ describe("CommandCenter shell", () => {
     render(<CommandCenter />);
     expect(screen.queryByTestId("command-center-empty")).toBeNull();
     expect(screen.getByTestId("command-center-overview-loading")).toBeTruthy();
+    expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
     await screen.findByTestId("command-center-empty");
+    expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
   });
 
   it("renders live Overview headline values when analytics data exists", async () => {
@@ -188,6 +190,12 @@ describe("CommandCenter shell", () => {
     expect(screen.getByTestId("command-center-throughput-trend")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Recent activity throughput trend" })).toBeTruthy();
     expect(screen.getByTestId("command-center-throughput")).toBeTruthy();
+
+    const charts = screen.getByTestId("command-center-overview-charts");
+    expect(within(charts).getByText("Tokens by model")).toBeTruthy();
+    expect(within(screen.getByTestId("command-center-overview-chart-tokens")).getByText("gpt-4o")).toBeTruthy();
+    expect(within(screen.getByTestId("command-center-overview-chart-tools")).getByText("read")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Daily activity trend" })).toBeTruthy();
   });
 
   it("renders cards for partially populated analytics instead of the empty state", async () => {
@@ -198,6 +206,55 @@ describe("CommandCenter shell", () => {
     expect(screen.queryByTestId("command-center-empty")).toBeNull();
     expect(statValue("command-center-stat-tokens")).toBe("0");
     expect(statValue("command-center-stat-nodes")).toBe("1");
+    expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-loading")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-error")).toBeNull();
+  });
+
+  it("renders no empty chart shell when some populated sources have no chart rows", async () => {
+    mockOverviewApi({ tokens: tokenFixture(), tools: toolsFixture(0), activity: activityFixture(), signals: signalsFixture(0) });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-overview-charts");
+    expect(screen.getByTestId("command-center-overview-chart-tokens")).toBeTruthy();
+    expect(screen.queryByTestId("command-center-overview-chart-tools")).toBeNull();
+    expect(screen.getByTestId("command-center-overview-chart-activity")).toBeTruthy();
+  });
+
+  it("handles empty, undefined, single-item, and zero chart data without NaN output", async () => {
+    const tokensWithSingleZeroGroup = {
+      ...tokenFixture(0),
+      groups: [
+        {
+          key: "idle-model",
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 0,
+          nTasks: 0,
+          cost: { usd: null, unavailable: true, stale: false },
+        },
+      ],
+    };
+    const toolsWithoutCategories = { ...toolsFixture(1), byCategory: undefined };
+    const activityWithSingleZeroDay = {
+      ...activityFixture({ sessions: 0, messages: 0, activeNodes: 1, activeAgents: 0, doneInRange: 0 }),
+      daily: [{ day: "2026-06-08", activeNodes: 0, activeAgents: 0, messages: 0 }],
+    };
+    mockOverviewApi({
+      tokens: tokensWithSingleZeroGroup,
+      tools: toolsWithoutCategories,
+      activity: activityWithSingleZeroDay,
+      signals: signalsFixture(0),
+    });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-overview-charts");
+    expect(screen.getByTestId("command-center-overview-chart-tokens").textContent).toContain("idle-model");
+    expect(screen.queryByTestId("command-center-overview-chart-tools")).toBeNull();
+    expect(screen.getByTestId("command-center-overview-chart-activity")).toBeTruthy();
+    expect(screen.getByTestId("command-center-panel-overview").textContent).not.toContain("NaN");
   });
 
   it("keeps Overview populated when the signals endpoint is missing", async () => {
@@ -224,6 +281,7 @@ describe("CommandCenter shell", () => {
     expect(screen.getByTestId("command-center-overview-error").textContent).toContain("tokens failed");
     expect(screen.queryByTestId("command-center-overview-loading")).toBeNull();
     expect(screen.queryByTestId("command-center-empty")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
   });
 
   it("re-fetches and re-derives the Overview empty state when the range changes", async () => {
