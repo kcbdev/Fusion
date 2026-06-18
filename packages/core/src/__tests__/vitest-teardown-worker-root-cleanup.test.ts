@@ -78,6 +78,33 @@ describe("vitest global teardown worker-root cleanup", () => {
     expect(existsSync(workerRoot)).toBe(false);
   });
 
+  it("retries transient ENOTEMPTY worker-root cleanup until the root can be removed", async () => {
+    const teardown = setup();
+    const workerRoot = remember(process.env.FUSION_TEST_WORKER_ROOT!);
+    makeWorkerChild(workerRoot, "not-empty");
+    let attempts = 0;
+    const sleeps: number[] = [];
+
+    __setWorkerRootRmSyncForTests((path, options) => {
+      attempts++;
+      if (attempts <= 3) {
+        const error = new Error("directory not empty") as NodeJS.ErrnoException;
+        error.code = "ENOTEMPTY";
+        throw error;
+      }
+      rmSync(path, options);
+    });
+    __setWorkerRootSleepMsSyncForTests((ms) => {
+      sleeps.push(ms);
+    });
+
+    await teardown();
+
+    expect(attempts).toBe(4);
+    expect(sleeps).toEqual([75, 75, 75]);
+    expect(existsSync(workerRoot)).toBe(false);
+  });
+
   it("tolerates ENOENT when the worker root is already gone", async () => {
     const teardown = setup();
     const workerRoot = remember(process.env.FUSION_TEST_WORKER_ROOT!);

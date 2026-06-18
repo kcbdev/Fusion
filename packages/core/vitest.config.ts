@@ -23,9 +23,11 @@ const quarantinedCoreTests = [
 
   FNXC:CoreTests 2026-06-17-17:55:
   FN-6592 rescued mission-integration by closing every reopened TaskStore handle and strengthening restart-fidelity assertions across mission hierarchy read paths. Keep the quarantine absent in both this exclude list and scripts/lib/test-quarantine.json unless a future observed flake is mirrored in both files.
+
+  FNXC:CoreTests 2026-06-17-19:03:
+  FN-6600 re-ran the core quarantine candidates under the broad-run worker budget and rescued the current core ledger entries without timeout, retry, assertion, or worker-budget appeasement.
+  Keep core quarantines mirrored here only when a loaded run still fails after shared teardown cleanup has been ruled out.
   */
-  "src/__tests__/task-list-format.test.ts",
-  "src/__tests__/test-project.test.ts",
 ];
 
 export default defineConfig({

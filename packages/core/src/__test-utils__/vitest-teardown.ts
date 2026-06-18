@@ -57,7 +57,12 @@ export function removeLegacyTopLevelHomeRoots(tempRoot = tmpdir()): void {
   }
 }
 
-export function removeWorkerRootWithRetry(workerRoot: string, retries = 3, delayMs = 75): void {
+export function removeWorkerRootWithRetry(workerRoot: string, retries = 8, delayMs = 75): void {
+  /*
+  FNXC:TestIsolation 2026-06-17-19:02:
+  Broad core/package runs can finish workers while macOS still drains redirected temp files or SQLite WAL handles under `fusion-test-workers-*`.
+  Keep teardown bounded but long enough to absorb transient ENOTEMPTY/EBUSY cleanup races rather than leaking a per-invocation worker root.
+  */
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
