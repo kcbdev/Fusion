@@ -5,7 +5,7 @@
 ## Latest baseline
 
 - Cycle: **2026-W25**
-- Captured at: **2026-06-18T03:04:28.794Z**
+- Captured at: **2026-06-18T16:12:01.248Z**
 - Timing snapshot: `scripts/test-timings.json` captured at **2026-06-03T23:45:49.672Z**
 - Quarantine ledger: `scripts/lib/test-quarantine.json`
 
@@ -13,10 +13,10 @@
 
 | Metric | Current | Delta vs previous |
 |---|---:|---:|
-| Merge gate wall-time (`pnpm test:gate`) | 6.2s | -2.3s |
-| Boot smoke wall-time (`pnpm smoke:boot`) | 18.2s | n/a |
-| Changed-only test wall-time (`pnpm test`) | 7.7s | -30.7s |
-| Quarantine / flake count | 2 | 0 |
+| Merge gate wall-time (`pnpm test:gate`) | 5.4s | -779ms |
+| Boot smoke wall-time (`pnpm smoke:boot`) | 18.1s | -123ms |
+| Changed-only test wall-time (`pnpm test`) | 7.2s | -500ms |
+| Quarantine / flake count | 0 | -2 |
 | Deletion-due quarantines | 0 | n/a |
 
 ## Measurement failures
@@ -52,7 +52,7 @@
 
 | Age bucket | Count |
 |---|---:|
-| 0-6 days | 2 |
+| 0-6 days | 0 |
 | 7-13 days | 0 |
 | deletion due (>=14 days) | 0 |
 | unknown/future | 0 |
@@ -67,16 +67,16 @@
 
 | Row | Captured at | Gate | Boot smoke | `pnpm test` | Quarantine count |
 |---|---|---:|---:|---:|---:|
-| Previous | 2026-06-18T02:53:34.158Z | 8.5s | unavailable | 38.4s | 2 |
-| Latest | 2026-06-18T03:04:28.794Z | 6.2s | 18.2s | 7.7s | 2 |
-| Delta | — | -2.3s | n/a | -30.7s | 0 |
+| Previous | 2026-06-18T03:04:28.794Z | 6.2s | 18.2s | 7.7s | 2 |
+| Latest | 2026-06-18T16:12:01.248Z | 5.4s | 18.1s | 7.2s | 0 |
+| Delta | — | -779ms | -123ms | -500ms | -2 |
 
 _Future weekly rows append to `scripts/test-velocity-history.json`; compare the latest row against the previous row before posting to #leads._
 
 ## Post to #leads
 
 ```text
-FN-6612 weekly test velocity: gate 6.2s (-2.3s), boot smoke 18.2s (n/a), pnpm test 7.7s (-30.7s), quarantine ledger 2 (0). Slowest file: packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts at 13.9s. Deletion-due quarantines: 0.
+FN-6612 weekly test velocity: gate 5.4s (-779ms), boot smoke 18.1s (-123ms), pnpm test 7.2s (-500ms), quarantine ledger 0 (-2). Slowest file: packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts at 13.9s. Deletion-due quarantines: 0.
 ```
 
 ## How to refresh

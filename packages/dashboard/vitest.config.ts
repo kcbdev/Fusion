@@ -257,11 +257,16 @@ Keep the ledger entry and exclude removed together; git history remains the arch
 FNXC:DashboardTestQuarantine 2026-06-18-06:12:
 FN-6633 workspace verification observed unrelated QuickEntryBox focus and chat-routes SSE lifecycle flakes after the targeted chat prompt regression suite passed.
 Quarantine the files under the deletion ratchet so this prompt-only chat guidance change does not appease flaky timing/focus behavior.
+
+FNXC:DashboardTestQuarantine 2026-06-18-09:02:
+FN-6642 rescued QuickEntryBox after the single-file and full app-backfill lanes passed with the exclude removed.
+Keep QuickEntryBox out of this list so focus-restoration coverage remains active instead of deleting useful user-facing behavior coverage.
+
+FNXC:DashboardTestQuarantine 2026-06-18-09:07:
+FN-6642 rescued chat-routes by fixing the shared engine mock to return an iterable chat-task-document tool list during broad API lanes.
+Keep chat-routes out of this list so SSE lifecycle coverage remains active and the ledger/config stay in lockstep.
 */
-const quarantinedDashboardTests: string[] = [
-  "app/components/__tests__/QuickEntryBox.test.tsx",
-  "src/__tests__/chat-routes.test.ts",
-];
+const quarantinedDashboardTests: string[] = [];
 
 const qualityApiTests = [
   // Critical HTTP/server behavior: auth, task/project/settings mutation,

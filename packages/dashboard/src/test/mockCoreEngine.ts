@@ -59,6 +59,12 @@ export function createEngineMock(overrides: AnyModule = {}): AnyModule {
     // Returns an iterable tool list; dashboard code spreads its result
     // (`...createWorkflowAuthoringTools(...)`), so it must not be undefined.
     createWorkflowAuthoringTools: vi.fn(() => []),
+    /*
+    FNXC:DashboardRouteTests 2026-06-18-09:07:
+    Planning and chat route files can share worker-level @fusion/engine mocks during broad dashboard API quality runs.
+    Keep chat task document tools iterable by default so rescuing chat-routes from quarantine does not poison planning route imports with a fallback vi.fn() result.
+    */
+    createChatTaskDocumentTools: vi.fn(() => []),
     ...overrides,
   });
 }
