@@ -1393,16 +1393,16 @@ describe("TaskExecutor bounded recovery retries", () => {
 
   describe("completion-finalize hard-cancel overwrite classification (FN-6644)", () => {
     /*
-    Surface Enumeration coverage:
-    - Classifier branch: the overwrite-sequence tests drive `handleGraphFailure` after durable completion-finalized state survives a later `hard-cancel` re-mark and assert the benign already-advanced branch.
-    - Provenance-overwrite ordering: each benign case calls `markCompletionFinalized(...)` first, then `awaitAbortInFlightTaskWork(...)`, proving `completion-finalize → hard-cancel` cannot re-park a finalized row failed.
-    - Abort provenance sources: hard-cancel overwrite is reproduced here; user pause/global pause/merge-seam companion tests prove their existing provenance categories still win.
-    - Both completion-finalize paths: production uses the same `markCompletionFinalized(...)` helper at the graceful-session-exit and finally-block `handoffTaskToReview(task, "paused-after-completion")` sites.
-    - Failed-node identity: benign overwrite coverage uses both `execute` and a non-execute node so the fix is keyed on durable completion state rather than node id.
-    - Column/progress states: finalized in-review and already-terminal done rows are benign; active in-progress hard-cancel remains pause-preserved; pending-step in-review hard-cancel remains operator-action failure.
-    - Data states: userPaused true, global-pause, hard-cancel overwrite after completion, genuine hard-cancel before completion, and merge-seam retry routing are asserted without weakening the already-status/error guard above.
-    - Shared hooks / cleanup sites: `clearPausedAborted(...)` and `execute(...)` clear the durable marker; the final test asserts a new dispatch drops stale suppression state.
-    - No leftover shells: durable completion state is in-memory only and is cleared on re-dispatch/backward cleanup, preventing a later genuine run from inheriting suppression.
+    Surface Enumeration coverage (FN-6647):
+    - [x] Lifecycle paths that transition to `in-review`: both `handoffTaskToReview(task, "paused-after-completion")` call sites use `markCompletionFinalized(...)`; this block drives their shared classifier seam rather than duplicating executor finally/graceful-session-exit control flow.
+    - [x] No-commit / verification-only completion: the FN-6647 tests cover both a normal completed task (FN-6638 shape) and a zero-modified-files/no-commits completed task (FN-6641 shape).
+    - [x] Pause / resume / self-healing interactions: hard-cancel without a surviving `markCompletionFinalized(...)`, `clearPausedAborted(...)` then hard-cancel, and fresh `execute(...)` re-dispatch clearing stale suppression are all asserted.
+    - [x] Abort provenance sources: `global-pause`, `merge-seam`, `hard-cancel`, `completion-finalize`, and undefined provenance keep their existing routes; companion tests prove genuine pause/global-pause/merge-seam controls still win.
+    - [x] Failed-node identity: benign coverage uses `execute` and `verifySentinel`; merge coverage uses `requestMerge`, so the fix keys on durable completion state rather than node id and does not divert merge-seam retry routing.
+    - [x] Column / progress data states: finalized `in-review`, terminal `done`/`archived`, active `in-progress` hard-cancel, and pending-step `in-review` hard-cancel are covered; the pending-step control remains an operator-action failure.
+    - [x] Live-pause data states: `userPaused === true` and `global-pause` still park/preserve as operator-actionable even when stale finalized state exists.
+    - [x] Dashboard / board state rendering: benign finalized rows assert `store.updateTask` is not called with `status: "failed"`/operator-action `error`, leaving a normal `in-review` row with no failed badge.
+    - [x] Leftover shells: stale in-memory suppression is cleared on fresh dispatch; durable persisted-state suppression requires completed steps plus the finalize log so incomplete rows cannot inherit it.
     */
     const makeCompletedTask = (overrides: Partial<Task> = {}) => ({
       id: "FN-001",
@@ -1416,11 +1416,139 @@ describe("TaskExecutor bounded recovery retries", () => {
         { name: "Verify", status: "done" },
       ],
       currentStep: 1,
+      modifiedFiles: ["packages/engine/src/executor.ts"],
       log: [{ timestamp: new Date().toISOString(), action: "Execution paused after completion — finalizing to in-review" }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...overrides,
     }) as Task;
+
+    const expectBenignAlreadyAdvanced = (store: ReturnType<typeof createMockStore>, column = "in-review") => {
+      const messages = store.logEntry.mock.calls.map((call) => call[1]).join("\n");
+      expect(messages).toContain(`Workflow graph run ended after task already advanced to '${column}' — no further action needed`);
+      expect(messages).not.toContain("Workflow graph failure surfaced after paused engine abort during pause/resume");
+      expect(messages).not.toContain("operator action required");
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ status: "failed" }),
+        expect.anything(),
+      );
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ error: expect.stringContaining("operator action required") }),
+        expect.anything(),
+      );
+      expect(store.moveTask).not.toHaveBeenCalled();
+    };
+
+    it("treats a normal completed in-review row as benign after the volatile finalize marker is lost", async () => {
+      const store = createMockStore();
+      const task = makeCompletedTask();
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-review",
+        paused: false,
+        userPaused: false,
+        status: undefined,
+        error: null,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      (executor as any).markPausedAborted("FN-001", "hard-cancel");
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds: ["execute"],
+      });
+
+      expectBenignAlreadyAdvanced(store);
+    });
+
+    it("treats a no-commits verification-only in-review row as benign after the volatile finalize marker is lost", async () => {
+      const store = createMockStore();
+      const task = makeCompletedTask({
+        noCommitsExpected: true,
+        modifiedFiles: [],
+        steps: [
+          { name: "Preflight", status: "done" },
+          { name: "Verify", status: "skipped" },
+        ],
+      });
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-review",
+        paused: false,
+        userPaused: false,
+        status: undefined,
+        error: null,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      (executor as any).markPausedAborted("FN-001", "hard-cancel");
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds: ["execute"],
+      });
+
+      expectBenignAlreadyAdvanced(store);
+    });
+
+    it("keeps finalized-completion rows benign after clearPausedAborted wipes the in-memory marker before hard-cancel", async () => {
+      const store = createMockStore();
+      const task = makeCompletedTask();
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-review",
+        paused: false,
+        userPaused: false,
+        status: undefined,
+        error: null,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      (executor as any).markCompletionFinalized("FN-001");
+      (executor as any).clearPausedAborted("FN-001");
+      (executor as any).markPausedAborted("FN-001", "hard-cancel");
+
+      expect((executor as any).completionFinalizedTaskIds.has("FN-001")).toBe(false);
+      expect((executor as any).pausedAbortProvenance.get("FN-001")).toBe("hard-cancel");
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds: ["execute"],
+      });
+
+      expectBenignAlreadyAdvanced(store);
+    });
+
+    it.each(["completion-finalize", undefined] as const)(
+      "keeps finalized-completion rows benign with %s abort provenance",
+      async (provenance) => {
+        const store = createMockStore();
+        const task = makeCompletedTask();
+        store.getTask.mockResolvedValue({
+          ...task,
+          column: "in-review",
+          paused: false,
+          userPaused: false,
+          status: undefined,
+          error: null,
+        });
+        const executor = new TaskExecutor(store, "/tmp/test", {});
+        if (provenance) {
+          (executor as any).markPausedAborted("FN-001", provenance);
+        }
+
+        await (executor as any).handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          visitedNodeIds: ["verifySentinel"],
+        });
+
+        expectBenignAlreadyAdvanced(store);
+      },
+    );
 
     it.each(["execute", "verifySentinel"] as const)(
       "treats finalized-completion graph exits as benign after hard-cancel overwrite at node %s",
@@ -1460,12 +1588,12 @@ describe("TaskExecutor bounded recovery retries", () => {
       },
     );
 
-    it("keeps already-terminal finalized-completion rows benign after hard-cancel overwrite", async () => {
+    it.each(["done", "archived"] as const)("keeps already-terminal %s finalized-completion rows benign after hard-cancel overwrite", async (column) => {
       const store = createMockStore();
       const task = makeCompletedTask();
       store.getTask.mockResolvedValue({
         ...task,
-        column: "done",
+        column,
         paused: false,
         userPaused: false,
         status: undefined,
@@ -1473,7 +1601,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       });
       const executor = new TaskExecutor(store, "/tmp/test", {});
       (executor as any).markCompletionFinalized("FN-001");
-      await (executor as any).awaitAbortInFlightTaskWork("FN-001", "completion-finalize teardown after done handoff");
+      await (executor as any).awaitAbortInFlightTaskWork("FN-001", "completion-finalize teardown after terminal handoff");
 
       await (executor as any).handleGraphFailure(task, {
         disposition: "failed",
@@ -1481,15 +1609,7 @@ describe("TaskExecutor bounded recovery retries", () => {
         visitedNodeIds: ["execute"],
       });
 
-      const messages = store.logEntry.mock.calls.map((call) => call[1]).join("\n");
-      expect(messages).toContain("Workflow graph run ended after task already advanced to 'done' — no further action needed");
-      expect(messages).not.toContain("operator action required");
-      expect(store.updateTask).not.toHaveBeenCalledWith(
-        "FN-001",
-        expect.objectContaining({ status: "failed" }),
-        expect.anything(),
-      );
-      expect(store.moveTask).not.toHaveBeenCalled();
+      expectBenignAlreadyAdvanced(store, column);
     });
 
     it("preserves explicit user-pause parking even when durable completion state exists", async () => {

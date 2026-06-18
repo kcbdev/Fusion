@@ -6451,13 +6451,29 @@ export class TaskExecutor {
       const abortProvenance = this.pausedAbortProvenance.get(task.id);
       const mergeSeamAborted = abortProvenance === "merge-seam";
       const completionFinalizeAborted = abortProvenance === "completion-finalize";
-      const completionFinalized = completionFinalizeAborted || this.completionFinalizedTaskIds.has(task.id);
+      const persistedCompletionFinalizeLog = live.log?.some((entry) => entry.action.includes("Execution paused after completion — finalizing to in-review")) === true;
+      const persistedCompletedProgress = live.steps.length > 0 && live.steps.every((step) => step.status === "done" || step.status === "skipped");
       /*
       FNXC:WorkflowLifecycle 2026-06-17-23:39: A real live pause still parks even if stale provenance says completion-finalize; completed handoff rows are expected to be unpaused.
 
       FNXC:WorkflowLifecycle 2026-06-18-10:57:
       FN-6644: a completed/no-commit execution that already finalized to in-review must not be re-parked as an operator-action pause abort when later teardown overwrites FN-6625 `completion-finalize` provenance with `hard-cancel` (FN-6641). Only suppress the pause-abort branch for already-finalized, non-in-progress rows with no live user/global pause; active execution hard-cancel and genuine pause/global-pause still park or preserve exactly as before.
+
+      FNXC:WorkflowLifecycle 2026-06-18-12:00:
+      FN-6647 closes the remaining durability gap by deriving already-finalized completion from the persisted task row: non-in-progress column, completed steps, no live pause/status/error, and the finalize-to-review log entry. The volatile `completionFinalizedTaskIds` marker still helps within one executor lifecycle, but teardown/restart loss must not reclassify a completed in-review row as a hard-cancel pause abort.
       */
+      const alreadyFinalizedToReview = Boolean(
+        live.column !== "in-progress"
+          && persistedCompletedProgress
+          && live.status == null
+          && live.error == null
+          && live.userPaused !== true
+          && live.paused !== true
+          && abortProvenance !== "global-pause"
+          && !mergeSeamAborted
+          && persistedCompletionFinalizeLog,
+      );
+      const completionFinalized = completionFinalizeAborted || this.completionFinalizedTaskIds.has(task.id) || alreadyFinalizedToReview;
       const suppressFinalizedCompletionAbort = Boolean(
         completionFinalized
           && live.column !== "in-progress"
