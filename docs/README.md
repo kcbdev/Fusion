@@ -66,6 +66,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Sandbox Backends](./sandbox.md) | Pluggable sandbox backends for executor command isolation (bubblewrap, spawn-based) |
 | [Secrets](./secrets.md) | Encrypted secrets storage, per-secret access policies, scopes, and agent tool wiring |
 | [Testing](./testing.md) | Full testing lanes, worker fanout guidance, test taxonomy, and file organization |
+| [Real iOS Safari Acceptance Surface](./ios-acceptance.md) | Provisioning runbook and harness usage for terminal verification gates on physical or cloud real-iOS Safari |
 | [Solutions Catalog](./solutions/) | Documented solutions to past problems (bugs, architecture patterns, best practices) organized by category |
 | [Localization Contributing Guide](./i18n-contributing.md) | Conventions for contributing translations, locale file structure, and i18n tooling |
 | [Mobile](../MOBILE.md) | Capacitor/PWA mobile development setup and workflow |

@@ -40,6 +40,9 @@ pnpm verify:workspace  # deep opt-in verification: lint -> test:full -> build (N
 
 `pnpm test:full` runs each package's default test script with capped worker fanout (`FUSION_TEST_TOTAL_WORKERS=4 FUSION_TEST_CONCURRENCY=2 pnpm -r --workspace-concurrency=2 test`). Do not casually raise worker counts; dashboard/jsdom and integration-heavy packages destabilize when oversubscribed. Use `VITEST_MAX_WORKERS=<n>` only for targeted package-level investigation.
 
+<!-- FNXC:iOSAcceptance 2026-06-18-17:25: Terminal acceptance gates that depend on real mobile Safari must use the credential-driven real-iOS surface runbook instead of treating desktop WebKit or jsdom as evidence. -->
+Terminal acceptance tasks that require real mobile Safari should use [`docs/ios-acceptance.md`](./ios-acceptance.md) for the `--check` run-vs-NO-OP probe, credential wiring, and physical/cloud real-iOS evidence workflow.
+
 Agents running verification through `fn_run_verification` are bounded by default: project `verificationCommandTimeoutMs` when set, otherwise 300s for package scope and 900s for workspace scope, with an 1800s hard cap. Marathon invocations such as root `pnpm test`, `pnpm test:full`, `pnpm verify:workspace`, whole-package tests without file filters, and shell repeat loops are soft-capped unless the agent explicitly passes `allowFullSuite: true`; the escape hatch still emits progress heartbeats and respects the hard cap. Prefer targeted commands such as `pnpm --filter @fusion/<pkg> exec vitest run src/path/to/test.ts --silent=passed-only --reporter=dot` before opting into a full run.
 
 ## Fresh-worktree dist bootstrap

@@ -67,6 +67,7 @@
     "mobile:dev:android": "pnpm --filter @fusion/mobile dev:android",
     "mobile:sync": "pnpm --filter @fusion/mobile cap sync",
     "mobile:run:android": "bash scripts/mobile-run-android.sh",
+    "ios:acceptance": "node scripts/ios-acceptance.mjs",
     "build:desktop": "pnpm --filter @fusion/desktop build",
     "dist:desktop:win": "pnpm --filter @fusion/desktop build && pnpm --filter @fusion/desktop dist:win"
   },
