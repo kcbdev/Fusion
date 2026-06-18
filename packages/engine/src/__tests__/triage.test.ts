@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { TaskStore, Task, TaskDetail, Settings } from "@fusion/core";
-import { builtinSeamPrompt, renderTriagePolicyPlaceholders, resolveAgentPrompt } from "@fusion/core";
+import { builtinSeamPrompt, MAX_TASK_LIST_TEXT_CHARS, renderTriagePolicyPlaceholders, resolveAgentPrompt } from "@fusion/core";
 import {
   TriageProcessor,
   buildSpecificationPrompt,
@@ -62,7 +62,7 @@ describe("fn_task_list resilience (FN-6573)", () => {
       const formatter = resolveTaskListFormatter(coreNamespace);
       const text = formatter(boardLines, { clamp: coreNamespace.clampTaskListText }).trimEnd();
       expect(text).toBeTruthy();
-      expect(text.length).toBeLessThanOrEqual(12_000);
+      expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
     }
   });
 });

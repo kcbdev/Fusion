@@ -26,6 +26,7 @@ import {
   getTaskDuplicateLineage,
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
+  MAX_TASK_LIST_TEXT_CHARS,
   resolveSecretAccessPolicy,
   getProjectRootFromWorktree,
   resolveTaskGithubTracking,
@@ -69,7 +70,11 @@ export function inlineTaskListFallback(
   lines: string[],
   opts: { maxChars?: number } = {},
 ): string {
-  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? 12_000));
+  /*
+  FNXC:TaskListOutput 2026-06-18-03:20:
+  FN-6629 requires stale-runtime fallback formatting to mirror the shared host-safe task-list budget; otherwise missing @fusion/core formatter exports can re-emit imageified column-filtered listings.
+  */
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? MAX_TASK_LIST_TEXT_CHARS));
   try {
     const text = lines.join("\n");
     if (text.length <= maxChars) {

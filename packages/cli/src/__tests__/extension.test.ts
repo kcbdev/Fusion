@@ -2552,11 +2552,18 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
   });
 
   describe("fn_task_list", () => {
+    const HOST_SAFE_TASK_LIST_TEXT_CEILING = 3_000;
+
     function expectSingleBoundedTextBlock(result: any) {
       expect(result.content).toHaveLength(1);
       expect(result.content[0].type).toBe("text");
       expect(result.content[0].text).toBeTruthy();
       expect(result.content[0].text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      expect(result.content[0].text.length).toBeLessThanOrEqual(HOST_SAFE_TASK_LIST_TEXT_CEILING);
+    }
+
+    function realisticTaskTitle(column: string, index: number) {
+      return `${column} realistic task ${String(index).padStart(3, "0")} keeps enough descriptive context for text agents without artificial padding`;
     }
 
     it("returns bounded text for omitted and provided column/limit params", async () => {
@@ -2610,6 +2617,87 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(text).toContain("[deps: FN-001]");
       expect(text).not.toContain("truncated to fit; narrow with column/limit");
       expect(result.details.count).toBe(2);
+    });
+
+    it("bounds realistic column-filtered listings below the host-safe text budget", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        const todoFirst = await store.createTask({
+          title: realisticTaskTitle("todo", 1),
+          description: "Realistic todo task 001",
+          column: "todo",
+        });
+        for (let i = 2; i <= 60; i += 1) {
+          await store.createTask({
+            title: realisticTaskTitle("todo", i),
+            description: `Realistic todo task ${String(i).padStart(3, "0")}`,
+            column: "todo",
+            dependencies: [todoFirst.id],
+          });
+        }
+        for (let i = 1; i <= 35; i += 1) {
+          await store.createTask({
+            title: realisticTaskTitle("triage", i),
+            description: `Realistic triage task ${String(i).padStart(3, "0")}`,
+          });
+        }
+        for (let i = 1; i <= 30; i += 1) {
+          await store.createTask({
+            title: realisticTaskTitle("done", i),
+            description: `Realistic done task ${String(i).padStart(3, "0")}`,
+            column: "done",
+          });
+        }
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      const broadResult = await listTool.execute(
+        "list-realistic-broad",
+        { limit: 20 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      expectSingleBoundedTextBlock(broadResult);
+      expect(broadResult.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(broadResult.content[0].text).toContain("Planning (35):");
+      expect(broadResult.details.count).toBe(125);
+
+      for (const { callId, params, header, ids } of [
+        {
+          callId: "list-realistic-todo",
+          params: { column: "todo", limit: 50 },
+          header: "Todo (60):",
+          ids: ["FN-001", "FN-002"],
+        },
+        {
+          callId: "list-realistic-triage",
+          params: { column: "triage", limit: 50 },
+          header: "Planning (35):",
+          ids: ["FN-061", "FN-062"],
+        },
+        {
+          callId: "list-realistic-done",
+          params: { column: "done", limit: 50 },
+          header: "Done (30):",
+          ids: ["FN-096", "FN-097"],
+        },
+      ] as const) {
+        const result = await listTool.execute(callId, params, undefined, undefined, makeCtx(tmpDir));
+        const text = result.content[0].text;
+
+        expectSingleBoundedTextBlock(result);
+        expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+        expect(text).toContain(header);
+        for (const id of ids) {
+          expect(text).toContain(id);
+        }
+        expect(text).toContain("truncated to fit; narrow with column/limit");
+        expect(result.details.count).toBe(125);
+      }
     });
 
     it("bounds broad listings as a single plain-text block", async () => {

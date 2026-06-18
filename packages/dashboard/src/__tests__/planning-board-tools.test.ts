@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { TaskStore } from "@fusion/core";
+import { MAX_TASK_LIST_TEXT_CHARS, type TaskStore } from "@fusion/core";
 import { createPlanningBoardTools, resolveTaskListFormatter } from "../planning-board-tools.js";
 
 function createStoreMock(overrides?: {
@@ -33,7 +33,7 @@ describe("fn_task_list resilience (FN-6573)", () => {
       const formatter = resolveTaskListFormatter(coreNamespace);
       const text = formatter(boardLines, { clamp: coreNamespace.clampTaskListText }).trimEnd();
       expect(text).toBeTruthy();
-      expect(text.length).toBeLessThanOrEqual(12_000);
+      expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
     }
   });
 });

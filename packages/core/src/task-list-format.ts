@@ -1,4 +1,4 @@
-export const MAX_TASK_LIST_TEXT_CHARS = 12_000;
+export const MAX_TASK_LIST_TEXT_CHARS = 3_000;
 
 const TRUNCATION_HINT = "truncated to fit; narrow with column/limit";
 
@@ -14,6 +14,9 @@ function joinWithMarker(lines: string[], marker: string): string {
  * FNXC:TaskListOutput 2026-06-16-17:45:
  * FN-6492 requires every fn_task_list surface to emit bounded plain text so column-filtered or otherwise large board listings remain readable to text-only heartbeat agents and stay below host runtimes' imageification thresholds.
  * The default budget is intentionally below common MCP attachment-conversion limits while preserving dozens of compact task rows.
+ *
+ * FNXC:TaskListOutput 2026-06-18-03:12:
+ * FN-6629 lowers the budget from 12,000 because realistic column-filtered heartbeat listings stayed under that old clamp while still exceeding the host imageification threshold. Keep the bound in the low-thousands so todo/triage/done limit-50 outputs remain text-only for heartbeat and other text agents.
  */
 export function clampTaskListText(
   lines: string[],

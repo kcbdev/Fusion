@@ -201,6 +201,10 @@ describe("formatTaskListText", () => {
 });
 
 describe("clampTaskListText", () => {
+  it("documents the host-safe default budget", () => {
+    expect(MAX_TASK_LIST_TEXT_CHARS).toBe(3_000);
+  });
+
   it("returns an empty string for empty input", () => {
     expect(clampTaskListText([])).toBe("");
   });
@@ -262,6 +266,27 @@ describe("clampTaskListText", () => {
     const lines = Array.from({ length: 500 }, (_, index) => `FN-${String(index + 1).padStart(3, "0")}  ${"x".repeat(80)}`);
 
     expect(clampTaskListText(lines).length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+  });
+
+  it("truncates realistic large listings under the host-safe budget", () => {
+    const lines = [
+      "Todo (60):",
+      ...Array.from(
+        { length: 50 },
+        (_, index) =>
+          `  FN-${String(index + 1).padStart(3, "0")}  Realistic todo task ${String(index + 1).padStart(3, "0")} keeps descriptive context for text agents without artificial padding`,
+      ),
+      "  ... and 10 more",
+      "",
+    ];
+
+    const text = clampTaskListText(lines);
+
+    expect(lines.join("\n").length).toBeGreaterThan(MAX_TASK_LIST_TEXT_CHARS);
+    expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+    expect(text).toContain("Todo (60):");
+    expect(text).toContain("FN-001");
+    expect(text).toContain("truncated to fit; narrow with column/limit");
   });
 
   it("handles a single over-budget line by returning a bounded truncation marker", () => {
