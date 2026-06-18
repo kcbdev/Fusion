@@ -652,6 +652,30 @@ Features:
 - Dismiss/archive/unarchive insight records as they age
 - Create triage tasks from selected insights directly from the view
 
+## Command Center
+
+Command Center is the combined analytics and live-operations surface for a project: it pairs historical usage, cost, and throughput analytics with a live Mission Control panel.
+
+Navigation:
+- Desktop: **Header → More views → Command Center**
+- Mobile: **More** sheet → **Command Center**
+- Deep link: `?view=command-center`
+
+Features:
+- Global date-range picker in the header scopes the analytics tabs; **Mission Control** remains live rather than historical.
+- **Overview** summarizes token usage/cost, autonomy, active nodes, tasks done, model breadth, and open signals, and includes the SDLC throughput funnel for the selected range.
+- **Tokens** breaks down token totals, estimated cost, tasks, and per-model usage.
+- **Tools** shows autonomy ratio, tool-call volume, intervention counts, sessions, and tool categories.
+- **Activity** tracks sessions, messages, active nodes, active agents, stickiness, and daily activity sparklines.
+- **Productivity** separates outcome counters (commits and pull requests) from volume proxies such as modified files, lines changed, and files by language.
+- **Ecosystem** shows active model breadth and per-model task activity; unavailable plugin-activation metrics render as unavailable rather than zero.
+- **Signals** shows external signal totals, open/resolved counts, MTTR, and source/severity breakdowns when signal sources are connected.
+- **Mission Control** shows live active sessions/runs/nodes, current sessions and nodes, and a live SDLC funnel; when idle it reports that live updates resume when work starts.
+
+Data states:
+- Overview shows a loading state while core analytics settle, then shows `No usage data yet. Run some agents to populate the Command Center.` only after the selected range has settled with no core usage data.
+- Signals is best-effort: if the Signals endpoint is absent or no signal source is connected, the Signals area falls back to its empty state and other Command Center metrics remain valid.
+
 ## Reliability View
 
 Reliability view summarizes in-review pipeline health so operators can spot bounce/merge instability trends without leaving the dashboard.
@@ -1259,7 +1283,7 @@ Manage project and global secrets directly inside **Settings → Project → Sec
 
 ### Lazy-Loaded Heavy Views
 
-These 22 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms App-level chunks once on mount via `requestIdleCallback`; AppModals lazy modal imports (`SettingsModal`, `WorkflowNodeEditor`, `SetupWizardModal`) are part of the same inventory. **Do not make these eager.**
+These 23 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms App-level chunks once on mount via `requestIdleCallback`; AppModals lazy modal imports (`SettingsModal`, `WorkflowNodeEditor`, `SetupWizardModal`) are part of the same inventory. **Do not make these eager.**
 
 - `AgentsView`
 - `NodesView`
@@ -1272,6 +1296,7 @@ These 22 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null
 - `SkillsView`
 - `ResearchView`
 - `ReliabilityView`
+- `CommandCenter`
 - `EvalsView`
 - `TodoView`
 - `GoalsView`
