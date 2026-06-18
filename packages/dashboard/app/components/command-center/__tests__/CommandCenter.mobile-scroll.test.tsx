@@ -6,6 +6,64 @@ import "@testing-library/jest-dom";
 import { loadStylesCss } from "../../../test/cssFixture";
 import { CommandCenter } from "../CommandCenter";
 
+const apiMock = vi.fn();
+vi.mock("../../../api/legacy", () => ({
+  api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+}));
+
+function emptyTokenFixture() {
+  return {
+    totals: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, totalTokens: 0, nTasks: 0 },
+    cost: { usd: null, unavailable: true, stale: false },
+    groups: [],
+  };
+}
+
+function emptyToolsFixture() {
+  return {
+    toolCalls: 0,
+    byCategory: [],
+    sessions: 0,
+    interventions: { approvals: 0, userSteers: 0, total: 0 },
+    autonomyRatio: 0,
+    fullyAutonomous: true,
+  };
+}
+
+function emptyActivityFixture() {
+  return {
+    sessions: 0,
+    messages: 0,
+    activeNodes: 0,
+    activeAgents: 0,
+    daily: [],
+    stickiness: 0,
+    mttr: { value: null, unavailable: true },
+    monitor: { mttr: { value: null, unavailable: true }, incidents: 0, deployments: 0 },
+    funnel: {
+      stages: [
+        { stage: "triage", entered: 0, current: 0 },
+        { stage: "done", entered: 0, current: 0 },
+      ],
+      enteredInRange: 0,
+      doneInRange: 0,
+      completionRate: 0,
+      throughputPerDay: 0,
+      rangeDays: 7,
+    },
+  };
+}
+
+function mockEmptyOverviewApi() {
+  apiMock.mockImplementation((path: string) => {
+    if (path.startsWith("/command-center/tokens")) return Promise.resolve(emptyTokenFixture());
+    if (path.startsWith("/command-center/tools")) return Promise.resolve(emptyToolsFixture());
+    if (path.startsWith("/command-center/activity")) return Promise.resolve(emptyActivityFixture());
+    if (path.startsWith("/command-center/signals")) return Promise.resolve({ totalSignals: 0, open: 0, resolved: 0, mttr: { value: null, unavailable: true }, bySource: [], bySeverity: [] });
+    return Promise.reject(new Error(`Unhandled api path: ${path}`));
+  });
+}
+
 function injectCommandCenterCss() {
   document.head.querySelector("style[data-testid='fn-6595-css']")?.remove();
   const style = document.createElement("style");
@@ -52,15 +110,17 @@ function assertScrollOwnerContract(panel: HTMLElement) {
 
 describe("CommandCenter mobile scroll regression (FN-6595)", () => {
   beforeEach(() => {
+    apiMock.mockReset();
+    mockEmptyOverviewApi();
     injectCommandCenterCss();
     mockMobileMatchMedia(true);
   });
 
-  it("keeps the tabpanel as the mobile scroll owner with pinned header and tabs", () => {
+  it("keeps the tabpanel as the mobile scroll owner with pinned header and tabs", async () => {
     render(<CommandCenter />);
 
     const overviewPanel = screen.getByTestId("command-center-panel-overview");
-    expect(screen.getByTestId("command-center-empty")).toBeTruthy();
+    await screen.findByTestId("command-center-empty");
     assertScrollOwnerContract(overviewPanel);
 
     fireEvent.click(screen.getByTestId("command-center-tab-tokens"));

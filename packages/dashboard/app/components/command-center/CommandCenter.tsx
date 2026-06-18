@@ -1,6 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
+import type { ActivityAnalytics, TokenAnalytics, ToolAnalytics } from "@fusion/core";
+import { api } from "../../api/legacy";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
 import { TokensArea } from "./areas/TokensArea";
 import { ToolsArea } from "./areas/ToolsArea";
@@ -10,6 +12,9 @@ import { EcosystemArea } from "./areas/EcosystemArea";
 import { SignalsArea } from "./areas/SignalsArea";
 import { MissionControlPanel } from "./MissionControlPanel";
 import { SdlcFunnel } from "./SdlcFunnel";
+import { useAnalyticsArea } from "./areas/useAnalyticsArea";
+import { formatCost, formatCount, isInvalidRange, rangeQuery } from "./areas/areaShared";
+import type { SignalsAnalytics } from "./areas/SignalsArea";
 import "./CommandCenter.css";
 
 type SubViewId =
@@ -44,22 +49,95 @@ function useSubViews(): SubView[] {
 interface OverviewStatCard {
   id: string;
   label: string;
+  value: string;
+  subLabel?: string;
 }
 
-/**
- * Headline stat cards (one per measurement area). Values land once Phase A's
- * analytics endpoints exist; until then each card shows the shared empty state.
- */
-function OverviewTab({ hasData, range }: { hasData: boolean; range: DateRange }) {
+/*
+FNXC:CommandCenter 2026-06-17-00:00:
+Overview is the Command Center landing surface, so it must reflect real analytics instead of shell placeholders. Show loading while core analytics have not settled, show the empty state only after settled zero data, and treat Signals as best-effort because that endpoint can be absent without invalidating tokens/tools/activity metrics.
+*/
+function OverviewTab({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");
+  const tokens = useAnalyticsArea<TokenAnalytics>("/command-center/tokens?groupBy=model", range);
+  const tools = useAnalyticsArea<ToolAnalytics>("/command-center/tools", range);
+  const activity = useAnalyticsArea<ActivityAnalytics>("/command-center/activity", range);
+  const [signals, setSignals] = useState<SignalsAnalytics | null>(null);
+  const [signalsLoading, setSignalsLoading] = useState(true);
+
+  const signalsQuery = rangeQuery(range);
+  const invalidRange = isInvalidRange(range);
+
+  useEffect(() => {
+    if (invalidRange) {
+      setSignalsLoading(false);
+      setSignals(null);
+      return;
+    }
+    let cancelled = false;
+    setSignalsLoading(true);
+    void (async () => {
+      try {
+        const result = await api<SignalsAnalytics>(`/command-center/signals${signalsQuery}`);
+        if (!cancelled) {
+          setSignals(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setSignals(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setSignalsLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [signalsQuery, invalidRange]);
+
+  const tokenTotal = tokens.data?.totals?.totalTokens ?? 0;
+  const toolCalls = tools.data?.toolCalls ?? 0;
+  const activeNodes = activity.data?.activeNodes ?? 0;
+  const tasksDone = activity.data?.funnel?.doneInRange ?? 0;
+  const uniqueModels = tokens.data?.groups?.length ?? 0;
+  const hasActivityData =
+    (activity.data?.sessions ?? 0) > 0 ||
+    (activity.data?.messages ?? 0) > 0 ||
+    activeNodes > 0 ||
+    (activity.data?.activeAgents ?? 0) > 0 ||
+    tasksDone > 0;
+  const hasData = tokenTotal > 0 || toolCalls > 0 || hasActivityData;
+  const hasAllCoreData = tokens.data !== null && tools.data !== null && activity.data !== null;
+  const isInitialLoading = !hasAllCoreData && (tokens.isLoading || tools.isLoading || activity.isLoading);
+  const coreError = tokens.error ?? tools.error ?? activity.error;
+
+  const costLabel = tokens.data ? formatCost(tokens.data.cost?.usd ?? null, tokens.data.cost?.unavailable ?? true) : "—";
+  const autonomyLabel = tools.data
+    ? tools.data.fullyAutonomous
+      ? t("commandCenter.tools.ratioAutonomous", "{{ratio}} calls/session (fully autonomous)", {
+          ratio: tools.data.autonomyRatio.toFixed(1),
+        })
+      : `${tools.data.autonomyRatio.toFixed(1)}:1`
+    : "—";
 
   const cards: OverviewStatCard[] = [
-    { id: "tokens", label: t("commandCenter.overview.tokensCost", "Tokens & cost") },
-    { id: "autonomy", label: t("commandCenter.overview.autonomy", "Autonomy ratio") },
-    { id: "nodes", label: t("commandCenter.overview.activeNodes", "Active nodes") },
-    { id: "tasksDone", label: t("commandCenter.overview.tasksDone", "Tasks done") },
-    { id: "models", label: t("commandCenter.overview.uniqueModels", "Unique models") },
-    { id: "signals", label: t("commandCenter.overview.openSignals", "Open signals") },
+    {
+      id: "tokens",
+      label: t("commandCenter.overview.tokensCost", "Tokens & cost"),
+      value: formatCount(tokenTotal),
+      subLabel: costLabel,
+    },
+    { id: "autonomy", label: t("commandCenter.overview.autonomy", "Autonomy ratio"), value: autonomyLabel },
+    { id: "nodes", label: t("commandCenter.overview.activeNodes", "Active nodes"), value: formatCount(activeNodes) },
+    { id: "tasksDone", label: t("commandCenter.overview.tasksDone", "Tasks done"), value: formatCount(tasksDone) },
+    { id: "models", label: t("commandCenter.overview.uniqueModels", "Unique models"), value: formatCount(uniqueModels) },
+    {
+      id: "signals",
+      label: t("commandCenter.overview.openSignals", "Open signals"),
+      value: signalsLoading ? "—" : signals ? formatCount(signals.open ?? 0) : "—",
+    },
   ];
 
   // The throughput funnel reads its own data (activityLog transitions) and shows
@@ -70,6 +148,30 @@ function OverviewTab({ hasData, range }: { hasData: boolean; range: DateRange })
       <SdlcFunnel range={range} />
     </div>
   );
+
+  if (isInitialLoading) {
+    return (
+      <div className="cc-overview">
+        <div className="cc-loading" data-testid="command-center-overview-loading">
+          <div className="cc-chart-skeleton" />
+          <p>{t("commandCenter.loading", "Loading command center...")}</p>
+        </div>
+        {throughputSection}
+      </div>
+    );
+  }
+
+  if (coreError !== null && !hasData) {
+    return (
+      <div className="cc-overview">
+        <div className="cc-error" data-testid="command-center-overview-error" role="alert">
+          <AlertCircle size={24} />
+          <p>{coreError}</p>
+        </div>
+        {throughputSection}
+      </div>
+    );
+  }
 
   if (!hasData) {
     return (
@@ -89,7 +191,8 @@ function OverviewTab({ hasData, range }: { hasData: boolean; range: DateRange })
         {cards.map((card) => (
           <div key={card.id} className="card cc-stat-card" data-testid={`command-center-stat-${card.id}`}>
             <div className="cc-stat-label">{card.label}</div>
-            <div className="cc-stat-value">—</div>
+            <div className="cc-stat-value">{card.value}</div>
+            {card.subLabel ? <span className="cc-stat-sub">{card.subLabel}</span> : null}
           </div>
         ))}
       </div>
@@ -118,11 +221,6 @@ export function CommandCenter() {
   const { t } = useTranslation("app");
   const subViews = useSubViews();
   const [activeTab, setActiveTab] = useState<SubViewId>("overview");
-  // Shell-only state: real loading/error wiring lands with the Phase A endpoints.
-  const [isLoading] = useState(false);
-  const [error] = useState<string | null>(null);
-  // No analytics endpoints yet, so there is no data to show — drives the empty state.
-  const hasData = false;
 
   const [range, setRange] = useState<DateRange>(() => rangeFromPreset(defaultPresets((_k, f) => f)[1]));
 
@@ -173,7 +271,7 @@ export function CommandCenter() {
   function renderActiveTab() {
     switch (activeTab) {
       case "overview":
-        return <OverviewTab hasData={hasData} range={range} />;
+        return <OverviewTab range={range} />;
       case "tokens":
         return <TokensArea range={range} />;
       case "tools":
@@ -191,24 +289,6 @@ export function CommandCenter() {
       default:
         return <PlaceholderTab tabId={activeTab} />;
     }
-  }
-
-  if (isLoading) {
-    return (
-      <div className="cc-loading" data-testid="command-center-loading">
-        <div className="cc-chart-skeleton" style={{ width: "60%" }} />
-        <p>{t("commandCenter.loading", "Loading command center...")}</p>
-      </div>
-    );
-  }
-
-  if (error !== null) {
-    return (
-      <div className="cc-error" data-testid="command-center-error" role="alert">
-        <AlertCircle size={24} />
-        <p>{error}</p>
-      </div>
-    );
   }
 
   return (

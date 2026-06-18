@@ -1,6 +1,152 @@
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+/*
+FNXC:CommandCenter 2026-06-17-00:00:
+Command Center Overview must consume the same analytics endpoints as the detail tabs. These tests reproduce the prior always-empty landing page, then pin loading-before-empty, range re-derivation, and best-effort Signals behavior so Overview cannot regress into shell placeholders again.
+*/
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { CommandCenter } from "../CommandCenter";
+
+const apiMock = vi.fn();
+vi.mock("../../../api/legacy", () => ({
+  api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+}));
+
+function tokenFixture(totalTokens = 1_500) {
+  return {
+    from: "2026-06-08",
+    to: null,
+    groupBy: "model",
+    totals: {
+      inputTokens: Math.round(totalTokens * 0.6),
+      outputTokens: Math.round(totalTokens * 0.3),
+      cachedTokens: Math.round(totalTokens * 0.1),
+      cacheWriteTokens: 0,
+      totalTokens,
+      nTasks: totalTokens > 0 ? 5 : 0,
+    },
+    cost: totalTokens > 0 ? { usd: 12.5, unavailable: false, stale: false } : { usd: null, unavailable: true, stale: false },
+    groups:
+      totalTokens > 0
+        ? [
+            {
+              key: "gpt-4o",
+              inputTokens: 600,
+              outputTokens: 300,
+              cachedTokens: 100,
+              cacheWriteTokens: 0,
+              totalTokens: 900,
+              nTasks: 3,
+              cost: { usd: 9.0, unavailable: false, stale: false },
+            },
+            {
+              key: "claude-sonnet",
+              inputTokens: 400,
+              outputTokens: 200,
+              cachedTokens: 100,
+              cacheWriteTokens: 0,
+              totalTokens: 600,
+              nTasks: 2,
+              cost: { usd: 3.5, unavailable: false, stale: false },
+            },
+          ]
+        : [],
+  };
+}
+
+function toolsFixture(toolCalls = 30) {
+  return {
+    from: "2026-06-08",
+    to: null,
+    toolCalls,
+    byCategory: toolCalls > 0 ? [{ category: "read", count: toolCalls }] : [],
+    sessions: toolCalls > 0 ? 3 : 0,
+    interventions: { approvals: toolCalls > 0 ? 2 : 0, userSteers: toolCalls > 0 ? 1 : 0, total: toolCalls > 0 ? 3 : 0 },
+    autonomyRatio: toolCalls > 0 ? 10 : 0,
+    fullyAutonomous: toolCalls === 0,
+  };
+}
+
+function activityFixture(overrides: Partial<Record<"sessions" | "messages" | "activeNodes" | "activeAgents" | "doneInRange", number>> = {}) {
+  const sessions = overrides.sessions ?? 4;
+  const messages = overrides.messages ?? 18;
+  const activeNodes = overrides.activeNodes ?? 3;
+  const activeAgents = overrides.activeAgents ?? 2;
+  const doneInRange = overrides.doneInRange ?? 7;
+  return {
+    from: "2026-06-08",
+    to: null,
+    sessions,
+    messages,
+    activeNodes,
+    activeAgents,
+    daily: [],
+    stickiness: activeAgents > 0 ? 0.5 : 0,
+    mttr: { value: null, unavailable: true },
+    monitor: { mttr: { value: null, unavailable: true }, incidents: 0, deployments: 0 },
+    funnel: {
+      stages: [
+        { stage: "triage", entered: doneInRange, current: 0 },
+        { stage: "done", entered: doneInRange, current: doneInRange },
+      ],
+      enteredInRange: doneInRange,
+      doneInRange,
+      completionRate: doneInRange > 0 ? 1 : 0,
+      throughputPerDay: doneInRange > 0 ? 1 : 0,
+      rangeDays: 7,
+    },
+  };
+}
+
+const emptyActivityFixture = () =>
+  activityFixture({ sessions: 0, messages: 0, activeNodes: 0, activeAgents: 0, doneInRange: 0 });
+
+function signalsFixture(open = 2) {
+  return {
+    totalSignals: open,
+    open,
+    resolved: 0,
+    mttr: { value: null, unavailable: true },
+    bySource: [],
+    bySeverity: [],
+  };
+}
+
+function mockOverviewApi({
+  tokens = tokenFixture(),
+  tools = toolsFixture(),
+  activity = activityFixture(),
+  signals = signalsFixture(),
+}: {
+  tokens?: unknown;
+  tools?: unknown;
+  activity?: unknown;
+  signals?: unknown;
+} = {}) {
+  apiMock.mockImplementation((path: string) => {
+    if (path.startsWith("/command-center/tokens")) return Promise.resolve(tokens);
+    if (path.startsWith("/command-center/tools")) return Promise.resolve(tools);
+    if (path.startsWith("/command-center/activity")) return Promise.resolve(activity);
+    if (path.startsWith("/command-center/signals")) {
+      return signals instanceof Error ? Promise.reject(signals) : Promise.resolve(signals);
+    }
+    return Promise.reject(new Error(`Unhandled api path: ${path}`));
+  });
+}
+
+function mockEmptyOverviewApi() {
+  mockOverviewApi({ tokens: tokenFixture(0), tools: toolsFixture(0), activity: emptyActivityFixture(), signals: signalsFixture(0) });
+}
+
+function statValue(testId: string) {
+  return within(screen.getByTestId(testId)).getByText((content, element) =>
+    element?.classList.contains("cc-stat-value") === true && content.length > 0,
+  ).textContent;
+}
+
+beforeEach(() => {
+  apiMock.mockReset();
+  mockEmptyOverviewApi();
+});
 
 describe("CommandCenter shell", () => {
   it("renders with the Overview tab active by default", () => {
@@ -10,9 +156,88 @@ describe("CommandCenter shell", () => {
     expect(screen.getByTestId("command-center-panel-overview")).toBeTruthy();
   });
 
-  it("renders the documented empty state when there is no data (no crash)", () => {
+  it("renders the documented empty state when there is no data (no crash)", async () => {
+    mockEmptyOverviewApi();
     render(<CommandCenter />);
-    expect(screen.getByTestId("command-center-empty")).toBeTruthy();
+    expect(screen.queryByTestId("command-center-empty")).toBeNull();
+    expect(screen.getByTestId("command-center-overview-loading")).toBeTruthy();
+    await screen.findByTestId("command-center-empty");
+  });
+
+  it("renders live Overview headline values when analytics data exists", async () => {
+    mockOverviewApi();
+    render(<CommandCenter />);
+
+    await waitFor(() => expect(screen.queryByTestId("command-center-empty")).toBeNull());
+    await screen.findByTestId("command-center-stat-tokens");
+
+    expect(statValue("command-center-stat-tokens")).toBe("1,500");
+    expect(screen.getByTestId("command-center-stat-tokens").textContent).toContain("$12.50");
+    expect(statValue("command-center-stat-autonomy")).toBe("10.0:1");
+    expect(statValue("command-center-stat-nodes")).toBe("3");
+    expect(statValue("command-center-stat-tasksDone")).toBe("7");
+    expect(statValue("command-center-stat-models")).toBe("2");
+    expect(statValue("command-center-stat-signals")).toBe("2");
+    expect(screen.getByTestId("command-center-live-strip")).toBeTruthy();
+    expect(screen.getByTestId("command-center-throughput")).toBeTruthy();
+  });
+
+  it("renders cards for partially populated analytics instead of the empty state", async () => {
+    mockOverviewApi({ tokens: tokenFixture(0), tools: toolsFixture(0), activity: activityFixture({ sessions: 0, messages: 0, activeNodes: 1, activeAgents: 0, doneInRange: 0 }), signals: signalsFixture(0) });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-stat-nodes");
+    expect(screen.queryByTestId("command-center-empty")).toBeNull();
+    expect(statValue("command-center-stat-tokens")).toBe("0");
+    expect(statValue("command-center-stat-nodes")).toBe("1");
+  });
+
+  it("keeps Overview populated when the signals endpoint is missing", async () => {
+    mockOverviewApi({ signals: new Error("API returned HTML instead of JSON (404)") });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-stat-signals");
+    expect(screen.queryByTestId("command-center-empty")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-error")).toBeNull();
+    expect(statValue("command-center-stat-signals")).toBe("—");
+  });
+
+  it("surfaces a settled core-source error without staying in loading", async () => {
+    apiMock.mockImplementation((path: string) => {
+      if (path.startsWith("/command-center/tokens")) return Promise.reject(new Error("tokens failed"));
+      if (path.startsWith("/command-center/tools")) return Promise.resolve(toolsFixture(0));
+      if (path.startsWith("/command-center/activity")) return Promise.resolve(emptyActivityFixture());
+      if (path.startsWith("/command-center/signals")) return Promise.resolve(signalsFixture(0));
+      return Promise.reject(new Error(`Unhandled api path: ${path}`));
+    });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-overview-error");
+    expect(screen.getByTestId("command-center-overview-error").textContent).toContain("tokens failed");
+    expect(screen.queryByTestId("command-center-overview-loading")).toBeNull();
+    expect(screen.queryByTestId("command-center-empty")).toBeNull();
+  });
+
+  it("re-fetches and re-derives the Overview empty state when the range changes", async () => {
+    apiMock.mockImplementation((path: string) => {
+      const populated = path.includes("from=");
+      if (path.startsWith("/command-center/tokens")) return Promise.resolve(populated ? tokenFixture() : tokenFixture(0));
+      if (path.startsWith("/command-center/tools")) return Promise.resolve(populated ? toolsFixture() : toolsFixture(0));
+      if (path.startsWith("/command-center/activity")) return Promise.resolve(populated ? activityFixture() : emptyActivityFixture());
+      if (path.startsWith("/command-center/signals")) return Promise.resolve(populated ? signalsFixture() : signalsFixture(0));
+      return Promise.reject(new Error(`Unhandled api path: ${path}`));
+    });
+    render(<CommandCenter />);
+
+    await screen.findByTestId("command-center-stat-tokens");
+    expect(screen.queryByTestId("command-center-empty")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("cc-date-range-trigger"));
+    fireEvent.click(screen.getByTestId("cc-date-range-preset-all"));
+
+    await screen.findByTestId("command-center-empty");
+    expect(screen.queryByTestId("command-center-stat-tokens")).toBeNull();
+    expect(apiMock.mock.calls.some(([path]) => typeof path === "string" && path === "/command-center/tools")).toBe(true);
   });
 
   it("exposes the ARIA tabs pattern (tablist + tabs + tabpanel)", () => {
