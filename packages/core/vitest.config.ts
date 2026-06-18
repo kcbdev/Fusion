@@ -17,7 +17,12 @@ const quarantinedCoreTests = [
 
   FNXC:CoreTests 2026-06-15-07:39:
   FN-6486 rescued store-concurrent-writes by making the transient lock helper release independent of event-loop timer scheduling, then removed the quarantine in lockstep with scripts/lib/test-quarantine.json. Keep this array empty unless a future observed flake is mirrored in the ledger in the same commit.
+
+  FNXC:CoreTests 2026-06-17-17:21:
+  FN-6596 verification observed task-list-format and test-project timing out only in the broad changed-package core lane after the merge gate had passed; both files passed immediate isolated reruns. Quarantine the suite-load flakes without widening timeouts or weakening assertions.
   */
+  "src/__tests__/task-list-format.test.ts",
+  "src/__tests__/test-project.test.ts",
 ];
 
 export default defineConfig({
