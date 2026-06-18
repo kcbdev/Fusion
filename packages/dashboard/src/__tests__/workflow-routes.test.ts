@@ -289,6 +289,10 @@ describe("workflow routes (U4)", () => {
     expect((badCompile.body as { error: string }).error).toMatch(/interpreter \(deferred\)/i);
   });
 
+  /*
+  FNXC:CustomWorkflows 2026-06-18-11:03:
+  FN-6645 locks the per-task workflow selection route contract: missing or non-string workflowId returns 400, unknown ids return 404, uncompilable custom IR returns 422, explicit null clears, and workflow:updated SSE is emitted only after successful select or clear mutations.
+  */
   it("PUT /tasks/:taskId/workflow selects and reflects on the task", async () => {
     const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
     const wfId = (wf.body as { id: string }).id;
@@ -308,10 +312,12 @@ describe("workflow routes (U4)", () => {
     const wfId = (wf.body as { id: string }).id;
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
     await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
+    vi.mocked(emitWorkflowSseEvent).mockClear();
 
-    // Malformed body ({}) must not silently wipe the selection.
+    // Malformed body ({}) must not silently wipe the selection or emit SSE.
     const omitted = await put(`/api/tasks/${task.id}/workflow`, {});
     expect(omitted.status).toBe(400);
+    expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
     const stillSelected = await get(`/api/tasks/${task.id}/workflow`);
     expect((stillSelected.body as { workflowId: string }).workflowId).toBe(wfId);
 
@@ -321,6 +327,60 @@ describe("workflow routes (U4)", () => {
     expect((cleared.body as { workflowId: string | null }).workflowId).toBeNull();
     const read = await get(`/api/tasks/${task.id}/workflow`);
     expect((read.body as { workflowId: string | null }).workflowId).toBeNull();
+  });
+
+  it.each([123, true, {}, []])(
+    "PUT /tasks/:taskId/workflow rejects non-string workflowId %j with 400 and no SSE",
+    async (workflowId) => {
+      const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
+      const wfId = (wf.body as { id: string }).id;
+      const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+      await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
+      vi.mocked(emitWorkflowSseEvent).mockClear();
+
+      const res = await put(`/api/tasks/${task.id}/workflow`, { workflowId });
+      expect(res.status).toBe(400);
+      expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
+      const stillSelected = await get(`/api/tasks/${task.id}/workflow`);
+      expect((stillSelected.body as { workflowId: string }).workflowId).toBe(wfId);
+    },
+  );
+
+  it("PUT /tasks/:taskId/workflow maps uncompilable custom workflow IR to 422 without SSE", async () => {
+    const branchy = await post("/api/workflows", { name: "Branching", ir: branchingIr() });
+    const branchyId = (branchy.body as { id: string }).id;
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    vi.mocked(emitWorkflowSseEvent).mockClear();
+
+    const res = await put(`/api/tasks/${task.id}/workflow`, { workflowId: branchyId });
+    expect(res.status).toBe(422);
+    expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
+  });
+
+  it("PUT /tasks/:taskId/workflow emits workflow:updated exactly once after select and clear", async () => {
+    const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
+    const wfId = (wf.body as { id: string }).id;
+    const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    vi.mocked(emitWorkflowSseEvent).mockClear();
+
+    const selected = await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
+    expect(selected.status).toBe(200);
+    expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
+    expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+      "workflow:updated",
+      { taskId: task.id, workflowId: wfId },
+      "proj-workflow-routes",
+    );
+
+    vi.mocked(emitWorkflowSseEvent).mockClear();
+    const cleared = await put(`/api/tasks/${task.id}/workflow`, { workflowId: null });
+    expect(cleared.status).toBe(200);
+    expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
+    expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+      "workflow:updated",
+      { taskId: task.id, workflowId: null },
+      "proj-workflow-routes",
+    );
   });
 
   it("PUT /project/default-workflow then create task inherits the default", async () => {
@@ -334,10 +394,18 @@ describe("workflow routes (U4)", () => {
     expect(detail.enabledWorkflowSteps).toHaveLength(1);
   });
 
-  it("selecting an unknown workflow returns 404", async () => {
+  it("selecting an unknown workflow returns 404 without mutating or emitting SSE", async () => {
+    const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
+    const wfId = (wf.body as { id: string }).id;
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+    await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
+    vi.mocked(emitWorkflowSseEvent).mockClear();
+
     const res = await put(`/api/tasks/${task.id}/workflow`, { workflowId: "WF-404" });
     expect(res.status).toBe(404);
+    expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
+    const stillSelected = await get(`/api/tasks/${task.id}/workflow`);
+    expect((stillSelected.body as { workflowId: string }).workflowId).toBe(wfId);
   });
 
   it("approve-cli only approves the command from pausedReason, ignoring body.command", async () => {
