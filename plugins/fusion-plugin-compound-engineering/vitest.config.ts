@@ -19,12 +19,14 @@ const dashboardSetup = fileURLToPath(new URL("./src/dashboard/test-setup.ts", im
 FNXC:CompoundEngineeringTests 2026-06-17-12:35:
 FN-6587 quarantines the CE broad-pnpm-test timeout flakes without timeout appeasement. Keep these excludes mirrored in scripts/lib/test-quarantine.json and remove or delete the files when the 14-day ratchet resolves.
 
+FNXC:CompoundEngineeringTests 2026-06-17-16:20:
+FN-6593 deletes orchestrator-flow.test.ts and skill-wiring.test.ts under the ratchet because the broad-workflow-only 5000ms timeout could not be tied to a narrow non-appeasement root cause.
+Keep the ledger entries and excludes removed together; git history remains the archive for this dropped CE orchestrator/skill-wiring coverage.
+
 FNXC:CompoundEngineeringTests 2026-06-17-17:18:
 The CE broad package lane still times out in sync/work-bridge hooks under project concurrency while both files pass in isolation. Quarantine the files under the deletion ratchet instead of raising hook timeouts or serializing the whole plugin lane.
 */
 const quarantinedCompoundEngineeringTests = [
-  "src/__tests__/orchestrator-flow.test.ts",
-  "src/__tests__/skill-wiring.test.ts",
   "src/__tests__/sync.test.ts",
   "src/__tests__/work-bridge.test.ts",
 ];

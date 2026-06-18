@@ -100,10 +100,13 @@ export default defineConfig({
             // `pnpm test` stays snappy. CI picks them up via `test:slow`
             // / `test:all` invoked from the root `test:full` script.
             "src/**/*.slow.test.ts",
-            "src/__tests__/cli-agent-executor.test.ts",
             /*
             FNXC:EngineTests 2026-06-16-19:05:
             FN-6492 verification caught cli-agent-executor as a package-lane-only flake: the hard-cancel assertion failed once and left an ENOTEMPTY temp hook directory, then the file passed in isolation. Quarantine the whole file under the deletion ratchet instead of weakening timing or process assertions.
+
+            FNXC:EngineTests 2026-06-17-16:12:
+            FN-6593 deletes cli-agent-executor.test.ts under the ratchet because the package-lane-only hard-cancel/ENOTEMPTY flake did not have a non-appeasement root-cause fix in this follow-up.
+            Keep the ledger entry and exclude removed together; git history remains the archive, while executor-recovery.test.ts still covers active CLI task-session hard-cancel cleanup.
             */
             "node_modules/**",
             "dist/**",
