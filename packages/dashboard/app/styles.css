@@ -231,6 +231,13 @@ svg.spin {
   --surface-muted: color-mix(in srgb, var(--surface) 94%, var(--text) 6%);
   --surface-emphasis: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
   --surface-hover-strong: color-mix(in srgb, var(--surface) 88%, var(--text) 12%);
+  /*
+   FNXC:DashboardSurfaceTokens 2026-06-18-21:29:
+   FN-6678 defines neutral surface tiers and a subtle border because the command-center subtree, NewTaskModal, and related dashboard surfaces consume these tokens via bare var() calls. Keep them tokenized so light and dark modes cascade from each theme's --surface, --text, and --border values instead of resolving unset.
+  */
+  --surface-1: color-mix(in srgb, var(--surface) 97%, var(--text) 3%);
+  --surface-2: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
   --bg-secondary: color-mix(in srgb, var(--surface) 70%, var(--card));
   --bg-tertiary: color-mix(in srgb, var(--surface) 40%, var(--card));
   --border: #30363d;
@@ -467,6 +474,9 @@ svg.spin {
   --surface-muted: color-mix(in srgb, var(--surface) 97%, var(--text) 3%);
   --surface-emphasis: color-mix(in srgb, var(--surface) 95%, var(--text) 5%);
   --surface-hover-strong: color-mix(in srgb, var(--surface) 94%, var(--text) 6%);
+  --surface-1: color-mix(in srgb, var(--surface) 98%, var(--text) 2%);
+  --surface-2: color-mix(in srgb, var(--surface) 95%, var(--text) 5%);
+  --border-subtle: color-mix(in srgb, var(--border) 60%, transparent);
   --bg: #ffffff;
   --surface: #f6f8fa;
   --card: #ffffff;
