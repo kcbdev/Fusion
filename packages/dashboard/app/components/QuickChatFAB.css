@@ -374,7 +374,7 @@
 
 .quick-chat-rename-label {
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .quick-chat-rename-input {
@@ -1351,7 +1351,7 @@ Quick chat session rows include a separate rename button so selecting a session,
 /* Streaming indicator */
 .quick-chat-panel .chat-message--streaming {
   align-self: flex-start;
-  background: var(--bg-elevated, var(--bg-secondary));
+  background: var(--surface-1);
   color: var(--text);
   border-bottom-left-radius: var(--radius-sm);
   opacity: 0.9;

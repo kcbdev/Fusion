@@ -12,7 +12,7 @@
 
 .reliability-card {
   padding: var(--space-lg);
-  border: var(--border-width-thin, 0.0625rem) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
 }
@@ -55,7 +55,7 @@
 }
 
 .reliability-headline {
-  font-size: var(--font-size-2xl, 1.75rem);
+  font-size: 1.75rem;
   font-weight: 700;
 }
 
@@ -82,7 +82,7 @@
 .reliability-table td {
   text-align: left;
   padding: var(--space-xs) var(--space-sm);
-  border-bottom: var(--border-width-thin, 0.0625rem) solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .reliability-stat-row {

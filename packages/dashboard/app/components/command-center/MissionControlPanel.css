@@ -14,19 +14,19 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
 .cc-mission-control {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4, 16px);
+  gap: var(--space-lg);
 }
 
 .cc-mc-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-4, 16px);
+  gap: var(--space-lg);
 }
 
 .cc-mc-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
+  gap: var(--space-sm);
   min-width: 0;
 }
 
@@ -42,7 +42,7 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1, 4px);
+  gap: var(--space-xs);
 }
 
 .cc-mc-session,
@@ -50,8 +50,8 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2, 8px);
-  padding: var(--space-2, 8px);
+  gap: var(--space-sm);
+  padding: var(--space-sm);
   border: 1px solid var(--border-subtle, color-mix(in srgb, #ffffff 8%, transparent));
   border-radius: var(--radius-sm, 6px);
   background: var(--surface-1, color-mix(in srgb, #ffffff 2%, transparent));
@@ -74,7 +74,7 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
 .cc-mc-node-meta {
   display: flex;
   align-items: center;
-  gap: var(--space-2, 8px);
+  gap: var(--space-sm);
   flex-shrink: 0;
 }
 

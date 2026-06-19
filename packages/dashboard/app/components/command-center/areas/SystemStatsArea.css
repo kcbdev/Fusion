@@ -7,9 +7,9 @@ The Command Center System area replaces the standalone System Stats modal with g
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-2);
+  gap: var(--space-sm);
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-system-refresh .btn-icon {
@@ -24,17 +24,17 @@ The Command Center System area replaces the standalone System Stats modal with g
   min-inline-size: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-md);
 }
 
 .cc-system-chart-grid .cc-stat-card {
-  gap: var(--space-3);
+  gap: var(--space-md);
 }
 
 .cc-system-section-title-with-icon {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-system-section-title-with-icon svg {
@@ -49,9 +49,9 @@ System control cards sit beside chart/stat cards, so FN-6680 gives them the same
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border-subtle);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-1);
 }
@@ -59,7 +59,7 @@ System control cards sit beside chart/stat cards, so FN-6680 gives them the same
 .cc-system-vitest-card .btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-system-toggle-row,
@@ -67,13 +67,13 @@ System control cards sit beside chart/stat cards, so FN-6680 gives them the same
 .cc-system-threshold-controls {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-system-toggle-row,
 .cc-system-threshold-row {
   color: var(--text);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-system-threshold-controls input[type="range"] {
@@ -87,7 +87,7 @@ System control cards sit beside chart/stat cards, so FN-6680 gives them the same
 .cc-system-note {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-system-note--error,

@@ -90,7 +90,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: var(--text-xs, 12px);
+  font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -130,7 +130,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   align-items: center;
   gap: var(--space-xs);
   padding: var(--space-xs) var(--space-md);
-  font-size: var(--text-xs, 12px);
+  font-size: 0.75rem;
   font-weight: 500;
   border: none;
   border-radius: var(--radius-sm);
@@ -288,12 +288,12 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: calc(var(--space-md) + var(--space-xs) / 2) var(--space-lg);
-  background: var(--card-bg);
+  background: var(--card);
   transition: border-color var(--transition-fast);
 }
 
 .schedule-card:hover {
-  border-color: var(--border-hover, var(--border));
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text) 30%);
 }
 
 .schedule-card.disabled {
@@ -671,7 +671,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 .step-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .step-card-row {
@@ -900,7 +900,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 .routine-card:hover {
-  border-color: var(--border-hover, var(--border));
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text) 30%);
 }
 
 .routine-card.disabled {
@@ -1116,7 +1116,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 .routine-trigger-btn:hover {
-  border-color: var(--border-hover, var(--border));
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text) 30%);
   background: var(--bg-secondary);
   color: var(--text);
 }
@@ -1959,7 +1959,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 .gm-status-conflict {
-  color: var(--danger, #c0392b);
+  color: var(--color-error);
   font-weight: 600;
 }
 
@@ -1969,8 +1969,8 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   gap: var(--space-sm);
   padding: var(--space-md);
   margin-top: var(--space-md);
-  background: color-mix(in srgb, var(--warning, #f4b400) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning, #f4b400) 40%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 40%, transparent);
   border-radius: var(--radius-md);
   font-size: 13px;
   line-height: 1.4;
@@ -1979,7 +1979,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 .gm-status-warning svg {
   flex-shrink: 0;
   margin-top: 2px;
-  color: var(--warning, #f4b400);
+  color: var(--color-warning);
 }
 
 .gm-status-warning code {
@@ -2061,11 +2061,11 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 .gm-status-advances .gm-advance-needs-action {
-  background: color-mix(in srgb, var(--warning, #f4b400) 8%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
 .gm-status-advances .gm-advance-handled {
-  background: color-mix(in srgb, var(--success, #27ae60) 6%, transparent);
+  background: color-mix(in srgb, var(--color-success) 6%, transparent);
   color: var(--text-muted);
 }
 
@@ -3124,7 +3124,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   gap: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-pill);
-  font-size: var(--text-xs, 12px);
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -3407,7 +3407,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: var(--text-xs, 12px);
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -3422,7 +3422,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
-  font-size: var(--text-xs, 12px);
+  font-size: 0.75rem;
   font-family: var(--font-mono);
 }
 
@@ -3586,7 +3586,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  background: var(--bg-surface, var(--surface-subtle));
+  background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;

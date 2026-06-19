@@ -69,7 +69,7 @@
 .wf-field-id-static {
   font-family: var(--font-mono, monospace);
   font-size: 0.7rem;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
   background: var(--surface-2, color-mix(in srgb, #ffffff 4%, transparent));
   padding: 1px 6px;
   border-radius: var(--radius-sm);
@@ -113,7 +113,7 @@
 .wf-field-sub > span {
   font-size: 0.65rem;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-field--checkbox {
@@ -140,7 +140,7 @@
 .wf-field-options-label {
   font-size: 0.65rem;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-field-option-row {

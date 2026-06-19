@@ -10,7 +10,7 @@ Area headings, table metadata, and empty states use --text-muted so the analytic
 .cc-area {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-lg);
   min-inline-size: 0;
 }
 
@@ -21,7 +21,7 @@ FN-6680 preserves the FN-6664 section rhythm while adding real-layout shrink gua
 .cc-area-section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-md);
   min-inline-size: 0;
 }
 
@@ -29,12 +29,12 @@ FN-6680 preserves the FN-6664 section rhythm while adding real-layout shrink gua
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-area-section-title {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -48,19 +48,19 @@ FN-6683 recharts wrappers must stay responsive without creating an inner scroll 
 .cc-area .cc-recharts-chart,
 .cc-area .cc-recharts-empty {
   inline-size: 100%;
-  block-size: calc(var(--space-20) * 3);
+  block-size: calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 3);
   min-inline-size: 0;
 }
 
 /* Reuse the shell's stat-grid/stat-card look. */
 .cc-area .cc-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--space-20) * 2)), 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2)), 1fr));
+  gap: var(--space-md);
 }
 
 .cc-stat-sub {
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
   color: var(--text-muted);
 }
 
@@ -72,7 +72,7 @@ The Tokens area needs a real hour/day/week control and live token-number motion.
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: var(--space-1);
+  gap: var(--space-xs);
 }
 
 .cc-token-granularity .btn.active {
@@ -87,7 +87,7 @@ The Tokens area needs a real hour/day/week control and live token-number motion.
 
 @keyframes cc-token-count-pop {
   from {
-    transform: translateY(var(--space-1));
+    transform: translateY(var(--space-xs));
     opacity: 0.7;
   }
   to {
@@ -121,7 +121,7 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
 */
 .cc-table-wrap {
   max-inline-size: 100%;
-  border: var(--border-width) solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-1);
   overflow-x: auto;
@@ -131,15 +131,15 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
 .cc-table {
   inline-size: 100%;
   border-collapse: collapse;
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
 }
 
 .cc-table th,
 .cc-table td {
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-sm) var(--space-md);
   text-align: right;
-  border-bottom: var(--border-width) solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
 
@@ -175,7 +175,7 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
 }
 
 .cc-sort-caret {
-  margin-inline-start: var(--space-1);
+  margin-inline-start: var(--space-xs);
   font-size: 0.7em;
   color: var(--accent);
 }
@@ -184,14 +184,14 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
 .cc-unavailable {
   color: var(--text-muted);
   cursor: help;
-  border-bottom: var(--border-width) dotted var(--border-subtle);
+  border-bottom: 1px dotted var(--border-subtle);
 }
 
 .cc-loading-inline {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-4);
+  gap: var(--space-sm);
+  padding: var(--space-lg);
   color: var(--text-muted);
 }
 
@@ -200,8 +200,8 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-6);
+  gap: var(--space-sm);
+  padding: var(--space-xl);
   color: var(--text-muted);
   text-align: center;
 }
@@ -211,7 +211,7 @@ FN-6680 keeps table-heavy chart areas on the same --border-width/--border-subtle
 }
 
 .cc-pricing-note {
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
   color: var(--text-muted);
 }
 
@@ -222,16 +222,16 @@ The Team view must use dashboard design tokens only, preserve .cc-tabpanel as th
 .cc-team-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-md);
 }
 
 .cc-team-chart-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-md);
   min-inline-size: 0;
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border-subtle);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-1);
   animation: cc-team-panel-reveal var(--duration-fast) ease-out both;
@@ -248,13 +248,13 @@ The Team view must use dashboard design tokens only, preserve .cc-tabpanel as th
 
 .cc-muted-hint {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-team-agent-cell {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
   min-inline-size: 0;
 }
 
@@ -269,14 +269,14 @@ The Team view must use dashboard design tokens only, preserve .cc-tabpanel as th
 }
 
 .cc-team-agent-role {
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
   text-transform: capitalize;
 }
 
 @keyframes cc-team-panel-reveal {
   from {
     opacity: 0;
-    transform: translateY(var(--space-1));
+    transform: translateY(var(--space-xs));
   }
   to {
     opacity: 1;
@@ -296,7 +296,7 @@ Tablet Command Center areas share the FN-6679 overflow fix with the shell: area 
 */
 @media (min-width: 769px) and (max-width: 1024px) {
   .cc-area .cc-stat-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--space-20) * 2)), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2)), 1fr));
   }
 
   .cc-team-chart-grid {
@@ -320,6 +320,6 @@ Tablet Command Center areas share the FN-6679 overflow fix with the shell: area 
   }
 
   .cc-team-chart-panel {
-    padding: var(--space-2);
+    padding: var(--space-sm);
   }
 }

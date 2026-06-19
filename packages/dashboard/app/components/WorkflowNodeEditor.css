@@ -48,7 +48,7 @@
   justify-content: space-between;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
-  background: var(--accent-subtle, color-mix(in srgb, #3b82f6 12%, transparent));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font-size: 0.85rem;
@@ -398,7 +398,7 @@
 
 .wf-editor-readonly-note {
   font-size: 0.75rem;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -473,7 +473,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-templates-entries {
@@ -507,7 +507,7 @@
 
 .wf-templates-badge {
   padding: 0 var(--space-xs);
-  background: var(--accent-subtle, color-mix(in srgb, #3b82f6 12%, transparent));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 0.7rem;
@@ -903,7 +903,7 @@
 .wf-inspector-note {
   margin: 0;
   font-size: 0.78rem;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-inspector-note--info {
@@ -1219,7 +1219,7 @@
 .wf-workflow-description,
 .wf-workflow-description--readonly {
   font-size: 0.78rem;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -1266,7 +1266,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-template-option {
@@ -1281,12 +1281,12 @@
 }
 
 .wf-template-option:hover {
-  background: var(--bg-hover);
+  background: var(--surface-hover);
 }
 
 .wf-template-option.selected {
   border-color: var(--accent);
-  background: var(--bg-active);
+  background: var(--surface-hover-strong);
 }
 
 .wf-template-option:focus-visible {
@@ -1309,7 +1309,7 @@
 
 .wf-template-option-count {
   font-size: 0.72rem;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-create-error {
@@ -1393,7 +1393,7 @@
   cursor: not-allowed;
   border-color: var(--border);
   background: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-column-panel-empty {
@@ -1489,7 +1489,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-tertiary);
+  color: var(--text-dim);
 }
 
 .wf-column-agent-select {
@@ -1517,7 +1517,7 @@
 
 .wf-column-agent-select:disabled {
   background: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  color: var(--text-dim);
   cursor: not-allowed;
 }
 
@@ -1586,7 +1586,7 @@
 
 .wf-column-agent-mode-option:has(input:disabled) {
   background: var(--bg-tertiary);
-  color: var(--text-tertiary);
+  color: var(--text-dim);
   cursor: not-allowed;
 }
 
@@ -1619,7 +1619,7 @@
 }
 
 .wf-ai-toggle:hover {
-  background: var(--bg-hover);
+  background: var(--surface-hover);
 }
 
 .wf-ai-create-body {

@@ -353,7 +353,7 @@
 /* Context menu for session items */
 .chat-session-context-menu {
   position: fixed;
-  background: var(--bg-elevated, var(--bg));
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
@@ -639,7 +639,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
   display: block;
   margin-bottom: var(--space-xs);
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .chat-rename-input {
@@ -680,7 +680,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
 }
 
 .chat-thread-header-render-toggle:hover {
-  background: var(--bg-hover, var(--bg-secondary));
+  background: var(--surface-hover);
   color: var(--text);
 }
 
@@ -755,7 +755,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
 
 .chat-message--assistant {
   align-self: flex-start;
-  background: var(--bg-elevated, var(--bg-secondary));
+  background: var(--surface-1);
   color: var(--text);
   border-bottom-left-radius: var(--radius-sm);
 }
@@ -829,7 +829,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--surface-bg, color-mix(in srgb, var(--surface) 55%, transparent));
+  background: var(--surface);
   color: var(--text-muted);
   margin-left: 6px;
   white-space: nowrap;
@@ -1358,7 +1358,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
 /* Streaming indicator */
 .chat-message--streaming {
   align-self: flex-start;
-  background: var(--bg-elevated, var(--bg-secondary));
+  background: var(--surface-1);
   color: var(--text);
   border-bottom-left-radius: 4px;
   opacity: 0.9;

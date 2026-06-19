@@ -11,10 +11,10 @@ The FN-4286 dashboard text-token guard requires command-center secondary copy to
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-lg);
   min-height: 0;
   inline-size: 100%;
-  padding: var(--space-4);
+  padding: var(--space-lg);
 }
 
 /*
@@ -26,15 +26,15 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-md);
 }
 
 .cc-title {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
   margin: 0;
-  font-size: var(--font-size-lg);
+  font-size: 1rem;
 }
 
 /* ---- Tabs ---- */
@@ -42,19 +42,19 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
   display: flex;
   flex-shrink: 0;
   flex-wrap: wrap;
-  gap: var(--space-1);
-  border-bottom: var(--border-width) solid var(--border-subtle);
+  gap: var(--space-xs);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .cc-tab {
   appearance: none;
   background: none;
   border: none;
-  border-bottom: var(--border-width-thick) solid transparent;
+  border-bottom: 2px solid transparent;
   color: var(--text-muted);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-sm) var(--space-md);
   cursor: pointer;
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -80,7 +80,7 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
 
 @media (max-width: 768px) {
   .cc-tabpanel {
-    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0) + var(--standalone-bottom-gap));
+    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0) + var(--standalone-bottom-gap));
   }
 }
 
@@ -89,13 +89,13 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
   min-inline-size: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-lg);
 }
 
 .cc-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--space-20) * 2)), 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2)), 1fr));
+  gap: var(--space-md);
 }
 
 /*
@@ -105,21 +105,21 @@ FN-6680 standardizes the Command Center card rhythm across overview, area, table
 .cc-stat-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-sm);
   min-inline-size: 0;
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border-subtle);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-1);
 }
 
 .cc-stat-label {
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
   color: var(--text-muted);
 }
 
 .cc-stat-value {
-  font-size: var(--font-size-xl);
+  font-size: 1.25rem;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
@@ -137,15 +137,15 @@ The GitHub closed-at backfill control lives inside the existing Fixed by Fusion 
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-github-backfill-status {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-xs);
   color: var(--text-muted);
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
 }
 
 .cc-github-backfill-status--error {
@@ -175,18 +175,18 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
 .cc-live-strip {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(calc(var(--space-20) * 2), 1fr) minmax(calc((var(--space-20) * 3) + var(--space-4)), 2fr) minmax(calc(var(--space-20) * 2), 1fr);
+  grid-template-columns: minmax(calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2), 1fr) minmax(calc((calc(var(--space-2xl) * 2 + var(--space-lg)) * 3) + var(--space-lg)), 2fr) minmax(calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2), 1fr);
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border-subtle);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent),
     var(--surface-1);
-  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: 0 0 var(--space-lg) color-mix(in srgb, var(--accent) 18%, transparent);
   overflow: hidden;
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-live-strip::before {
@@ -211,7 +211,7 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
 .cc-live-strip-heading {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-live-strip-label {
@@ -223,15 +223,15 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
   min-inline-size: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-live-metric {
   min-inline-size: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-2);
+  gap: var(--space-xs);
+  padding: var(--space-sm);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-2) 70%, transparent);
   animation: cc-live-signal-pulse calc(var(--duration-slow) * 6) ease-in-out infinite;
@@ -239,7 +239,7 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
 
 .cc-live-metric-value {
   color: var(--text);
-  font-size: var(--font-size-lg);
+  font-size: 1rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -254,7 +254,7 @@ Overview token totals now live-poll and should visibly count up on change in bot
 
 @keyframes cc-token-count-pop {
   from {
-    transform: translateY(var(--space-1));
+    transform: translateY(var(--space-xs));
     opacity: 0.7;
   }
   to {
@@ -266,7 +266,7 @@ Overview token totals now live-poll and should visibly count up on change in bot
 .cc-live-metric-label,
 .cc-live-trend-label {
   color: var(--text-muted);
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -275,15 +275,15 @@ Overview token totals now live-poll and should visibly count up on change in bot
   min-inline-size: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-sm);
 }
 
 .cc-live-trend .cc-sparkline {
-  block-size: var(--space-10);
+  block-size: calc(var(--space-2xl) + var(--space-sm));
 }
 
 .cc-live-trend .cc-sparkline-bar {
-  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: 0 0 var(--space-sm) color-mix(in srgb, var(--accent) 28%, transparent);
   animation: cc-live-signal-pulse calc(var(--duration-slow) * 5) ease-in-out infinite;
 }
 
@@ -323,7 +323,7 @@ Overview charts must use dashboard tokens only and keep motion decorative; anima
   min-inline-size: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
+  gap: var(--space-md);
   align-items: stretch;
 }
 
@@ -332,14 +332,14 @@ Overview charts must use dashboard tokens only and keep motion decorative; anima
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: var(--border-width) solid var(--border-subtle);
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background:
     linear-gradient(145deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent),
     var(--surface-1);
-  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 var(--space-lg) color-mix(in srgb, var(--accent) 12%, transparent);
   overflow: hidden;
   animation: cc-overview-chart-rise var(--duration-normal) ease-out both;
 }
@@ -363,13 +363,13 @@ Overview charts must use dashboard tokens only and keep motion decorative; anima
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-xs);
 }
 
 .cc-overview-chart-header p {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .cc-overview-chart-card .cc-bar-chart,
@@ -387,23 +387,23 @@ Overview recharts cards use token-derived height so ResponsiveContainer can rend
 .cc-overview-chart-card .cc-recharts-chart,
 .cc-overview-chart-card .cc-recharts-empty {
   inline-size: 100%;
-  block-size: calc(var(--space-20) * 3);
+  block-size: calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 3);
   min-inline-size: 0;
 }
 
 .cc-overview-chart-card .cc-sparkline {
-  block-size: var(--space-16);
+  block-size: calc(var(--space-2xl) * 2);
 }
 
 .cc-overview-chart-card .cc-bar-fill,
 .cc-overview-chart-card .cc-sparkline-bar {
-  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 var(--space-sm) color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 @keyframes cc-overview-chart-rise {
   from {
     opacity: 0;
-    transform: translateY(var(--space-2));
+    transform: translateY(var(--space-sm));
   }
   to {
     opacity: 1;
@@ -470,7 +470,7 @@ The Command Center subtree previously had no tablet tier, so at 769px–1024px t
 
   .cc-stat-grid,
   .cc-area .cc-stat-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--space-20) * 2)), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(calc(var(--space-2xl) * 2 + var(--space-lg)) * 2)), 1fr));
   }
 }
 
@@ -502,8 +502,8 @@ The Command Center subtree previously had no tablet tier, so at 769px–1024px t
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-6);
+  gap: var(--space-sm);
+  padding: var(--space-xl);
   color: var(--text-muted);
   text-align: center;
 }
@@ -513,7 +513,7 @@ The Command Center subtree previously had no tablet tier, so at 769px–1024px t
 }
 
 .cc-loading .cc-chart-skeleton {
-  block-size: var(--space-4);
+  block-size: var(--space-lg);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   animation: cc-shell-pulse var(--duration-slow) ease-in-out infinite;

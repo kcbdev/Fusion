@@ -52,6 +52,7 @@ const qualityAppFoundationUiTests = [
   "app/__tests__/column-fixed-width.test.ts",
   "app/__tests__/component-css-no-raw-rgba.test.ts",
   "app/__tests__/dashboard-component-color-tokenization.test.ts",
+  "app/__tests__/dashboard-css-token-validity.css.test.ts",
   "app/__tests__/dashboard-footer-mobile-layout.test.ts",
   "app/__tests__/detail-body-mobile-overflow.test.ts",
   "app/__tests__/dev-server-layout-css.test.ts",

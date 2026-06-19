@@ -39,8 +39,8 @@
 }
 
 .github-import-toolbar__zone--filter input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
   outline: none;
 }
 
@@ -105,8 +105,8 @@
 
 .github-import-remote-select select:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* Load button */
@@ -704,7 +704,7 @@
 }
 
 [data-theme="light"] .github-import-toolbar__zone--filter input:focus {
-  border-color: var(--color-primary, var(--todo));
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--in-progress) 15%, transparent);
 }
 

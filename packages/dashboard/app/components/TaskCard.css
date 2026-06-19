@@ -221,9 +221,9 @@ The global mobile touch-action reset applies to descendants, and browsers inters
 
 /* DISTINCT error badge for the failed node-state (never the open-PR badge). */
 .card-pr-node-badge--failed {
-  background: color-mix(in srgb, var(--color-danger, #e5534b) 18%, transparent);
-  border-color: color-mix(in srgb, var(--color-danger, #e5534b) 35%, transparent);
-  color: var(--color-danger, #e5534b);
+  background: color-mix(in srgb, var(--color-error) 18%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+  color: var(--color-error);
 }
 
 .card-status-badge.stalled-review {
@@ -894,7 +894,7 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
 
 .card-duplicate-keep {
   border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
-  background: color-mix(in srgb, var(--surface-secondary) 90%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 90%, transparent);
   color: var(--text);
   cursor: pointer;
   appearance: none;
@@ -1195,10 +1195,10 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  font-size: var(--font-size-xs, 11px);
+  font-size: 0.8rem;
   font-weight: 600;
   background: var(--todo);
-  color: var(--background, #fff);
+  color: var(--bg);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -1290,7 +1290,7 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
 .card-unarchive-btn:hover {
   background: var(--card-hover);
   color: var(--text);
-  border-color: var(--border-hover);
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text) 30%);
 }
 
 .card-archive-btn:focus,
@@ -1331,7 +1331,7 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
 .card-send-back-btn:hover {
   background: var(--card-hover);
   color: var(--text);
-  border-color: var(--border-hover);
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text) 30%);
 }
 
 .card-send-back-btn:focus {
@@ -1579,9 +1579,9 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
   align-items: center;
   gap: 3px;
   padding: 1px 7px;
-  border: 1px solid var(--border-color, #2a2d34);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--chip-bg, #1c1f26);
+  background: var(--surface-2);
   color: var(--text-muted, #b4b8c0);
   font-size: 11px;
   line-height: 1.5;
@@ -1607,8 +1607,8 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
   align-items: center;
   padding: 0 5px;
   border-radius: 999px;
-  border: 1px solid var(--border-color, #2a2d34);
-  background: var(--chip-bg, #1c1f26);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
 }
 
 .card-field-badge--overflow {

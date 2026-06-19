@@ -45,8 +45,8 @@
 }
 
 .cli-posture-chip--elevated {
-  color: var(--warning, var(--color-warning));
-  border-color: var(--warning, var(--color-warning));
+  color: var(--color-warning);
+  border-color: var(--color-warning);
 }
 
 .cli-posture-chip__mode {
@@ -91,7 +91,7 @@
   margin-top: var(--space-sm);
   padding: 2px var(--space-sm);
   font-size: 0.75rem;
-  color: var(--accent, var(--color-primary));
+  color: var(--accent);
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -164,8 +164,8 @@ Recurrence #5 requires the attach terminal to mirror TerminalModal: xterm receiv
 .cli-session-terminal__advance-btn {
   padding: 4px var(--space-md);
   font-size: 0.8125rem;
-  color: var(--button-primary-text, var(--accent-text));
-  background: var(--button-primary-bg, var(--accent));
+  color: var(--accent-text);
+  background: var(--accent);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -241,14 +241,14 @@ Recurrence #5 requires the attach terminal to mirror TerminalModal: xterm receiv
 }
 
 .cli-terminal-key--ctrl.cli-terminal-key--active {
-  color: var(--accent-text, var(--button-primary-text));
-  background: var(--accent, var(--color-primary));
-  border-color: var(--accent, var(--color-primary));
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .cli-terminal-key--ctrlc {
-  color: var(--warning, var(--color-warning));
-  border-color: var(--warning, var(--color-warning));
+  color: var(--color-warning);
+  border-color: var(--color-warning);
 }
 
 .cli-session-terminal__input-row {
@@ -263,14 +263,14 @@ Recurrence #5 requires the attach terminal to mirror TerminalModal: xterm receiv
   padding: var(--space-xs) var(--space-sm);
   font-size: 16px; /* >=16px avoids iOS focus zoom */
   color: var(--text);
-  background: var(--input-bg, var(--bg));
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
 .cli-session-terminal__mobile-input:focus {
   outline: none;
-  border-color: var(--accent, var(--color-primary));
+  border-color: var(--accent);
 }
 
 .cli-session-terminal__mobile-send {
@@ -278,8 +278,8 @@ Recurrence #5 requires the attach terminal to mirror TerminalModal: xterm receiv
   min-height: 38px;
   padding: var(--space-xs) var(--space-md);
   font-size: 0.8125rem;
-  color: var(--button-primary-text, var(--accent-text));
-  background: var(--button-primary-bg, var(--accent));
+  color: var(--accent-text);
+  background: var(--accent);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;

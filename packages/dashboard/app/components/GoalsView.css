@@ -226,7 +226,7 @@
   padding: calc(var(--space-xs) / 2);
   border: calc(var(--space-xs) / 4) solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--surface-elevated);
+  background: var(--surface-1);
 }
 
 .goals-linked-mission-link {

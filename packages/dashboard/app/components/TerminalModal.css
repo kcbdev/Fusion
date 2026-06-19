@@ -415,7 +415,7 @@ FN-6603 found that unicode-range scoping is not enough when the symbols face is 
 }
 
 .terminal-prompt {
-  color: var(--success);
+  color: var(--color-success);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -438,7 +438,7 @@ FN-6603 found that unicode-range scoping is not enough when the symbols face is 
 
 .terminal-output-error {
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border-left: 3px solid var(--failed);
+  border-left: 3px solid var(--color-error);
 }
 
 .terminal-running-indicator {
@@ -478,7 +478,7 @@ FN-6603 found that unicode-range scoping is not enough when the symbols face is 
 }
 
 .terminal-input-prompt {
-  color: var(--success);
+  color: var(--color-success);
   font-weight: 600;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -513,7 +513,7 @@ FN-6603 found that unicode-range scoping is not enough when the symbols face is 
 
 .terminal-kill-btn {
   padding: var(--space-sm) var(--space-lg);
-  background: var(--failed);
+  background: var(--color-error);
   border: none;
   border-radius: var(--radius);
   color: white;
@@ -662,7 +662,7 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
 }
 
 .terminal-status.disconnected {
-  background: var(--error);
+  background: var(--color-error);
 }
 
 @keyframes terminal-pulse {
@@ -748,7 +748,7 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   flex-direction: column;
   gap: var(--space-xs);
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
+  font-size: 0.875rem;
 }
 
 .terminal-preference-field--checkbox {
@@ -765,7 +765,7 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
 
 .terminal-preference-note {
   color: var(--text-muted);
-  font-size: var(--font-size-xs);
+  font-size: 0.8rem;
 }
 
 .terminal-preferences-reset {
@@ -798,11 +798,11 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
 }
 
 .terminal-connection-status.disconnected {
-  color: var(--error);
+  color: var(--color-error);
 }
 
 .terminal-exit-code {
-  color: var(--error);
+  color: var(--color-error);
   font-weight: 500;
 }
 
@@ -871,7 +871,7 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   padding: var(--space-md) var(--space-lg);
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
   border-bottom: 1px solid var(--border);
-  color: var(--error);
+  color: var(--color-error);
   font-size: 13px;
 }
 
@@ -883,7 +883,7 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
 }
 
 .terminal-error-content span {
-  color: var(--error, #f48771);
+  color: var(--color-error);
   text-align: center;
 }
 

@@ -4,5 +4,5 @@
  * adds spacing between the funnel and the throughput cards.
  */
 .cc-area[data-testid="cc-area-funnel"] .cc-area-section + .cc-area-section {
-  margin-top: var(--space-4, 1rem);
+  margin-top: var(--space-lg);
 }

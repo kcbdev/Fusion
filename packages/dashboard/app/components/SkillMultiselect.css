@@ -55,7 +55,7 @@
 
 .skill-chip-remove:hover:not(:disabled) {
   color: var(--text);
-  background: var(--bg-hover);
+  background: var(--surface-hover);
 }
 
 .skill-chip-remove:disabled {

@@ -6,7 +6,7 @@
 .cc-date-range-trigger {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1, 0.25rem);
+  gap: var(--space-xs);
 }
 
 /*
@@ -18,38 +18,38 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
 */
 .cc-date-range-popover {
   position: absolute;
-  top: calc(100% + var(--space-1, 0.25rem));
+  top: calc(100% + var(--space-xs));
   right: 0;
   z-index: 20;
   min-width: 16rem;
-  padding: var(--space-3, 0.75rem);
+  padding: var(--space-md);
   background: var(--surface-1, #1c1c1c);
   border: 1px solid var(--border-subtle, color-mix(in srgb, #7f7f7f 25%, transparent));
   border-radius: var(--radius-md, 8px);
   box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 0.75rem);
+  gap: var(--space-md);
 }
 
 .cc-date-range-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2, 0.5rem);
+  gap: var(--space-sm);
 }
 
 .cc-date-range-custom {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 0.5rem);
+  gap: var(--space-sm);
 }
 
 .cc-date-range-field {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2, 0.5rem);
-  font-size: var(--font-size-sm, 0.85rem);
+  gap: var(--space-sm);
+  font-size: 0.85rem;
   color: var(--text-muted);
 }
 
@@ -58,5 +58,5 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
   border: 1px solid var(--border-subtle, color-mix(in srgb, #7f7f7f 25%, transparent));
   border-radius: var(--radius-sm, 4px);
   color: var(--text);
-  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  padding: var(--space-xs) var(--space-sm);
 }

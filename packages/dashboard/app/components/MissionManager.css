@@ -882,7 +882,7 @@
 .mission-list__item-run-help {
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-muted);
-  max-width: calc(var(--space-3xl) * 5);
+  max-width: calc(calc(var(--space-2xl) + var(--space-md)) * 5);
 }
 
 .mission-list__item-summary {
@@ -1127,7 +1127,7 @@
   padding: calc(var(--space-xs) / 2);
   border: calc(var(--space-xs) / 4) solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--surface-elevated);
+  background: var(--surface-1);
 }
 
 .mission-detail__linked-goal-chip-link {
@@ -1327,9 +1327,9 @@
 }
 
 .mission-detail__tab--active {
-  background: var(--button-primary-bg);
-  color: var(--button-primary-text);
-  border-color: var(--button-primary-bg);
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
 }
 
 .mission-detail__activity {
