@@ -696,6 +696,21 @@ describe("TerminalModal", () => {
       expect(mockSendInput).toHaveBeenCalledWith("\x03");
       expect(ctrlBtn.getAttribute("aria-pressed")).toBe("false");
 
+      fireEvent.click(ctrlBtn);
+      fireEvent.click(screen.getByRole("button", { name: "D" }));
+      expect(mockSendInput).toHaveBeenCalledWith("\x04");
+      expect(ctrlBtn.getAttribute("aria-pressed")).toBe("false");
+
+      fireEvent.click(ctrlBtn);
+      fireEvent.click(screen.getByRole("button", { name: "L" }));
+      expect(mockSendInput).toHaveBeenCalledWith("\x0c");
+      expect(ctrlBtn.getAttribute("aria-pressed")).toBe("false");
+
+      fireEvent.click(ctrlBtn);
+      fireEvent.click(screen.getByRole("button", { name: "." }));
+      expect(mockSendInput).toHaveBeenCalledWith(".");
+      expect(ctrlBtn.getAttribute("aria-pressed")).toBe("false");
+
       fireEvent.click(altBtn);
       fireEvent.click(screen.getByRole("button", { name: "D" }));
       expect(mockSendInput).toHaveBeenCalledWith("\x1bd");
@@ -811,7 +826,19 @@ describe("TerminalModal", () => {
         helperTextarea.focus();
 
         fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+        const ctrlButton = screen.getByTestId("terminal-modifier-ctrl");
         const arrowUpButton = screen.getByTestId("terminal-arrow-up");
+        fireEvent.touchStart(ctrlButton);
+        expect(document.activeElement).toBe(helperTextarea);
+
+        const pointerDown = new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          pointerType: "touch",
+        });
+        ctrlButton.dispatchEvent(pointerDown);
+        expect(pointerDown.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(helperTextarea);
         const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
         arrowUpButton.dispatchEvent(mouseDown);
         expect(mouseDown.defaultPrevented).toBe(true);
@@ -4876,10 +4903,13 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     expect(mockSendInput).toHaveBeenCalledWith("echo hello\r");
   });
 
-  it("copies selected terminal text on ctrl+c and blocks sigint", async () => {
+  it.each([
+    ["mac", "MacIntel", { metaKey: true }],
+    ["non-mac", "Win32", { ctrlKey: true }],
+  ] as const)("copies selected terminal text on platform copy modifier+c and blocks sigint on %s", async (_name, platform, modifier) => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "platform", {
-      value: "Win32",
+      value: platform,
       configurable: true,
     });
     Object.defineProperty(navigator, "clipboard", {
@@ -4896,7 +4926,7 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     });
 
     const handled = terminalKeyEventHandler?.(
-      new KeyboardEvent("keydown", { key: "c", ctrlKey: true }),
+      new KeyboardEvent("keydown", { key: "c", ...modifier }),
     );
 
     expect(handled).toBe(false);
@@ -4904,9 +4934,13 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     expect(mockSendInput).not.toHaveBeenCalled();
   });
 
-  it("preserves sigint on ctrl+c when nothing is selected", async () => {
+  it.each([
+    ["mac ctrl", "MacIntel", { ctrlKey: true }],
+    ["mac platform copy modifier", "MacIntel", { metaKey: true }],
+    ["non-mac ctrl", "Win32", { ctrlKey: true }],
+  ] as const)("preserves sigint on %s+c when nothing is selected", async (_name, platform, modifier) => {
     Object.defineProperty(navigator, "platform", {
-      value: "Win32",
+      value: platform,
       configurable: true,
     });
     Object.defineProperty(navigator, "clipboard", {
@@ -4922,7 +4956,7 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     });
 
     const handled = terminalKeyEventHandler?.(
-      new KeyboardEvent("keydown", { key: "c", ctrlKey: true }),
+      new KeyboardEvent("keydown", { key: "c", ...modifier }),
     );
 
     expect(handled).toBe(true);

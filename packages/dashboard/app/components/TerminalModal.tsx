@@ -6,6 +6,8 @@ import {
   useCallback,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { getErrorMessage } from "@fusion/core";
@@ -1256,10 +1258,21 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   /*
   FNXC:Terminal 2026-06-19-05:05:
   FN-6697 root cause: shortcut-bar buttons took browser focus on hardware-keyboard surfaces before their click handlers injected bytes, leaving xterm's helper textarea blurred even though the active session's sendInput path was correct. Preserve focus on mousedown and refocus xterm after every shortcut action so sticky modifiers, literal keys, arrows, and Ctrl-letter shortcuts deliver input without stranding subsequent hardware-keyboard typing across desktop and touch surfaces.
+
+  FNXC:Terminal 2026-06-19-10:38:
+  FN-6737 root cause: touch-primary Ctrl shortcuts still allowed the browser's touchstart default action on shortcut buttons, so a tap on sticky Ctrl could move focus away from xterm's helper textarea before the composed Ctrl-letter byte reached the active PTY. Prevent the focus-taking default for mouse and touch activation, then keep the existing xterm refocus path so Ctrl control codes work from the sticky shortcut panel and physical Ctrl key paths on desktop, touch, and touch-with-hardware-keyboard surfaces.
   */
-  const preserveShortcutFocus = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-  }, []);
+  const preserveShortcutFocus = useCallback(
+    (
+      event:
+        | ReactMouseEvent<HTMLButtonElement>
+        | ReactPointerEvent<HTMLButtonElement>
+        | ReactTouchEvent<HTMLButtonElement>,
+    ) => {
+      event.preventDefault();
+    },
+    [],
+  );
 
   const refocusTerminalAfterShortcut = useCallback(() => {
     xtermRef.current?.focus();
@@ -1569,7 +1582,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                   stickyModifier === "ctrl" ? "is-active" : ""
                 }`}
                 data-testid="terminal-modifier-ctrl"
+                onPointerDown={preserveShortcutFocus}
                 onMouseDown={preserveShortcutFocus}
+                onTouchStart={preserveShortcutFocus}
                 onClick={() => toggleModifier("ctrl")}
                 aria-pressed={stickyModifier === "ctrl"}
               >
@@ -1581,7 +1596,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                   stickyModifier === "alt" ? "is-active" : ""
                 }`}
                 data-testid="terminal-modifier-alt"
+                onPointerDown={preserveShortcutFocus}
                 onMouseDown={preserveShortcutFocus}
+                onTouchStart={preserveShortcutFocus}
                 onClick={() => toggleModifier("alt")}
                 aria-pressed={stickyModifier === "alt"}
               >
@@ -1590,7 +1607,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
               <button
                 type="button"
                 className="terminal-shortcut-btn"
+                onPointerDown={preserveShortcutFocus}
                 onMouseDown={preserveShortcutFocus}
+                onTouchStart={preserveShortcutFocus}
                 onClick={() => sendLiteralShortcut("\x1b")}
               >
                 ESC
@@ -1598,7 +1617,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
               <button
                 type="button"
                 className="terminal-shortcut-btn"
+                onPointerDown={preserveShortcutFocus}
                 onMouseDown={preserveShortcutFocus}
+                onTouchStart={preserveShortcutFocus}
                 onClick={() => sendLiteralShortcut("\t")}
               >
                 Tab
@@ -1616,7 +1637,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                   className="terminal-shortcut-btn"
                   data-testid={arrow.testId}
                   aria-label={arrow.ariaLabel}
+                  onPointerDown={preserveShortcutFocus}
                   onMouseDown={preserveShortcutFocus}
+                  onTouchStart={preserveShortcutFocus}
                   onClick={() => sendLiteralShortcut(arrow.sequence)}
                 >
                   {arrow.label}
@@ -1628,7 +1651,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                 key={shortcut.label}
                 type="button"
                 className="terminal-shortcut-btn"
+                onPointerDown={preserveShortcutFocus}
                 onMouseDown={preserveShortcutFocus}
+                onTouchStart={preserveShortcutFocus}
                 onClick={() => sendShortcutKey(shortcut.key)}
                 title={shortcut.description}
               >
