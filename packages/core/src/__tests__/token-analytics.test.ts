@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { Database } from "../db.js";
+import { costFor } from "../model-pricing.js";
 import { aggregateTokenAnalytics } from "../token-analytics.js";
 
 interface TaskSeed {
@@ -266,6 +267,87 @@ describe("token-analytics", () => {
 
     expect(result.series).toHaveLength(1);
     expect(result.series?.[0].cost).toEqual({ usd: 12.5, unavailable: true, stale: false });
+  });
+
+  it("prices resolved-model token usage costs from the usage snapshot across analytics surfaces", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 0, cacheWriteTokens: 0 };
+    const expected = costFor(usage, { provider: "openai", model: "gpt-4o" });
+    expect(expected).toEqual({ usd: 12.5, unavailable: false, stale: false });
+
+    insertTask(db, {
+      id: "resolved",
+      ...usage,
+      totalTokens: 2_000_000,
+      lastUsedAt: "2026-03-01T00:00:00.000Z",
+      modelProvider: null,
+      modelId: null,
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-4o",
+      nodeId: "node-resolved",
+      agentId: "agent-resolved",
+    });
+
+    const byModel = aggregateTokenAnalytics(db, { groupBy: "model" });
+    const modelGroup = byModel.groups.find((group) => group.key === "gpt-4o");
+    expect(modelGroup?.cost).toEqual(expected);
+    expect(modelGroup?.cost.unavailable).toBe(false);
+    expect(byModel.cost).toEqual(expected);
+
+    const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
+    expect(byProvider.groups.find((group) => group.key === "openai")?.cost).toEqual(expected);
+
+    const byNode = aggregateTokenAnalytics(db, { groupBy: "node" });
+    expect(byNode.groups.find((group) => group.key === "node-resolved")?.cost).toEqual(expected);
+
+    const byAgent = aggregateTokenAnalytics(db, { groupBy: "agent" });
+    expect(byAgent.groups.find((group) => group.key === "agent-resolved")?.cost).toEqual(expected);
+
+    const byDay = aggregateTokenAnalytics(db, { granularity: "day" });
+    expect(byDay.series).toHaveLength(1);
+    expect(byDay.series?.[0].cost).toEqual(expected);
+  });
+
+  it("keeps token cost fallback and snapshot precedence guess-free", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 0, cacheWriteTokens: 0 };
+    const legacyExpected = costFor(usage, { provider: "openai", model: "gpt-4o-mini" });
+    const snapshotExpected = costFor(usage, { provider: "openai", model: "gpt-4o" });
+    expect(legacyExpected.usd).not.toBe(snapshotExpected.usd);
+
+    insertTask(db, {
+      id: "legacy-priced",
+      ...usage,
+      totalTokens: 2_000_000,
+      lastUsedAt: "2026-03-01T00:00:00.000Z",
+      modelProvider: "openai",
+      modelId: "gpt-4o-mini",
+    });
+    insertTask(db, {
+      id: "snapshot-wins",
+      ...usage,
+      totalTokens: 2_000_000,
+      lastUsedAt: "2026-03-02T00:00:00.000Z",
+      modelProvider: "openai",
+      modelId: "gpt-4o-mini",
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-4o",
+    });
+    insertTask(db, {
+      id: "unpriced-snapshot",
+      inputTokens: 100,
+      totalTokens: 100,
+      lastUsedAt: "2026-03-03T00:00:00.000Z",
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      tokenUsageModelProvider: "unknown",
+      tokenUsageModelId: "mystery-model",
+    });
+
+    const result = aggregateTokenAnalytics(db, { groupBy: "model" });
+    const groups = new Map(result.groups.map((group) => [group.key, group]));
+
+    expect(groups.get("gpt-4o-mini")?.cost).toEqual(legacyExpected);
+    expect(groups.get("gpt-4o")?.cost).toEqual(snapshotExpected);
+    expect(groups.get("mystery-model")?.cost).toEqual({ usd: null, unavailable: true, stale: false });
   });
 
   it("returns an empty series for an empty requested range", () => {

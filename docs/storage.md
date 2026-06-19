@@ -388,7 +388,7 @@ FN-5240/FN-5241/FN-5242 establish the handoff invariant: the only legal executor
 
 The `tasks.githubTracking` JSON column stores per-task GitHub tracking state (`enabled`, optional `repoOverride`, linked issue metadata, and `unlinkedAt`). It is additive and default-off; imported-source issue metadata remains in `issueInfo` / `sourceIssue`. Behavior wiring (issue creation/lifecycle sync and UI surfacing) lands in FN-3870/FN-3873/FN-3874.
 
-The `tasks.tokenUsage*` columns store cumulative per-task token usage for analytics. `tokenUsageModelProvider` and `tokenUsageModelId` are analytics-only snapshots of the actually-used runtime model recorded when usage is accumulated; they let Command Center group resolved-via-settings usage by provider/model without writing the task-level `modelProvider` / `modelId` own-model override fields that control future model resolution.
+The `tasks.tokenUsage*` columns store cumulative per-task token usage for analytics. `tokenUsageModelProvider` and `tokenUsageModelId` are analytics-only snapshots of the actually-used runtime model recorded when usage is accumulated; they let Command Center group and price resolved-via-settings usage by provider/model without writing the task-level `modelProvider` / `modelId` own-model override fields that control future model resolution. Cost attribution reads the snapshot first and falls back to the legacy own-model columns for pre-snapshot rows.
 | `config` | Single-row project configuration (`nextId`, settings payload, workflow step counters). |
 | `workflow_steps` | Workflow step definitions (`prompt`/`script`) with phase, template metadata, and model overrides. |
 | `activityLog` | Per-project activity/event log with timestamp/type/task indexes. |

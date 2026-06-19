@@ -148,6 +148,10 @@ function emptyCostAccumulator(): CostAccumulator {
 }
 
 function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void {
+  /*
+   * FNXC:CommandCenter 2026-06-18-12:00:
+   * Token cost attribution must use the actually-used model snapshot first, then legacy own-model columns, matching groupKeyFor so resolved-via-settings tasks show priced Command Center costs instead of unavailable groups.
+   */
   const result = costFor(
     {
       inputTokens: row.inputTokens ?? 0,
@@ -155,7 +159,10 @@ function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void
       cachedTokens: row.cachedTokens ?? 0,
       cacheWriteTokens: row.cacheWriteTokens ?? 0,
     },
-    { provider: row.modelProvider, model: row.modelId },
+    {
+      provider: row.tokenUsageModelProvider ?? row.modelProvider,
+      model: row.tokenUsageModelId ?? row.modelId,
+    },
     now,
   );
   if (result.stale) acc.anyStale = true;
