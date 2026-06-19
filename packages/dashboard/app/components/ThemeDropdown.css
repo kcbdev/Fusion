@@ -1,0 +1,96 @@
+.theme-dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-inline-size: 0;
+}
+
+.theme-dropdown-trigger {
+  justify-content: space-between;
+  gap: var(--space-sm);
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.theme-dropdown-trigger .theme-option-swatch,
+.theme-dropdown-option .theme-option-swatch {
+  flex: 0 0 auto;
+}
+
+.theme-dropdown-trigger-label,
+.theme-dropdown-option-label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-dropdown-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.theme-dropdown-mode-btn {
+  gap: var(--space-xs);
+}
+
+.theme-dropdown-mode-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.theme-dropdown-popover {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: calc(100% + var(--space-xs));
+  inset-inline: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-lg);
+}
+
+.theme-dropdown-list {
+  display: grid;
+  gap: var(--space-xs);
+  max-block-size: min(60vh, calc(var(--space-2xl) * 12));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.theme-dropdown-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  inline-size: 100%;
+  padding: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: start;
+}
+
+.theme-dropdown-option:hover,
+.theme-dropdown-option:focus-visible,
+.theme-dropdown-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  outline: none;
+}
+
+@media (max-width: 768px) {
+  .theme-dropdown-popover {
+    position: static;
+    margin-block-start: var(--space-xs);
+  }
+
+  .theme-dropdown-list {
+    max-block-size: min(50vh, calc(var(--space-2xl) * 10));
+  }
+}

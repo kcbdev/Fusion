@@ -7121,6 +7121,53 @@
       "from": "From",
       "to": "To",
       "invalidRange": "Start date must be on or before end date"
+    },
+    "controls": {
+      "title": "Operator controls",
+      "orgChart": {
+        "title": "Agent org chart",
+        "description": "Read-only view of the running agent hierarchy.",
+        "loading": "Loading org chart…",
+        "empty": "No agents are reporting in yet.",
+        "error": "Unable to load org chart"
+      },
+      "heartbeat": {
+        "title": "Heartbeat control",
+        "description": "Pause or resume the scheduling heartbeat.",
+        "pause": "Pause heartbeat",
+        "resume": "Resume heartbeat",
+        "disabledByStop": "Start the AI engine before resuming the heartbeat."
+      },
+      "engine": {
+        "title": "AI engine",
+        "description": "Stopping the engine halts all AI work."
+      },
+      "concurrency": {
+        "title": "Concurrency",
+        "description": "Tune live scheduler capacity.",
+        "maxConcurrent": "Max concurrent tasks",
+        "maxTriageConcurrent": "Max triage concurrent",
+        "maxWorktrees": "Max worktrees",
+        "error": "Unable to load concurrency settings"
+      },
+      "theme": {
+        "title": "Theme",
+        "description": "Switch the dashboard theme with live color previews."
+      },
+      "status": {
+        "running": "Running",
+        "paused": "Paused",
+        "stopped": "Stopped",
+        "loading": "Loading…",
+        "saving": "Saving…",
+        "saved": "Saved",
+        "saveError": "Save failed",
+        "ready": "Ready",
+        "error": "Unable to load live scheduler status",
+        "lastActivity": "Last activity",
+        "maxConcurrent": "Max concurrent",
+        "noActivity": "No recent activity"
+      }
     }
   }
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { COLOR_THEMES } from "@fusion/core";
 import { ThemeSelector } from "../ThemeSelector";
+import { COLOR_THEMES as THEME_OPTIONS } from "../themeOptions";
 
 describe("ThemeSelector", () => {
   it("renders theme mode toggle buttons", () => {
@@ -126,6 +127,23 @@ describe("ThemeSelector", () => {
     expect(screen.getByLabelText("Lavender theme")).toBeDefined();
     expect(screen.getByLabelText("Neon Bloom theme")).toBeDefined();
     expect(screen.getByLabelText("Sepia theme")).toBeDefined();
+  });
+
+  it("renders every shared swatch class from themeOptions", () => {
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="default"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    for (const theme of THEME_OPTIONS) {
+      const option = screen.getByLabelText(`${theme.label} theme`);
+      expect(option.querySelector(`.${theme.className}`)).toBeTruthy();
+    }
+    expect(THEME_OPTIONS.map((theme) => theme.value)).toEqual([...COLOR_THEMES]);
   });
 
   it("marks current color theme as active", () => {

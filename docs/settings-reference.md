@@ -299,10 +299,10 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `globalPause` | `boolean` | `false` | Hard stop: terminate active engine sessions and pause scheduling immediately. |
 | `globalPauseReason` | `string` | `undefined` | Optional reason for `globalPause` (`"rate-limit"` for automatic pauses, `"manual"` for user-triggered pauses). Cleared on unpause. |
 | `enginePaused` | `boolean` | `false` | Soft pause: stop dispatching new work while letting active sessions finish. While paused (including shared pause windows with `globalPause`), stuck-task polling/timers are suspended so paused wall-clock time does not count against `taskStuckTimeoutMs`. Clearing pause state resumes runtime scheduling and gives tracked active sessions a fresh stuck-task grace window before normal detection resumes; when `autoMerge` is enabled, eligible `in-review` tasks are re-swept into the auto-merge queue (paused/blocked/failed review tasks remain skipped). |
-| `maxConcurrent` | `number` | `2` | Max concurrent task-lane AI agents (planning, executor, merge). |
-| `maxTriageConcurrent` | `number` | `2` | Max concurrent planning agents. |
+| `maxConcurrent` | `number` | `2` | Max concurrent task-lane AI agents (planning, executor, merge). Editable from Settings and the Command Center Overview controls dashboard. |
+| `maxTriageConcurrent` | `number` | `2` | Max concurrent planning agents. Editable from Settings and the Command Center Overview controls dashboard. |
 | `globalMaxConcurrent` | `number` | `4` | System-wide max concurrent agents across all projects. |
-| `maxWorktrees` | `number` | `4` | Max git worktrees. |
+| `maxWorktrees` | `number` | `4` | Max git worktrees. Editable from Settings and the Command Center Overview controls dashboard. |
 | `pollIntervalMs` | `number` | `15000` | Scheduler poll interval (ms). |
 | `heartbeatMultiplier` | `number` | `1` | Global multiplier applied to agent heartbeat timing: both heartbeat intervals and unresponsive timeout bases. Configured from the Agents screen (not Settings). |
 | `heartbeatScopeDiscipline` | `"strict" \| "lite" \| "off"` | `"strict"` | Heartbeat prompt procedure mode. `strict` keeps coordination-heavy scope discipline, `lite` restores pre-2026-05-11 wording, and `off` uses a minimal procedure. Per-agent `runtimeConfig.heartbeatScopeDiscipline` can override this default. |

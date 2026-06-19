@@ -9,6 +9,21 @@ import { CommandCenter } from "../CommandCenter";
 const apiMock = vi.fn();
 vi.mock("../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+  fetchOrgTree: vi.fn().mockResolvedValue([]),
+  fetchExecutorStats: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, maxConcurrent: 2 }),
+  fetchSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxTriageConcurrent: 1, maxWorktrees: 5 }),
+  fetchConfig: vi.fn().mockResolvedValue({ maxConcurrent: 2, rootDir: "/" }),
+  updateSettings: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("../../../hooks/useAppSettings", () => ({
+  useAppSettings: () => ({
+    globalPaused: false,
+    enginePaused: false,
+    toggleGlobalPause: vi.fn(),
+    toggleEnginePause: vi.fn(),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock("../../../api", () => ({
@@ -319,10 +334,19 @@ afterEach(() => {
 
 describe("CommandCenter shell", () => {
   it("renders with the Overview tab active by default", () => {
-    render(<CommandCenter />);
+    render(
+      <CommandCenter
+        projectId="project-a"
+        colorTheme="default"
+        themeMode="dark"
+        onColorThemeChange={vi.fn()}
+        onThemeModeChange={vi.fn()}
+      />,
+    );
     const overviewTab = screen.getByTestId("command-center-tab-overview");
     expect(overviewTab.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByTestId("command-center-panel-overview")).toBeTruthy();
+    expect(screen.getByTestId("command-center-controls")).toBeTruthy();
   });
 
   it("renders throughput last while the Overview branch is loading", () => {

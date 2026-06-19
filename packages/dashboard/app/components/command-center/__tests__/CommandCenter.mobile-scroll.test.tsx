@@ -9,6 +9,21 @@ import { CommandCenter } from "../CommandCenter";
 const apiMock = vi.fn();
 vi.mock("../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+  fetchOrgTree: vi.fn().mockResolvedValue([]),
+  fetchExecutorStats: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, maxConcurrent: 2 }),
+  fetchSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxTriageConcurrent: 1, maxWorktrees: 5 }),
+  fetchConfig: vi.fn().mockResolvedValue({ maxConcurrent: 2, rootDir: "/" }),
+  updateSettings: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("../../../hooks/useAppSettings", () => ({
+  useAppSettings: () => ({
+    globalPaused: false,
+    enginePaused: false,
+    toggleGlobalPause: vi.fn(),
+    toggleEnginePause: vi.fn(),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock("../../../api", () => ({
@@ -338,6 +353,8 @@ describe("CommandCenter mobile scroll regression (FN-6595)", () => {
 
     const overviewPanel = screen.getByTestId("command-center-panel-overview");
     await screen.findByTestId("command-center-empty");
+    expect(screen.getByTestId("command-center-controls")).toBeTruthy();
+    expect(screen.getByTestId("cc-controls-concurrency")).toBeTruthy();
     assertScrollOwnerContract(overviewPanel);
 
     fireEvent.click(screen.getByTestId("command-center-tab-tokens"));

@@ -1819,7 +1819,13 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <CommandCenter />
+            <CommandCenter
+              projectId={currentProject?.id}
+              colorTheme={colorTheme}
+              themeMode={themeMode}
+              onColorThemeChange={setColorTheme}
+              onThemeModeChange={setThemeMode}
+            />
           </Suspense>
         </PageErrorBoundary>
       );

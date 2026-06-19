@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
-import type { ActivityAnalytics, LiveSnapshot, SignalsAnalytics, TokenAnalytics, ToolAnalytics } from "@fusion/core";
+import type { ActivityAnalytics, ColorTheme, LiveSnapshot, SignalsAnalytics, ThemeMode, TokenAnalytics, ToolAnalytics } from "@fusion/core";
 import { api } from "../../api/legacy";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
 import { TokensArea } from "./areas/TokensArea";
@@ -14,6 +14,7 @@ import { GithubArea } from "./areas/GithubArea";
 import { SignalsArea } from "./areas/SignalsArea";
 import { SystemStatsArea } from "./areas/SystemStatsArea";
 import { MissionControlPanel } from "./MissionControlPanel";
+import { CommandCenterControls } from "./CommandCenterControls";
 import { ReliabilityView } from "../ReliabilityView";
 import { SdlcFunnel } from "./SdlcFunnel";
 import { Bar, type BarDatum } from "./charts/Bar";
@@ -86,7 +87,22 @@ FN-6683 adds real Overview pie and line charts by reusing the already-fetched to
 */
 const OVERVIEW_TOKEN_REFRESH_MS = 15_000;
 
-function OverviewTab({ range }: { range: DateRange }) {
+interface CommandCenterProps {
+  projectId?: string;
+  colorTheme?: ColorTheme;
+  themeMode?: ThemeMode;
+  onColorThemeChange?: (theme: ColorTheme) => void;
+  onThemeModeChange?: (mode: ThemeMode) => void;
+}
+
+function OverviewTab({
+  range,
+  projectId,
+  colorTheme = "default",
+  themeMode = "system",
+  onColorThemeChange = () => {},
+  onThemeModeChange = () => {},
+}: { range: DateRange } & CommandCenterProps) {
   const { t } = useTranslation("app");
   const tokens = useAnalyticsArea<TokenAnalytics>("/command-center/tokens?groupBy=model", range, {
     pollMs: OVERVIEW_TOKEN_REFRESH_MS,
@@ -228,6 +244,15 @@ function OverviewTab({ range }: { range: DateRange }) {
   // The throughput funnel reads its own data (activityLog transitions) and shows
   // its own empty state, so it renders even when the stat-card aggregates have no
   // data yet.
+  const controlsSection = (
+    <CommandCenterControls
+      projectId={projectId}
+      colorTheme={colorTheme}
+      themeMode={themeMode}
+      onColorThemeChange={onColorThemeChange}
+      onThemeModeChange={onThemeModeChange}
+    />
+  );
   const throughputSection = (
     <div className="cc-overview-throughput" data-testid="command-center-throughput">
       <SdlcFunnel range={range} />
@@ -237,6 +262,7 @@ function OverviewTab({ range }: { range: DateRange }) {
   if (isInitialLoading) {
     return (
       <div className="cc-overview">
+        {controlsSection}
         <div className="cc-loading" data-testid="command-center-overview-loading">
           <div className="cc-chart-skeleton" />
           <p>{t("commandCenter.loading", "Loading command center...")}</p>
@@ -249,6 +275,7 @@ function OverviewTab({ range }: { range: DateRange }) {
   if (coreError !== null && !hasData) {
     return (
       <div className="cc-overview">
+        {controlsSection}
         <div className="cc-error" data-testid="command-center-overview-error" role="alert">
           <AlertCircle size={24} />
           <p>{coreError}</p>
@@ -261,6 +288,7 @@ function OverviewTab({ range }: { range: DateRange }) {
   if (!hasData) {
     return (
       <div className="cc-overview">
+        {controlsSection}
         <div className="cc-empty" data-testid="command-center-empty">
           <Gauge size={28} />
           <p>{t("commandCenter.empty", "No usage data yet. Run some agents to populate the Command Center.")}</p>
@@ -272,6 +300,7 @@ function OverviewTab({ range }: { range: DateRange }) {
 
   return (
     <div className="cc-overview">
+      {controlsSection}
       <div className="cc-stat-grid">
         {cards.map((card) => (
           <div key={card.id} className="card cc-stat-card" data-testid={`command-center-stat-${card.id}`}>
@@ -397,7 +426,13 @@ function PlaceholderTab({ tabId }: { tabId: SubViewId }) {
   );
 }
 
-export function CommandCenter() {
+export function CommandCenter({
+  projectId,
+  colorTheme = "default",
+  themeMode = "system",
+  onColorThemeChange = () => {},
+  onThemeModeChange = () => {},
+}: CommandCenterProps = {}) {
   const { t } = useTranslation("app");
   const subViews = useSubViews();
   const [activeTab, setActiveTab] = useState<SubViewId>("overview");
@@ -451,7 +486,16 @@ export function CommandCenter() {
   function renderActiveTab() {
     switch (activeTab) {
       case "overview":
-        return <OverviewTab range={range} />;
+        return (
+          <OverviewTab
+            range={range}
+            projectId={projectId}
+            colorTheme={colorTheme}
+            themeMode={themeMode}
+            onColorThemeChange={onColorThemeChange}
+            onThemeModeChange={onThemeModeChange}
+          />
+        );
       case "tokens":
         return <TokensArea range={range} />;
       case "tools":
