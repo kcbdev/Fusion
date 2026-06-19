@@ -120,6 +120,7 @@ html {
   /* Typography */
   --font-primary: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-size-xs: 0.8rem;
 
   /* Spacing Scale */
   --space-xs: 4px;
@@ -667,7 +668,7 @@ html .column.drag-over * {
  * Runtime provider settings card — unified layout used by Hermes / OpenClaw /
  * Paperclip cards. Header (large logo + name + status), description, form,
  * footer action row.
- * font-size values intentionally raw — no --font-size-* tokens defined yet
+ * FNXC:DashboardCssTokens 2026-06-19-05:07: Most font-size values remain intentionally raw; --font-size-xs exists for mobile tab-size reuse where token validity tests require a defined custom property.
  * ------------------------------------------------------------------------- */
 
 .runtime-card {

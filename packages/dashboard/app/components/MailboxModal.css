@@ -789,7 +789,7 @@
   .mailbox-modal .mailbox-tab {
     flex-shrink: 0;
     padding: var(--space-sm) var(--space-md);
-    font-size: 0.8rem;
+    font-size: var(--font-size-xs, 0.8rem);
   }
 
   .mailbox-modal .mailbox-content {
@@ -881,7 +881,7 @@
   .mailbox-view .mailbox-tab {
     flex-shrink: 0;
     padding: var(--space-sm) var(--space-md);
-    font-size: 0.8rem;
+    font-size: var(--font-size-xs, 0.8rem);
   }
 
   .mailbox-view .mailbox-content {
