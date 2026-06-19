@@ -1180,7 +1180,7 @@ describe("MailboxModal", () => {
       expect(mailboxMobileSection).toContain("display: none;");
       expect(mailboxMobileSection).toContain(".mailbox-modal .mailbox-tab");
       expect(mailboxMobileSection).toContain("padding: var(--space-sm) var(--space-md);");
-      expect(mailboxMobileSection).toContain("font-size: 0.8rem;");
+      expect(mailboxMobileSection).toContain("font-size: var(--font-size-xs, 0.8rem);");
       expect(mailboxMobileSection).toContain("max-height: calc(100dvh - var(--header-height) - var(--space-2xl) - var(--space-xl));");
       expect(mailboxMobileSection).toContain(".mailbox-modal .mailbox-message-detail-header");
       expect(mailboxMobileSection).toContain("flex-direction: column;");

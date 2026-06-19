@@ -302,6 +302,12 @@ function expectThroughputFirstBefore(...followingTestIds: string[]) {
   }
 }
 
+function expectDailyActivityLineBeforeTrend() {
+  const lineCard = screen.getByTestId("cc-overview-line");
+  const trendCard = screen.getByTestId("command-center-overview-chart-activity");
+  expect(Boolean(lineCard.compareDocumentPosition(trendCard) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+}
+
 beforeEach(() => {
   apiMock.mockReset();
   mockEmptyOverviewApi();
@@ -334,11 +340,13 @@ describe("CommandCenter shell", () => {
     expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
     expect(screen.queryByTestId("cc-overview-pie")).toBeNull();
     expect(screen.queryByTestId("cc-overview-line")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-chart-activity")).toBeNull();
     await screen.findByTestId("command-center-empty");
     expectThroughputFirstBefore("command-center-empty");
     expect(screen.queryByTestId("command-center-overview-charts")).toBeNull();
     expect(screen.queryByTestId("cc-overview-pie")).toBeNull();
     expect(screen.queryByTestId("cc-overview-line")).toBeNull();
+    expect(screen.queryByTestId("command-center-overview-chart-activity")).toBeNull();
   });
 
   it("renders the Overview agent-runs card when run data is the only activity", async () => {
@@ -387,6 +395,7 @@ describe("CommandCenter shell", () => {
     expect(within(screen.getByTestId("command-center-overview-chart-tools")).getByText("read")).toBeTruthy();
     expect(screen.getByTestId("cc-overview-pie")).toBeTruthy();
     expect(screen.getByTestId("cc-overview-line")).toBeTruthy();
+    expectDailyActivityLineBeforeTrend();
     expect(screen.getByRole("img", { name: "Token share by model" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Daily activity line" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Daily activity trend" })).toBeTruthy();

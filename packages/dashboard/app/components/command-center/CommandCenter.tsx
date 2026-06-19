@@ -348,18 +348,10 @@ function OverviewTab({ range }: { range: DateRange }) {
               <Bar data={toolCategoryData} ariaLabel={t("commandCenter.overview.toolCategories", "Tool categories")} />
             </div>
           ) : null}
-          {dailyActivityValues.length > 0 ? (
-            <div className="card cc-overview-chart-card cc-overview-chart-card--trend" data-testid="command-center-overview-chart-activity">
-              <div className="cc-overview-chart-header">
-                <h3 className="cc-area-section-title">{t("commandCenter.overview.dailyActivity", "Daily activity trend")}</h3>
-                <p>{t("commandCenter.overview.dailyActivityHint", "Messages plus active agents per day")}</p>
-              </div>
-              <Sparkline
-                values={dailyActivityValues}
-                ariaLabel={t("commandCenter.overview.dailyActivityAria", "Daily activity trend")}
-              />
-            </div>
-          ) : null}
+          {/*
+          FNXC:CommandCenter 2026-06-19-00:00:
+          The Overview chart grid should surface the multi-series daily activity line higher by rendering it directly before the daily activity sparkline, without changing either card's data gate or wiring.
+          */}
           {dailyActivityValues.length > 0 ? (
             <div className="card cc-overview-chart-card cc-overview-chart-card--trend" data-testid="cc-overview-line">
               <div className="cc-overview-chart-header">
@@ -369,6 +361,18 @@ function OverviewTab({ range }: { range: DateRange }) {
               <RechartsLineChart
                 series={overviewLineSeries}
                 ariaLabel={t("commandCenter.overview.dailyActivityLine", "Daily activity line")}
+              />
+            </div>
+          ) : null}
+          {dailyActivityValues.length > 0 ? (
+            <div className="card cc-overview-chart-card cc-overview-chart-card--trend" data-testid="command-center-overview-chart-activity">
+              <div className="cc-overview-chart-header">
+                <h3 className="cc-area-section-title">{t("commandCenter.overview.dailyActivity", "Daily activity trend")}</h3>
+                <p>{t("commandCenter.overview.dailyActivityHint", "Messages plus active agents per day")}</p>
+              </div>
+              <Sparkline
+                values={dailyActivityValues}
+                ariaLabel={t("commandCenter.overview.dailyActivityAria", "Daily activity trend")}
               />
             </div>
           ) : null}
