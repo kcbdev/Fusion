@@ -74,6 +74,12 @@ function extractRule(content: string, selector: string): string {
   return content.match(new RegExp(`${escapedSelector}\\s*\\{[^}]*\\}`))?.[0] ?? "";
 }
 
+function expectLogicalOrPhysicalMinSize(rule: string, axis: "block" | "inline"): void {
+  const logicalProp = axis === "block" ? "min-block-size" : "min-inline-size";
+  const physicalProp = axis === "block" ? "min-height" : "min-width";
+  expect(rule).toSatisfy((value: string) => value.includes(`${logicalProp}: 0`) || value.includes(`${physicalProp}: 0`));
+}
+
 const workflowPayload = {
   flagEnabled: true,
   defaultWorkflowId: "builtin:coding",
@@ -272,8 +278,12 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     const projectContentRule = extractRule(cssContent, ".project-content");
 
     expect(projectContentRule).toContain("display: flex");
-    expect(projectContentRule).toContain("min-height: 0");
-    expect(projectContentRule).toContain("min-width: 0");
+    /*
+     * FNXC:BoardMobileCss 2026-06-19-03:16:
+     * The fill-height invariant accepts logical min-size properties because styles.css canonicalizes .project-content to writing-mode-safe min-block-size/min-inline-size declarations.
+     */
+    expectLogicalOrPhysicalMinSize(projectContentRule, "block");
+    expectLogicalOrPhysicalMinSize(projectContentRule, "inline");
 
     expect(baseBoardRule).toContain("box-sizing: border-box");
     expect(baseBoardRule).toContain("flex: 1 1 auto");
@@ -324,7 +334,7 @@ describe("Board mobile initial render stabilization (FN-4574)", () => {
     expect(mobileProjectContentRule).toContain("display: flex");
     expect(mobileProjectContentRule).toContain("align-items: stretch");
     expect(mobileProjectContentRule).toContain("width: 100%");
-    expect(mobileProjectContentRule).toContain("min-height: 0");
+    expectLogicalOrPhysicalMinSize(mobileProjectContentRule, "block");
     expect(mobileProjectContentRule).toContain("overflow: hidden");
 
     expect(mobileWorkflowViewRule).toContain("display: flex");

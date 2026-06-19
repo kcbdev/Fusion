@@ -75,10 +75,19 @@ import {
   postMergeAuditFailuresPerDay,
   recoverAlreadyMergedReviewTasksRecoveriesPerDay,
 } from "./reliability-metrics.js";
-import { loadViewChunkManifest } from "./view-chunk-manifest.js";
+import { loadViewChunkManifest, type ViewChunkManifestEntry } from "./view-chunk-manifest.js";
 import { maybeStartOtelExporter, type OtelExporterHandle } from "./otel-exporter.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export function buildViewPreloadInjection(chunkMap: Record<string, ViewChunkManifestEntry>): string {
+  const serializedChunkMap = JSON.stringify(chunkMap).replace(/<\//g, "<\\/");
+  /*
+  FNXC:CommandCenterStyling 2026-06-19-09:43:
+  The served dashboard may open directly into a persisted lazy view before React's dynamic import runs. Inject both the modulepreload and stylesheet links from Vite's manifest so Command Center and every other co-located-CSS lazy view have their CSS requested on first paint, while in-app navigation remains owned by Vite's __vitePreload runtime.
+  */
+  return `<script>window.__FUSION_VIEW_CHUNKS__=${serializedChunkMap};(()=>{try{const chunkMap=window.__FUSION_VIEW_CHUNKS__||{};const projectId=localStorage.getItem("kb-dashboard-current-project");const scopedKey=projectId?"kb:"+projectId+":kb-dashboard-task-view":null;let taskView=(scopedKey&&localStorage.getItem(scopedKey))||localStorage.getItem("kb-dashboard-task-view");if(taskView==="devserver")taskView="dev-server";if(taskView==="roadmaps")taskView="board";if(typeof taskView!=="string"||taskView.startsWith("plugin:"))return;const chunkEntry=chunkMap[taskView];if(!chunkEntry)return;const chunkPath=typeof chunkEntry==="string"?chunkEntry:chunkEntry.file;const cssPaths=Array.isArray(chunkEntry.css)?chunkEntry.css:[];for(const cssPath of cssPaths){if(!cssPath)continue;const cssLink=document.createElement("link");cssLink.rel="stylesheet";cssLink.href=cssPath;document.head.appendChild(cssLink);}if(!chunkPath)return;const link=document.createElement("link");link.rel="modulepreload";link.href=chunkPath;link.crossOrigin="";document.head.appendChild(link);}catch{}})();</script>`;
+}
 
 function parseVersion(version: string): number[] {
   return version
@@ -791,11 +800,6 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   let cachedIndexHtml: string | null = null;
   let cachedIndexMtimeMs: number | null = null;
   let cachedTemplatedIndexHtml: string | null = null;
-
-  const buildViewPreloadInjection = (chunkMap: Record<string, string>): string => {
-    const serializedChunkMap = JSON.stringify(chunkMap).replace(/<\//g, "<\\/");
-    return `<script>window.__FUSION_VIEW_CHUNKS__=${serializedChunkMap};(()=>{try{const chunkMap=window.__FUSION_VIEW_CHUNKS__||{};const projectId=localStorage.getItem("kb-dashboard-current-project");const scopedKey=projectId?"kb:"+projectId+":kb-dashboard-task-view":null;let taskView=(scopedKey&&localStorage.getItem(scopedKey))||localStorage.getItem("kb-dashboard-task-view");if(taskView==="devserver")taskView="dev-server";if(taskView==="roadmaps")taskView="board";if(typeof taskView!=="string"||taskView.startsWith("plugin:"))return;const chunkPath=chunkMap[taskView];if(!chunkPath)return;const link=document.createElement("link");link.rel="modulepreload";link.href=chunkPath;link.crossOrigin="";document.head.appendChild(link);}catch{}})();</script>`;
-  };
 
   const renderIndexHtml = (): string => {
     const resolvedClientDir = process.env.FUSION_CLIENT_DIR
