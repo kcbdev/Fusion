@@ -289,6 +289,14 @@ describe("LineChart", () => {
     expectLineChartPointsInsideViewBox(chart);
   });
 
+  it("coerces non-finite and negative values without leaking invalid SVG geometry", () => {
+    render(<LineChart ariaLabel="invalid trend" series={[{ label: "invalid", values: [Number.NaN, Number.POSITIVE_INFINITY, -2, 4] }]} />);
+
+    const chart = screen.getByRole("img", { name: "invalid trend" });
+    expect(chart.outerHTML).not.toMatch(/NaN|Infinity/);
+    expectLineChartPointsInsideViewBox(chart);
+  });
+
   it("renders an empty series as an empty valid SVG without throwing", () => {
     render(<LineChart ariaLabel="empty line" series={[{ label: "empty", values: [] }]} />);
 

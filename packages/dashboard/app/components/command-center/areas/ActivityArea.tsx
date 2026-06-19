@@ -123,9 +123,14 @@ export function ActivityArea({ range }: { range: DateRange }) {
       {daily.length > 0 ? (
         <div className="cc-area-section" data-testid="cc-activity-line">
           <h3 className="cc-area-section-title">{t("commandCenter.activity.rechartsLine", "Activity trend")}</h3>
+          {/*
+          FNXC:CommandCenterCharts 2026-06-19-07:58:
+          The Activity trend combines message volume with low-count agent/run series. Opt into per-series normalization so agent activity remains visible instead of being flattened by message-scale values.
+          */}
           <RechartsLineChart
             series={rechartsLineSeries}
             ariaLabel={t("commandCenter.activity.rechartsLine", "Activity trend")}
+            scaleMode="series"
           />
         </div>
       ) : null}

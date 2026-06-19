@@ -201,6 +201,22 @@ function expectRechartsWrapperWithin(testId: string, label: string): void {
   expect(chart.outerHTML).not.toMatch(/NaN|Infinity/);
 }
 
+function expectBarFillsFinite(testId: string): void {
+  const section = screen.getByTestId(testId);
+  for (const fill of Array.from(section.querySelectorAll<HTMLElement>(".cc-bar-fill"))) {
+    expect(fill.style.width).toMatch(/^\d+(?:\.\d+)?%$/);
+    expect(fill.style.width).not.toMatch(/NaN|Infinity/);
+  }
+}
+
+function expectSparklineHeightsFinite(testId: string): void {
+  const section = screen.getByTestId(testId);
+  for (const bar of Array.from(section.querySelectorAll<HTMLElement>(".cc-sparkline-bar"))) {
+    expect(bar.style.height).toMatch(/^\d+(?:\.\d+)?%$/);
+    expect(bar.style.height).not.toMatch(/NaN|Infinity/);
+  }
+}
+
 function expectSvgLinePointsInsideViewBox(testId: string, label: string): void {
   const section = screen.getByTestId(testId);
   const chart = within(section).getByRole("img", { name: label });
@@ -306,12 +322,35 @@ describe("ActivityArea", () => {
     expect(screen.getByRole("img", { name: "Agent runs / day" })).toBeTruthy();
     expect(screen.getByTestId("cc-activity-line-throughput")).toBeTruthy();
     expectRechartsWrapperWithin("cc-activity-line", "Activity trend");
+    expect(screen.getByRole("img", { name: "Activity trend" })).toHaveAttribute("data-scale-mode", "series");
     expectRechartsWrapperWithin("cc-activity-pie", "Agent run outcome share");
     expectSvgLinePointsInsideViewBox("cc-activity-line-messages", "Messages / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-agents", "Active agents / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-nodes", "Active nodes / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-throughput", "Throughput / day");
     expect(within(screen.getByTestId("cc-activity-agent-runs-sparkline")).getByRole("img", { name: "Agent runs / day" }).classList).toContain("cc-sparkline");
+    expectSparklineHeightsFinite("cc-activity-agent-runs-sparkline");
+  });
+
+  it("opts only the mixed-unit activity trend into per-series scaling", async () => {
+    apiMock.mockResolvedValue({
+      ...activityFixture(),
+      messages: 3_300,
+      activeAgents: 2,
+      agentRuns: { total: 9, active: 1, completed: 7, failed: 1 },
+      daily: [
+        { day: "2026-06-08", messages: 1_000, activeNodes: 20, activeAgents: 1, agentRuns: 2 },
+        { day: "2026-06-09", messages: 1_200, activeNodes: 22, activeAgents: 2, agentRuns: 4 },
+        { day: "2026-06-10", messages: 1_100, activeNodes: 21, activeAgents: 1, agentRuns: 3 },
+      ],
+    });
+    render(<ActivityArea range={range7d} />);
+
+    await screen.findByTestId("cc-area-activity");
+    expect(screen.getByRole("img", { name: "Activity trend" })).toHaveAttribute("data-scale-mode", "series");
+    expectSvgLinePointsInsideViewBox("cc-activity-line-agents", "Active agents / day");
+    expectSvgLinePointsInsideViewBox("cc-activity-line-throughput", "Throughput / day");
+    expectSparklineHeightsFinite("cc-activity-agent-runs-sparkline");
   });
 
   it("renders zero agent-run cards when counts are zero and other activity exists", async () => {
@@ -813,6 +852,9 @@ describe("TeamArea", () => {
     expect(within(screen.getByTestId("cc-team-tokens-chart")).getByRole("list", { name: "Tokens by agent" }).classList).toContain("cc-bar-chart");
     expect(within(screen.getByTestId("cc-team-completed-chart")).getByRole("list", { name: "Tasks done by agent" }).classList).toContain("cc-bar-chart");
     expect(within(screen.getByTestId("cc-team-spread-chart")).getByRole("img", { name: "Team spread" }).classList).toContain("cc-sparkline");
+    expectBarFillsFinite("cc-team-tokens-chart");
+    expectBarFillsFinite("cc-team-completed-chart");
+    expectSparklineHeightsFinite("cc-team-spread-chart");
   });
 
   it("keeps the team pie safe for single-item and non-finite data", async () => {

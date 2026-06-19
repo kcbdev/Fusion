@@ -9,9 +9,15 @@ function chartHtml(label: string): string {
   return screen.getByRole("img", { name: label }).outerHTML;
 }
 
-function renderChart(series: LineChartSeries[], ariaLabel = "line chart") {
+function renderChart(series: LineChartSeries[], ariaLabel = "line chart", scaleMode?: "shared" | "series") {
   // FNXC:CommandCenterCharts 2026-06-18-22:03: jsdom's ResizeObserver mock does not report dimensions, so tests pass explicit dimensions through the wrapper to mount recharts children while production remains responsive.
-  return render(<LineChart series={series} ariaLabel={ariaLabel} {...chartSize} />);
+  return render(<LineChart series={series} ariaLabel={ariaLabel} {...chartSize} scaleMode={scaleMode} />);
+}
+
+function ySpanForDots(seriesName: string): number {
+  const values = Array.from(document.querySelectorAll<SVGCircleElement>(`.recharts-line-dot[name="${seriesName}"]`)).map((dot) => Number(dot.getAttribute("cy")));
+  expect(values.length).toBeGreaterThan(1);
+  return Math.max(...values) - Math.min(...values);
 }
 
 afterEach(() => {
@@ -54,6 +60,30 @@ describe("recharts LineChart", () => {
     expect(screen.getByText("Zero")).toBeTruthy();
     expect(screen.queryByText("No chart data")).toBeNull();
     expect(chartHtml("zero line")).not.toMatch(/NaN|Infinity/);
+  });
+
+  it("normalizes mixed-unit series so low-count activity lines are not flattened", () => {
+    renderChart([
+      { label: "Messages", values: [1_000, 1_200, 1_100] },
+      { label: "Active agents", values: [1, 2, 1] },
+      { label: "Agent runs", values: [2, 4, 3] },
+    ], "activity trend", "series");
+
+    const chart = screen.getByRole("img", { name: "activity trend" });
+    expect(chart).toHaveAttribute("data-scale-mode", "series");
+    expect(ySpanForDots("Active agents")).toBeGreaterThan(40);
+    expect(ySpanForDots("Agent runs")).toBeGreaterThan(40);
+    expect(chartHtml("activity trend")).not.toMatch(/NaN|Infinity/);
+  });
+
+  it("keeps shared absolute scale as the default for comparable series", () => {
+    renderChart([
+      { label: "Filed", values: [3, 6, 9] },
+      { label: "Fixed", values: [2, 4, 8] },
+    ], "issue flow");
+
+    expect(screen.getByRole("img", { name: "issue flow" })).toHaveAttribute("data-scale-mode", "shared");
+    expect(chartHtml("issue flow")).not.toContain("% of series");
   });
 
   it("coerces non-finite and negative values without leaking invalid output", () => {
