@@ -3,7 +3,7 @@ FNXC:Navigation 2026-06-19-00:00:
 The experimental sidebar is a persistent desktop/tablet navigation replacement for the Header view-toggle row. It uses the same tokenized visual rhythm as Header navigation so the flag can be toggled without changing dashboard information architecture.
 */
 .left-sidebar-nav {
-  --left-sidebar-nav-width: calc(var(--space-2xl) * 8);
+  --left-sidebar-nav-width: calc(var(--space-2xl) * 7);
   --left-sidebar-nav-rail-width: calc(var(--space-2xl) * 2);
   position: relative;
   display: flex;

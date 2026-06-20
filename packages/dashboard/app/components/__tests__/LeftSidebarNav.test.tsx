@@ -111,6 +111,17 @@ describe("LeftSidebarNav", () => {
     expect(screen.queryByTestId("sidebar-nav-plugin-fusion-plugin-primary-primary-view")).toBeNull();
   });
 
+  it("renders shortened primary labels and default width", () => {
+    renderSidebar();
+
+    expect(screen.getByTestId("left-sidebar-nav")).toHaveStyle({ width: "224px", minWidth: "224px" });
+    expect(screen.getByTestId("sidebar-nav-board")).toHaveAccessibleName("Board");
+    expect(screen.getByTestId("sidebar-nav-list")).toHaveAccessibleName("List");
+    expect(screen.getByTestId("sidebar-nav-agents")).toHaveAccessibleName("Agents");
+    expect(screen.getByTestId("sidebar-nav-missions")).toHaveAccessibleName("Missions");
+    expect(screen.queryByRole("button", { name: /view$/i })).toBeNull();
+  });
+
   it("renders mailbox and stash badges", () => {
     renderSidebar();
 
@@ -129,6 +140,35 @@ describe("LeftSidebarNav", () => {
     renderSidebar({ pluginDashboardViews: pluginViews });
     expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-primary-primary-view")).toBeDefined();
     expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-overflow-overflow-view")).toBeDefined();
+  });
+
+  it("renders plugin labels without view suffix and shortens Compound Engineering", () => {
+    renderSidebar({
+      pluginDashboardViews: [
+        ...pluginViews,
+        {
+          pluginId: "fusion-plugin-compound-engineering",
+          view: {
+            viewId: "compound",
+            label: "Compound Engineering",
+            componentPath: "./CompoundEngineering",
+            placement: "primary",
+            order: 0,
+          },
+        },
+      ],
+    });
+
+    const primaryPlugin = screen.getByTestId("sidebar-nav-plugin-fusion-plugin-primary-primary-view");
+    const compoundPlugin = screen.getByTestId("sidebar-nav-plugin-fusion-plugin-compound-engineering-compound");
+    expect(primaryPlugin).toHaveAccessibleName("Primary Plugin");
+    expect(primaryPlugin).toHaveAttribute("title", "Primary Plugin");
+    expect(primaryPlugin).toHaveTextContent("Primary Plugin");
+    expect(primaryPlugin).not.toHaveTextContent("view");
+    expect(compoundPlugin).toHaveAccessibleName("Compound");
+    expect(compoundPlugin).toHaveAttribute("title", "Compound");
+    expect(compoundPlugin).toHaveTextContent("Compound");
+    expect(compoundPlugin).not.toHaveTextContent("Compound Engineering");
   });
 
   it.each<[TaskView, string]>([

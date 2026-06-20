@@ -56,7 +56,11 @@ interface SidebarNavEntry {
   onSelect: () => void;
 }
 
-const LEFT_SIDEBAR_DEFAULT_WIDTH = 256;
+/*
+FNXC:Navigation 2026-06-20-00:00:
+The experimental sidebar default is intentionally narrower than the original 256px layout so desktop/tablet navigation preserves more board content while keeping the existing resize clamps.
+*/
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 224;
 const LEFT_SIDEBAR_MIN_WIDTH = 192;
 const LEFT_SIDEBAR_MAX_WIDTH = 384;
 const LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "fusion:left-sidebar-width";
@@ -142,6 +146,14 @@ function isPluginEntryActive(view: TaskView, entry: PluginDashboardViewEntry): b
 
 function sortPluginViews(entries: PluginDashboardViewEntry[]): PluginDashboardViewEntry[] {
   return [...entries].sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER));
+}
+
+/*
+FNXC:Navigation 2026-06-20-00:00:
+Experimental sidebar plugin labels must read as plain navigation nouns without an appended "view" suffix. The Compound Engineering plugin is intentionally shortened to "Compound" so its label fits the narrower sidebar.
+*/
+function getSidebarPluginLabel(entry: PluginDashboardViewEntry): string {
+  return entry.pluginId === "fusion-plugin-compound-engineering" ? "Compound" : entry.view.label;
 }
 
 export function LeftSidebarNav({
@@ -234,7 +246,7 @@ export function LeftSidebarNav({
   const primaryEntries: SidebarNavEntry[] = [
     {
       id: "board",
-      label: t("header.boardView", "Board view"),
+      label: t("nav.board", "Board"),
       view: "board",
       isActive: view === "board",
       icon: LayoutGrid,
@@ -243,7 +255,7 @@ export function LeftSidebarNav({
     },
     {
       id: "list",
-      label: t("header.listView", "List view"),
+      label: t("nav.list", "List"),
       view: "list",
       isActive: view === "list",
       icon: List,
@@ -254,7 +266,7 @@ export function LeftSidebarNav({
       ? [
           {
             id: "agents",
-            label: t("header.agentsView", "Agents view"),
+            label: t("nav.agents", "Agents"),
             view: "agents" as TaskView,
             isActive: view === "agents",
             icon: Bot,
@@ -265,7 +277,7 @@ export function LeftSidebarNav({
       : []),
     {
       id: "command-center",
-      label: t("header.commandCenterView", "Command Center"),
+      label: t("nav.commandCenter", "Command Center"),
       view: "command-center",
       isActive: view === "command-center",
       icon: Gauge,
@@ -274,7 +286,7 @@ export function LeftSidebarNav({
     },
     {
       id: "missions",
-      label: t("header.missionsView", "Missions view"),
+      label: t("nav.missions", "Missions"),
       view: "missions",
       isActive: view === "missions",
       icon: Target,
@@ -283,7 +295,7 @@ export function LeftSidebarNav({
     },
     {
       id: "chat",
-      label: t("header.chatView", "Chat view"),
+      label: t("nav.chat", "Chat"),
       view: "chat",
       isActive: view === "chat",
       icon: MessageSquare,
@@ -293,7 +305,7 @@ export function LeftSidebarNav({
     },
     {
       id: "documents",
-      label: t("header.documentsView", "Documents view"),
+      label: t("nav.documents", "Documents"),
       view: "documents",
       isActive: view === "documents",
       icon: FileText,
@@ -302,7 +314,7 @@ export function LeftSidebarNav({
     },
     {
       id: "mailbox",
-      label: t("header.mailboxView", "Mailbox view"),
+      label: t("nav.mailbox", "Mailbox"),
       view: "mailbox",
       isActive: view === "mailbox",
       icon: Mail,
@@ -316,7 +328,7 @@ export function LeftSidebarNav({
       const targetView = getPluginEntryView(entry);
       return {
         id: `plugin-${entry.pluginId}-${entry.view.viewId}`,
-        label: `${entry.view.label} view`,
+        label: getSidebarPluginLabel(entry),
         view: targetView,
         isActive: isPluginEntryActive(view, entry),
         icon: PluginIcon,
@@ -358,7 +370,7 @@ export function LeftSidebarNav({
       const targetView = getPluginEntryView(entry);
       return {
         id: `plugin-${entry.pluginId}-${entry.view.viewId}`,
-        label: entry.view.label,
+        label: getSidebarPluginLabel(entry),
         view: targetView,
         isActive: isPluginEntryActive(view, entry),
         icon: PluginIcon,
