@@ -54,6 +54,8 @@ Any remaining user-facing copy must be localized with `t()` / `<Trans>` and an
 specific files or a small cluster in `lint.ignore`, includes an `FNXC` rationale,
 and has a filed follow-up task that removes the ignore. The settings sections
 cluster is no longer deferred as of FN-6771; keep those files covered by lint.
+The `@fusion/i18n` regression tests also assert the lint-ignore scope and live
+catalog key parity so those guardrails cannot silently drift.
 
 ## Translating an existing language
 
