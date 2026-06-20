@@ -16,6 +16,8 @@ import { SystemStatsArea } from "./areas/SystemStatsArea";
 import { MissionControlPanel } from "./MissionControlPanel";
 import { CommandCenterControls } from "./CommandCenterControls";
 import { ReliabilityView } from "../ReliabilityView";
+import { NodesView } from "../NodesView";
+import type { ToastType } from "../../hooks/useToast";
 import { SdlcFunnel } from "./SdlcFunnel";
 import { Bar, type BarDatum } from "./charts/Bar";
 import { Sparkline } from "./charts/Sparkline";
@@ -35,6 +37,7 @@ type SubViewId =
   | "github"
   | "signals"
   | "system"
+  | "nodes"
   | "reliability"
   | "mission-control";
 
@@ -49,8 +52,11 @@ Team tab shows each agent's tokens/cost/files-changed/tasks-completed with live 
 
 FNXC:CommandCenter 2026-06-19-00:00:
 FN-6702 moves Reliability from a top-level dashboard view into a Command Center tab next to System telemetry. Reuse ReliabilityView unchanged so its /api/health/reliability loading, error, insufficient-data, and populated states keep the same data flow.
+
+FNXC:CommandCenter 2026-06-19-00:00:
+FN-6717 moves Nodes from a standalone overlay into a Command Center tab gated by the nodesView flag. Reuse NodesView unchanged so useNodes, managed Docker nodes, mesh state, settings sync, toast wiring, and data-testid anchors keep the same data flow.
 */
-function useSubViews(): SubView[] {
+function useSubViews(nodesEnabled: boolean): SubView[] {
   const { t } = useTranslation("app");
   return [
     { id: "overview", label: t("commandCenter.tabs.overview", "Overview") },
@@ -63,6 +69,7 @@ function useSubViews(): SubView[] {
     { id: "github", label: t("commandCenter.tabs.github", "GitHub") },
     { id: "signals", label: t("commandCenter.tabs.signals", "Signals") },
     { id: "system", label: t("commandCenter.tabs.system", "System") },
+    ...(nodesEnabled ? [{ id: "nodes" as const, label: t("commandCenter.tabs.nodes", "Nodes") }] : []),
     { id: "reliability", label: t("commandCenter.tabs.reliability", "Reliability") },
     { id: "mission-control", label: t("commandCenter.tabs.missionControl", "Mission Control") },
   ];
@@ -93,6 +100,8 @@ interface CommandCenterProps {
   themeMode?: ThemeMode;
   onColorThemeChange?: (theme: ColorTheme) => void;
   onThemeModeChange?: (mode: ThemeMode) => void;
+  addToast?: (message: string, type?: ToastType) => void;
+  nodesEnabled?: boolean;
 }
 
 function OverviewTab({
@@ -432,9 +441,11 @@ export function CommandCenter({
   themeMode = "system",
   onColorThemeChange = () => {},
   onThemeModeChange = () => {},
+  addToast = () => {},
+  nodesEnabled = false,
 }: CommandCenterProps = {}) {
   const { t } = useTranslation("app");
-  const subViews = useSubViews();
+  const subViews = useSubViews(nodesEnabled);
   const [activeTab, setActiveTab] = useState<SubViewId>("overview");
 
   const [range, setRange] = useState<DateRange>(() => rangeFromPreset(defaultPresets((_k, f) => f)[1]));
@@ -514,6 +525,8 @@ export function CommandCenter({
         return <SignalsArea range={range} />;
       case "system":
         return <SystemStatsArea />;
+      case "nodes":
+        return <NodesView addToast={addToast} />;
       case "reliability":
         return <ReliabilityView />;
       case "mission-control":

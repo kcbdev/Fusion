@@ -46,7 +46,6 @@ const createDefaultMobileNavProps = () => ({
   onOpenSettings: vi.fn(),
   onOpenActivityLog: vi.fn(),
   onOpenMailbox: vi.fn(),
-  onOpenNodes: vi.fn(),
   mailboxUnreadCount: 0,
   onOpenGitManager: vi.fn(),
   onOpenWorkflowEditor: vi.fn(),
@@ -176,16 +175,15 @@ describe("Mobile Feature Access Regression Guard", () => {
     expect(props.onChangeView).toHaveBeenCalledWith("command-center");
   });
 
-  it("nodes view is reachable from mobile More sheet when enabled", () => {
+  it("nodes is no longer a mobile More item and is reached via Command Center", () => {
     const props = createDefaultMobileNavProps();
-    render(<MobileNavBar {...props} experimentalFeatures={{ nodesView: true }} />);
+    render(<MobileNavBar {...props} />);
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.queryByTestId("mobile-more-item-nodes")).toBeNull();
 
-    const nodesItem = screen.getByTestId("mobile-more-item-nodes");
-    expect(nodesItem).toBeDefined();
-    fireEvent.click(nodesItem);
-    expect(props.onOpenNodes).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-command-center"));
+    expect(props.onChangeView).toHaveBeenCalledWith("command-center");
   });
 
   it("chat is accessible via the bottom nav while remaining absent from the More sheet", () => {

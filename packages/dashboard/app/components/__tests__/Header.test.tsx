@@ -1047,27 +1047,17 @@ describe("Header", () => {
   });
 
   describe("nodes button", () => {
-    it("renders Nodes button in desktop overflow when handler is provided", () => {
-      renderHeader({ onOpenNodes: vi.fn() }, "desktop");
+    it("omits Nodes button from desktop overflow because Nodes lives in Command Center", () => {
+      renderHeader({}, "desktop");
       expect(screen.getByTestId("desktop-overflow-trigger")).toBeDefined();
       fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      expect(screen.getByTestId("desktop-overflow-nodes-btn")).toBeDefined();
+      expect(screen.queryByTestId("desktop-overflow-nodes-btn")).toBeNull();
     });
 
-    it("calls onOpenNodes when Nodes button is clicked from desktop overflow", () => {
-      const onOpenNodes = vi.fn();
-      renderHeader({ onOpenNodes }, "desktop");
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      fireEvent.click(screen.getByTestId("desktop-overflow-nodes-btn"));
-      expect(onOpenNodes).toHaveBeenCalled();
-    });
-
-    it("shows Nodes action in mobile overflow menu", () => {
-      const onOpenNodes = vi.fn();
-      renderHeader({ onOpenNodes }, "mobile");
+    it("omits Nodes action from mobile overflow menu because Nodes lives in Command Center", () => {
+      renderHeader({}, "mobile");
       fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-nodes-btn"));
-      expect(onOpenNodes).toHaveBeenCalled();
+      expect(screen.queryByTestId("overflow-nodes-btn")).toBeNull();
     });
   });
 

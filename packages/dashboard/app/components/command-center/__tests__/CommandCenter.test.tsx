@@ -33,6 +33,16 @@ vi.mock("../../../api", () => ({
   updateGlobalSettings: () => Promise.resolve({}),
 }));
 
+vi.mock("../../NodesView", () => ({
+  NodesView: ({ addToast }: { addToast: (message: string, type?: "success" | "error") => void }) => (
+    <section data-testid="nodes-view">
+      <button type="button" data-testid="nodes-view-toast-probe" onClick={() => addToast("Nodes tab toast", "success")}>
+        Nodes toast probe
+      </button>
+    </section>
+  ),
+}));
+
 function tokenFixture(totalTokens = 1_500) {
   return {
     from: "2026-06-08",
@@ -716,6 +726,7 @@ describe("CommandCenter shell", () => {
     const tabs = within(tablist).getAllByRole("tab");
     // Overview, Tokens, Tools, Activity, Productivity, Team, Ecosystem, GitHub, Signals, System, Reliability, Mission Control.
     expect(tabs.length).toBe(12);
+    expect(screen.queryByTestId("command-center-tab-nodes")).toBeNull();
     // roving tabindex: exactly one tab is focusable.
     const focusable = tabs.filter((tab) => tab.getAttribute("tabindex") === "0");
     expect(focusable.length).toBe(1);
@@ -740,6 +751,25 @@ describe("CommandCenter shell", () => {
     expect(screen.getByTestId("command-center-panel-system")).toBeTruthy();
     await screen.findByTestId("cc-area-system");
     expect(screen.getByTestId("cc-system-cpu-gauge")).toBeTruthy();
+  });
+
+  it("renders and routes the Nodes tab when the nodes feature is enabled", () => {
+    const addToast = vi.fn();
+    render(<CommandCenter addToast={addToast} nodesEnabled={true} />);
+    expect(screen.getAllByTestId("command-center-tab-nodes")).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("command-center-tab-nodes"));
+    expect(screen.getByTestId("command-center-tab-nodes").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("command-center-panel-nodes")).toBeTruthy();
+    expect(screen.getByTestId("nodes-view")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("nodes-view-toast-probe"));
+    expect(addToast).toHaveBeenCalledWith("Nodes tab toast", "success");
+  });
+
+  it("omits the Nodes tab when the nodes feature is disabled", () => {
+    render(<CommandCenter nodesEnabled={false} />);
+    expect(screen.queryByTestId("command-center-tab-nodes")).toBeNull();
   });
 
   it("renders and routes the GitHub tab exactly once", async () => {
@@ -858,7 +888,7 @@ describe("CommandCenter shell", () => {
   });
 
   it("keeps existing Command Center tab test ids after adding Team", () => {
-    render(<CommandCenter />);
+    render(<CommandCenter nodesEnabled={true} />);
     for (const id of [
       "overview",
       "tokens",
@@ -869,6 +899,7 @@ describe("CommandCenter shell", () => {
       "github",
       "signals",
       "system",
+      "nodes",
       "reliability",
       "mission-control",
       "team",
@@ -878,7 +909,7 @@ describe("CommandCenter shell", () => {
   });
 
   it("supports arrow-key navigation between tabs (roving tabindex)", () => {
-    render(<CommandCenter />);
+    render(<CommandCenter nodesEnabled={true} />);
     const overviewTab = screen.getByTestId("command-center-tab-overview");
     overviewTab.focus();
     fireEvent.keyDown(overviewTab, { key: "ArrowRight" });
@@ -889,6 +920,11 @@ describe("CommandCenter shell", () => {
     const systemTab = screen.getByTestId("command-center-tab-system");
     systemTab.focus();
     fireEvent.keyDown(systemTab, { key: "ArrowRight" });
+    const nodesTab = screen.getByTestId("command-center-tab-nodes");
+    expect(nodesTab.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(nodesTab);
+
+    fireEvent.keyDown(nodesTab, { key: "ArrowRight" });
     const reliabilityTab = screen.getByTestId("command-center-tab-reliability");
     expect(reliabilityTab.getAttribute("aria-selected")).toBe("true");
     expect(document.activeElement).toBe(reliabilityTab);

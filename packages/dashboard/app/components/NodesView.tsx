@@ -18,9 +18,13 @@ import type { ToastType } from "../hooks/useToast";
 
 interface NodesViewProps {
   addToast: (message: string, type?: ToastType) => void;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
+/*
+FNXC:Nodes 2026-06-19-00:00:
+FN-6717 mounts Nodes inside Command Center while preserving the legacy overlay caller during migration/testing. The close affordance is overlay-only, so tab mode omits it when no onClose handler is provided.
+*/
 export function NodesView({ addToast, onClose }: NodesViewProps) {
   const { t } = useTranslation("app");
   const {
@@ -151,13 +155,15 @@ export function NodesView({ addToast, onClose }: NodesViewProps) {
         </div>
 
         <div className="nodes-view-actions">
-          <button
-            className="btn-icon nodes-view-close"
-            onClick={onClose}
-            aria-label={t("nodes.closeAriaLabel", "Close nodes view")}
-          >
-            <X size={16} />
-          </button>
+          {onClose ? (
+            <button
+              className="btn-icon nodes-view-close"
+              onClick={onClose}
+              aria-label={t("nodes.closeAriaLabel", "Close nodes view")}
+            >
+              <X size={16} />
+            </button>
+          ) : null}
           <button className="btn btn-sm" onClick={() => void handleRefresh()} disabled={loading || dockerLoading}>
             <RefreshCw size={14} className={loading ? "spin" : ""} />
             {t("nodes.refresh", "Refresh")}

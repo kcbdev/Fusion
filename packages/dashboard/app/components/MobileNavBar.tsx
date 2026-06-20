@@ -24,7 +24,6 @@ import {
   Play,
   Settings,
   Monitor,
-  Network,
   Search,
   Sparkles,
   Target,
@@ -108,9 +107,7 @@ export interface MobileNavBarProps {
     researchView?: boolean;
     evalsView?: boolean;
     goalsView?: boolean;
-    nodesView?: boolean;
   };
-  onOpenNodes?: () => void;
   pluginDashboardViews?: PluginDashboardViewEntry[];
   shellConnectionControl?: ReactNode;
 }
@@ -164,7 +161,6 @@ export function MobileNavBar({
   onViewAllProjects,
   showSkillsTab,
   experimentalFeatures,
-  onOpenNodes,
   pluginDashboardViews = [],
   shellConnectionControl,
 }: MobileNavBarProps) {
@@ -784,18 +780,6 @@ export function MobileNavBar({
               >
                 <Monitor />
                 <span>{t("nav.devServer", "Dev Server")}</span>
-              </button>
-            )}
-
-            {experimentalFeatures?.nodesView && onOpenNodes && (
-              <button
-                type="button"
-                className="mobile-more-item"
-                data-testid="mobile-more-item-nodes"
-                onClick={() => handleMoreAction(onOpenNodes)}
-              >
-                <Network />
-                <span>{t("nav.nodes", "Nodes")}</span>
               </button>
             )}
 

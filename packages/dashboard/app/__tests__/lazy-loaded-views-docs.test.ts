@@ -8,6 +8,9 @@ Merging main reconciled the curated count to 23 (main's 22 lazy views/modals + C
 
 FNXC:CommandCenter 2026-06-19-00:00:
 FN-6702 removes ReliabilityView from the App-level lazy inventory because Reliability now mounts inside the lazy CommandCenter chunk.
+
+FNXC:CommandCenter 2026-06-19-00:00:
+FN-6717 removes NodesView from the App-level lazy inventory because Nodes now mounts inside the lazy CommandCenter chunk.
 */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -15,7 +18,6 @@ import { resolve } from "node:path";
 
 const EXPECTED_DOCUMENTED_VIEWS = new Set([
   "AgentsView",
-  "NodesView",
   "ChatView",
   "MemoryView",
   "DevServerView",
@@ -44,7 +46,6 @@ const EXPECTED_APP_LEVEL_VIEWS = new Set([
   "InsightsView",
   "ResearchView",
   "EvalsView",
-  "NodesView",
   "ChatView",
   "SkillsView",
   "MemoryView",
@@ -106,7 +107,7 @@ function extractAppModalsLazyViews(appModalsSource: string): Set<string> {
 }
 
 describe("AGENTS lazy-loaded views inventory", () => {
-  it("documents the App-level and AppModals lazy views accurately and keeps the curated 22-view list in sync", () => {
+  it("documents the App-level and AppModals lazy views accurately and keeps the curated 21-view list in sync", () => {
     const agentsDoc = readFileSync(resolve(__dirname, "../../../../AGENTS.md"), "utf-8");
     const appSource = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
     const appModalsSource = readFileSync(resolve(__dirname, "../components/AppModals.tsx"), "utf-8");
@@ -114,11 +115,11 @@ describe("AGENTS lazy-loaded views inventory", () => {
     const section = extractLazyLoadedSection(agentsDoc);
     const countMatch = section.match(/These\s+(\d+)\s+views\s+are lazy-loaded/);
     expect(countMatch).toBeTruthy();
-    expect(Number(countMatch?.[1])).toBe(22);
+    expect(Number(countMatch?.[1])).toBe(21);
 
     const documentedViews = extractBacktickedNamesFromBullets(section);
     expect(new Set(documentedViews)).toEqual(EXPECTED_DOCUMENTED_VIEWS);
-    expect(documentedViews).toHaveLength(22);
+    expect(documentedViews).toHaveLength(21);
 
     expect(section).toContain("`ResearchView`");
     expect(section).toContain("`TodoView`");

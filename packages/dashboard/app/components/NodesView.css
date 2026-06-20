@@ -1,18 +1,4 @@
 /* === Node Management === */
-.nodes-management-overlay {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-  height: 100%;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.nodes-management-overlay__header {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .nodes-view {
   --nodes-view-spin-duration: calc(var(--duration-slow) * 4);
   --nodes-view-pulse-duration: calc(var(--duration-slow) * 5);
@@ -605,17 +591,6 @@
 
 /* ── Nodes View Mobile Responsive ──────────────────────────────────────── */
 @media (max-width: 768px) {
-  .nodes-management-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    background: var(--bg);
-    padding-top: max(var(--space-sm), env(safe-area-inset-top, 0px));
-    padding-bottom: calc(var(--mobile-nav-height, 0px) + max(env(safe-area-inset-bottom, 0px), 12px));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
   .nodes-view {
     padding-inline: var(--space-sm);
   }
@@ -716,17 +691,5 @@
 
   .nodes-view-section-title {
     font-size: calc(var(--space-md) + var(--space-xs) / 4);
-  }
-}
-
-/* ── Nodes View Tablet Overlay ───────────────────────────────────────── */
-@media (min-width: 769px) and (max-width: 1024px) {
-  .nodes-management-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    background: var(--bg);
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
   }
 }

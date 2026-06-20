@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Server, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge } from "lucide-react";
+import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge } from "lucide-react";
 import "./Header.css";
 // ProjectSelector styles used by the imported standalone component.
 import "./ProjectSelector.css";
@@ -77,9 +77,6 @@ export interface HeaderProps {
   stashOrphanCount?: number;
   onOpenSchedules?: () => void;
   onOpenGitManager?: () => void;
-  onOpenNodes?: () => void;
-  /** When false, hides the Nodes management button. Defaults to true for backward compat. */
-  showNodesButton?: boolean;
   onOpenWorkflowEditor?: () => void;
   onOpenScripts?: () => void;
   onRunScript?: (name: string, command: string) => void;
@@ -146,8 +143,6 @@ export function Header({
   stashOrphanCount = 0,
   onOpenSchedules,
   onOpenGitManager,
-  onOpenNodes,
-  showNodesButton,
   onOpenWorkflowEditor,
   onOpenScripts,
   onRunScript,
@@ -1524,20 +1519,6 @@ export function Header({
                 role="menu"
                 aria-label={t("header.moreActions", "More actions")}
               >
-                {onOpenNodes && showNodesButton !== false && (
-                  <button
-                    className="view-toggle-overflow-item"
-                    onClick={() => {
-                      onOpenNodes();
-                      setIsDesktopOverflowOpen(false);
-                    }}
-                    role="menuitem"
-                    data-testid="desktop-overflow-nodes-btn"
-                  >
-                    <Server size={14} />
-                    <span>{t("header.nodes", "Nodes")}</span>
-                  </button>
-                )}
                 <button
                   className="view-toggle-overflow-item"
                   onClick={() => {
@@ -1679,18 +1660,6 @@ export function Header({
               >
                 <GitBranch size={16} />
                 <span>{t("header.gitManager", "Git Manager")}</span>
-              </button>
-            )}
-            {/* Nodes - in overflow on mobile */}
-            {onOpenNodes && showNodesButton !== false && (
-              <button
-                className="mobile-overflow-item"
-                onClick={() => handleOverflowAction(onOpenNodes)}
-                role="menuitem"
-                data-testid="overflow-nodes-btn"
-              >
-                <Server size={16} />
-                <span>{t("header.nodes", "Nodes")}</span>
               </button>
             )}
             {!isDesktopShell && (

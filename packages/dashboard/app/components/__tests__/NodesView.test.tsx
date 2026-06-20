@@ -8,7 +8,6 @@ import { useNodeSettingsSync } from "../../hooks/useNodeSettingsSync";
 import { useManagedDockerNodes } from "../../hooks/useManagedDockerNodes";
 import { useMeshState } from "../../hooks/useMeshState";
 import type { NodeSettingsSyncStatus } from "../../api-node";
-import { loadAllAppCss } from "../../test/cssFixture";
 
 vi.mock("../../hooks/useNodes", () => ({
   useNodes: vi.fn(),
@@ -106,43 +105,6 @@ function makeUseNodesResult(overrides: Partial<ReturnType<typeof useNodes>> = {}
   };
 }
 
-function extractMediaBlocks(css: string, regex: RegExp): string {
-  const blocks: string[] = [];
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(css)) !== null) {
-    const startIdx = match.index + match[0].length;
-    let braceCount = 1;
-    let endIdx = startIdx;
-
-    while (braceCount > 0 && endIdx < css.length) {
-      if (css[endIdx] === "{") braceCount += 1;
-      if (css[endIdx] === "}") braceCount -= 1;
-      endIdx += 1;
-    }
-
-    if (braceCount === 0) {
-      blocks.push(css.slice(startIdx, endIdx - 1));
-    }
-  }
-
-  return blocks.join("\n");
-}
-
-function extractMobileMediaBlocks(css: string): string {
-  return extractMediaBlocks(css, /@media[^{]*\(max-width: 768px\)[^{]*\{/g);
-}
-
-function extractTabletMediaBlocks(css: string): string {
-  return extractMediaBlocks(css, /@media[^{]*\(min-width: 769px\)[^{]*\(max-width: 1024px\)[^{]*\{/g);
-}
-
-function extractRuleBlock(css: string, selector: string): string {
-  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matches = [...css.matchAll(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "g"))];
-  return matches.at(-1)?.[1] ?? "";
-}
-
 beforeEach(() => {
   mockUseProjects.mockReturnValue({
     projects: [],
@@ -188,39 +150,6 @@ beforeEach(() => {
 });
 
 describe("NodesView", () => {
-  it("defines nodes overlay as a fixed fullscreen mobile panel", () => {
-    const mobileCss = extractMobileMediaBlocks(loadAllAppCss());
-    const overlayRule = extractRuleBlock(mobileCss, ".nodes-management-overlay");
-
-    expect(overlayRule).toContain("position: fixed;");
-    expect(overlayRule).toContain("inset: 0;");
-    expect(overlayRule).toContain("z-index: 50;");
-    expect(overlayRule).toContain("background: var(--bg);");
-    expect(overlayRule).toContain("padding-top: max(var(--space-sm), env(safe-area-inset-top, 0px));");
-    expect(overlayRule).toContain("padding-bottom: calc(var(--mobile-nav-height, 0px) + max(env(safe-area-inset-bottom, 0px), 12px));");
-    expect(overlayRule).toContain("overflow-y: auto;");
-    expect(overlayRule).toContain("-webkit-overflow-scrolling: touch;");
-
-    mockUseNodes.mockReturnValue(makeUseNodesResult({ nodes: [] }));
-    render(<div className="nodes-management-overlay"><NodesView addToast={vi.fn()} onClose={vi.fn()} /></div>);
-
-    const overlay = document.querySelector(".nodes-management-overlay");
-    expect(overlay).toContainElement(screen.getByTestId("nodes-view"));
-    expect(screen.getByRole("button", { name: "Close nodes view" })).toBeInTheDocument();
-  });
-
-  it("defines nodes overlay as a fixed fullscreen tablet panel", () => {
-    const tabletCss = extractTabletMediaBlocks(loadAllAppCss());
-    const overlayRule = extractRuleBlock(tabletCss, ".nodes-management-overlay");
-
-    expect(overlayRule).toContain("position: fixed;");
-    expect(overlayRule).toContain("inset: 0;");
-    expect(overlayRule).toContain("z-index: 50;");
-    expect(overlayRule).toContain("background: var(--bg);");
-    expect(overlayRule).toContain("overflow-y: auto;");
-    expect(overlayRule).toContain("-webkit-overflow-scrolling: touch;");
-  });
-
   it("renders docker stat and passes docker data to matching node card", () => {
     mockUseNodes.mockReturnValue(makeUseNodesResult({
       nodes: [makeNode({ id: "node-1", name: "Alpha", type: "remote", url: "https://alpha.node" })],
@@ -399,6 +328,16 @@ describe("NodesView", () => {
     fireEvent.click(nodeCard!);
 
     expect(screen.getByText("Projects (1)")).toBeDefined();
+  });
+
+  it("omits close button when rendered without an overlay close handler", () => {
+    mockUseNodes.mockReturnValue(makeUseNodesResult({ nodes: [] }));
+
+    render(<NodesView addToast={vi.fn()} />);
+
+    expect(screen.getByTestId("nodes-view")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close nodes view" })).toBeNull();
+    expect(document.querySelector(".nodes-view-close")).toBeNull();
   });
 
   it("renders close button and calls onClose when clicked", () => {

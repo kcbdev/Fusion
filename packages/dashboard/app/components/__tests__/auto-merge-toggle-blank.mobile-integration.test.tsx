@@ -332,7 +332,6 @@ function AppShellMobileHarness({ tasks }: { tasks: Task[] }) {
           onOpenUsage={vi.fn()}
           onRunScript={vi.fn()}
           onViewAllProjects={vi.fn()}
-          onOpenNodes={vi.fn()}
           projectId="proj_123"
           activePlanningSessionCount={0}
           experimentalFeatures={{}}
