@@ -26,10 +26,19 @@ All commands run from the repo root:
 pnpm i18n:extract   # pull t()/<Trans> keys from source into the en catalogs
 pnpm i18n:sync      # propagate the en key structure to every other locale
 pnpm i18n:types     # regenerate key types from the en catalogs
-pnpm i18n:status    # per-locale completion report
+pnpm i18n:status    # key-parity gate: structure only, empty values allowed
+pnpm i18n:status:report # upstream completeness report (informational; may exit non-zero)
 pnpm i18n:lint      # flag hardcoded user-facing strings
 pnpm i18n:gen-cli   # regenerate the CLI static catalog import map
 ```
+
+`pnpm i18n:status` must be green before landing catalog or extraction changes,
+but it only verifies that every secondary catalog has the same structural keys as
+`en`. Empty secondary-locale values (`""`) are expected placeholders and do not
+fail the gate because runtime falls back to English. Use
+`pnpm i18n:status:report` when you want the upstream completeness report that
+counts empty placeholders as untranslated; that report is informational and may
+exit non-zero until translations are filled.
 
 ## Lint baseline policy
 
@@ -53,7 +62,8 @@ and has a filed follow-up task that removes the ignore.
 3. Keep interpolation placeholders verbatim: `{{brand}}`, `{{detail}}`,
    `{{key}}`. Never translate a `[{{key}}]` keybinding accelerator — only the
    words around it.
-4. `pnpm i18n:status` to confirm the locale is complete.
+4. Run `pnpm i18n:status` to confirm key parity still holds, then optionally run
+   `pnpm i18n:status:report` to inspect remaining untranslated placeholders.
 
 `zh-CN` and `zh-TW` are independent — different script **and** vocabulary. Do
 not machine-convert one into the other.
@@ -65,7 +75,9 @@ not machine-convert one into the other.
 2. `pnpm i18n:sync` — scaffolds a full set of catalog files for the new locale
    with the correct plural categories.
 3. `pnpm i18n:gen-cli` — adds the locale to the CLI's static import map.
-4. Translate the new catalogs, then `pnpm i18n:status` to verify.
+4. Run `pnpm i18n:status` to verify the new locale has the same key structure as
+   `en`. Translate the new catalogs as time allows, using
+   `pnpm i18n:status:report` as the informational completeness report.
 
 No feature code changes are required: the dashboard discovers the locale through
 the generated `app/locales/` tree, and the CLI through the regenerated import

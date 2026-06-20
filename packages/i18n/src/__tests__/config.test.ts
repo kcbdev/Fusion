@@ -47,7 +47,7 @@ describe("@fusion/i18n config", () => {
 
   it("has real en content (catalogs wired, not empty)", () => {
     expect(cliResources.en.cli).toMatchObject({ tui: { loading: expect.any(String) } });
-    expect(cliResources.en.common).toMatchObject({ columns: { done: "Done" } });
+    expect(cliResources.en.common).toMatchObject({ inline: { online: "Online" } });
   });
 
   it("keeps dashboard/cli namespace lists as subsets of the canonical set", () => {
