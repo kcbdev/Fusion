@@ -78,6 +78,7 @@ Features:
 - Column ordering semantics: `todo` mirrors scheduler pickup order (priority descending, then oldest `createdAt`, then task ID); `triage`, `in-progress`, `in-review`, and `archived` remain priority-first with task-ID tie-breaks; `done` is ordered by most recent completion first (`columnMovedAt`, then `updatedAt`, then `createdAt` fallback)
 - On mobile, both default and workflow-mode boards fill the project viewport while the column strip remains the internal horizontal scroller with contained edge overscroll.
 - Board and List workflow switchers use a themed dropdown instead of a native select. The closed trigger and each workflow option show compact Todo / In Progress / Done counts derived from workflow column flags, excluding archived columns.
+- When workflow columns are enabled, Board and List hydrate the last successful workflow-lane payload from a per-project session cache; cold loads show a neutral skeleton until settings and workflow metadata are known, avoiding a legacy single-lane flash.
 
 ![Board view](./screenshots/dashboard-overview.png)
 

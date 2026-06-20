@@ -1849,6 +1849,8 @@ function AppInner() {
             prAuthAvailable={prAuthAvailable}
             onOpenWorkflowEditor={openWorkflowEditorWithNav}
             onCreateWorkflow={openCreateWorkflowWithNav}
+            workflowColumnsEnabled={experimentalFeatures.workflowColumns === true}
+            settingsLoaded={settingsLoaded}
           />
         </PageErrorBoundary>
       );
@@ -1887,6 +1889,8 @@ function AppInner() {
           prAuthAvailable={prAuthAvailable}
           autoMerge={autoMerge}
           onCreateWorkflow={openCreateWorkflowWithNav}
+          workflowColumnsEnabled={experimentalFeatures.workflowColumns === true}
+          settingsLoaded={settingsLoaded}
         />
       </PageErrorBoundary>
     );
