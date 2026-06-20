@@ -260,6 +260,30 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     createdAt: BUILTIN_TS,
     updatedAt: BUILTIN_TS,
   },
+  /**
+   * FNXC:Workflows 2026-06-20-00:00:
+   * Fusion needs a built-in design lane for UI-heavy work. Gate changes on the frontend-ux-design review criteria before the standard review and merge so visual hierarchy, spacing, typography, token consistency, component reuse, responsive behavior, and fit with the design language are checked without custom workflow assembly.
+   */
+  linear({
+    id: "builtin:design",
+    name: "Design (built-in)",
+    description: "Implement, then run a design/UX review gate before the standard review and merge — for UI-heavy work.",
+    nodes: [
+      { id: "execute", kind: "prompt", config: builtinPromptConfig("execute", "Execute") },
+      {
+        id: "design-review",
+        kind: "gate",
+        config: {
+          name: "Design review",
+          gateMode: "gate",
+          prompt:
+            "You are a UX design reviewer. Review frontend/UI changes for visual polish and consistency with existing UI patterns and design tokens. Check visual hierarchy and information flow; spacing, typography, margins, padding, gaps, and type scale; color and token consistency, including CSS custom properties/design tokens and no hardcoded colors; reuse of existing components instead of one-off styling or duplication; responsive behavior across viewports; and fit with the product design language, including border radius, shadows, transitions, and icon style. Block merge on real visual-quality regressions such as layout breaks, broken responsive behavior, hardcoded color/token violations, inconsistent component patterns, or design-language mismatches. Do not block or nit when the diff has no frontend/UI impact or no real design issue exists.",
+        },
+      },
+      { id: "review", kind: "prompt", config: builtinPromptConfig("review", "Review") },
+      { id: "merge", kind: "prompt", config: builtinPromptConfig("merge", "Merge boundary") },
+    ],
+  }),
   // The PR workflow (U9) — the unified PR-entity lifecycle wired end to end as
   // first-class graph nodes/edges: pr-create → await-review (hold) → pr-respond
   // (bounded rework loop) → auto-merge gate → pr-merge → end, with the await

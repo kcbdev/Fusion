@@ -132,7 +132,11 @@ Save is blocked by client-side issues such as unplaced nodes and blocking column
 Fusion ships built-in workflows as read-only references:
 
 - `builtin:coding` — the default coding lifecycle and fallback for tasks without a workflow selection.
+- `builtin:quick-fix` — a short path for trivial or no-commit/decision work.
+- `builtin:review-heavy` — a standard execute/review/merge path with an additional gated security review.
+- `builtin:compound-engineering` — a plugin-gated workflow for Compound Engineering skill lanes.
 - `builtin:stepwise-coding` — a graph variant that models per-step parse, execute, review, and rework structure.
+- `builtin:design` — a UI-heavy work path with a gated design/UX review before standard review and merge.
 
 Built-ins can be viewed, exported, and used as templates, but their graph, columns, field declarations, and setting declarations are not editable. Their per-project setting **values** are editable from the Settings panel's Values tab.
 

@@ -150,6 +150,27 @@ describe("built-in workflows", () => {
     expect(ir.settings).toEqual(BUILTIN_WORKFLOW_SETTINGS);
   });
 
+  it("includes the design built-in with an ordered design review gate", () => {
+    const design = getBuiltinWorkflow("builtin:design");
+    expect(design).toBeDefined();
+    expect(design!.kind).toBe("workflow");
+    expect(() => parseWorkflowIr(design!.ir)).not.toThrow();
+    expect(() => compileWorkflowToSteps(design!.ir)).not.toThrow();
+
+    const authoredNodeIds = design!.ir.nodes.filter((node) => node.id !== "start" && node.id !== "end").map((node) => node.id);
+    expect(authoredNodeIds).toEqual(["execute", "design-review", "review", "merge"]);
+
+    const designReview = design!.ir.nodes.find((node) => node.id === "design-review");
+    expect(designReview?.kind).toBe("gate");
+    expect(designReview?.config?.name).toBe("Design review");
+    expect(designReview?.config?.gateMode).toBe("gate");
+    const prompt = String(designReview?.config?.prompt ?? "");
+    expect(prompt.length).toBeGreaterThan(100);
+    expect(prompt).toContain("visual hierarchy");
+    expect(prompt).toContain("design tokens");
+    expect(prompt).toContain("responsive behavior");
+  });
+
   it("repeated catalog reads and listings keep builtin:coding in the enabled order", () => {
     expect(getBuiltinWorkflow("builtin:coding")?.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(getBuiltinWorkflow("builtin:coding")?.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
@@ -159,9 +180,11 @@ describe("built-in workflows", () => {
         (workflow) => workflow.kind !== "fragment" && !isBuiltinWorkflowPluginGated(workflow.id),
       ).map((workflow) => workflow.id),
     );
+    expect(defaultEnabledBuiltinWorkflowIds()).toContain("builtin:design");
     expect(defaultEnabledBuiltinWorkflowIds()).not.toContain("builtin:compound-engineering");
     expect(defaultEnabledBuiltinWorkflowIds()).not.toContain("builtin:pr-workflow");
     expect(getBuiltinWorkflow("builtin:pr-workflow")!.kind).toBe("fragment");
+    expect(defaultEnabledBuiltinWorkflowIds().length).toBeGreaterThanOrEqual(4);
     expect(defaultEnabledBuiltinWorkflowIds().slice(0, 4)).toEqual([
       "builtin:coding",
       "builtin:quick-fix",

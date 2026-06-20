@@ -32,6 +32,7 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 | Review-heavy | `builtin:review-heavy` | Standard execute/review/merge path with an additional gated security review. |
 | Compound engineering | `builtin:compound-engineering` | Plugin-gated workflow that invokes Compound Engineering skills for planning, work, review, PR/feedback, and learnings capture. |
 | Stepwise coding | `builtin:stepwise-coding` | Graph-executor workflow that models per-step parse/execute/review/rework explicitly. |
+| Design | `builtin:design` | UI-heavy work path that implements, runs a gated design/UX review, then performs the standard review and merge. |
 | PR lifecycle | `builtin:pr-workflow` | Reusable PR lifecycle graph fragment (create PR → await review → respond → gate → merge); it is a fragment, not directly selectable as a task workflow. |
 
 ### Custom workflow authoring
