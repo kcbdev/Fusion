@@ -1,7 +1,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, lstatSync, readdirSync, rmSync, realpathSync } from "node:fs";
-import { basename, join, relative, resolve, isAbsolute } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, realpathSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
 import type { ColumnId, SecretsStore, Settings, TaskStore, WorktrunkSettings } from "@fusion/core";
 import { assertCleanBranchAtBase, inspectBranchConflict } from "./branch-conflicts.js";
 import { worktreePoolLog } from "./logger.js";
@@ -848,6 +848,34 @@ export async function cleanupOrphanedWorktrees(
  * @param projectRoot - Absolute path to the project root (parent of `.worktrees/`)
  * @returns Number of orphan directories removed
  */
+/**
+ * Resolve a worktree's `.git` pointer to the gitdir admin path it references.
+ *
+ * Returns:
+ * - `"directory"` if `.git` is a real directory (a normal repo, not a worktree
+ *   link) — callers should treat that as "leave it alone".
+ * - an absolute path string for a `gitdir: <path>` link file (relative targets
+ *   are resolved against the worktree directory).
+ * - `null` if the pointer can't be read or parsed.
+ *
+ * Callers decide whether the target exists; a missing target means the link is
+ * dangling (leak residue) and the directory is safe to reap.
+ */
+function resolveGitdirPointer(dotGitPath: string): string | "directory" | null {
+  try {
+    if (lstatSync(dotGitPath).isDirectory()) {
+      return "directory";
+    }
+    const raw = readFileSync(dotGitPath, "utf8").trim();
+    const match = /^gitdir:\s*(.+)$/.exec(raw);
+    if (!match) return null;
+    const target = match[1].trim();
+    return isAbsolute(target) ? target : resolve(dirname(dotGitPath), target);
+  } catch {
+    return null;
+  }
+}
+
 export async function reapOrphanWorktrees(
   projectRoot: string,
   settings?: Pick<Settings, "worktreesDir">,
@@ -902,16 +930,29 @@ export async function reapOrphanWorktrees(
     // Belt-and-suspenders: skip if a .git file exists AND points to an existing gitdir.
     // This guards against races where git registered the worktree between our list
     // call and now, or against a broken repo whose porcelain is unreliable.
+    //
+    // FN-6782 follow-up: a *dangling* `.git` (file present, but the admin entry it
+    // points to is gone) is NOT "partially registered" — it is leak residue from a
+    // worktree whose admin entry was pruned while the directory survived. Such a dir
+    // is invisible to `git worktree list`/`prune` yet collides with freshly generated
+    // worktree names and breaks `execute` (cleanup can't `git worktree remove` a path
+    // git never registered). Only skip when the gitdir target actually exists; reap
+    // dangling pointers like any other half-initialized orphan.
     const dotGit = join(resolvedFull, ".git");
     if (existsSync(dotGit)) {
-      // If there's a .git file/dir, don't touch it — assertValidWorktreeSession
-      // will handle it on the next agent start.
-      worktreePoolLog.log(`reapOrphanWorktrees: skipping ${name} (has .git entry but not in registered list — may be partially registered)`);
-      continue;
+      const gitdirTarget = resolveGitdirPointer(dotGit);
+      if (gitdirTarget === "directory" || (gitdirTarget && existsSync(gitdirTarget))) {
+        // Valid registration (or a real .git dir) — leave it; assertValidWorktreeSession
+        // will handle it on the next agent start.
+        worktreePoolLog.log(`reapOrphanWorktrees: skipping ${name} (has .git entry but not in registered list — may be partially registered)`);
+        continue;
+      }
+      worktreePoolLog.log(`reapOrphanWorktrees: ${name} has a dangling .git pointer (admin entry missing) — treating as orphan`);
+      // fall through to removal
     }
 
-    // This directory is on disk but has no .git entry and is not a registered
-    // worktree — it is a half-initialized orphan.  Remove it.
+    // This directory is on disk but has no valid .git entry and is not a registered
+    // worktree — it is a half-initialized / leaked orphan.  Remove it.
     try {
       try {
         await cleanupSecretsEnvFile({

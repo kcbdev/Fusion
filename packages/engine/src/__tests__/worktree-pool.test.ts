@@ -52,6 +52,7 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   lstatSync: vi.fn().mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false }),
   readdirSync: vi.fn().mockReturnValue([]),
+  readFileSync: vi.fn().mockReturnValue(""),
   rmSync: vi.fn(),
 }));
 
@@ -73,13 +74,14 @@ import {
 import { BranchConflictError } from "../branch-conflicts.js";
 import * as branchConflictModule from "../branch-conflicts.js";
 import { execSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import type { Task, Column } from "@fusion/core";
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedLstatSync = vi.mocked(lstatSync);
 const mockedReaddirSync = vi.mocked(readdirSync);
+const mockedReadFileSync = vi.mocked(readFileSync);
 const mockedRmSync = vi.mocked(rmSync);
 const mockedPruneWorktreeAdminEntries = vi.mocked(worktreePrune.pruneWorktreeAdminEntries);
 const TEST_TASK_ID = "FN-test";
@@ -1108,6 +1110,51 @@ describe("reapOrphanWorktrees", () => {
     expect(removed).toBe(1);
     expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/half-built", { recursive: true, force: true });
     expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/.ai-merge", expect.anything());
+  });
+
+  // FN-6782 follow-up: a directory whose `.git` points to a missing admin entry is leak
+  // residue (invisible to `git worktree list`/`prune`), not "partially registered". It
+  // must be reaped — otherwise it collides with freshly generated worktree names and
+  // breaks `execute`. Previously the reaper skipped on mere `.git` presence.
+  it("reaps a dir with a dangling .git pointer (admin gitdir missing)", async () => {
+    mockedReaddirSync.mockReturnValue([makeDirEntry("leaked-wt")] as any);
+    // `.git` is a link FILE (not a dir); the worktree dir itself is a dir.
+    mockedLstatSync.mockImplementation((p: any) =>
+      (String(p).endsWith("/.git")
+        ? { isDirectory: () => false, isSymbolicLink: () => false }
+        : { isDirectory: () => true, isSymbolicLink: () => false }) as any,
+    );
+    mockedReadFileSync.mockReturnValue("gitdir: /root/.git/worktrees/leaked-wt\n" as any);
+    mockedExistsSync.mockImplementation((p) => {
+      const s = String(p);
+      // .worktrees root exists; the .git link file exists; the gitdir target does NOT.
+      return s === "/root/.worktrees" || s === "/root/.worktrees/leaked-wt/.git";
+    });
+
+    const removed = await reapOrphanWorktrees("/root");
+
+    expect(removed).toBe(1);
+    expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/leaked-wt", { recursive: true, force: true });
+  });
+
+  it("skips a dir with a valid .git pointer (admin gitdir exists)", async () => {
+    mockedReaddirSync.mockReturnValue([makeDirEntry("live-wt")] as any);
+    mockedLstatSync.mockImplementation((p: any) =>
+      (String(p).endsWith("/.git")
+        ? { isDirectory: () => false, isSymbolicLink: () => false }
+        : { isDirectory: () => true, isSymbolicLink: () => false }) as any,
+    );
+    mockedReadFileSync.mockReturnValue("gitdir: /root/.git/worktrees/live-wt\n" as any);
+    mockedExistsSync.mockImplementation((p) => {
+      const s = String(p);
+      // The gitdir target exists too → treat as (maybe) registered, leave it alone.
+      return s === "/root/.worktrees" || s === "/root/.worktrees/live-wt/.git" || s === "/root/.git/worktrees/live-wt";
+    });
+
+    const removed = await reapOrphanWorktrees("/root");
+
+    expect(removed).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/live-wt", expect.anything());
   });
 });
 

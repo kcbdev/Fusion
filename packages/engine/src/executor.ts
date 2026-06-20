@@ -14247,14 +14247,24 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
       return true;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      // FN-4811 follow-up (FN-4813): when `git worktree remove --force` fails with
-      // "fatal: validation failed, cannot remove working tree", the worktree directory
-      // doesn't exist on disk and the git admin entry (if any) is stale. Treat as
-      // already-cleaned: prune the stale admin entry, best-effort delete the branch, and
-      // return success so the caller can proceed with fresh worktree creation. Without
-      // this recovery, every `tryCreateWorktree` retry on a stale conflict path fails
-      // with "automatic cleanup failed".
-      if (/validation failed, cannot remove working tree/i.test(errorMessage)) {
+      // FN-4811 follow-up (FN-4813): when `git worktree remove --force` fails because the
+      // conflicting path isn't a recoverable git worktree, treat it as already-cleaned:
+      // prune any stale admin entry, force-remove the leftover directory, best-effort delete
+      // the branch, and return success so the caller can proceed with fresh worktree creation.
+      // Without this recovery, every `tryCreateWorktree` retry on such a path fails with
+      // "automatic cleanup failed".
+      //
+      // Three variants land here, all meaning "no live worktree to preserve at this path":
+      //   1. `validation failed, cannot remove working tree` — stale admin entry, dir missing.
+      //   2. `is not a working tree` — an orphan directory exists on disk but git never
+      //      registered it (e.g. a leaked worktree dir that outlived its admin entry). This
+      //      is the FN-6782 leak residue that collides with freshly generated worktree names.
+      //   3. `No such file or directory` / ENOENT — the path is already gone.
+      const staleConflictPath =
+        /validation failed, cannot remove working tree/i.test(errorMessage) ||
+        /is not a working tree/i.test(errorMessage) ||
+        /no such file or directory|ENOENT/i.test(errorMessage);
+      if (staleConflictPath) {
         try {
           await execAsync("git worktree prune", {
             cwd: this.rootDir,
@@ -14265,6 +14275,14 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           const pruneMsg = pruneErr instanceof Error ? pruneErr.message : String(pruneErr);
           executorLog.warn(`${taskId}: git worktree prune failed during stale-path cleanup of ${worktreePath}: ${pruneMsg}`);
         }
+        // An orphan directory ("is not a working tree") won't be removed by prune — git
+        // doesn't track it. Force-remove the leftover dir so the colliding name is free.
+        try {
+          await rm(worktreePath, { recursive: true, force: true });
+        } catch (rmErr: unknown) {
+          const rmMsg = rmErr instanceof Error ? rmErr.message : String(rmErr);
+          executorLog.warn(`${taskId}: failed to remove orphan worktree directory ${worktreePath}: ${rmMsg}`);
+        }
         try {
           await execAsync(`git branch -D "${branch}"`, { cwd: this.rootDir });
           this.store.clearStaleExecutionStartBranchReferences([branch], taskId);
@@ -14273,7 +14291,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         }
         await this.store.logEntry(
           taskId,
-          `Cleaned up stale conflicting worktree admin entry (validation failed — path likely missing on disk)`,
+          `Cleaned up stale conflicting worktree (no live worktree at path — pruned admin entry and removed orphan directory)`,
           worktreePath,
         );
         return true;
