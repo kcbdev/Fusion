@@ -337,8 +337,11 @@ The global mobile touch-action reset applies to descendants, and browsers inters
   background: color-mix(in srgb, var(--color-warning) 6%, transparent);
 }
 
+/*
+FNXC:TaskCard 2026-06-20-03:25:
+FN-6774 removes the saturated stuck-task edge stripe from board cards. Keep the triage-tinted surface plus the stuck status badge so the state remains legible while the card uses the neutral board border.
+*/
 .card.stuck {
-  border-left: 3px solid var(--triage);
   background: color-mix(in srgb, var(--triage) 6%, transparent);
 }
 

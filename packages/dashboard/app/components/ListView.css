@@ -515,8 +515,11 @@
   opacity: 0.55;
 }
 
+/*
+FNXC:ListView 2026-06-20-03:25:
+FN-6774 removes the saturated stuck-task edge stripe from list rows. Keep the subtle triage background and stuck status badge so stuck rows stay distinguishable without changing the neutral row border.
+*/
 .list-row.stuck {
-  border-left: 3px solid var(--triage);
   background: color-mix(in srgb, var(--triage) 8%, transparent);
 }
 

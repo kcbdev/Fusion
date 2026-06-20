@@ -469,6 +469,10 @@ The base grid keeps a token-sized handle column as the no-JS fallback, while the
   gap: var(--space-lg);
 }
 
+/*
+FNXC:AgentsView 2026-06-20-03:25:
+FN-6774 removes the saturated top-edge status stripe from agent board cards. Agent state remains legible through state chips, subtle card background tints, hover feedback, and the neutral card border.
+*/
 .agent-board-card {
   display: flex;
   flex-direction: column;
@@ -476,7 +480,6 @@ The base grid keeps a token-sized handle column as the no-JS fallback, while the
   padding: var(--space-lg);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-top-width: 3px;
   border-radius: var(--radius-md);
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
@@ -568,17 +571,20 @@ The base grid keeps a token-sized handle column as the no-JS fallback, while the
   gap: var(--space-md);
 }
 
+/*
+FNXC:AgentsView 2026-06-20-03:25:
+FN-6774 removes the saturated left-edge status stripe from split-sidebar agent cards. Selection uses a full-card ring and state uses subtle backgrounds/status chips so no single edge becomes the status indicator.
+*/
 .agent-card {
   border: 1px solid var(--border);
-  border-left-width: 4px;
   border-radius: var(--radius-md);
   padding: var(--space-lg);
   background: var(--surface);
 }
 
 .agent-card--selected {
-  border-left-color: var(--todo) !important;
   background: color-mix(in srgb, var(--todo) 8%, transparent);
+  box-shadow: inset 0 0 0 calc(var(--space-xs) / 4) var(--todo);
 }
 
 .agent-card-header {
@@ -909,27 +915,41 @@ The base grid keeps a token-sized handle column as the no-JS fallback, while the
   border: 1px solid var(--state-error-border);
 }
 
-.agent-board-card--idle,
-.agent-board-card--active,
-.agent-board-card--paused { border-top-color: var(--state-idle-border); }
+.agent-board-card--active {
+  background: color-mix(in srgb, var(--state-active-border) 6%, var(--surface));
+}
+
+.agent-board-card--paused {
+  background: var(--state-paused-bg);
+}
+
 .agent-board-card--running {
-  border-top-color: var(--state-active-border);
   background: var(--state-active-bg);
 }
-.agent-board-card--error { border-top-color: var(--state-error-border); }
 
-.agent-card--idle,
-.agent-card--active,
-.agent-card--paused { border-left-color: var(--state-idle-border); }
+.agent-board-card--error {
+  background: var(--state-error-bg);
+}
+
+.agent-card--active {
+  background: color-mix(in srgb, var(--state-active-border) 6%, var(--surface));
+}
+
+.agent-card--paused {
+  background: var(--state-paused-bg);
+}
+
 .agent-card--running {
-  border-left-color: var(--state-active-border);
   background: var(--state-active-bg);
 }
 
 .agent-card--running:hover {
   background: color-mix(in srgb, var(--state-active-border) 20%, var(--card-hover));
 }
-.agent-card--error { border-left-color: var(--state-error-border); }
+
+.agent-card--error {
+  background: var(--state-error-bg);
+}
 
 /* === FN-1167: Agent Org Chart + Chain of Command === */
 .agent-org-chart-shell {
