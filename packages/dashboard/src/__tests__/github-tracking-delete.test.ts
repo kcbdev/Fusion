@@ -106,8 +106,11 @@ describe("github tracking delete flow", () => {
   afterEach(async () => {
     stateService.stop();
     store.close();
-    await rm(rootDir, { recursive: true, force: true });
-    await rm(globalDir, { recursive: true, force: true });
+    // The delete handlers are fire-and-forget (`void this.handleTaskDeleted`), so a
+    // trailing async write into `.fusion` can race this cleanup and surface as
+    // ENOTEMPTY. `maxRetries`/`retryDelay` make rm tolerant of that teardown race.
+    await rm(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await rm(globalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it("closes the linked issue as not_planned when a tracked task is deleted", async () => {
