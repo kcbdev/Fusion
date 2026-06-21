@@ -1,12 +1,13 @@
 import "./DocumentsView.css";
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, FileText, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Search, X, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, FileText, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Search, X, Eye, EyeOff, Package } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { TaskDocumentWithTask, TaskDetail } from "@fusion/core";
+import type { ArtifactType, ArtifactWithTask, TaskDocumentWithTask, TaskDetail } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { fetchTaskDetail, fetchWorkspaceFileContent, type MarkdownFileEntry } from "../api";
+import { artifactMediaUrl, fetchTaskDetail, fetchWorkspaceFileContent, type MarkdownFileEntry } from "../api";
+import { useArtifacts } from "../hooks/useArtifacts";
 import { useDocuments } from "../hooks/useDocuments";
 import { useProjectMarkdownFiles } from "../hooks/useProjectMarkdownFiles";
 import { useSelectionComment } from "../hooks/useSelectionComment";
@@ -15,7 +16,7 @@ import { LoadingSpinner } from "./LoadingSpinner";
 
 const MOBILE_BREAKPOINT = 768;
 
-type DocumentsTab = "project" | "tasks";
+type DocumentsTab = "project" | "tasks" | "artifacts";
 
 export interface DocumentsViewProps {
   projectId?: string;
@@ -37,6 +38,12 @@ interface TaskGroupProps {
   onOpenTask: (taskId: string) => void;
   renderMarkdownStates: Map<string, boolean>;
   onToggleMarkdown: (docId: string) => void;
+}
+
+interface ArtifactCardProps {
+  artifact: ArtifactWithTask;
+  projectId?: string;
+  onOpenTask: (taskId: string) => void;
 }
 
 function formatTimestamp(iso?: string): string {
@@ -154,7 +161,7 @@ function TaskGroup({ taskId, taskTitle, documents, onOpenTask, renderMarkdownSta
         <button
           className="documents-group-task-link"
           onClick={() => onOpenTask(taskId)}
-          aria-label={`Open task ${taskId}: ${taskTitle || t("documents.untitled", "Untitled")}`}
+          aria-label={t("documents.openTaskAria", "Open task {{taskId}}: {{title}}", { taskId, title: taskTitle || t("documents.untitled", "Untitled") })}
         >
           {t("documents.openTask", "Open task")}
         </button>
@@ -173,6 +180,83 @@ function TaskGroup({ taskId, taskTitle, documents, onOpenTask, renderMarkdownSta
         </div>
       )}
     </div>
+  );
+}
+
+function getArtifactTypeLabel(t: ReturnType<typeof useTranslation<"app">>["t"], type: ArtifactType): string {
+  switch (type) {
+    case "image":
+      return t("documents.artifactTypeImage", "Image");
+    case "video":
+      return t("documents.artifactTypeVideo", "Video");
+    case "audio":
+      return t("documents.artifactTypeAudio", "Audio");
+    case "document":
+      return t("documents.artifactTypeDocument", "Document");
+    case "other":
+      return t("documents.artifactTypeOther", "Other");
+  }
+}
+
+function ArtifactCard({ artifact, projectId, onOpenTask }: ArtifactCardProps) {
+  const { t } = useTranslation("app");
+  const mediaUrl = artifactMediaUrl(artifact.id, projectId);
+  const typeLabel = getArtifactTypeLabel(t, artifact.type);
+  const preview = artifact.content ? getContentPreview(artifact.content, 320) : artifact.description;
+  const title = artifact.title || t("documents.untitledArtifact", "Untitled artifact");
+
+  const media = (() => {
+    switch (artifact.type) {
+      case "image":
+        return <img className="documents-artifact-media" src={mediaUrl} alt={title} loading="lazy" />;
+      case "video":
+        return <video className="documents-artifact-media" controls src={mediaUrl} aria-label={t("documents.artifactVideoLabel", "Video artifact: {{title}}", { title })} />;
+      case "audio":
+        return <audio className="documents-artifact-audio" controls src={mediaUrl} aria-label={t("documents.artifactAudioLabel", "Audio artifact: {{title}}", { title })} />;
+      case "document":
+        return (
+          <div className="documents-artifact-document" data-testid="artifact-document-preview">
+            <FileText size={16} />
+            <p>{preview || t("documents.noArtifactPreview", "No preview available.")}</p>
+          </div>
+        );
+      case "other":
+        return (
+          <a className="documents-artifact-generic" href={mediaUrl} target="_blank" rel="noreferrer" data-testid="artifact-other-link">
+            <Package size={16} />
+            {t("documents.openArtifactMedia", "Open artifact media")}
+          </a>
+        );
+    }
+  })();
+
+  return (
+    <article className="document-card documents-artifact-card" aria-label={t("documents.artifactCardLabel", "Artifact {{title}}", { title })}>
+      <div className="documents-artifact-preview">
+        {media}
+      </div>
+      <div className="documents-artifact-body">
+        <div className="documents-artifact-header">
+          <span className="documents-artifact-type-badge">{typeLabel}</span>
+          <span className="documents-artifact-author">{artifact.authorId}</span>
+        </div>
+        <h3 className="documents-artifact-title">{title}</h3>
+        {artifact.description && <p className="documents-artifact-description">{artifact.description}</p>}
+        <div className="documents-artifact-meta">
+          <span>{formatTimestamp(artifact.createdAt)}</span>
+          {artifact.sizeBytes !== undefined && <span>{formatFileSize(artifact.sizeBytes)}</span>}
+        </div>
+        {artifact.taskId && (
+          <button
+            className="documents-group-task-link documents-artifact-task-link"
+            onClick={() => onOpenTask(artifact.taskId as string)}
+            aria-label={t("documents.openTaskAria", "Open task {{taskId}}: {{title}}", { taskId: artifact.taskId, title: artifact.taskTitle || t("documents.untitled", "Untitled") })}
+          >
+            {t("documents.openTask", "Open task")}
+          </button>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -200,6 +284,7 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
   const activeProjectSelection = renderProjectMarkdown ? markdownSelection : plainSelection;
 
   const taskSearchQuery = activeTab === "tasks" ? searchQuery.trim() : "";
+  const artifactSearchQuery = activeTab === "artifacts" ? searchQuery.trim() : "";
 
   const {
     documents,
@@ -218,6 +303,16 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
     error: projectFilesError,
     refresh: refreshProjectFiles,
   } = useProjectMarkdownFiles(projectId, { showHidden: showHiddenProjectFiles });
+
+  const {
+    artifacts,
+    loading: artifactsLoading,
+    error: artifactsError,
+    refresh: refreshArtifacts,
+  } = useArtifacts({
+    projectId,
+    searchQuery: artifactSearchQuery || undefined,
+  });
 
   useEffect(() => {
     const updateMobile = () => {
@@ -245,7 +340,7 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
   }, [projectId]);
 
   useEffect(() => {
-    if (initialTabSetRef.current || documentsLoading || projectFilesLoading) {
+    if (initialTabSetRef.current || documentsLoading || projectFilesLoading || artifactsLoading) {
       return;
     }
 
@@ -253,10 +348,12 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
       setActiveTab("project");
     } else if (documents.length > 0) {
       setActiveTab("tasks");
+    } else if (artifacts.length > 0) {
+      setActiveTab("artifacts");
     }
 
     initialTabSetRef.current = true;
-  }, [documents.length, documentsLoading, projectFiles.length, projectFilesLoading]);
+  }, [artifacts.length, artifactsLoading, documents.length, documentsLoading, projectFiles.length, projectFilesLoading]);
 
   const groupedDocuments = useMemo(() => {
     const groups = new Map<string, TaskDocumentWithTask[]>();
@@ -373,17 +470,21 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
     });
   }, []);
 
-  const activeError = activeTab === "project" ? projectFilesError : documentsError;
+  const activeError = activeTab === "project" ? projectFilesError : activeTab === "tasks" ? documentsError : artifactsError;
 
   const handleRetry = useCallback(async () => {
     if (activeTab === "project") {
       await refreshProjectFiles();
       return;
     }
-    await refreshDocuments();
-  }, [activeTab, refreshProjectFiles, refreshDocuments]);
+    if (activeTab === "tasks") {
+      await refreshDocuments();
+      return;
+    }
+    await refreshArtifacts();
+  }, [activeTab, refreshArtifacts, refreshProjectFiles, refreshDocuments]);
 
-  const activeCount = activeTab === "project" ? filteredProjectFiles.length : documents.length;
+  const activeCount = activeTab === "project" ? filteredProjectFiles.length : activeTab === "tasks" ? documents.length : artifacts.length;
   const selectionPopover = selectedFile && onSendSelectionToTask && activeProjectSelection ? (
     <SelectionCommentPopover
       selectedText={activeProjectSelection.selectedText}
@@ -396,7 +497,9 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
 
   const searchPlaceholder = activeTab === "project"
     ? t("documents.searchProjectFiles", "Search project markdown files…")
-    : t("documents.searchTaskDocuments", "Search task documents…");
+    : activeTab === "tasks"
+      ? t("documents.searchTaskDocuments", "Search task documents…")
+      : t("documents.searchArtifacts", "Search artifacts…");
 
   return (
     <div className="documents-view">
@@ -432,6 +535,20 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
             >
               {t("documents.taskDocumentsTab", "Task Documents")}
               <span className="documents-tab-count">{groupedDocuments.length}</span>
+            </button>
+            {/*
+              FNXC:ArtifactRegistry 2026-06-21-04:46:
+              The Documents navigation has one canonical Artifacts tab so media produced by any agent is discoverable without adding another dashboard destination.
+            */}
+            <button
+              className={`btn documents-tab${activeTab === "artifacts" ? " active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === "artifacts"}
+              aria-label={t("documents.showArtifacts", "Show artifacts")}
+              onClick={() => handleTabChange("artifacts")}
+            >
+              {t("documents.artifactsTab", "Artifacts")}
+              <span className="documents-tab-count">{artifacts.length}</span>
             </button>
           </div>
 
@@ -474,7 +591,7 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
       <div className="documents-view-content">
         {activeError ? (
           <div className="documents-view-error">
-            <p>{t("documents.failedToLoad", "Failed to load {{type}}: {{error}}", { type: activeTab === "project" ? t("documents.projectFiles", "project files") : t("documents.taskDocuments", "task documents"), error: activeError })}</p>
+            <p>{t("documents.failedToLoad", "Failed to load {{type}}: {{error}}", { type: activeTab === "project" ? t("documents.projectFiles", "project files") : activeTab === "tasks" ? t("documents.taskDocuments", "task documents") : t("documents.artifacts", "artifacts"), error: activeError })}</p>
             <button className="btn btn-primary" onClick={() => void handleRetry()} aria-label={t("documents.retryLoading", "Retry loading documents")}>
               <RefreshCw size={16} />
               {t("documents.retry", "Retry")}
@@ -573,6 +690,41 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
                   )}
                 </section>
               )}
+            </div>
+          )
+        ) : activeTab === "artifacts" ? (
+          artifactsLoading && artifacts.length === 0 ? (
+            <div className="documents-view-loading">
+              <p>{t("documents.loadingArtifacts", "Loading artifacts…")}</p>
+            </div>
+          ) : artifacts.length === 0 ? (
+            <div className="documents-view-empty">
+              {searchQuery.trim() ? (
+                <p>{t("documents.noMatchArtifacts", "No artifacts match \"{{query}}\".", { query: searchQuery.trim() })}</p>
+              ) : (
+                <>
+                  <FileText size={48} className="documents-view-empty-icon" />
+                  <p>{t("documents.noArtifacts", "No artifacts yet.")}</p>
+                  <p className="documents-view-empty-hint">
+                    {t("documents.artifactsCreatedBy", "Artifacts are created by agents, users, and system tools.")}
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
+            /*
+              FNXC:ArtifactRegistry 2026-06-21-04:46:
+              The gallery must render all artifact media classes in one responsive surface: images, video, audio, inline documents, and generic file links keep their task and author context visible.
+            */
+            <div className={`documents-artifact-gallery${isMobile ? " documents-artifact-gallery--mobile" : ""}`}>
+              {artifacts.map((artifact) => (
+                <ArtifactCard
+                  key={artifact.id}
+                  artifact={artifact}
+                  projectId={projectId}
+                  onOpenTask={handleOpenTask}
+                />
+              ))}
             </div>
           )
         ) : documentsLoading && documents.length === 0 ? (

@@ -27,6 +27,9 @@ import type {
   TaskDocument,
   TaskDocumentRevision,
   TaskDocumentWithTask,
+  Artifact,
+  ArtifactType,
+  ArtifactWithTask,
 
   Message,
   MessageMetadata,
@@ -1472,6 +1475,37 @@ export interface MarkdownFileEntry {
 
 export interface MarkdownFileListResponse {
   files: MarkdownFileEntry[];
+}
+
+export type { Artifact, ArtifactType, ArtifactWithTask };
+
+export interface FetchArtifactsOptions {
+  type?: ArtifactType;
+  authorId?: string;
+  taskId?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function fetchArtifacts(
+  options?: FetchArtifactsOptions,
+  projectId?: string,
+): Promise<ArtifactWithTask[]> {
+  const params = new URLSearchParams();
+  if (options?.type) params.set("type", options.type);
+  if (options?.authorId) params.set("authorId", options.authorId);
+  if (options?.taskId) params.set("taskId", options.taskId);
+  if (options?.q) params.set("q", options.q);
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  const queryString = params.toString();
+  const path = `/artifacts${queryString ? `?${queryString}` : ""}`;
+  return api<ArtifactWithTask[]>(withProjectId(path, projectId));
+}
+
+export function artifactMediaUrl(id: string, projectId?: string): string {
+  return buildApiUrl(withProjectId(`/artifacts/${encodeURIComponent(id)}/media`, projectId));
 }
 
 export async function fetchAllDocuments(

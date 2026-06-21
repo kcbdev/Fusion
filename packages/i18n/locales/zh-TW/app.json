@@ -2193,7 +2193,27 @@
     "taskDocuments": "工作文件",
     "taskDocumentsTab": "工作文件",
     "title": "文件",
-    "untitled": "未命名"
+    "untitled": "未命名",
+    "artifacts": "artifacts",
+    "artifactsCreatedBy": "Artifacts are created by agents, users, and system tools.",
+    "artifactsTab": "Artifacts",
+    "artifactAudioLabel": "Audio artifact: {{title}}",
+    "artifactCardLabel": "Artifact {{title}}",
+    "artifactTypeAudio": "Audio",
+    "artifactTypeDocument": "Document",
+    "artifactTypeImage": "Image",
+    "artifactTypeOther": "Other",
+    "artifactTypeVideo": "Video",
+    "artifactVideoLabel": "Video artifact: {{title}}",
+    "loadingArtifacts": "Loading artifacts…",
+    "noArtifactPreview": "No preview available.",
+    "noArtifacts": "No artifacts yet.",
+    "noMatchArtifacts": "No artifacts match \"{{query}}\".",
+    "openArtifactMedia": "Open artifact media",
+    "openTaskAria": "Open task {{taskId}}: {{title}}",
+    "searchArtifacts": "Search artifacts…",
+    "showArtifacts": "Show artifacts",
+    "untitledArtifact": "Untitled artifact"
   },
   "droidCli": {
     "active": "活躍",
@@ -2292,7 +2312,10 @@
     "status": "執行器狀態",
     "stuck": "卡住",
     "temporary": "暫時",
-    "todoStatus": ""
+    "todoStatus": "",
+    "engineControls": "Engine controls",
+    "openEngineControlsForState": "Open engine controls for {{state}} state",
+    "triageDisabledWhileStopped": "Start the AI engine before changing triage scheduling"
   },
   "fileBrowser": {
     "back": "返回檔案清單",

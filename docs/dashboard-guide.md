@@ -471,14 +471,16 @@ For per-run aggregation, `GET /api/agents/:id/runs/:runId/cited-goals` returns `
 
 ## Documents View
 
-Documents view aggregates task documents and project markdown files.
+Documents view aggregates task documents, project markdown files, and registered artifacts.
 
 Features:
 
 - Group task documents by task ID (with revision history metadata)
 - Search documents across tasks
 - Open project markdown files with inline preview
-- Jump directly from a document group to the owning task detail modal
+- Browse the **Artifacts** tab for media registered by agents, users, or the system across tasks
+- Preview artifact images inline, play video and audio with native controls, read document previews, and open generic artifacts through their media URL
+- Jump directly from a document group or artifact card to the owning task detail modal when a task is linked
 - Toggle between raw text and rendered markdown using the **Markdown/Plain** button
 - Highlight text in raw or rendered project-file previews, choose **Add comment**, and send the file path, selected snippet, and your comment to the **New Task** dialog
 

@@ -2193,7 +2193,27 @@
     "taskDocuments": "작업 문서",
     "taskDocumentsTab": "작업 문서",
     "title": "문서",
-    "untitled": "제목 없음"
+    "untitled": "제목 없음",
+    "artifacts": "artifacts",
+    "artifactsCreatedBy": "Artifacts are created by agents, users, and system tools.",
+    "artifactsTab": "Artifacts",
+    "artifactAudioLabel": "Audio artifact: {{title}}",
+    "artifactCardLabel": "Artifact {{title}}",
+    "artifactTypeAudio": "Audio",
+    "artifactTypeDocument": "Document",
+    "artifactTypeImage": "Image",
+    "artifactTypeOther": "Other",
+    "artifactTypeVideo": "Video",
+    "artifactVideoLabel": "Video artifact: {{title}}",
+    "loadingArtifacts": "Loading artifacts…",
+    "noArtifactPreview": "No preview available.",
+    "noArtifacts": "No artifacts yet.",
+    "noMatchArtifacts": "No artifacts match \"{{query}}\".",
+    "openArtifactMedia": "Open artifact media",
+    "openTaskAria": "Open task {{taskId}}: {{title}}",
+    "searchArtifacts": "Search artifacts…",
+    "showArtifacts": "Show artifacts",
+    "untitledArtifact": "Untitled artifact"
   },
   "droidCli": {
     "active": "활성",
@@ -2292,7 +2312,10 @@
     "status": "실행기 상태",
     "stuck": "중단됨",
     "temporary": "임시",
-    "todoStatus": ""
+    "todoStatus": "",
+    "engineControls": "Engine controls",
+    "openEngineControlsForState": "Open engine controls for {{state}} state",
+    "triageDisabledWhileStopped": "Start the AI engine before changing triage scheduling"
   },
   "fileBrowser": {
     "back": "파일 목록으로 돌아가기",
