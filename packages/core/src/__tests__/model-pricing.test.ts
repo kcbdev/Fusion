@@ -34,6 +34,34 @@ describe("model-pricing", () => {
     expect(result.usd).toBeCloseTo(10.0, 2);
   });
 
+  it("prices OpenAI Codex GPT-5 models instead of reporting unavailable", () => {
+    // gpt-5-codex: input $1.25/1M, output $10/1M.
+    // 1,000,000 input + 200,000 output = 1.25 + 2.00 = 3.25
+    const result = costFor(
+      { ...ZERO, inputTokens: 1_000_000, outputTokens: 200_000 },
+      { provider: "openai-codex", model: "gpt-5-codex" },
+    );
+    expect(result.unavailable).toBe(false);
+    expect(result.usd).not.toBeNull();
+    expect(result.usd).toBeCloseTo(3.25, 2);
+  });
+
+  it("prices Codex mini latest instead of reporting unavailable", () => {
+    // codex-mini-latest: input $1.50/1M, output $6/1M, cached input $0.375/1M.
+    const result = costFor(
+      {
+        ...ZERO,
+        inputTokens: 1_000_000,
+        outputTokens: 500_000,
+        cachedTokens: 1_000_000,
+      },
+      { provider: "openai-codex", model: "codex-mini-latest" },
+    );
+    expect(result.unavailable).toBe(false);
+    expect(result.usd).not.toBeNull();
+    expect(result.usd).toBeCloseTo(4.875, 3);
+  });
+
   it("returns unavailable + null usd for an unknown model (never guesses)", () => {
     const result = costFor(
       { ...ZERO, inputTokens: 1_000_000 },
@@ -134,6 +162,12 @@ describe("model-pricing", () => {
       ).toBe(MODEL_PRICING["openai:gpt-4o"]);
     });
 
+    it("resolves OpenAI Codex models by explicit provider:model keys", () => {
+      expect(
+        lookupPricing({ provider: " OpenAI-Codex ", model: " GPT-5-Codex " }),
+      ).toBe(MODEL_PRICING["openai-codex:gpt-5-codex"]);
+    });
+
     it("falls back to a bare model id when provider is unset", () => {
       expect(lookupPricing({ model: "gemini-2.5-pro" })).toBe(
         MODEL_PRICING["google:gemini-2.5-pro"],
@@ -147,12 +181,13 @@ describe("model-pricing", () => {
     });
   });
 
-  it("seeds Anthropic, OpenAI, and Google providers", () => {
+  it("seeds Anthropic, OpenAI Codex, OpenAI, and Google providers", () => {
     const providers = new Set(
       Object.keys(MODEL_PRICING).map((k) => k.split(":")[0]),
     );
     expect(providers).toContain("anthropic");
     expect(providers).toContain("openai");
+    expect(providers).toContain("openai-codex");
     expect(providers).toContain("google");
   });
 

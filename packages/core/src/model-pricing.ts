@@ -25,7 +25,7 @@
  * The date the rates in {@link MODEL_PRICING} were last verified, ISO-8601.
  * Bump this whenever you edit a rate. Surfaced in the UI as "prices as of".
  */
-export const pricingAsOf = "2026-06-15";
+export const pricingAsOf = "2026-06-21";
 
 /**
  * Pricing entries older than this (relative to a caller-supplied `now`) are
@@ -230,6 +230,48 @@ export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
     outputPer1M: 4.4,
     cacheReadPer1M: 0.55,
     cacheWritePer1M: 1.1,
+    source: "openai.com/api/pricing",
+  },
+
+  // ── OpenAI Codex ────────────────────────────────────────────────────
+  // OpenAI has no separate cache-write charge → cacheWrite = input rate.
+  /*
+   * FNXC:CommandCenter 2026-06-21-12:14:
+   * Codex runs store the `openai-codex` provider, so pricing must be keyed as `openai-codex:<modelId>` instead of relying on the OpenAI provider or bare-model fallback. Keep these entries explicit so Command Center token cost does not show `unavailable`; rates mirror OpenAI GPT-5 Codex pricing, and `pricingAsOf` must be bumped on every rate edit.
+   */
+  "openai-codex:gpt-5-codex": {
+    inputPer1M: 1.25,
+    outputPer1M: 10,
+    cacheReadPer1M: 0.125,
+    cacheWritePer1M: 1.25,
+    source: "openai.com/api/pricing",
+  },
+  "openai-codex:gpt-5.1-codex": {
+    inputPer1M: 1.25,
+    outputPer1M: 10,
+    cacheReadPer1M: 0.125,
+    cacheWritePer1M: 1.25,
+    source: "openai.com/api/pricing",
+  },
+  "openai-codex:gpt-5.2-codex": {
+    inputPer1M: 1.25,
+    outputPer1M: 10,
+    cacheReadPer1M: 0.125,
+    cacheWritePer1M: 1.25,
+    source: "openai.com/api/pricing",
+  },
+  "openai-codex:gpt-5.3-codex": {
+    inputPer1M: 1.25,
+    outputPer1M: 10,
+    cacheReadPer1M: 0.125,
+    cacheWritePer1M: 1.25,
+    source: "openai.com/api/pricing",
+  },
+  "openai-codex:codex-mini-latest": {
+    inputPer1M: 1.5,
+    outputPer1M: 6,
+    cacheReadPer1M: 0.375,
+    cacheWritePer1M: 1.5,
     source: "openai.com/api/pricing",
   },
 
