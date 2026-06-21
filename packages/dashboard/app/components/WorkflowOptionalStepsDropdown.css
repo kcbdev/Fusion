@@ -1,0 +1,80 @@
+/* WorkflowOptionalStepsDropdown — shared optional-step multi-select. The panel
+ * renders through a portal (position: fixed) so it is not clipped inside a modal's
+ * overflow boundary. */
+
+.wf-optional-steps-dropdown {
+  display: inline-flex;
+}
+
+.wf-optional-steps-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.wf-optional-steps-dropdown-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wf-optional-steps-dropdown-panel {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: var(--shadow-md, 0 6px 20px rgba(0, 0, 0, 0.18));
+}
+
+.wf-optional-steps-dropdown-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+
+.wf-optional-steps-dropdown-option:hover,
+.wf-optional-steps-dropdown-option.is-active {
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+}
+
+.wf-optional-steps-dropdown-option:focus-visible {
+  outline: 2px solid var(--accent, #4f7cff);
+  outline-offset: -2px;
+}
+
+.wf-optional-steps-dropdown-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wf-optional-steps-dropdown-option-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.wf-optional-steps-dropdown-option-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}

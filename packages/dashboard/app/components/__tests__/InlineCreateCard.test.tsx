@@ -1079,12 +1079,14 @@ describe("InlineCreateCard button visibility when collapsed", () => {
       target: { value: "Verify login flow in browser" },
     });
 
-    const toggle = await screen.findByTestId("inline-create-browser-verification-toggle");
-    expect(toggle).toHaveTextContent("Browser Verification");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // Open the optional-steps dropdown and select browser verification.
+    const trigger = await screen.findByTestId("inline-create-optional-steps-trigger");
+    expect(trigger).toHaveTextContent("Steps: none");
+    fireEvent.click(trigger);
+    const option = await screen.findByTestId("wf-optional-steps-dropdown-option-browser-verification");
+    expect(option).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(option);
+    expect(trigger).toHaveTextContent("Steps: 1 selected");
     fireEvent.click(screen.getByTestId("save-button"));
 
     await waitFor(() => {
