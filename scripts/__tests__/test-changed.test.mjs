@@ -34,7 +34,11 @@ import {
   buildForwardDependencyMap,
   collectTransitiveDependencies,
   computeOwnHash,
+  createDashboardScopedAffectedEnv,
   createEngineScopedAffectedEnv,
+  DASHBOARD_SCOPED_AFFECTED_HEAP_MB,
+  DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+  DASHBOARD_SCOPED_AFFECTED_WORKERS,
   ENGINE_SCOPED_AFFECTED_HEAP_MB,
   ENGINE_SCOPED_AFFECTED_PACKAGE,
   ENGINE_SCOPED_AFFECTED_WORKERS,
@@ -261,23 +265,101 @@ test("buildPackageDirByName: uses canonical workspace dirs instead of package al
 });
 
 // ---------------------------------------------------------------------------
-// engine scoped affected memory envelope
+// scoped affected memory envelopes
 // ---------------------------------------------------------------------------
 
-test("partitionScopedAffectedPackages: isolates engine from other scoped vitest lanes", () => {
-  const groups = partitionScopedAffectedPackages([
-    "@fusion/core",
-    ENGINE_SCOPED_AFFECTED_PACKAGE,
-    "@fusion/dashboard",
+function summarizeScopedAffectedGroups(packages) {
+  return partitionScopedAffectedPackages(packages).map((group) => ({
+    packages: group.packages,
+    engineMemoryEnvelope: group.engineMemoryEnvelope,
+    memoryEnvelopePackage: group.memoryEnvelopePackage,
+  }));
+}
+
+function assertScopedAffectedEnv(env, { heapMb, workers }) {
+  assert.match(env.NODE_OPTIONS, new RegExp(`--max-old-space-size=${heapMb}`));
+  assert.match(env.NODE_OPTIONS, /--trace-warnings/);
+  assert.equal(env.FUSION_TEST_TOTAL_WORKERS, workers);
+  assert.equal(env.FUSION_TEST_CONCURRENCY, workers);
+  assert.equal(env.VITEST_MAX_WORKERS, workers);
+  assert.equal(env.HOME, "/tmp/fusion-home");
+}
+
+test("partitionScopedAffectedPackages: isolates dashboard and engine into separate envelope groups", () => {
+  assert.deepEqual(summarizeScopedAffectedGroups([DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
+    {
+      packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+    },
   ]);
 
-  assert.deepEqual(groups, [
-    { packages: ["@fusion/core", "@fusion/dashboard"], engineMemoryEnvelope: false },
-    { packages: [ENGINE_SCOPED_AFFECTED_PACKAGE], engineMemoryEnvelope: true },
+  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
+    { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+    {
+      packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+    },
+  ]);
+
+  assert.deepEqual(
+    summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE, ENGINE_SCOPED_AFFECTED_PACKAGE]),
+    [
+      { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+      {
+        packages: [ENGINE_SCOPED_AFFECTED_PACKAGE],
+        engineMemoryEnvelope: true,
+        memoryEnvelopePackage: ENGINE_SCOPED_AFFECTED_PACKAGE,
+      },
+      {
+        packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
+        engineMemoryEnvelope: false,
+        memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+      },
+    ],
+  );
+
+  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", "@runfusion/fusion"]), [
+    { packages: ["@fusion/core", "@runfusion/fusion"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
   ]);
 });
 
-test("createEngineScopedAffectedEnv: caps heap, lowers workers, and leaves watchdog budget finite", () => {
+test("createDashboardScopedAffectedEnv: caps heap, preserves env, lowers workers, and leaves watchdog finite", () => {
+  const env = createDashboardScopedAffectedEnv({
+    NODE_OPTIONS: "--trace-warnings",
+    FUSION_TEST_TOTAL_WORKERS: "8",
+    FUSION_TEST_CONCURRENCY: "4",
+    FUSION_TEST_WORKSPACE_CONCURRENCY: "1",
+    VITEST_MAX_WORKERS: "4",
+    HOME: "/tmp/fusion-home",
+  });
+
+  assertScopedAffectedEnv(env, {
+    heapMb: DASHBOARD_SCOPED_AFFECTED_HEAP_MB,
+    workers: DASHBOARD_SCOPED_AFFECTED_WORKERS,
+  });
+  assert.equal(env.FUSION_TEST_WORKSPACE_CONCURRENCY, "1");
+
+  const lowConcurrencyEnv = createDashboardScopedAffectedEnv({
+    NODE_OPTIONS: "--trace-warnings",
+    FUSION_TEST_TOTAL_WORKERS: "1",
+    FUSION_TEST_CONCURRENCY: "1",
+    FUSION_TEST_WORKSPACE_CONCURRENCY: "1",
+    VITEST_MAX_WORKERS: "1",
+    HOME: "/tmp/fusion-home",
+  });
+  assertScopedAffectedEnv(lowConcurrencyEnv, {
+    heapMb: DASHBOARD_SCOPED_AFFECTED_HEAP_MB,
+    workers: DASHBOARD_SCOPED_AFFECTED_WORKERS,
+  });
+
+  const budgetMs = deriveBudgetMs({ klass: "changed" });
+  assert.equal(Number.isFinite(budgetMs), true);
+  assert.equal(budgetMs > 0, true);
+});
+
+test("createEngineScopedAffectedEnv: preserves existing engine envelope contract", () => {
   const env = createEngineScopedAffectedEnv({
     NODE_OPTIONS: "--trace-warnings",
     FUSION_TEST_TOTAL_WORKERS: "8",
@@ -286,12 +368,10 @@ test("createEngineScopedAffectedEnv: caps heap, lowers workers, and leaves watch
     HOME: "/tmp/fusion-home",
   });
 
-  assert.match(env.NODE_OPTIONS, new RegExp(`--max-old-space-size=${ENGINE_SCOPED_AFFECTED_HEAP_MB}`));
-  assert.match(env.NODE_OPTIONS, /--trace-warnings/);
-  assert.equal(env.FUSION_TEST_TOTAL_WORKERS, ENGINE_SCOPED_AFFECTED_WORKERS);
-  assert.equal(env.FUSION_TEST_CONCURRENCY, ENGINE_SCOPED_AFFECTED_WORKERS);
-  assert.equal(env.VITEST_MAX_WORKERS, ENGINE_SCOPED_AFFECTED_WORKERS);
-  assert.equal(env.HOME, "/tmp/fusion-home");
+  assertScopedAffectedEnv(env, {
+    heapMb: ENGINE_SCOPED_AFFECTED_HEAP_MB,
+    workers: ENGINE_SCOPED_AFFECTED_WORKERS,
+  });
 
   const budgetMs = deriveBudgetMs({ klass: "changed" });
   assert.equal(Number.isFinite(budgetMs), true);
