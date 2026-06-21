@@ -231,8 +231,9 @@ function defaultGateMode(node: WorkflowIrNode, mode: "prompt" | "script"): Workf
  * its exact inverse is `stepInputToNode` in `workflow-steps-to-ir.ts`. Parity is
  * pinned by `__tests__/workflow-steps-to-ir.test.ts` over exactly the
  * compiler-visible fields: name / mode / phase / gateMode / prompt / scriptName /
- * toolMode / modelProvider / modelId. `enabled` / `defaultOn` / `templateId` are
- * NOT compiler-visible and are handled by migration policy, not the converter.
+ * toolMode / skillName / modelProvider / modelId. `enabled` / `defaultOn` /
+ * `templateId` are NOT compiler-visible and are handled by migration policy, not
+ * the converter.
  *
  * INVERSION CONTRACT: when you add a field here, extend `stepInputToNode` (and
  * the parity test) in `workflow-steps-to-ir.ts` to keep the round-trip exact.
@@ -255,6 +256,10 @@ function nodeToStepInput(node: WorkflowIrNode, phase: "pre-merge" | "post-merge"
   } else {
     input.prompt = configString(node, "prompt") ?? "";
     input.toolMode = node.config?.toolMode === "coding" ? "coding" : "readonly";
+    // Carry the node's skill name so the step session can load it (U1). Only
+    // present on skill-executor nodes; omitted otherwise to keep round-trip exact.
+    const skillName = configString(node, "skillName");
+    if (skillName) input.skillName = skillName;
     const provider = configString(node, "modelProvider");
     const modelId = configString(node, "modelId");
     if (provider && modelId) {

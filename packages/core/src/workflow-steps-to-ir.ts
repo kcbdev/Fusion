@@ -12,10 +12,10 @@ import { parseWorkflowIr } from "./workflow-ir.js";
  *   compileWorkflowToSteps(stepsToWorkflowIr(steps, name)) ≡ steps
  *
  * over exactly the compiler-visible fields: name / mode / phase / gateMode /
- * prompt / scriptName / toolMode / modelProvider / modelId. `enabled` /
- * `defaultOn` / `templateId` / `migratedFragmentId` are NOT compiler-visible and
- * are handled by migration policy (KTD-3), not by this converter. Parity is
- * pinned by `__tests__/workflow-steps-to-ir.test.ts`.
+ * prompt / scriptName / toolMode / skillName / modelProvider / modelId.
+ * `enabled` / `defaultOn` / `templateId` / `migratedFragmentId` are NOT
+ * compiler-visible and are handled by migration policy (KTD-3), not by this
+ * converter. Parity is pinned by `__tests__/workflow-steps-to-ir.test.ts`.
  *
  * INVERSION CONTRACT: when a compiler-visible field is added to `nodeToStepInput`
  * (see the contract comment there), extend `stepInputToNode` below and the parity
@@ -68,6 +68,9 @@ function stepInputToNode(step: WorkflowStep, id: string): WorkflowIrNode {
   // prompt mode
   config.prompt = step.prompt ?? "";
   config.toolMode = step.toolMode === "coding" ? "coding" : "readonly";
+  // Skill name round-trips when set (U1). The compiler reads it back via
+  // configString(node, "skillName"), so this keeps the inverse exact.
+  if (step.skillName) config.skillName = step.skillName;
   // Model overrides only round-trip when BOTH are present (compiler requirement).
   if (step.modelProvider && step.modelId) {
     config.modelProvider = step.modelProvider;

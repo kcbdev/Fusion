@@ -626,6 +626,11 @@ export interface WorkflowStep {
   prompt: string;
   /** Tool set available to prompt-mode workflow agents. Defaults to readonly. */
   toolMode?: WorkflowStepToolMode;
+  /** Name of a skill to load into this step's session (e.g.
+   *  "compound-engineering:ce-work"). When set, the step session loads the named
+   *  skill (discovery + selection) and the engine injects the Fusion workflow-step
+   *  conventions preamble. Only meaningful for skill-executor graph nodes. */
+  skillName?: string;
   /** Name of a script from project settings `scripts` map to execute (required when mode is "script") */
   scriptName?: string;
   /** Whether this step is available for selection on new tasks */
@@ -746,6 +751,9 @@ export interface WorkflowStepInput {
   prompt?: string;
   /** Tool set available to prompt-mode workflow agents. Defaults to readonly. */
   toolMode?: WorkflowStepToolMode;
+  /** Name of a skill to load into this step's session (e.g.
+   *  "compound-engineering:ce-work"). See `WorkflowStep.skillName`. */
+  skillName?: string;
   /** Script name from project settings (required when mode is "script").
    *  Must reference a named script in `settings.scripts` — no raw commands. */
   scriptName?: string;
