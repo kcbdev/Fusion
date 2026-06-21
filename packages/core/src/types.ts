@@ -330,7 +330,7 @@ export const COLOR_THEMES = [
   "neon-bloom",
   "sepia",
   "shadcn",
-  // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list.
+  // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list. FNXC:DashboardTheming 2026-06-20-00:00: FN-6814 adds Shadcn Gray as the fully-neutral zinc accent variant; keep it distinct from Shadcn Mono's red accent and Shadcn Black's black/white CTA while preserving the shadcn-family lockstep ordering.
   "shadcn-blue",
   "shadcn-green",
   "shadcn-red",
@@ -339,7 +339,7 @@ export const COLOR_THEMES = [
   "shadcn-orange",
   "shadcn-yellow",
   "shadcn-mono",
-  "shadcn-black",
+  "shadcn-black", "shadcn-gray",
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 

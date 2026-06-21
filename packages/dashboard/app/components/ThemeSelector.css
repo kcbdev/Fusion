@@ -451,6 +451,14 @@
   --swatch-sample-4: #27272a;
 }
 
+/* FNXC:DashboardTheming 2026-06-20-00:00: The Shadcn Gray swatch previews the zinc-only accent choice so users can distinguish it from red-accent Mono and black/white CTA Black before selecting it. */
+.theme-swatch-shadcn-gray {
+  --swatch-sample-1: #09090b;
+  --swatch-sample-2: #18181b;
+  --swatch-sample-3: #a1a1aa;
+  --swatch-sample-4: #27272a;
+}
+
 .theme-swatch-ayu {
   --swatch-sample-1: #0f1419;
   --swatch-sample-2: #131d27;
@@ -729,6 +737,13 @@
   --swatch-sample-1: #ffffff;
   --swatch-sample-2: #f4f4f5;
   --swatch-sample-3: #09090b;
+  --swatch-sample-4: #e4e4e7;
+}
+
+[data-theme="light"] .theme-swatch-shadcn-gray {
+  --swatch-sample-1: #ffffff;
+  --swatch-sample-2: #f4f4f5;
+  --swatch-sample-3: #52525b;
   --swatch-sample-4: #e4e4e7;
 }
 

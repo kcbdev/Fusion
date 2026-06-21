@@ -78,4 +78,6 @@ export const COLOR_THEMES: { value: ColorTheme; label: string; className: string
   { value: "shadcn-yellow", label: "Shadcn Yellow", className: "theme-swatch-shadcn-yellow" },
   { value: "shadcn-mono", label: "Shadcn Mono", className: "theme-swatch-shadcn-mono" },
   { value: "shadcn-black", label: "Shadcn Black", className: "theme-swatch-shadcn-black" },
+  /* FNXC:DashboardTheming 2026-06-20-00:00: Shadcn Gray is the fully-neutral zinc accent option; keep it adjacent to Shadcn Black so selectors mirror the core COLOR_THEMES order. */
+  { value: "shadcn-gray", label: "Shadcn Gray", className: "theme-swatch-shadcn-gray" },
 ];
