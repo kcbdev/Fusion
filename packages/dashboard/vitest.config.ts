@@ -327,6 +327,18 @@ const backfillApiExclude = [
 ];
 const qualityApiBackfillTests = ["src/**/*.test.{ts,tsx}"];
 
+// The broad `dashboard-app` / `dashboard-api` lanes fully duplicate the curated
+// shards + backfill projects, which already partition app/ and src/ exactly
+// once. They exist ONLY as the explicit deep escape hatches
+// (`test:deep`/`test:app`/`test:api`/`test:build`). In the DEFAULT no-`--project`
+// run — e.g. `vitest run --changed` from `pnpm test` — letting their globs match
+// re-executes every test a second time (and, with the now-removed umbrella, a
+// third). Gate their includes on FUSION_DASHBOARD_DEEP so the default run uses
+// the curated partition once; the deep scripts set the flag to opt back in.
+const deepLaneEnabled = process.env.FUSION_DASHBOARD_DEEP === "1";
+const deepAppInclude = deepLaneEnabled ? ["app/**/*.test.{ts,tsx}"] : [];
+const deepApiInclude = deepLaneEnabled ? ["src/**/*.test.{ts,tsx}"] : [];
+
 export const dashboardQualityProjectGlobs = {
   "dashboard-app-quality-foundation-api": {
     include: qualityAppFoundationApiShardTests,
@@ -444,16 +456,11 @@ export default defineConfig({
     testTimeout: 15_000,
     hookTimeout: 15_000,
     projects: [
-      {
-        extends: true,
-        test: {
-          name: "dashboard-app-quality",
-          environment: "jsdom",
-          include: qualityAppTests,
-          exclude: quarantinedDashboardTests,
-          css: { include: [/app\//] },
-        },
-      },
+      // NOTE: the former `dashboard-app-quality` umbrella project was removed —
+      // it re-ran the exact union of the eight curated shards below (a 3rd copy
+      // of every curated app test in the default no-`--project` run). The shards
+      // partition `qualityAppTests` exactly; `dashboardQualityProjectGlobs` and
+      // scripts/lib/test-inventory-spec.json never referenced the umbrella.
       {
         extends: true,
         test: {
@@ -569,7 +576,10 @@ export default defineConfig({
         test: {
           name: "dashboard-app",
           environment: "jsdom",
-          include: ["app/**/*.test.{ts,tsx}"],
+          // Empty unless FUSION_DASHBOARD_DEEP=1 (deep escape hatch). Keeps this
+          // broad lane out of the default run so it doesn't duplicate the
+          // curated shards + backfill, while remaining selectable via --project.
+          include: deepAppInclude,
           exclude: quarantinedDashboardTests,
           // Process CSS imports only for jsdom tests that assert on
           // getComputedStyle. Node API tests do not need CSS transforms.
@@ -581,7 +591,9 @@ export default defineConfig({
         test: {
           name: "dashboard-api",
           environment: "node",
-          include: ["src/**/*.test.{ts,tsx}"],
+          // Empty unless FUSION_DASHBOARD_DEEP=1 (deep escape hatch); see the
+          // dashboard-app note above.
+          include: deepApiInclude,
           exclude: quarantinedDashboardTests,
           css: { include: [] },
         },
