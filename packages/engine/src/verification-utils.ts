@@ -24,6 +24,24 @@ export interface VerificationCommandResult {
   success: boolean;
   /** True when this result was satisfied from the verification cache rather than running the command. */
   cached?: boolean;
+  /**
+   * True when the command was terminated by the wallclock timeout rather than
+   * producing a real test/build verdict. Lets callers tell an *infrastructure*
+   * failure (timeout) apart from a genuinely failing test (`success === false`
+   * with a real exit code).
+   */
+  timedOut?: boolean;
+  /**
+   * True when the command was aborted via the supplied `AbortSignal`. Like
+   * {@link timedOut}, this is an infra outcome, not behavioral evidence.
+   */
+  aborted?: boolean;
+  /**
+   * True when the command could not be executed at all (spawn/setup failure,
+   * sandbox error) — distinct from a command that ran and exited non-zero. An
+   * infra outcome, not behavioral evidence.
+   */
+  executionError?: boolean;
 }
 
 /** Result of running all verification commands */
@@ -122,8 +140,14 @@ function toLegacyExecResult(
 export async function execWithProcessGroup(
   command: string,
   options: SandboxRunStreamingOptions,
+  /**
+   * Explicit sandbox backend to run under. When omitted, falls back to the
+   * process-global resolution. Callers that must pin an isolating backend under
+   * concurrency (e.g. mission behavioral verification) pass it explicitly so they
+   * never depend on mutable global state.
+   */
+  backend: SandboxBackend = getSandboxBackend(),
 ): Promise<{ stdout: string; stderr: string; bufferOverflow: boolean; aborted?: boolean }> {
-  const backend = getSandboxBackend();
   const result = await backend.runStreaming(command, options);
   return toLegacyExecResult(command, result);
 }
@@ -302,6 +326,12 @@ export async function runVerificationCommand(
   extraEnv?: NodeJS.ProcessEnv,
   /** Optional project-level per-command timeout override in milliseconds. Values <= 0 preserve the legacy default. */
   timeoutMsOverride?: number,
+  /**
+   * Optional explicit sandbox backend. When omitted, the process-global backend
+   * is resolved. Pass this to pin an isolating backend without mutating global
+   * state (required for safe concurrent verification — see mission-verification).
+   */
+  backend?: SandboxBackend,
 ): Promise<VerificationCommandResult> {
   const logger = log ?? { log: console.log, error: console.error, warn: console.warn };
   const label = (agentLabel ?? "merger") as AgentRole;
@@ -335,13 +365,17 @@ export async function runVerificationCommand(
     : VERIFICATION_COMMAND_TIMEOUT_MS;
   const timeoutMs = Math.min(rawTimeoutMs, VERIFICATION_COMMAND_HARD_CAP_MS);
   try {
-    const { stdout, stderr, bufferOverflow } = await execWithProcessGroup(command, {
-      cwd: rootDir,
-      timeout: timeoutMs,
-      maxBuffer: VERIFICATION_COMMAND_MAX_BUFFER,
-      signal,
-      ...(extraEnv !== undefined && { env: extraEnv }),
-    });
+    const { stdout, stderr, bufferOverflow } = await execWithProcessGroup(
+      command,
+      {
+        cwd: rootDir,
+        timeout: timeoutMs,
+        maxBuffer: VERIFICATION_COMMAND_MAX_BUFFER,
+        signal,
+        ...(extraEnv !== undefined && { env: extraEnv }),
+      },
+      backend ?? getSandboxBackend(),
+    );
 
     if (signal?.aborted) {
       throw Object.assign(
@@ -401,6 +435,22 @@ export async function runVerificationCommand(
       || err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
       || String(err?.message ?? "").includes("maxBuffer");
     result.success = maxBufferExceeded && result.exitCode === 0;
+
+    // Classify infra outcomes so callers can tell a timeout/abort/setup failure
+    // apart from a real failing test (a command that ran and exited non-zero).
+    // A real test failure carries a numeric exit code; these do not.
+    if (!result.success && !maxBufferExceeded) {
+      const errish = err as { code?: number | string; killed?: boolean; aborted?: boolean };
+      if (errish.code === "ETIMEDOUT" || (errish.killed && result.exitCode === null)) {
+        result.timedOut = true;
+      } else if (errish.code === "ABORT_ERR" || errish.aborted) {
+        result.aborted = true;
+      } else if (result.exitCode === null) {
+        // No exit code and not a recognized success → the command could not be
+        // run to a real verdict (spawn/setup/sandbox error), not a test failure.
+        result.executionError = true;
+      }
+    }
 
     if (result.success) {
       logger.log(`${taskId}: ${type} command succeeded (exit 0, output exceeded buffer) in ${verificationDurationMs}ms`);

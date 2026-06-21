@@ -83,6 +83,11 @@ export default defineConfig({
             "src/__tests__/workflow-node-handlers.test.ts",
             "src/__tests__/workflow-policy-ownership-map.test.ts",
           ],
+          // No per-file quarantine excludes needed here: engine-core's
+          // membership is the explicit include allow-list above, so any
+          // quarantined file (e.g. merger-file-scope-invariant.test.ts) is
+          // already absent. The quarantine excludes live in engine-default,
+          // whose `src/**/*.test.ts` glob is what would otherwise pick them up.
           exclude: [
             "node_modules/**",
             "dist/**",

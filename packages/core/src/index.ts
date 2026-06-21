@@ -1234,6 +1234,9 @@ export {
   FEATURE_LOOP_STATES,
   VALIDATOR_RUN_STATUSES,
   MISSION_ASSERTION_STATUSES,
+  MISSION_ASSERTION_TYPES,
+  DEFAULT_MISSION_ASSERTION_TYPE,
+  normalizeMissionAssertionType,
   MILESTONE_VALIDATION_STATES,
 } from "./mission-types.js";
 export type {
@@ -1280,6 +1283,7 @@ export type {
   MissionFeatureLoopSnapshot,
   // Contract assertion types
   MissionAssertionStatus,
+  MissionAssertionType,
   MilestoneValidationState,
   MissionContractAssertion,
   FeatureAssertionLink,
