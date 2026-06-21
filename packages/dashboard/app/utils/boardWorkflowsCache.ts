@@ -1,4 +1,4 @@
-import type { BoardWorkflowsPayload } from "../api";
+import type { BoardWorkflowDefinition, BoardWorkflowsPayload } from "../api";
 
 const BOARD_WORKFLOWS_CACHE_PREFIX = "fusion:board-workflows:";
 const DEFAULT_PROJECT_CACHE_KEY = "default";
@@ -17,6 +17,20 @@ function isBoardWorkflowsPayload(value: unknown): value is BoardWorkflowsPayload
   if (!Array.isArray(value.workflows)) return false;
   if (typeof value.defaultWorkflowId !== "string") return false;
   if (!isRecord(value.taskWorkflowIds)) return false;
+  // FNXC:BoardWorkflows 2026-06-20-20:10:
+  // Validate each cached workflow's shape and the taskWorkflowIds value types,
+  // not just the container types. A malformed entry (e.g. `[{}]` from a stale or
+  // partially-written cache) would otherwise pass and later throw in Board/ListView
+  // when accessing workflow.name/columns — re-introducing the legacy flash this
+  // cache exists to prevent. Mirrors the BoardWorkflowDefinition contract (id, name,
+  // columns) and the Record<string,string> taskWorkflowIds map.
+  if (!value.workflows.every((workflow): workflow is BoardWorkflowDefinition => (
+    isRecord(workflow)
+    && typeof workflow.id === "string"
+    && typeof workflow.name === "string"
+    && Array.isArray(workflow.columns)
+  ))) return false;
+  if (!Object.values(value.taskWorkflowIds).every((workflowId) => typeof workflowId === "string")) return false;
   return true;
 }
 

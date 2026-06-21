@@ -234,10 +234,19 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   }, []);
 
   const openPlanning = useCallback(() => {
+    // FNXC:PlanningModals 2026-06-20-20:10:
+    // A fresh planning open must clear any resume-session id / initial plan left
+    // by a prior resumePlanning/openPlanningWith* flow; otherwise the modal reopens
+    // into the stale session or pre-fills an old plan instead of starting blank.
+    setPlanningResumeSessionId(undefined);
+    setPlanningInitialPlan(null);
     setPlanningWorkflowId(undefined);
     setIsPlanningOpen(true);
   }, []);
   const openPlanningWithInitialPlan = useCallback((initialPlan: string, workflowId?: string | null) => {
+    // FNXC:PlanningModals 2026-06-20-20:10: clear a stale resume-session id so the
+    // supplied initial plan is honored rather than being overridden by an old session.
+    setPlanningResumeSessionId(undefined);
     setPlanningInitialPlan(initialPlan);
     setPlanningWorkflowId(workflowId);
     setIsPlanningOpen(true);
@@ -262,6 +271,9 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   }, []);
 
   const openSubtaskBreakdown = useCallback((description: string, workflowId?: string | null) => {
+    // FNXC:PlanningModals 2026-06-20-20:10: clear a stale subtask resume-session id
+    // so a new breakdown starts fresh rather than reopening a prior session.
+    setSubtaskResumeSessionId(undefined);
     setSubtaskInitialDescription(description);
     setSubtaskWorkflowId(workflowId);
     setIsSubtaskOpen(true);

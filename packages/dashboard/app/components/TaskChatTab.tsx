@@ -177,6 +177,7 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   const statusAllowsReviewSteering = !task.status || REVIEW_STEERABLE_STATUSES.has(task.status);
   const columnAllowsSteering = (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && statusAllowsReviewSteering);
+  // FNXC:TaskDetailChat 2026-06-20-20:10:
   // In the default ephemeral-agents mode the scheduler never writes
   // `assignedAgentId`/`checkedOutBy` — those are only set when
   // `ephemeralAgentsEnabled === false` (scheduler.ts). An actively-executing
