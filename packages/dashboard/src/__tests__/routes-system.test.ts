@@ -490,6 +490,33 @@ describe("GET /api/system-stats", () => {
     mockExecFile.mockClear();
   });
 
+  it("reports systemFreeMem from process.availableMemory instead of macOS-shaped freemem", async () => {
+    type ProcessWithAvailableMemory = NodeJS.Process & { availableMemory?: () => number };
+    const proc = process as ProcessWithAvailableMemory;
+    const originalAvailableMemory = proc.availableMemory;
+    proc.availableMemory = vi.fn(() => 10_000_000_000);
+
+    try {
+      vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+      vi.spyOn(AgentStore.prototype, "listAgents").mockResolvedValue([]);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue([]),
+        getFusionDir: vi.fn().mockReturnValue("/fake/default"),
+      });
+
+      const res = await GET(buildApp(store), "/api/system-stats");
+
+      expect(res.status).toBe(200);
+      expect(res.body.systemStats.systemFreeMem).toBe(10_000_000_000);
+    } finally {
+      if (originalAvailableMemory) {
+        proc.availableMemory = originalAvailableMemory;
+      } else {
+        Reflect.deleteProperty(proc, "availableMemory");
+      }
+    }
+  });
+
   it("includes last auto-kill timestamp when available in global settings", async () => {
     const store = createMockStore({
       listTasks: vi.fn().mockResolvedValue([]),

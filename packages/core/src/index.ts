@@ -1326,6 +1326,7 @@ export type { CentralCoreEvents } from "./central-core.js";
 export { CentralDatabase, createCentralDatabase, getDefaultCentralDbPath } from "./central-db.js";
 export { NodeConnection } from "./node-connection.js";
 export { NodeDiscovery } from "./node-discovery.js";
+export { getAvailableMemoryBytes, getAvailableMemoryInfo, type AvailableMemoryReading } from "./available-memory.js";
 export { collectSystemMetrics } from "./system-metrics.js";
 export { getAppVersion, parseSemver } from "./app-version.js";
 export { DockerClientService } from "./docker-client.js";

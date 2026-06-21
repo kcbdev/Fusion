@@ -23,6 +23,7 @@ import {
   RoutineStore,
   discoverPiExtensions,
   findVitestProcessIds,
+  getAvailableMemoryBytes,
   getFusionAgentDir,
   getLegacyPiAgentDir,
   isWebhookTrigger,
@@ -1586,7 +1587,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         loadAvg: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
         cpuCount: os.cpus().length,
         systemTotalMem: os.totalmem(),
-        systemFreeMem: os.freemem(),
+        /*
+        FNXC:CommandCenter 2026-06-21-13:01:
+        The public `systemFreeMem` field carries OS-available memory so SystemStatsArea derives Memory Used from reclaimable-aware bytes and matches Activity Monitor on macOS.
+        */
+        systemFreeMem: getAvailableMemoryBytes(),
         pid: process.pid,
         nodeVersion: process.version,
         platform: `${process.platform}/${process.arch}`,
