@@ -405,8 +405,12 @@ If an executor later proves an ordinary implementation task is already satisfied
 ## Project commands
 When the user prompt includes explicit test/build commands, use those exact commands in the generated spec.
 
+<!--
+FNXC:WorkflowRouting 2026-06-20-22:08:
+Fast triage must keep tasks on the project default workflow unless the user explicitly asked for a specific workflow. The no-commits header remains a PROMPT.md marker only; it is not permission to select a lightweight workflow automatically.
+-->
 ## Workflow Routing
-Call \`fn_workflow_list\` and use workflow descriptions as the routing signal. For investigation/audit/research, operational routing/coordination, or decision-only tasks that meet the no-commits criteria above, include \`**No commits expected:** true\` in the PROMPT.md header and prefer \`builtin:quick-fix\` or a custom investigation workflow; standard coding tasks can stay on the default \`builtin:coding\`. Use \`fn_workflow_select\` for the current task or pass \`workflow_id\` to \`fn_task_create\` for subtasks.
+Keep the project default workflow (\`builtin:coding\`) unless the user explicitly requested a specific workflow for this task or subtask. Do NOT call \`fn_workflow_select\` or pass \`workflow_id\` to \`fn_task_create\` just because a task looks like investigation, audit, research, coordination, decision-only work, or coding work. If the user explicitly asks for a workflow, call \`fn_workflow_list\` to discover valid IDs, then use \`fn_workflow_select\` for the current task or pass \`workflow_id\` to \`fn_task_create\` for the requested subtask. For investigation/audit/research, operational routing/coordination, or decision-only tasks that meet the no-commits criteria above, still include \`**No commits expected:** true\` in the PROMPT.md header when appropriate; that header marker does not change the workflow.
 
 ## Task Artifact Location for Forensic / Reconciliation Tasks
 
@@ -698,13 +702,15 @@ commands, use those EXACT commands in the testing/verification steps and anywher
 the spec references running tests or builds. Do NOT guess or infer commands from
 package.json when explicit commands are provided.
 
+<!--
+FNXC:WorkflowRouting 2026-06-20-22:08:
+Standard triage must not infer workflow changes from task type. Agents preserve the project default unless the user names or explicitly requests a workflow; no-commit decisions use the header marker without automatic workflow selection.
+-->
 ## Workflow Routing
-- Call \`fn_workflow_list\` to discover available workflows before selecting a routing path, and read each workflow description as the routing signal.
-- For investigation, audit, research, operational routing/coordination, or decision-only tasks that produce no code/config/file changes, set \`**No commits expected:** true\` in the PROMPT.md header when the no-commits criteria above are met, then select an appropriate lightweight workflow.
-- For decision-only tasks ({{triageNoCommitsDecisionVerbs}}), prefer \`{{triageDecisionOnlyWorkflowId}}\` or a custom investigation workflow when one is available.
-- For standard coding tasks, \`{{triageDefaultWorkflowId}}\` is the default and is usually appropriate.
-- Use \`fn_workflow_select\` to set the workflow on the current task, or pass \`workflow_id\` to \`fn_task_create\` when creating subtasks.
-- Match the task nature to the workflow description; descriptions are authoritative for routing decisions.
+- Keep the project default workflow (\`{{triageDefaultWorkflowId}}\`) unless the user explicitly requested a specific workflow for this task or subtask.
+- Do NOT call \`fn_workflow_select\` or pass \`workflow_id\` to \`fn_task_create\` just because a task looks like investigation, audit, research, operational routing/coordination, decision-only work, or standard coding work.
+- For decision-only tasks ({{triageNoCommitsDecisionVerbs}}) or other no-code tasks, set \`**No commits expected:** true\` in the PROMPT.md header when the no-commits criteria above are met; this is a header marker only and does not select \`{{triageDecisionOnlyWorkflowId}}\` or any custom investigation workflow by itself.
+- If the user explicitly asks for a workflow, call \`fn_workflow_list\` to discover valid IDs, then use \`fn_workflow_select\` to set the workflow on the current task or pass \`workflow_id\` to \`fn_task_create\` when creating a requested subtask.
 
 ## Spec Review
 

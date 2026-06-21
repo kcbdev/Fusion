@@ -784,15 +784,12 @@ describe("fast-mode triage", () => {
     expect(FAST_PLANNING_PROMPT).not.toContain("Frontend UX Criteria");
   });
 
-  it("documents workflow routing in standard and fast prompts", () => {
+  it("documents explicit-request-only workflow routing in standard and fast prompts", () => {
+    const required = ["## Workflow Routing", "Keep the project default workflow", "unless the user explicitly requested a specific workflow", "Do NOT call `fn_workflow_select` or pass `workflow_id`", "If the user explicitly", "fn_workflow_list", "fn_workflow_select", "workflow_id", "**No commits expected:** true", "builtin:coding"];
+    const forbidden = ["use workflow descriptions as the routing signal", "select an appropriate lightweight workflow", "prefer `builtin:quick-fix` or a custom investigation workflow", "Match the task nature to the workflow description", "descriptions are authoritative for routing decisions"];
     for (const prompt of [RENDERED_TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
-      expect(prompt).toContain("## Workflow Routing");
-      expect(prompt).toContain("fn_workflow_list");
-      expect(prompt).toContain("fn_workflow_select");
-      expect(prompt).toContain("workflow_id");
-      expect(prompt).toContain("**No commits expected:** true");
-      expect(prompt).toContain("builtin:quick-fix");
-      expect(prompt).toContain("builtin:coding");
+      for (const text of required) expect(prompt).toContain(text);
+      for (const text of forbidden) expect(prompt).not.toContain(text);
     }
   });
 

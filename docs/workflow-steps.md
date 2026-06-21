@@ -12,6 +12,9 @@ Public docs need one concise workflow overview that names the shipped built-ins,
 
 FNXC:Docs 2026-06-20-08:47:
 The built-in catalog now includes a business lead-generation workflow with custom columns, custom lead fields, and inline per-stage prompts, so the public inventory must show it beside coding workflows instead of implying all selectable built-ins are engineering-only.
+
+FNXC:WorkflowRouting 2026-06-21-04:25:
+Triage and planning agents must preserve the project default workflow unless the user explicitly requests a different workflow. No-commit markers describe expected artifact behavior only; they no longer imply automatic Quick fix workflow selection.
 -->
 
 Fusion workflows define the task lifecycle policy that moves work from an idea to delivery. The default coding path is **Plan/Triage → Execute → Workflow steps → Review → Merge**, but that path is now represented as a workflow selection rather than only as fixed engine behavior. A task with no explicit workflow resolves to `builtin:coding`; an explicit missing/corrupt custom workflow fails closed instead of silently falling back.
@@ -24,7 +27,7 @@ Operators can select workflows in the dashboard wherever the task or board workf
 - `fn_workflow_select` — assign a workflow to the current or named task.
 - `workflow_id` on `fn_task_create` / delegation tools — create a task with a workflow already selected.
 
-Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; the built-in triage policy prefers the Quick fix workflow for that no-commit lane.
+Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; that marker does not change workflow selection by itself. Tasks without an explicit workflow request stay on the project default (`builtin:coding`).
 
 ### Built-in workflow catalog
 

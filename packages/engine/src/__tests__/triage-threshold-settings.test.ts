@@ -43,8 +43,11 @@ describe("triage threshold workflow settings", () => {
     expect(rendered).toContain("at or above 30 items");
     expect(rendered).toContain("S (<2h), M (2-4h), L (4-8h). Split if XL (8h+)");
     expect(rendered).toContain("Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report");
-    expect(rendered).toContain("prefer `builtin:quick-fix`");
-    expect(rendered).toContain("`builtin:coding` is the default");
+    expect(rendered).toContain("Keep the project default workflow (`builtin:coding`)");
+    expect(rendered).toContain("unless the user explicitly requested a specific workflow");
+    expect(rendered).toContain("Do NOT call `fn_workflow_select` or pass `workflow_id`");
+    expect(rendered).toContain("set `**No commits expected:** true` in the PROMPT.md header");
+    expect(rendered).not.toContain("prefer `builtin:quick-fix`");
     expect(rendered).not.toContain("{{");
   });
 
