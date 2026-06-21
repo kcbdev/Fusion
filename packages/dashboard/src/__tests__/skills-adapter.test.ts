@@ -826,6 +826,64 @@ describe("createSkillsAdapter - plugin skill merge", () => {
     const skills = await adapter.discoverSkills("/tmp/project");
     expect(skills).toEqual([]);
   });
+
+  it("lets a project-settings toggle override a plugin skill's default enabled", async () => {
+    const dir = join(tmpdir(), `skills-adapter-plugin-toggle-${process.pid}-${Date.now()}`);
+    const settingsPath = join(dir, "settings.json");
+    await mkdir(dir, { recursive: true });
+    // ce-plan defaults to enabled, but a "-" entry under its plugin package
+    // source must disable it; without the settings lookup the toggle is lost.
+    const relativePath = "skills/ce-plan/SKILL.md";
+    await writeFile(
+      settingsPath,
+      JSON.stringify({
+        packages: [{ source: "plugin:fusion-plugin-compound-engineering", skills: [`-${relativePath}`] }],
+      }),
+    );
+
+    try {
+      const adapter = createSkillsAdapter({
+        packageManager: { resolve: vi.fn().mockResolvedValue({ skills: [] }) },
+        getSettingsPath: () => settingsPath,
+        getPluginSkills: () => [
+          { pluginId: "fusion-plugin-compound-engineering", skill: { name: "ce-plan", enabled: true } },
+        ],
+      });
+
+      const skills = await adapter.discoverSkills(dir);
+      const cePlan = skills.find((s) => s.name === "ce-plan");
+      expect(cePlan).toBeDefined();
+      expect(cePlan!.enabled).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("createSkillsAdapter - readSkillContent for plugin skills", () => {
+  it("returns synthesized content (not a blank panel) for plugin-contributed skills", async () => {
+    const adapter = createSkillsAdapter({
+      packageManager: { resolve: vi.fn().mockResolvedValue({ skills: [] }) },
+      getSettingsPath: () => "/tmp/does-not-exist-settings.json",
+      getPluginSkills: () => [
+        {
+          pluginId: "fusion-plugin-compound-engineering",
+          skill: { name: "ce-plan", description: "Create structured plans." },
+        },
+      ],
+    });
+
+    const skills = await adapter.discoverSkills("/tmp/project");
+    const cePlan = skills.find((s) => s.name === "ce-plan")!;
+
+    const content = await adapter.readSkillContent("/tmp/project", cePlan.id);
+    expect(content.name).toBe("ce-plan");
+    expect(content.skillMd).toContain("ce-plan");
+    expect(content.skillMd).toContain("Create structured plans.");
+    expect(content.skillMd).toContain("fusion-plugin-compound-engineering");
+    expect(content.skillMd).not.toBe("");
+    expect(content.files).toEqual([]);
+  });
 });
 
 describe("bareSkillName", () => {

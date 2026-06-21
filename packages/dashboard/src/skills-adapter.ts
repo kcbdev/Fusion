@@ -53,6 +53,8 @@ export interface DiscoveredSkill {
   path: string;
   relativePath: string;
   enabled: boolean;
+  /** Optional human-readable description (currently set for plugin skills). */
+  description?: string;
   metadata: {
     source: string;
     scope: "user" | "project" | "temporary";
@@ -256,17 +258,18 @@ async function waitForSupervisedExit(
 }
 
 /**
- * Check if a skill path is enabled in the settings.
- * Checks both top-level skills and package-scoped skills.
+ * Resolve a skill's explicit enable/disable state from settings.
+ * Checks both top-level skills and package-scoped skills. Returns "enabled" or
+ * "disabled" when a settings entry matches, or undefined when the settings file
+ * says nothing about this skill -- so callers can apply their own default.
  */
-function isSkillEnabled(
+function getSkillSettingState(
   skillId: string,
   settings: { skills?: string[]; packages?: Array<{ source: string; skills?: string[] }> },
-): boolean {
-  // Check top-level skills
+): "enabled" | "disabled" | undefined {
   const parsedSkillId = parseSkillId(skillId);
   if (!parsedSkillId) {
-    return false;
+    return undefined;
   }
 
   const normalizedSkillPath = normalizeStoredSkillPath(parsedSkillId.relativePath);
@@ -278,7 +281,7 @@ function isSkillEnabled(
     );
     const entryId = computeSkillId("*", `skills/${entryPath}`);
     if (entryId === skillId || entryPath === normalizedSkillPath) {
-      return entry.startsWith("+");
+      return entry.startsWith("+") ? "enabled" : "disabled";
     }
   }
 
@@ -295,13 +298,24 @@ function isSkillEnabled(
       );
       const entryId = computeSkillId(source, `skills/${entryPath}`);
       if (entryId === skillId || entryPath === normalizedSkillPath) {
-        return entry.startsWith("+");
+        return entry.startsWith("+") ? "enabled" : "disabled";
       }
     }
   }
 
-  // Default to disabled if not found
-  return false;
+  return undefined;
+}
+
+/**
+ * Check if a skill path is enabled in the settings.
+ * Checks both top-level skills and package-scoped skills.
+ * Defaults to disabled when the settings file says nothing about the skill.
+ */
+function isSkillEnabled(
+  skillId: string,
+  settings: { skills?: string[]; packages?: Array<{ source: string; skills?: string[] }> },
+): boolean {
+  return getSkillSettingState(skillId, settings) === "enabled";
 }
 
 /**
@@ -324,7 +338,10 @@ export function createSkillsAdapter(options: {
    * skill catalog omits them. Lazy thunk: plugins may load after the adapter is
    * created, so it is invoked per discovery rather than captured eagerly.
    */
-  getPluginSkills?: () => Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
+  getPluginSkills?: () => Array<{
+    pluginId: string;
+    skill: { name: string; description?: string; enabled?: boolean };
+  }>;
   /** Optional superviseSpawn seam for tests */
   superviseSpawn?: typeof superviseSpawn;
 }): SkillsAdapter {
@@ -389,12 +406,25 @@ export function createSkillsAdapter(options: {
           if (seenBareNames.has(bare)) continue;
           seenBareNames.add(bare);
           const relativePath = `skills/${name}/SKILL.md`;
+          const id = computeSkillId(`plugin:${pluginId}`, relativePath);
+          // Respect an explicit enable/disable written to project settings by
+          // toggleExecutionSkill, falling back to the plugin's declared default.
+          // Without consulting settings here, a user toggle on a plugin skill
+          // would be silently reverted on the very next discovery.
+          const settingState = getSkillSettingState(
+            id,
+            settings as Parameters<typeof getSkillSettingState>[1],
+          );
+          const enabled = settingState === undefined
+            ? skill.enabled !== false
+            : settingState === "enabled";
           discoveredSkills.push({
-            id: computeSkillId(`plugin:${pluginId}`, relativePath),
+            id,
             name,
             path: relativePath,
             relativePath,
-            enabled: skill.enabled !== false,
+            enabled,
+            description: skill.description,
             metadata: {
               source: `plugin:${pluginId}`,
               scope: "user",
@@ -680,6 +710,27 @@ export function createSkillsAdapter(options: {
       const skill = discovered.find((entry) => entry.id === skillId);
       if (!skill) {
         throw new Error(`Skill not found: ${skillId}`);
+      }
+
+      // Plugin-contributed skills have no on-disk representation in this
+      // catalog: the engine materializes them for executor sessions at runtime,
+      // so `path` is a virtual relative path with no filesystem backing. Reading
+      // it would silently return a blank panel, so surface what we know (name +
+      // description) and explain where the definition lives instead.
+      if (skill.metadata.source.startsWith("plugin:")) {
+        const pluginId = skill.metadata.source.slice("plugin:".length);
+        const lines = [`# ${skill.name}`, ""];
+        if (skill.description) {
+          lines.push(skill.description, "");
+        }
+        lines.push(
+          `_Contributed by the \`${pluginId}\` plugin. Its definition is materialized at runtime and has no editable file in this project._`,
+        );
+        return {
+          name: skill.name,
+          skillMd: lines.join("\n"),
+          files: [],
+        };
       }
 
       let skillDir = skill.path;
