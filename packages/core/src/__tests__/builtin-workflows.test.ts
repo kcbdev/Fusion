@@ -393,6 +393,26 @@ describe("built-in workflows", () => {
     expect(ids.indexOf("merge")).toBeLessThan(ids.indexOf("document"));
   });
 
+  it("compound-engineering runs plan/code-review/document in coding mode and carries skillName onto compiled steps (U1/U4)", () => {
+    const ce = getBuiltinWorkflow("builtin:compound-engineering")!;
+    const byId = (id: string) => ce.ir.nodes.find((n) => n.id === id);
+    // U4: fan-out steps (plan, code-review) need coding so fn_spawn_agent is
+    // available for persona fan-out; document needs coding to WRITE docs/solutions.
+    expect(byId("plan")?.config?.toolMode).toBe("coding");
+    expect(byId("code-review")?.config?.toolMode).toBe("coding");
+    expect(byId("document")?.config?.toolMode).toBe("coding");
+    // U1: the compiler carries each node's skillName onto the materialized step so
+    // the step session can actually LOAD the skill (not just name it in prompt text).
+    const steps = compileWorkflowToSteps(ce.ir);
+    const plan = steps.find((s) => s.name === "Plan");
+    expect(plan?.skillName).toBe("compound-engineering:ce-plan");
+    expect(plan?.toolMode).toBe("coding");
+    const codeReview = steps.find((s) => s.skillName === "compound-engineering:ce-code-review");
+    expect(codeReview?.toolMode).toBe("coding");
+    const document = steps.find((s) => s.skillName === "compound-engineering:ce-compound");
+    expect(document?.toolMode).toBe("coding");
+  });
+
   describe("store integration", () => {
     const harness = createTaskStoreTestHarness();
     let store: ReturnType<typeof harness.store>;

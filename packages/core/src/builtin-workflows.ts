@@ -187,6 +187,10 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           name: "Plan",
           executor: "skill",
           skillName: "compound-engineering:ce-plan",
+          // Coding mode so ce-plan can fan out to its research subagents via
+          // fn_spawn_agent (registered only for coding-mode steps). It is not
+          // meant to write — see the accepted write-capability posture (Risk-1).
+          toolMode: "coding",
           prompt: "Produce a short implementation plan for this task before any code is written.",
         },
       },
@@ -213,6 +217,10 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           executor: "skill",
           skillName: "compound-engineering:ce-code-review",
           gateMode: "gate",
+          // Coding mode so ce-code-review can fan out to its reviewer-persona
+          // subagents via fn_spawn_agent. As a gate step it still emits the
+          // verdict JSON (KTD-6); it is not meant to write the tree (Risk-1).
+          toolMode: "coding",
           prompt: "Run a structured code review of the changes. Block merge on P0/P1 findings.",
         },
       },
@@ -253,6 +261,9 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           name: "Document learnings",
           executor: "skill",
           skillName: "compound-engineering:ce-compound",
+          // Coding mode so ce-compound can WRITE the learning doc into
+          // docs/solutions (readonly would strip write tools).
+          toolMode: "coding",
           prompt: "Capture any reusable learnings from this task into docs/solutions.",
         },
       },
