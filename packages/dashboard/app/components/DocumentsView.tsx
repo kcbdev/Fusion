@@ -14,6 +14,7 @@ import { useSelectionComment } from "../hooks/useSelectionComment";
 import { SelectionCommentPopover } from "./SelectionCommentPopover";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { ArtifactMedia, getArtifactTypeLabel } from "./ArtifactMedia";
+import { ViewHeader } from "./ViewHeader";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -538,17 +539,21 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
 
   return (
     <div className="documents-view">
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Documents/Artifacts adopts the shared ViewHeader (CC-modeled) for a consistent main-content title row; the result count rides in the header actions while the tab bar, hidden-files toggle, and search stay in the controls row below.
+      FNXC:Navigation 2026-06-21-18:25: FN-6890 keeps the top-level title as Artifacts (renamed from Documents) without changing internal task-document tabs or artifact sub-tabs.
+      */}
       <div className="documents-view-header">
-        <div className="documents-view-title-row">
-          <h2 className="documents-view-title">
-            <FileText size={20} />
-            {/* FNXC:Navigation 2026-06-21-18:25: FN-6890 renames the top-level Documents view header to Artifacts without changing internal task-document tabs or artifact sub-tabs. */}
-            {t("documents.title", "Artifacts")}
-          </h2>
-          <span className="documents-view-count">
-            {t("documents.resultCount", "{{count}} result{{plural}}", { count: activeCount, plural: activeCount !== 1 ? "s" : "" })}
-          </span>
-        </div>
+        <ViewHeader
+          icon={FileText}
+          title={t("documents.title", "Artifacts")}
+          actions={(
+            <span className="documents-view-count">
+              {t("documents.resultCount", "{{count}} result{{plural}}", { count: activeCount, plural: activeCount !== 1 ? "s" : "" })}
+            </span>
+          )}
+        />
 
         <div className="documents-controls-row">
           <div className="documents-tab-bar" role="tablist" aria-label={t("documents.sectionsLabel", "Documents sections")}>

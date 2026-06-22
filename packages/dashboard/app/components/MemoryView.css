@@ -1,30 +1,20 @@
 /* === MemoryView === */
+/*
+FNXC:Navigation 2026-06-22-01:10:
+The title row now comes from the shared .view-header (which supplies the --space-lg top/side padding). The root drops its uniform padding; the description, tab bar, and content area carry their own horizontal inset so they align under the header.
+*/
 .memory-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-lg);
   overflow: hidden;
-}
-
-.memory-view-header {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-lg);
-}
-
-.memory-view-header h2 {
-  font-size: 18px;
-  color: var(--text);
-  margin: 0;
 }
 
 .memory-view-description {
   color: var(--text-muted);
   font-size: 13px;
-  margin: var(--space-xs) 0 0 0;
+  margin: 0;
+  padding: 0 var(--space-lg);
 }
 
 .memory-view-tabs {
@@ -32,7 +22,8 @@
   flex-direction: row;
   gap: var(--space-xs);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-lg);
+  margin: var(--space-md) 0 var(--space-lg);
+  padding: 0 var(--space-lg);
 }
 
 .memory-view-tab {
@@ -67,6 +58,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 0 var(--space-lg) var(--space-lg);
 }
 
 .memory-working-tab,
@@ -441,13 +433,14 @@
 
 /* Mobile responsive for memory view */
 @media (max-width: 768px) {
-  .memory-view {
-    padding: var(--space-md);
+  /* ViewHeader supplies its own responsive padding; the body blocks tighten their horizontal inset here. */
+  .memory-view-description,
+  .memory-view-tabs {
+    padding-inline: var(--space-md);
   }
 
-  .memory-view-header {
-    flex-direction: column;
-    gap: var(--space-sm);
+  .memory-view-content {
+    padding: 0 var(--space-md) var(--space-md);
   }
 
   .memory-editor-container {

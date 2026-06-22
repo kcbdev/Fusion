@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ExternalLink, RefreshCw, Settings } from "lucide-react";
+import { ExternalLink, RefreshCw, Settings, Target } from "lucide-react";
 import { fetchSettings } from "../api";
 import { useEvals } from "../hooks/useEvals";
 import type { SectionId } from "./SettingsModal";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { ViewHeader } from "./ViewHeader";
 import "./EvalsView.css";
 
 interface EvalsViewProps {
@@ -51,7 +52,13 @@ export function EvalsView({ projectId, onOpenSettings, onOpenTaskDetail }: Evals
   }
 
   return (
+    /*
+    FNXC:Navigation 2026-06-22-01:10:
+    Evals adopts the shared ViewHeader (CC-modeled) so this main-content destination reads consistently with the others; the scored-results grid moves into a body wrapper beneath the header. The per-list Refresh control stays in the results toolbar.
+    */
     <section className="evals-view" data-testid="evals-view">
+      <ViewHeader icon={Target} title={t("evals.title", "Evals")} />
+      <div className="evals-view__body">
       <div className="evals-list card">
         <div className="evals-toolbar">
           <input
@@ -139,6 +146,7 @@ export function EvalsView({ projectId, onOpenSettings, onOpenTaskDetail }: Evals
             </div>
           </>
         )}
+      </div>
       </div>
     </section>
   );

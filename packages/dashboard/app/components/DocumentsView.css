@@ -9,31 +9,13 @@
   min-height: 0;
 }
 
+/*
+FNXC:Navigation 2026-06-22-01:10:
+The header row now comes from the shared .view-header (which supplies the --space-lg top/side padding). The container only contributes the bottom border + surface; the controls row gets its own side/bottom padding so the tab bar/search stay aligned without doubling the ViewHeader inset.
+*/
 .documents-view-header {
-  padding: var(--space-lg);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-}
-
-.documents-view-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-md);
-}
-
-.documents-view-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--text);
-}
-
-.documents-view-title svg {
-  color: var(--todo);
 }
 
 .documents-view-count {
@@ -46,6 +28,7 @@
   align-items: center;
   gap: var(--space-md);
   flex-wrap: nowrap;
+  padding: 0 var(--space-lg) var(--space-lg);
 }
 
 .documents-tab-bar {
@@ -847,25 +830,12 @@ The artifacts tab is a thumbnail-first responsive media gallery for agent-create
 
 
 @media (max-width: 768px) {
-  /* Documents View mobile */
-  .documents-view-header {
-    padding: var(--space-md);
-  }
-
-  .documents-view-title-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-sm);
-  }
-
-  .documents-view-title {
-    font-size: 16px;
-  }
-
+  /* Documents View mobile: ViewHeader supplies its own responsive padding; only the controls row needs tightening here. */
   .documents-controls-row {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-sm);
+    padding: 0 var(--space-md) var(--space-md);
   }
 
   .documents-tab-bar {
