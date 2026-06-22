@@ -605,7 +605,7 @@ describe("TaskExecutor bounded recovery retries", () => {
 
       (executor as any).executing.add(taskId);
       executingTaskLock.tryClaim(taskId);
-      (executor as any).activeWorktrees.set(taskId, worktreePath);
+      (executor as any).addActiveWorktree(taskId, worktreePath);
       (executor as any).activeSessions.set(taskId, { session });
       (executor as any).activeStepExecutors.set(taskId, stepExecutor);
       (executor as any).activeWorkflowStepSessions.set(taskId, workflowSession);
@@ -686,7 +686,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       });
       (executor as any).executing.add("FN-001");
       executingTaskLock.tryClaim("FN-001");
-      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).addActiveWorktree("FN-001", "/tmp/test/.worktrees/FN-001");
       (executor as any).activeSessions.set("FN-001", { session });
 
       executor.markStuckAborted("FN-001", true);
@@ -750,7 +750,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       vi.mocked(removeWorktree).mockRejectedValue(new Error("worktree busy"));
       (executor as any).executing.add("FN-001");
       executingTaskLock.tryClaim("FN-001");
-      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).addActiveWorktree("FN-001", "/tmp/test/.worktrees/FN-001");
       (executor as any).activeSessions.set("FN-001", { session });
 
       executor.markStuckAborted("FN-001", true);
@@ -797,7 +797,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       vi.mocked(removeWorktree).mockResolvedValue(undefined as any);
       (executor as any).executing.add("FN-001");
       executingTaskLock.tryClaim("FN-001");
-      (executor as any).activeWorktrees.set("FN-001", "/tmp/test/.worktrees/FN-001");
+      (executor as any).addActiveWorktree("FN-001", "/tmp/test/.worktrees/FN-001");
       (executor as any).activeSessions.set("FN-001", { session });
 
       executor.markStuckAborted("FN-001", true);

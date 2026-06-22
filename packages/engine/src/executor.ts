@@ -143,7 +143,7 @@ import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
 import { makeAncestryBlastRadiusGuard, resetStepToBaseline, runTaskStep } from "./step-runner.js";
 // FNXC:MergerUnification 2026-06-21-19:05: the foundation branch imported `acquireWorkspaceRepoWorktree` here but never used it in executor.ts (the agent tool wraps it via agent-tools.ts), which fails lint on the inherited base. Removed until master-plan U1 re-adds it together with its per-repo acquisition usage.
-import { acquireTaskWorktree } from "./worktree-acquisition.js";
+import { acquireTaskWorktree, type AcquireTaskWorktreeResult } from "./worktree-acquisition.js";
 import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
 import { installTaskWorktreeIdentityGuard } from "./worktree-hooks.js";
 import {
@@ -1465,7 +1465,28 @@ interface ActiveExecutorSessionState {
 }
 
 export class TaskExecutor {
-  private activeWorktrees = new Map<string, string>();
+  /*
+  FNXC:Workspace 2026-06-21-12:00:
+  activeWorktrees tracks the worktree paths a task currently holds for liveness/owner checks. In workspace mode a single task acquires N sub-repo worktrees (foundation `task.workspaceWorktrees`), so the value is a SET of paths, not one path. A non-workspace (single-repo) task holds a one-element set — every consumer is converted to membership semantics so the single-repo path is byte-for-byte unchanged (KTD2). Helpers below add/remove/iterate the set.
+  */
+  private activeWorktrees = new Map<string, Set<string>>();
+
+  /**
+   * FNXC:Workspace 2026-06-21-12:00: Register a worktree path under a task's active set, creating the set on first add (KTD2). Single-repo tasks call this once → one-element set.
+   */
+  private addActiveWorktree(taskId: string, worktreePath: string): void {
+    const set = this.activeWorktrees.get(taskId) ?? new Set<string>();
+    set.add(worktreePath);
+    this.activeWorktrees.set(taskId, set);
+  }
+
+  /**
+   * FNXC:Workspace 2026-06-21-12:00: Read-only snapshot of every worktree path a task currently holds (KTD2). Empty when the task holds none.
+   */
+  private getActiveWorktreePaths(taskId: string): string[] {
+    const set = this.activeWorktrees.get(taskId);
+    return set ? Array.from(set) : [];
+  }
   private executing = new Set<string>();
   /** Tasks currently being prepared for unpause resume, before execute() has registered them. */
   private resumingUnpaused = new Set<string>();
@@ -1583,9 +1604,10 @@ export class TaskExecutor {
     this.activeSessions.delete(taskId);
     // U5: drop the effective column-agent principal for this task's session.
     this.effectiveColumnAgentByTask.delete(taskId);
-    const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
-    if (resolvedWorktreePath) {
-      activeSessionRegistry.unregisterPath(resolvedWorktreePath);
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — when no explicit path is given, unregister EVERY worktree path the task holds (a workspace task holds N sub-repo paths); single-repo tasks resolve a one-element set.
+    const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
+    for (const path of resolvedWorktreePaths) {
+      activeSessionRegistry.unregisterPath(path);
     }
   }
 
@@ -1600,9 +1622,10 @@ export class TaskExecutor {
     this.activeStepExecutorSeenSteeringIds.delete(taskId);
     // U5: drop the effective column-agent principal for this task's step session.
     this.effectiveColumnAgentByTask.delete(taskId);
-    const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
-    if (resolvedWorktreePath) {
-      activeSessionRegistry.unregisterPath(resolvedWorktreePath);
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — unregister every held worktree path (Set), not one.
+    const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
+    for (const path of resolvedWorktreePaths) {
+      activeSessionRegistry.unregisterPath(path);
     }
   }
 
@@ -1615,9 +1638,10 @@ export class TaskExecutor {
   private deleteActiveWorkflowStepSession(taskId: string, worktreePath?: string): void {
     this.activeWorkflowStepSessions.delete(taskId);
     this.activeWorkflowStepSessionSeenSteeringIds.delete(taskId);
-    const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
-    if (resolvedWorktreePath) {
-      activeSessionRegistry.unregisterPath(resolvedWorktreePath);
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — unregister every held worktree path (Set), not one.
+    const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
+    for (const path of resolvedWorktreePaths) {
+      activeSessionRegistry.unregisterPath(path);
     }
   }
 
@@ -2053,7 +2077,8 @@ export class TaskExecutor {
       return false;
     }
 
-    const worktreePath = this.activeWorktrees.get(taskId);
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — collect every worktree path the task holds (a workspace task holds N) before clearing the binding, so the registry sweep below unregisters all of them, not just one.
+    const heldWorktreePaths = this.getActiveWorktreePaths(taskId);
     this.activeWorktrees.delete(taskId);
     this.executing.delete(taskId);
     this.recoveringCompleted.delete(taskId);
@@ -2063,8 +2088,8 @@ export class TaskExecutor {
     this.effectiveColumnAgentByTask.delete(taskId);
 
     const registeredPaths = new Set(activeSessionRegistry.pathsForTask(taskId));
-    if (worktreePath) {
-      registeredPaths.add(worktreePath);
+    for (const path of heldWorktreePaths) {
+      registeredPaths.add(path);
     }
     for (const path of registeredPaths) {
       activeSessionRegistry.unregisterPath(path);
@@ -7430,7 +7455,19 @@ export class TaskExecutor {
       const hadAssignedWorktree = Boolean(task.worktree);
       const taskCommandAbortController = new AbortController();
       this.registerConfiguredCommandController(task.id, taskCommandAbortController);
-      const acquisition = await (async () => {
+      /*
+      FNXC:Workspace 2026-06-21-12:00:
+      KTD1 — in workspace mode `this.rootDir` is a NON-git parent. Acquiring a root worktree there fails. Skip root acquisition entirely and run the agent session rooted at the browse-only workspace root; the agent acquires per-sub-repo worktrees on demand via fn_acquire_repo_worktree. `task.worktree` stays unset. We synthesize a non-fresh, non-resume acquisition with an empty branch so the downstream env-injection/onStart bookkeeping runs unchanged while every rootDir git preflight (base capture, contamination, liveness) is gated off below. The non-workspace branch is byte-for-byte the original acquisition path.
+      */
+      const acquisition: AcquireTaskWorktreeResult = this.workspaceConfig
+        ? {
+            worktreePath: this.rootDir,
+            branch: "",
+            source: "existing",
+            hydrated: true,
+            isResume: Boolean(task.sessionFile),
+          }
+        : await (async () => {
         try {
           return await acquireTaskWorktree({
             task,
@@ -7520,6 +7557,11 @@ export class TaskExecutor {
         }
       }
 
+      /*
+      FNXC:Workspace 2026-06-21-12:00:
+      KTD1 — every preflight below (base-commit capture, contamination check, worktree-liveness gate) runs git against `worktreePath`, which equals the non-git workspace root in workspace mode. They would all fail. Gate the whole block off in workspace mode; the per-repo equivalents return in Phase B (master U3) against each acquired sub-repo worktree. The non-workspace branch is unchanged.
+      */
+      if (!this.workspaceConfig) {
       // Capture the base commit SHA for diff computation whenever a task
       // starts with a newly assigned worktree.
       if (!acquisition.isResume) {
@@ -7664,8 +7706,10 @@ export class TaskExecutor {
         this.options.onError?.(task, new Error(failureMessage));
         return;
       }
+      } // end !this.workspaceConfig preflight gate (FNXC:Workspace KTD1)
 
-      this.activeWorktrees.set(task.id, worktreePath);
+      // FNXC:Workspace 2026-06-21-12:00: KTD2 — register the worktree path under the task's Set. In workspace mode `worktreePath` is the browse-only root; per-repo paths are added as the agent acquires them. Non-workspace tasks add exactly one path → a one-element set (unchanged liveness/owner semantics).
+      this.addActiveWorktree(task.id, worktreePath);
       executorLog.log(`${task.id}: worktree ready at ${worktreePath}`);
 
       const injected = await this.buildInjectedRuntimeEnv(task.id, worktreePath, acquisition.branch ?? undefined);
@@ -10457,8 +10501,13 @@ export class TaskExecutor {
     options?: { noOpCompletion?: boolean; noOpCompletionReason?: string },
   ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
     const settings = await this.store.getSettings();
+    // FNXC:Workspace 2026-06-21-12:00: KTD1/KTD2 — workspace tasks have no root worktree and no single `task.worktree`; the singular per-task invariant is meaningless against the non-git root. Phase B (master U3) iterates this check per sub-repo worktree. Until then it is gated OFF in workspace mode so fn_task_done (its only caller path) does not requeue a zero-acquire workspace task for "missing task.worktree".
+    if (this.workspaceConfig) {
+      return { ok: true };
+    }
     const branchName = resolveTaskWorkingBranch(task);
-    const worktreePath = worktreePathOverride ?? task.worktree ?? this.activeWorktrees.get(task.id) ?? null;
+    // Non-workspace tasks hold a one-element set; fall back to its sole member to preserve the original singular resolution.
+    const worktreePath = worktreePathOverride ?? task.worktree ?? this.getActiveWorktreePaths(task.id)[0] ?? null;
 
     if (!worktreePath) {
       return {
@@ -14440,9 +14489,9 @@ You have access to the file system to review changes.${verdictBlock}`;
     conflictPath: string,
     currentTaskId: string,
   ): Promise<boolean> {
-    // Check if conflicting worktree is in our active set
-    for (const [taskId, worktreePath] of this.activeWorktrees) {
-      if (taskId !== currentTaskId && worktreePath === conflictPath) {
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — a task may hold N worktree paths; the conflict check is membership across the set, not equality on a single path.
+    for (const [taskId, worktreePaths] of this.activeWorktrees) {
+      if (taskId !== currentTaskId && worktreePaths.has(conflictPath)) {
         return true;
       }
     }
@@ -14479,8 +14528,11 @@ You have access to the file system to review changes.${verdictBlock}`;
    */
   listWorktreeHolders(): Array<{ taskId: string; worktreePath: string }> {
     const holders: Array<{ taskId: string; worktreePath: string }> = [];
-    for (const [taskId, worktreePath] of this.activeWorktrees) {
-      holders.push({ taskId, worktreePath });
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — flat-map each task's Set into one holder row per worktree path. A workspace task emits N rows; the FN-6782 reaper (self-healing.ts) and in-process-runtime adapter key purely off taskId (verified) and are idempotent across duplicate-task rows, so multi-row holders do not mis-count maxWorktrees slots.
+    for (const [taskId, worktreePaths] of this.activeWorktrees) {
+      for (const worktreePath of worktreePaths) {
+        holders.push({ taskId, worktreePath });
+      }
     }
     return holders;
   }
@@ -14489,8 +14541,9 @@ You have access to the file system to review changes.${verdictBlock}`;
     worktreePath: string,
     requestingTaskId: string,
   ): Promise<string | null> {
-    for (const [taskId, path] of this.activeWorktrees) {
-      if (taskId !== requestingTaskId && path === worktreePath) {
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — membership across the task's worktree set (a workspace task holds N).
+    for (const [taskId, paths] of this.activeWorktrees) {
+      if (taskId !== requestingTaskId && paths.has(worktreePath)) {
         return taskId;
       }
     }
@@ -14516,12 +14569,9 @@ You have access to the file system to review changes.${verdictBlock}`;
    * Returns true if cleanup succeeded.
    */
   private hasActiveWorktreeBinding(taskId: string, worktreePath: string): boolean {
-    for (const [activeTaskId, activePath] of this.activeWorktrees) {
-      if (activeTaskId === taskId && activePath === worktreePath) {
-        return true;
-      }
-    }
-    return false;
+    // FNXC:Workspace 2026-06-21-12:00: KTD2 — membership across the task's worktree set.
+    const paths = this.activeWorktrees.get(taskId);
+    return paths ? paths.has(worktreePath) : false;
   }
 
   private async reconcileSelfOwnedBeforeRemove(worktreePath: string, taskId: string): Promise<void> {
@@ -14919,10 +14969,17 @@ You have access to the file system to review changes.${verdictBlock}`;
    * always cleaned up by the merger on a per-task basis.
    */
   async cleanup(taskId: string): Promise<void> {
-    const worktreePath = this.activeWorktrees.get(taskId);
-    if (!worktreePath) return;
+    const worktreePaths = this.getActiveWorktreePaths(taskId);
+    if (worktreePaths.length === 0) return;
 
     this.activeWorktrees.delete(taskId);
+
+    // FNXC:Workspace 2026-06-21-12:00: KTD1 — in workspace mode the tracked path is the non-git workspace root (browse-only), never a removable worktree. Drop the in-memory tracking above but never remove the root. Per-repo worktree teardown returns in Phase B.
+    if (this.workspaceConfig) {
+      return;
+    }
+    // Non-workspace tasks hold a one-element set — preserve the original single-path removal semantics.
+    const worktreePath = worktreePaths[0];
 
     // Check if another task still needs this worktree
     const otherUser = await findWorktreeUser(this.store, worktreePath, taskId);
@@ -15420,8 +15477,14 @@ You have access to the file system to review changes.${verdictBlock}`;
     return true;
   }
 
+  /**
+   * FNXC:Workspace 2026-06-21-12:00: KTD2 single-path-getter contract. Returns the task's sole worktree path for single-repo tasks (one-element set). For a multi-worktree workspace task there is no single answer — callers must read the per-repo `task.workspaceWorktrees` entry instead — so this returns undefined. A workspace task tracked only at the browse-only root also returns undefined, matching the "no removable single worktree" semantics.
+   */
   getWorktreePath(taskId: string): string | undefined {
-    return this.activeWorktrees.get(taskId);
+    if (this.workspaceConfig) {
+      return undefined;
+    }
+    return this.getActiveWorktreePaths(taskId)[0];
   }
 
   // ── Agent Spawning ─────────────────────────────────────────────────────
@@ -15721,7 +15784,11 @@ function formatTimestamp(iso: string): string {
 // Project commands are injected here (for reliability) and also in the PROMPT.md (by triage).
 // This ensures the executor agent always sees the authoritative commands from settings,
 // even if the PROMPT.md was written manually or before commands were configured.
-function scopePromptToWorktree(prompt: string, rootDir?: string, worktreePath?: string): string {
+function scopePromptToWorktree(prompt: string, rootDir?: string, worktreePath?: string, workspaceConfig?: WorkspaceConfig | null): string {
+  // FNXC:Workspace 2026-06-21-12:00: KTD1 — in workspace mode the session is rooted at the workspace root itself (worktreePath === rootDir) and path rewriting to a per-task root worktree is meaningless: edits happen in per-sub-repo worktrees the agent acquires, not at the root. No-op the rewrite. (The rootDir === worktreePath guard below already covers this, but gate explicitly so intent survives future refactors.)
+  if (workspaceConfig) {
+    return prompt;
+  }
   if (!rootDir || !worktreePath || rootDir === worktreePath || !prompt.includes(rootDir)) {
     return prompt;
   }
@@ -15755,7 +15822,7 @@ export function buildExecutionPrompt(
   customFieldDefs?: WorkflowFieldDefinition[],
   workspaceConfig?: WorkspaceConfig | null,
 ): string {
-  const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
+  const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath, workspaceConfig);
   const reviewLevel = parseReviewLevelFromPrompt(prompt);
 
   // Build co-author trailer arg for git commits based on settings. The user's
