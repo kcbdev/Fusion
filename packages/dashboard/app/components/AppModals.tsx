@@ -489,6 +489,7 @@ export function AppModals({
           onOpenGitHubImport={handleOpenGitHubImport}
           firstCreatedTask={firstCreatedTask}
           onViewTask={handleOnboardingViewTask}
+          agentOnboardingEnabled={agentOnboardingEnabled}
         />
       )}
 

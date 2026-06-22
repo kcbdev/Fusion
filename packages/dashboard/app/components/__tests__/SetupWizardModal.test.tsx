@@ -162,7 +162,7 @@ describe("SetupWizardModal", () => {
     expect(screen.getByText("Set Token & Continue")).toBeDefined();
     expect(screen.getByRole("link", { name: "Need help?" })).toHaveAttribute(
       "href",
-      "https://github.com/runfusion/fusion/discussions"
+      "https://discord.gg/ksrfuy7WYR"
     );
   });
 

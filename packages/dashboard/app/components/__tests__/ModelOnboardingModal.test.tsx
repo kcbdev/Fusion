@@ -17,6 +17,7 @@ const mockFetchModels = vi.fn();
 const mockFetchGlobalSettings = vi.fn();
 const mockUpdateGlobalSettings = vi.fn();
 const mockCreateTask = vi.fn();
+const mockCreateAgent = vi.fn();
 const mockFetchCustomProviders = vi.fn();
 const mockCreateCustomProvider = vi.fn();
 const mockFetchCursorCliStatus = vi.fn();
@@ -36,6 +37,7 @@ vi.mock("../../api", () => ({
   fetchGlobalSettings: (...args: unknown[]) => mockFetchGlobalSettings(...args),
   updateGlobalSettings: (...args: unknown[]) => mockUpdateGlobalSettings(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
+  createAgent: (...args: unknown[]) => mockCreateAgent(...args),
   fetchCustomProviders: (...args: unknown[]) => mockFetchCustomProviders(...args),
   createCustomProvider: (...args: unknown[]) => mockCreateCustomProvider(...args),
   fetchCursorCliStatus: (...args: unknown[]) => mockFetchCursorCliStatus(...args),
@@ -98,7 +100,7 @@ vi.mock("../model-onboarding-state", () => ({
   markStepSkipped: (...args: unknown[]) => mockMarkStepSkipped(...args),
   getSkippedSteps: (...args: unknown[]) => mockGetSkippedSteps(...args),
   getStepData: (...args: unknown[]) => mockGetStepData(...args),
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 const mockTrackOnboardingEvent = vi.fn();
@@ -138,6 +140,8 @@ vi.mock("lucide-react", async (importOriginal) => {
     GitPullRequest: () => <span data-testid="icon-git-pull-request">GitPullRequest</span>,
     Rocket: () => <span data-testid="icon-rocket">Rocket</span>,
     Plus: () => <span data-testid="icon-plus">Plus</span>,
+    Sparkles: () => <span data-testid="icon-sparkles">Sparkles</span>,
+    UserRound: () => <span data-testid="icon-user-round">UserRound</span>,
     ChevronRight: () => <span data-testid="icon-chevron-right">ChevronRight</span>,
   };
 });
@@ -181,6 +185,10 @@ async function navigateToFirstTaskStep() {
   await navigateToProjectSetupStep();
   fireEvent.click(screen.getByText("Next →"));
   await waitFor(() => {
+    expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+  });
+  fireEvent.click(screen.getByText("Skip for now"));
+  await waitFor(() => {
     expect(screen.getByText("Create Your First Task")).toBeTruthy();
   });
 }
@@ -194,6 +202,7 @@ beforeEach(() => {
   mockFetchGlobalSettings.mockResolvedValue({});
   mockUpdateGlobalSettings.mockResolvedValue({});
   mockCreateTask.mockResolvedValue({ id: "FN-TEST", description: "test task" });
+  mockCreateAgent.mockResolvedValue({ id: "agent-1" });
   mockFetchCustomProviders.mockResolvedValue({ providers: [] });
   mockCreateCustomProvider.mockResolvedValue({ provider: {} });
   mockLoginProvider.mockResolvedValue({ url: "https://auth.example.com/login" });
@@ -1870,6 +1879,12 @@ describe("ModelOnboardingModal", () => {
       fireEvent.click(screen.getByText("Next →"));
 
       await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("Skip for now"));
+
+      await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeTruthy();
       });
     });
@@ -2451,6 +2466,12 @@ describe("ModelOnboardingModal", () => {
       fireEvent.click(screen.getByText("← Back"));
 
       await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("← Back"));
+
+      await waitFor(() => {
         expect(screen.getByText("Set Up Your Project")).toBeTruthy();
       });
 
@@ -2459,6 +2480,7 @@ describe("ModelOnboardingModal", () => {
       await waitFor(() => {
         expect(screen.getByText("Connect GitHub")).toBeTruthy();
       });
+
     });
   });
 
@@ -2582,7 +2604,7 @@ describe("ModelOnboardingModal", () => {
       expect(aiSetupIndicator).toHaveClass("done");
       expect(githubIndicator).toHaveClass("done");
       expect(firstTaskIndicator).toHaveClass("done");
-      expect(document.querySelectorAll(".model-onboarding-step-connector.done")).toHaveLength(3);
+      expect(document.querySelectorAll(".model-onboarding-step-connector.done")).toHaveLength(4);
 
       // Click Get Started to close
       fireEvent.click(screen.getByText("Get Started"));
@@ -2875,6 +2897,12 @@ describe("ModelOnboardingModal", () => {
       expect(mockFetchGlobalSettings).toHaveBeenCalled();
 
       // Navigate back to see if the model dropdown has the saved value
+      fireEvent.click(screen.getByText("← Back"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
       fireEvent.click(screen.getByText("← Back"));
 
       await waitFor(() => {
@@ -3209,6 +3237,13 @@ describe("ModelOnboardingModal", () => {
 
       fireEvent.click(screen.getByText("Next →"));
 
+      // Then advance to optional Agent step before First Task
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("Skip for now"));
+
       // Then advance to First Task step
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeTruthy();
@@ -3274,6 +3309,11 @@ describe("ModelOnboardingModal", () => {
 
       fireEvent.click(screen.getByText("Next →"));
       await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("Skip for now"));
+      await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeTruthy();
       });
 
@@ -3319,6 +3359,12 @@ describe("ModelOnboardingModal", () => {
       });
 
       fireEvent.click(screen.getByText("Next →"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByText("Skip for now"));
 
       // Then advance to First Task step
       await waitFor(() => {
@@ -4572,4 +4618,3 @@ describe("Custom providers disclosure", () => {
     });
   });
 });
-

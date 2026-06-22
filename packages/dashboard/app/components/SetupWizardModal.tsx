@@ -65,7 +65,7 @@ export function SetupWizardModal({
   agentOnboardingEnabled = false,
 }: SetupWizardModalProps) {
   const { t } = useTranslation("app");
-  const helpUrl = "https://github.com/runfusion/fusion/discussions";
+  const helpUrl = "https://discord.gg/ksrfuy7WYR";
   /*
   FNXC:Onboarding 2026-06-22-03:11:
   First-run project setup must offer a first persistent agent after registration, defaulting to the CEO preset while still letting users choose another template or skip creation.
@@ -678,7 +678,7 @@ export function SetupWizardModal({
             className="btn setup-wizard-help-link"
             href={helpUrl}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
           >
             {t("setup.needHelp", "Need help?")}
           </a>
