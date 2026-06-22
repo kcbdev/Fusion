@@ -14,6 +14,35 @@
   border-radius: var(--radius-md);
 }
 
+/*
+FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+Embedded presentation renders the editor inline as a main-content-area view
+filling the right-dock panel instead of as a centered fixed modal. The wrapper
+takes the full panel box and the modal element drops its modal chrome
+(fixed sizing, box-shadow, border-radius, resize grip) so it reads as a flush
+embedded view.
+*/
+.workflow-editor-embedded {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.wf-editor-modal--embedded {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+  min-height: 0;
+  position: static;
+  resize: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+}
+
 .wf-create-modal {
   --wf-editor-touch-target: calc(var(--space-xl) + var(--space-lg) + var(--space-xs));
 }

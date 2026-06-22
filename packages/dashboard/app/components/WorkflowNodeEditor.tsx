@@ -197,6 +197,17 @@ interface WorkflowNodeEditorProps {
   initialAction?: "create";
   /** Workflow id to preselect when the editor opens from workflow-aware surfaces. */
   initialWorkflowId?: string;
+  /*
+  FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  The workflow editor can render either as a fixed modal overlay ("modal", the
+  default and historical behavior) or inline as a main-content-area view
+  ("embedded") that fills the right-dock panel like a Command Center view.
+  In embedded mode the editor drops the .modal-overlay shell, the X close
+  button, native resize, and all modal-only dismiss paths (Escape, overlay
+  click) so it reads as a persistent view rather than a dismissible dialog.
+  The modal path stays byte-identical when presentation is "modal"/undefined.
+  */
+  presentation?: "modal" | "embedded";
 }
 
 let nodeSeq = 0;
@@ -697,7 +708,11 @@ function InnerEditor({
   initialAction,
   initialWorkflowId,
   modalRef,
-}: Omit<WorkflowNodeEditorProps, "isOpen"> & { modalRef: React.RefObject<HTMLDivElement | null> }) {
+  isEmbedded = false,
+}: Omit<WorkflowNodeEditorProps, "isOpen" | "presentation"> & {
+  modalRef: React.RefObject<HTMLDivElement | null>;
+  isEmbedded?: boolean;
+}) {
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const viewportMode = useViewportMode();
@@ -2435,11 +2450,15 @@ function InnerEditor({
         )
       : null;
 
-  return (
-    <>
-      <div className="modal-overlay open wf-editor-overlay" {...overlayProps}>
+  // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  // Embedded mode renders the editor inline inside the right-dock panel: no
+  // fixed .modal-overlay shell, no overlay-click dismiss, no Escape-to-close,
+  // and a --embedded sized variant of the modal element. The modal path stays
+  // byte-identical (same overlay + overlayProps + Escape handler) when not
+  // embedded.
+  const modalElement = (
       <div
-        className="modal wf-editor-modal"
+        className={`modal wf-editor-modal${isEmbedded ? " wf-editor-modal--embedded" : ""}`}
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
@@ -2447,6 +2466,8 @@ function InnerEditor({
           // Ignore Escape originating from inputs/textareas/selects so inline
           // editors (name/description) keep their own Escape-to-cancel behavior.
           if (e.key !== "Escape") return;
+          // Embedded views are persistent; Escape must not dismiss them.
+          if (isEmbedded) return;
           // The create dialog (rendered as a child) owns its own Escape; if it's
           // open, let it handle the event (it stops propagation already).
           if (createOpen) return;
@@ -2459,9 +2480,13 @@ function InnerEditor({
       >
         <header className="wf-editor-header">
           <h2>{t("workflows.title", "Workflows")}</h2>
-          <button className="wf-editor-close" onClick={requestClose} aria-label={t("workflows.closeEditor", "Close workflow editor")}>
-            <X size={18} />
-          </button>
+          {/* FNXC:WorkflowEditorEmbedding 2026-06-22-00:00: embedded views keep a
+              Command Center-style header title but drop the modal X close button. */}
+          {!isEmbedded ? (
+            <button className="wf-editor-close" onClick={requestClose} aria-label={t("workflows.closeEditor", "Close workflow editor")}>
+              <X size={18} />
+            </button>
+          ) : null}
         </header>
 
         {showMigrationNotice ? (
@@ -4598,7 +4623,20 @@ function InnerEditor({
           />
         )}
       </div>
-      </div>
+  );
+  return (
+    <>
+      {isEmbedded ? (
+        // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00: inline main-content
+        // wrapper (no fixed overlay, no overlayProps overlay-click dismiss).
+        <div className="workflow-editor-embedded right-dock-embedded-view">
+          {modalElement}
+        </div>
+      ) : (
+        <div className="modal-overlay open wf-editor-overlay" {...overlayProps}>
+          {modalElement}
+        </div>
+      )}
       {promptFullscreenOverlay}
     </>
   );
@@ -4612,9 +4650,14 @@ export function WorkflowNodeEditor({
   initialPanel,
   initialAction,
   initialWorkflowId,
+  presentation = "modal",
 }: WorkflowNodeEditorProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  useModalResizePersist(modalRef, isOpen, "fusion:workflow-node-editor-size");
+  const isEmbedded = presentation === "embedded";
+  // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  // Size persistence + native resize are modal-only; an embedded view fills its
+  // host panel (width/height:100%) so persisting a saved pixel size is wrong.
+  useModalResizePersist(modalRef, isOpen && !isEmbedded, "fusion:workflow-node-editor-size");
   if (!isOpen) return null;
   return (
     <ReactFlowProvider>
@@ -4626,6 +4669,7 @@ export function WorkflowNodeEditor({
         initialAction={initialAction}
         initialWorkflowId={initialWorkflowId}
         modalRef={modalRef}
+        isEmbedded={isEmbedded}
       />
     </ReactFlowProvider>
   );

@@ -1215,6 +1215,132 @@ The embedded root is a plain flow box that fills the dock; the inner panel sheds
   resize: none;
 }
 
+/*
+FNXC:AutomationsEmbedded 2026-06-22-00:00:
+Automations can render inline in the main content area (presentation="embedded") instead of as a fixed modal overlay.
+The embedded root fills its host and sheds all modal chrome — no overlay, no card/shadow/border/radius — so the view
+blends into the main panel like Command Center. The view container carries --space-lg padding and a plain .cc-header
+title row (reused from Command Center). The body is a responsive two-pane layout (list + detail) via container query
+when supported, falling back to a min-width media breakpoint, that collapses to a single column below ~900px.
+*/
+.automations-embedded.right-dock-embedded-view {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+}
+
+.automations-embedded-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-height: 0;
+  inline-size: 100%;
+  padding: var(--space-lg);
+  /* Enable container-query-driven two-pane breakpoint scoped to the view's own width, not the viewport. */
+  container-type: inline-size;
+  overflow-y: auto;
+}
+
+/* Two-pane body: single column by default (narrow); two columns when the container is wide enough. */
+.automations-two-pane {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-lg);
+  min-height: 0;
+  flex: 1;
+}
+
+.automations-single-pane {
+  min-height: 0;
+  flex: 1;
+}
+
+/* Left list rail */
+.automations-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.automation-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.automation-list-row:hover {
+  border-color: var(--accent);
+}
+
+.automation-list-row.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle, var(--card));
+}
+
+.automation-list-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-list-row-badge {
+  flex-shrink: 0;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+
+/* Right detail pane */
+.automations-detail-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.automations-detail-empty {
+  height: 100%;
+}
+
+/* Two columns once the embedded container is wide enough (~900px). */
+@container (min-width: 900px) {
+  .automations-two-pane {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/*
+Fallback for browsers without container-query support: use a viewport media query. Harmless where container
+queries already apply (the container-query rule above also fires and produces the same two-column layout).
+*/
+@media (min-width: 900px) {
+  .automations-two-pane {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
 .activity-log-header {
   /* Extends shared .modal-header with activity-log-specific overrides */
   gap: var(--space-sm);

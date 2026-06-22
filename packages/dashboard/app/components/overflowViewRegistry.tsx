@@ -1,10 +1,8 @@
 import { Suspense, type ComponentType, type ReactNode } from "react";
 import {
   Activity,
-  Clock,
   Folder,
   GitBranch,
-  GitPullRequestArrow,
   History,
   type LucideProps,
 } from "lucide-react";
@@ -25,10 +23,8 @@ import { GitManagerModal } from "./GitManagerModal";
 export type OverflowViewKey =
   | "usage"
   | "activity-log"
-  | "github-import"
   | "git-manager"
   | "files"
-  | "automation"
   | `plugin:${string}:${string}`;
 
 export interface OverflowViewFeatureState {
@@ -150,13 +146,6 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
     ),
   },
   {
-    key: "github-import",
-    label: "Import from GitHub",
-    icon: GitPullRequestArrow,
-    testId: "right-dock-tab-github-import",
-    onActivate: (props) => props.onOpenGitHubImport?.(),
-  },
-  {
     key: "git-manager",
     label: "Git Manager",
     icon: GitBranch,
@@ -178,13 +167,6 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
     icon: Folder,
     testId: "right-dock-tab-files",
     render: (props) => wrapOverflowView(<InlineFilesView projectId={props.projectId} openFile={props.openFile} />),
-  },
-  {
-    key: "automation",
-    label: "Automation",
-    icon: Clock,
-    testId: "right-dock-tab-automation",
-    onActivate: (props) => props.onOpenSchedules?.(),
   },
 ];
 

@@ -123,6 +123,13 @@ const DevServerView = lazy(() => import("./components/DevServerView").then((m) =
 const TodoView = lazy(() => import("./components/TodoView").then((m) => ({ default: m.TodoView })));
 const GoalsView = lazy(() => import("./components/GoalsView").then((m) => ({ default: m.GoalsView })));
 const PullRequestView = lazy(() => import("./components/PullRequestView").then((m) => ({ default: m.PullRequestView })));
+/*
+FNXC:Navigation 2026-06-22-00:00:
+Workflows, Import Tasks (GitHub import), and Automations render as embedded main-content views (presentation="embedded") via these lazy chunks; the same components still mount as modals in AppModals for the mobile overflow path.
+*/
+const WorkflowEditorView = lazy(() => import("./components/WorkflowNodeEditor").then((m) => ({ default: m.WorkflowNodeEditor })));
+const ImportTasksView = lazy(() => import("./components/GitHubImportModal").then((m) => ({ default: m.GitHubImportModal })));
+const AutomationsView = lazy(() => import("./components/ScheduledTasksModal").then((m) => ({ default: m.ScheduledTasksModal })));
 
 // Warm lazy chunks during browser idle so first navigation to each view is
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
@@ -1828,6 +1835,58 @@ function AppInner() {
             resumeSessionId={modalManager.planningResumeSessionId}
             presentation="embedded"
           />
+        </PageErrorBoundary>
+      );
+    }
+
+    /*
+    FNXC:Navigation 2026-06-22-00:00:
+    Workflows, Import Tasks (GitHub import), and Automations are left-sidebar destinations that render embedded in the main content area instead of as modal overlays. Closing returns to the board. The same components still mount as modals in AppModals for the mobile overflow path.
+    */
+    if (taskView === "workflows") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <WorkflowEditorView
+              isOpen={true}
+              onClose={() => handleChangeTaskView("board")}
+              addToast={addToast}
+              projectId={currentProject?.id}
+              presentation="embedded"
+            />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
+    if (taskView === "import-tasks") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <ImportTasksView
+              isOpen={true}
+              onClose={() => handleChangeTaskView("board")}
+              onImport={handleGitHubImport}
+              tasks={tasks}
+              projectId={currentProject?.id}
+              presentation="embedded"
+            />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
+    if (taskView === "automations") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <AutomationsView
+              onClose={() => handleChangeTaskView("board")}
+              addToast={addToast}
+              projectId={currentProject?.id}
+              presentation="embedded"
+            />
+          </Suspense>
         </PageErrorBoundary>
       );
     }

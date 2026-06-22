@@ -11,8 +11,10 @@ import {
   Brain,
   ChevronLeft,
   ChevronRight,
+  Clock,
   FileText,
   Gauge,
+  GitPullRequestArrow,
   Lightbulb,
   LayoutGrid,
   List,
@@ -24,6 +26,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  Workflow,
   Zap,
   type LucideProps,
 } from "lucide-react";
@@ -346,6 +349,37 @@ export function LeftSidebarNav({
   Secrets and Todos are intentionally omitted from the left sidebar. They live in the right dock through RightDock/overflowViewRegistry, while mobile keeps its More-sheet entries and the Header opt-out layout keeps its overflow entries.
   */
   const secondaryEntries: SidebarNavEntry[] = [
+    /*
+    FNXC:Navigation 2026-06-22-00:00:
+    Workflows, Import Tasks, and Automations are left-sidebar destinations that load in the main content area (not modals). Import Tasks is the GitHub import view (labeled "Import Tasks", not "Import from GitHub").
+    */
+    {
+      id: "workflows",
+      label: t("nav.workflows", "Workflows"),
+      view: "workflows" as TaskView,
+      isActive: view === "workflows",
+      icon: Workflow,
+      testId: "sidebar-nav-workflows",
+      onSelect: () => onChangeView("workflows"),
+    },
+    {
+      id: "import-tasks",
+      label: t("nav.importTasks", "Import Tasks"),
+      view: "import-tasks" as TaskView,
+      isActive: view === "import-tasks",
+      icon: GitPullRequestArrow,
+      testId: "sidebar-nav-import-tasks",
+      onSelect: () => onChangeView("import-tasks"),
+    },
+    {
+      id: "automations",
+      label: t("nav.automations", "Automations"),
+      view: "automations" as TaskView,
+      isActive: view === "automations",
+      icon: Clock,
+      testId: "sidebar-nav-automations",
+      onSelect: () => onChangeView("automations"),
+    },
     ...(experimentalFeatures?.evalsView
       ? [{ id: "evals", label: t("header.evalsView", "Evals"), view: "evals" as TaskView, isActive: view === "evals", icon: Target, testId: "sidebar-nav-evals", onSelect: () => onChangeView("evals") }]
       : []),

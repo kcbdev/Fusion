@@ -24,6 +24,12 @@ interface GitHubImportModalProps {
   onImport: (task: Task) => void;
   tasks: Task[];
   projectId?: string;
+  /*
+  FNXC:RightDockEmbedding 2026-06-22-00:00:
+  Right-dock redesign renders the GitHub import surface inline inside the main content area instead of as a fixed popup overlay.
+  "embedded" drops the modal overlay/close button and disables modal-only chrome (scroll lock, resize persistence, escape/overlay dismiss); "modal" (default) keeps the original byte-identical overlay behavior.
+  */
+  presentation?: "modal" | "embedded";
 }
 
 // Mobile and two-pane breakpoints in pixels
@@ -50,8 +56,9 @@ function formatPreviewBody(body: string | null | undefined, isMobile: boolean) {
   return body.slice(0, 200) + (body.length > 200 ? "…" : "");
 }
 
-export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId }: GitHubImportModalProps) {
-  useMobileScrollLock(isOpen);
+export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
+  const isEmbedded = presentation === "embedded";
+  useMobileScrollLock(isOpen && !isEmbedded);
   const { t } = useTranslation("app");
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
@@ -80,7 +87,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
   const [selectedRemoteName, setSelectedRemoteName] = useState<string>("");
   const mountedRef = useRef(false);
   const modalRef = useRef<HTMLDivElement>(null);
-  useModalResizePersist(modalRef, isOpen, "fusion:github-modal-size");
+  useModalResizePersist(modalRef, isOpen && !isEmbedded, "fusion:github-modal-size");
   const overlayDismissProps = useOverlayDismiss(onClose);
 
   // Responsive view state
@@ -281,14 +288,15 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
   }, [owner, repo, labels, activeTab, isOpen, loading, importing, handleLoad, handleLoadPulls]);
 
   // Handle escape key
+  // FNXC:RightDockEmbedding 2026-06-22-00:00: Escape-to-close is a modal-only affordance; embedded mode has no dismiss.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isEmbedded) return;
     const handleKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, onClose]);
+  }, [isOpen, isEmbedded, onClose]);
 
   // Detect responsive viewport bands
   useEffect(() => {
@@ -480,9 +488,18 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
   const showPullsError = Boolean(error) && pulls.length > 0 && !isPullsEmpty;
   const showInlineErrorBanner = activeTab === "issues" ? showIssuesError : showPullsError;
 
-  return (
-    <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
-      <div className="modal modal-lg github-import-modal" ref={modalRef}>
+  /*
+  FNXC:RightDockEmbedding 2026-06-22-00:00:
+  Embedded mode renders the import surface as a main-content-area view (no fixed .modal-overlay, no close button, no overlay-dismiss).
+  Modal mode is kept byte-identical: same overlay wrapper, header with subtitle + close button, and overlay-dismiss props.
+  */
+  const inner = (
+    <div className={`modal modal-lg github-import-modal${isEmbedded ? " github-import-modal--embedded" : ""}`} ref={modalRef}>
+      {isEmbedded ? (
+        <div className="modal-header github-import-modal__header">
+          <h3>{t("git.importTasksHeading", "Import Tasks")}</h3>
+        </div>
+      ) : (
         <div className="modal-header github-import-modal__header">
           <div>
             <h3>{t("git.importFromGitHub", "Import from GitHub")}</h3>
@@ -494,6 +511,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
             &times;
           </button>
         </div>
+      )}
 
         <div className="modal-body github-import-modal__body">
           {/* Tab Navigation */}
@@ -861,7 +879,16 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId 
             {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
           </button>
         </div>
-      </div>
+    </div>
+  );
+
+  if (isEmbedded) {
+    return <div className="github-import-embedded right-dock-embedded-view">{inner}</div>;
+  }
+
+  return (
+    <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
+      {inner}
     </div>
   );
 }

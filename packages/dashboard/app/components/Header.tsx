@@ -945,8 +945,11 @@ export function Header({
         FN-6886 removes the header Lightbulb affordances because Planning Mode is now a primary left-sidebar destination after Command Center and a single canonical MobileNavBar More item on compact breakpoints.
         */}
 
-        {/* Workflows - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenWorkflowEditor && (
+        {/*
+        FNXC:Navigation 2026-06-22-00:00:
+        When the left sidebar is active it owns Workflows as a main-content destination, so the Header drops its duplicate desktop Workflow button. The flag-off desktop layout keeps the Header button; mobile/tablet keep the overflow entry.
+        */}
+        {!isCompact && !leftSidebarNavActive && onOpenWorkflowEditor && (
           <button
             className="btn-icon"
             onClick={onOpenWorkflowEditor}
