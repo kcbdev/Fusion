@@ -190,9 +190,12 @@ describe("DependencyGraph", () => {
     expect(screen.queryByTestId("graph-task-node-F")).toBeNull();
   });
 
-  it("auto-fits on initial load with active tasks", () => {
+  it("auto-fits on initial load with active tasks", async () => {
     render(<DependencyGraph tasks={[createTask("A", "todo")]} onOpenTaskDetail={vi.fn()} />);
-    expect(fitToGraph).toHaveBeenCalled();
+    // FNXC:Graph 2026-06-23-00:10: auto-fit only fires once the viewport is measured
+    // (width/height > 0); a 0-sized fit would mis-center, so the guard waits for layout.
+    setViewportSize(1200, 800);
+    await waitFor(() => expect(fitToGraph).toHaveBeenCalled());
     expect(setGraphBounds).toHaveBeenCalled();
   });
 

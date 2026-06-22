@@ -214,26 +214,57 @@ export function DependencyGraph({
     setGraphBounds,
   } = useGraphInteraction();
 
+  /*
+  FNXC:Graph 2026-06-23-00:10:
+  The Graph view must load CENTERED/fit in the viewport. This is a custom transform-based
+  canvas (not React Flow), so "fit" = compute zoom/pan from node positions via fitToGraph.
+  Two failure modes were producing an off-center / not-fit initial load:
+  1. Async nodes: tasks (and their computed `positions`) arrive after first paint. The old
+     guard latched `initialFitDoneRef` on the FIRST run, so it fit an empty/half-laid-out
+     graph (positions still stale, viewport unmeasured) and never re-fit once real nodes existed.
+  2. Re-entering the view: this component stays mounted when the user navigates away and back,
+     so a latched ref meant no re-fit on re-activation.
+  Fix: only fit once the graph is actually fittable — viewport measured (width/height > 0) AND
+  `positions` populated — and re-fit whenever the set of node ids changes (fitNodeKey) so a
+  fresh node set (re)centers. Guard against fitting an empty graph. User-saved positions still
+  opt out of auto-fit (respect manual layout).
+  */
+  // Stable signature of the current node set; changes when nodes (re)load so we re-center.
+  const fitNodeKey = useMemo(
+    () => Array.from(positions.keys()).sort().join("|"),
+    [positions],
+  );
+  const lastFittedNodeKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (initialFitDoneRef.current) return;
     if (filteredTasks.length === 0) return;
+    if (positions.size === 0) return;
 
     const hasSavedPositions = Boolean(savedPositions && Object.keys(savedPositions).length > 0);
     if (hasSavedPositions) {
       initialFitDoneRef.current = true;
+      lastFittedNodeKeyRef.current = fitNodeKey;
       return;
     }
 
     const viewport = viewportRef.current;
     if (!viewport) return;
+    // Viewport not yet measured: a 0-sized fit would mis-center. Wait for ResizeObserver.
+    const viewportWidth = viewport.clientWidth || viewportSize.width;
+    const viewportHeight = viewport.clientHeight || viewportSize.height;
+    if (viewportWidth === 0 || viewportHeight === 0) return;
 
-    fitToGraph(positions, viewport.clientWidth, viewport.clientHeight, {
+    // Re-fit on initial load AND whenever the node set changes (async (re)load / view re-entry).
+    if (initialFitDoneRef.current && lastFittedNodeKeyRef.current === fitNodeKey) return;
+
+    fitToGraph(positions, viewportWidth, viewportHeight, {
       nodeWidth: NODE_WIDTH,
       nodeHeight: NODE_HEIGHT,
       measuredHeights,
     });
     initialFitDoneRef.current = true;
-  }, [filteredTasks.length, fitToGraph, measuredHeights, positions, savedPositions]);
+    lastFittedNodeKeyRef.current = fitNodeKey;
+  }, [filteredTasks.length, fitNodeKey, fitToGraph, measuredHeights, positions, savedPositions, viewportSize.height, viewportSize.width]);
 
   const bounds = useMemo(() => {
     const values = Array.from(positions.values());

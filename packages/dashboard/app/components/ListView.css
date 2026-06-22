@@ -17,12 +17,12 @@
   background: var(--surface);
 }
 
+/* FNXC:ListView 2026-06-23-00:00: No border below the controls — the toolbar (Bulk Edit / View options / New Task) flows straight into the quick-add box with no divider between them. */
 .list-sidebar-controls {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-xl);
-  border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 

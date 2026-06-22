@@ -1558,7 +1558,8 @@ describe("ListView", () => {
 
     renderListView({ tasks });
 
-    expect(screen.getByText("3 of 3 tasks")).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: the "X of Y tasks" count was removed from the desktop sidebar; verify the filter result via the rendered task rows instead.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(3);
   });
 
   it("displays filtered task count in stats", () => {
@@ -1570,7 +1571,8 @@ describe("ListView", () => {
 
     renderListView({ tasks, searchQuery: "Alpha" });
 
-    expect(screen.getByText("1 of 3 tasks")).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: count removed from sidebar; assert the filtered rows.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("calls onNewTask when + New Task button is clicked", () => {
@@ -2096,7 +2098,7 @@ describe("ListView Column Filtering", () => {
     fireEvent.click(triageZone);
 
     // Stats should show filtered count with column name
-    expect(screen.getByText("2 of 3 tasks in Planning")).toBeDefined();
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(2);
   });
 
   it("applies text filter within column filter", () => {
@@ -2118,7 +2120,7 @@ describe("ListView Column Filtering", () => {
     expect(screen.queryByText("FN-003")).toBeNull();
 
     // Stats should reflect combined filtering
-    expect(screen.getByText("1 of 3 tasks in Planning")).toBeDefined();
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("applies active class to selected column drop zone", () => {
@@ -2525,16 +2527,15 @@ describe("ListView Hide Done Tasks", () => {
 
     renderListView({ tasks });
 
-    // Initial stats should show all tasks
-    expect(screen.getByText("3 of 3 tasks")).toBeDefined();
+    // Initial: all 3 tasks visible
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(3);
 
     // Click hide done button
     const hideDoneButton = screen.getByRole("button", { name: /hide done/i });
     fireEvent.click(hideDoneButton);
 
-    // Stats should show filtered count with hidden indicator
-    expect(screen.getByText("1 of 3 tasks")).toBeDefined();
-    expect(screen.getByText(/2 hidden/)).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: the count + "(N hidden)" indicator were removed from the sidebar; assert hiding done leaves only the 1 non-done task visible.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("hides done and archived column section headers when hide done is active", () => {

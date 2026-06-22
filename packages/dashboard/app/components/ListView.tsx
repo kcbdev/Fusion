@@ -1985,15 +1985,8 @@ export function ListView({
                 */}
                 <div className="list-sidebar-controls__header">
                   {renderWorkflowSelector()}
+                  {/* FNXC:ListView 2026-06-23-00:00: The "X of Y tasks" count is removed from the sidebar toolbar per user request — the Bulk Edit / View options / New Task actions are the sole content of this row. */}
                   <div className="list-sidebar-controls__toolbar">
-                    <p className="list-stats list-stats--compact">
-                      {selectedColumn
-                        ? t("listView.statsInColumn", "{{count}} of {{total}} tasks in {{column}}", { count: filteredCount, total: tasks.length, column: getListColumnLabel(selectedColumn) })
-                        : t("listView.stats", "{{count}} of {{total}} tasks", { count: filteredCount, total: tasks.length })}
-                      {hiddenCompletedCount > 0 && !selectedColumn && (
-                        <span className="list-stats-hidden"> ({t("listView.hidden", "{{count}} hidden", { count: hiddenCompletedCount })})</span>
-                      )}
-                    </p>
                     <div className="list-sidebar-controls__actions">
                       <button className="btn btn-sm" onClick={toggleBulkEdit} aria-pressed={bulkEditEnabled}>
                         {bulkEditEnabled ? t("listView.doneEditing", "Done Editing") : t("listView.bulkEdit", "Bulk Edit")}
