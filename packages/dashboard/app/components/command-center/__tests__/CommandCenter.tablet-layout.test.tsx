@@ -9,6 +9,13 @@ import { CommandCenter } from "../CommandCenter";
 const apiMock = vi.fn();
 vi.mock("../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+  // TeamArea (rendered on the team tab) imports these directly; provide resolving
+  // mocks so its mount effects (heartbeat-multiplier load/save, org tree, executor
+  // stats) don't call undefined and throw synchronously.
+  fetchOrgTree: vi.fn().mockResolvedValue([]),
+  fetchExecutorStats: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, maxConcurrent: 2 }),
+  fetchSettings: vi.fn().mockResolvedValue({ heartbeatMultiplier: 1 }),
+  updateSettings: vi.fn().mockResolvedValue({}),
 }));
 
 /*

@@ -7,8 +7,11 @@ import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent }
 import { useTranslation } from "react-i18next";
 import { Pause, Play } from "lucide-react";
 import type { CostResult, OrgTreeNode, TeamAgentSummary, TeamAnalytics } from "@fusion/core";
-import { fetchExecutorStats, fetchOrgTree } from "../../../api/legacy";
+import { getErrorMessage } from "@fusion/core";
+import { fetchExecutorStats, fetchOrgTree, fetchSettings, updateSettings } from "../../../api/legacy";
 import { useAppSettings } from "../../../hooks/useAppSettings";
+import type { ToastType } from "../../../hooks/useToast";
+import type { TaskView } from "../../../hooks/useViewState";
 import { AgentAvatar } from "../../AgentAvatar";
 import { LoadingSpinner } from "../../LoadingSpinner";
 import type { DateRange } from "../DateRangePicker";
@@ -23,6 +26,11 @@ import { formatCost, formatCount } from "./areaShared";
 const TEAM_LIVE_REFRESH_MS = 15_000;
 const EXECUTOR_STATUS_POLL_MS = 10_000;
 const ORG_CHART_DRAG_THRESHOLD = 4;
+/*
+FNXC:CommandCenter 2026-06-22-00:00:
+Heartbeat-multiplier presets mirror the Agents page (AgentsView) exactly so the Command Center slider scales agent heartbeats identically. Same range/step (0.1–10, step 0.1), same persisted settings.heartbeatMultiplier endpoint via updateSettings — no new state or API.
+*/
+const HEARTBEAT_MULTIPLIER_PRESETS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10] as const;
 type SortKey = "agent" | "tokens" | "cost" | "filesChanged" | "tasksCompleted" | "tasksInProgress";
 
 type AsyncState<T> =
@@ -157,13 +165,29 @@ function TeamOrgChartNode({ node }: { node: OrgTreeNode }) {
  * FNXC:CommandCenter 2026-06-19-13:45:
  * Org chart and heartbeat control are Team-tab responsibilities, not Overview controls. Keep them outside AreaShell so project-level team operations remain visible while analytics load, error, or return empty, remove org-node role/title descriptions, and style org cards locally so Command Center never depends on lazy AgentsView.css.
  */
-export function TeamArea({ range, projectId }: { range: DateRange; projectId?: string }) {
+export function TeamArea({
+  range,
+  projectId,
+  addToast,
+  onChangeView,
+}: {
+  range: DateRange;
+  projectId?: string;
+  addToast?: (message: string, type?: ToastType) => void;
+  onChangeView?: (view: TaskView) => void;
+}) {
   const { t } = useTranslation("app");
   const {
     globalPaused,
     enginePaused,
     toggleEnginePause,
   } = useAppSettings(projectId);
+  /*
+  FNXC:CommandCenter 2026-06-22-00:00:
+  Heartbeat-speed multiplier replicated from the Agents page so users can scale all agent heartbeat intervals from the dashboard. Wired to the same settings.heartbeatMultiplier persisted via updateSettings; loaded on mount via fetchSettings, defaulting to ×1.0.
+  */
+  const [heartbeatMultiplier, setHeartbeatMultiplier] = useState<number>(1);
+  const [isSavingMultiplier, setIsSavingMultiplier] = useState(false);
   const [orgTreeState, setOrgTreeState] = useState<AsyncState<OrgTreeNode[]>>({ status: "loading", data: null, error: null });
   const [executorStatsState, setExecutorStatsState] = useState<AsyncState<ExecutorStats>>({ status: "loading", data: null, error: null });
   const orgChartViewportRef = useRef<HTMLDivElement | null>(null);
@@ -248,6 +272,38 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [projectId, t]);
+  // Load heartbeat multiplier from project settings on mount (same source as the Agents page).
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSettings(projectId)
+      .then((settings) => {
+        if (!cancelled) setHeartbeatMultiplier(settings.heartbeatMultiplier ?? 1);
+      })
+      .catch(() => {
+        // Use default ×1.0 on error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const handleHeartbeatMultiplierChange = useCallback(
+    async (multiplier: number) => {
+      const clampedValue = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+      setHeartbeatMultiplier(clampedValue);
+      setIsSavingMultiplier(true);
+      try {
+        await updateSettings({ heartbeatMultiplier: clampedValue }, projectId);
+        addToast?.(t("agents.heartbeatSpeedSet", "Heartbeat speed set to ×{{value}}", { value: clampedValue.toFixed(1) }), "success");
+      } catch (err) {
+        addToast?.(t("agents.heartbeatSpeedSaveFailed", "Failed to save heartbeat multiplier: {{error}}", { error: getErrorMessage(err) }), "error");
+      } finally {
+        setIsSavingMultiplier(false);
+      }
+    },
+    [projectId, addToast, t],
+  );
+
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const unknownAgent = t("commandCenter.team.unknownAgent", "(unknown agent)");
   const unknownRole = t("commandCenter.team.unknownRole", "Unknown role");
@@ -459,6 +515,79 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
           </button>
           {effectiveGlobalPaused ? (
             <p className="cc-team-muted">{t("commandCenter.controls.heartbeat.disabledByStop", "Start the AI engine before resuming the heartbeat.")}</p>
+          ) : null}
+
+          {/*
+          FNXC:CommandCenter 2026-06-22-00:00:
+          Heartbeat-speed multiplier slider replicated from the Agents page (range 0.1–10, step 0.1, ×0.1–×10 presets) so users can scale all agent heartbeat intervals from the dashboard's AI engine card. Wired to the same settings.heartbeatMultiplier endpoint.
+          */}
+          <div className="cc-team-heartbeat-multiplier heartbeat-multiplier-group">
+            <div className="heartbeat-multiplier-controls">
+              <label htmlFor="ccHeartbeatMultiplier" className="heartbeat-multiplier-label">
+                {t("agents.heartbeatSpeed", "Heartbeat Speed")}
+              </label>
+              <input
+                id="ccHeartbeatMultiplier"
+                className="heartbeat-multiplier-slider touch-target"
+                type="range"
+                min={0.1}
+                max={10}
+                step={0.1}
+                value={heartbeatMultiplier}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                }}
+                disabled={isSavingMultiplier}
+              />
+              <span className="heartbeat-multiplier-value">×{heartbeatMultiplier.toFixed(1)}</span>
+              <select
+                className="heartbeat-multiplier-preset"
+                value={String(
+                  HEARTBEAT_MULTIPLIER_PRESETS.reduce((closest, candidate) => {
+                    return Math.abs(candidate - heartbeatMultiplier) < Math.abs(closest - heartbeatMultiplier) ? candidate : closest;
+                  }, HEARTBEAT_MULTIPLIER_PRESETS[0]),
+                )}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                }}
+                disabled={isSavingMultiplier}
+                aria-label={t("agents.heartbeatSpeedPreset", "Heartbeat speed preset")}
+              >
+                {HEARTBEAT_MULTIPLIER_PRESETS.map((multiplier) => (
+                  <option key={multiplier} value={String(multiplier)}>
+                    ×{multiplier}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <small className="text-secondary">
+              {t("agents.heartbeatSpeedHint", "Scales all agent heartbeat intervals. ×0.5 = twice as fast, ×2.0 = twice as slow. Default: ×1.0")}
+            </small>
+          </div>
+
+          {/*
+          FNXC:CommandCenter 2026-06-22-00:00:
+          AI engine card shortcuts: jump straight to the board or agents views. Navigation is owned by App (onChangeView), so these only fire when wired up.
+          */}
+          {onChangeView ? (
+            <div className="cc-team-engine-nav">
+              <button
+                type="button"
+                className="btn btn-sm cc-team-engine-nav-btn"
+                onClick={() => onChangeView("board")}
+              >
+                {t("commandCenter.controls.engine.viewBoard", "View Board")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm cc-team-engine-nav-btn"
+                onClick={() => onChangeView("agents")}
+              >
+                {t("commandCenter.controls.engine.viewAgents", "View Agents")}
+              </button>
+            </div>
           ) : null}
         </section>
       </div>

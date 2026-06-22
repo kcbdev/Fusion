@@ -312,6 +312,25 @@ Team owns the Agent org chart and Heartbeat control. Org nodes must be self-styl
 }
 
 /*
+FNXC:CommandCenter 2026-06-22-00:00:
+AI engine card (Team Heartbeat control) gains a heartbeat-speed multiplier and View Board / View Agents shortcuts. Space the multiplier from the pause control and lay the nav buttons in a wrapping row using theme tokens only.
+*/
+.cc-team-heartbeat-multiplier {
+  margin-block-start: var(--space-sm);
+}
+
+.cc-team-engine-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-block-start: var(--space-sm);
+}
+
+.cc-team-engine-nav-btn {
+  flex: 1 1 auto;
+}
+
+/*
 FNXC:CommandCenter 2026-06-21-00:00:
 FN-6885 adds a grab affordance to the Team org-chart scroll owner. Keep native overflow scrolling as the single pan mechanism and switch to non-selecting grabbing only while the mouse/pen drag handler is actively scrolling.
 */

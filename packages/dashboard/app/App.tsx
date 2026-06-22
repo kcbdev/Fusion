@@ -1858,6 +1858,7 @@ function AppInner() {
               onShadcnCustomColorsChange={setShadcnCustomColors}
               addToast={addToast}
               nodesEnabled={nodesEnabled}
+              onChangeView={handleChangeTaskView}
             />
           </Suspense>
         </PageErrorBoundary>

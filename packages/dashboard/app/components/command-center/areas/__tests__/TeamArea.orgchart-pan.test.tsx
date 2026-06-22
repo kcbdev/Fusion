@@ -8,6 +8,8 @@ import type { DateRange } from "../DateRangePicker";
 const mocks = vi.hoisted(() => ({
   fetchOrgTree: vi.fn(),
   fetchExecutorStats: vi.fn(),
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
   toggleEnginePause: vi.fn(),
   useAnalyticsArea: vi.fn(),
   resolveOrgChartLayoutMode: vi.fn(),
@@ -16,6 +18,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../../api/legacy", () => ({
   fetchOrgTree: mocks.fetchOrgTree,
   fetchExecutorStats: mocks.fetchExecutorStats,
+  fetchSettings: mocks.fetchSettings,
+  updateSettings: mocks.updateSettings,
 }));
 
 vi.mock("../../../../hooks/useAppSettings", () => ({
@@ -106,6 +110,8 @@ describe("TeamArea org chart drag panning", () => {
     });
     mocks.fetchOrgTree.mockResolvedValue(orgTree);
     mocks.fetchExecutorStats.mockResolvedValue({ globalPause: false, enginePaused: false, maxConcurrent: 2 });
+    mocks.fetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
+    mocks.updateSettings.mockResolvedValue({});
     mocks.useAnalyticsArea.mockReturnValue({ data: teamAnalyticsFixture(), isLoading: false, error: null });
   });
 

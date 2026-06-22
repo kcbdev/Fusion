@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   backfillGithubSourceIssueClosedAt: vi.fn(),
   fetchOrgTree: vi.fn(),
   fetchExecutorStats: vi.fn(),
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
   toggleEnginePause: vi.fn(),
   appSettings: { globalPaused: false, enginePaused: false },
 }));
@@ -27,6 +29,8 @@ vi.mock("../../../../api/legacy", () => ({
     mocks.backfillGithubSourceIssueClosedAt(options, projectId),
   fetchOrgTree: mocks.fetchOrgTree,
   fetchExecutorStats: mocks.fetchExecutorStats,
+  fetchSettings: mocks.fetchSettings,
+  updateSettings: mocks.updateSettings,
 }));
 
 vi.mock("../../../../hooks/useAppSettings", () => ({
@@ -255,6 +259,10 @@ beforeEach(() => {
     maxConcurrent: 2,
     lastActivityAt: "2026-06-19T12:00:00.000Z",
   });
+  mocks.fetchSettings.mockReset();
+  mocks.fetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
+  mocks.updateSettings.mockReset();
+  mocks.updateSettings.mockResolvedValue({});
   toggleEnginePauseMock.mockReset();
   appSettingsMock.globalPaused = false;
   appSettingsMock.enginePaused = false;

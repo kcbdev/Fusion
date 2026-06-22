@@ -19,6 +19,7 @@ import { CommandCenterControls } from "./CommandCenterControls";
 import { ReliabilityView } from "../ReliabilityView";
 import { NodesView } from "../NodesView";
 import type { ToastType } from "../../hooks/useToast";
+import type { TaskView } from "../../hooks/useViewState";
 import { SdlcFunnel } from "./SdlcFunnel";
 import { Bar, type BarDatum } from "./charts/Bar";
 import { Sparkline } from "./charts/Sparkline";
@@ -106,6 +107,11 @@ interface CommandCenterProps {
   onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
   addToast?: (message: string, type?: ToastType) => void;
   nodesEnabled?: boolean;
+  /*
+  FNXC:CommandCenter 2026-06-22-00:00:
+  The AI engine card (Team-tab Heartbeat control) offers "View Board"/"View Agents" shortcuts. Navigation is owned by App's view router, so thread an optional onChangeView down to TeamArea rather than letting the Command Center mutate routing state itself.
+  */
+  onChangeView?: (view: TaskView) => void;
 }
 
 function OverviewTab({
@@ -456,6 +462,7 @@ export function CommandCenter({
   onShadcnCustomColorsChange = () => {},
   addToast = () => {},
   nodesEnabled = false,
+  onChangeView,
 }: CommandCenterProps = {}) {
   const { t } = useTranslation("app");
   const subViews = useSubViews(nodesEnabled);
@@ -532,7 +539,7 @@ export function CommandCenter({
       case "productivity":
         return <ProductivityArea range={range} />;
       case "team":
-        return <TeamArea range={range} projectId={projectId} />;
+        return <TeamArea range={range} projectId={projectId} addToast={addToast} onChangeView={onChangeView} />;
       case "ecosystem":
         return <EcosystemArea range={range} />;
       case "github":
