@@ -175,8 +175,16 @@ export function RightDock({
     return null;
   }
 
+  /*
+  FNXC:Navigation 2026-06-22-00:00:
+  The right dock is no longer a persistent rail: when closed it renders nothing so the main content reclaims the space (the shell is flex, so a null dock simply reflows). The Header right-sidebar toggle is the canonical reopen control; the in-dock collapse toggle still hides the panel from inside.
+  */
+  if (!open) {
+    return null;
+  }
+
   const SelectedIcon = selectedEntry.icon;
-  const dockWidth = open ? `${width}px` : undefined;
+  const dockWidth = `${width}px`;
 
   return (
     <aside

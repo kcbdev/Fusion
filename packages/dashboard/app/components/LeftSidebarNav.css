@@ -41,10 +41,15 @@ The persistent desktop/tablet sidebar needs a centered New Task CTA at the top s
 FNXC:Navigation 2026-06-22-00:00:
 The New Task CTA must occupy exactly the same box as a sidebar item highlight: same min-height/padding/radius (inherited from .left-sidebar-nav__item) and the same horizontal inset as list rows. The list insets its rows by --space-sm padding, so the CTA matches with --space-sm side margins. The drop shadow is removed because it bled past the box edge and made the CTA read as larger than the item highlights; spacing below the CTA equals the inter-row gap (list padding-top --space-sm).
 */
-.left-sidebar-nav__new-task {
+/*
+FNXC:Navigation 2026-06-22-00:10:
+The CTA carries .left-sidebar-nav__item, whose width:100% rule is declared later and otherwise wins over a single-class width:auto. Because the CTA is a direct child of the unpadded aside (not the padded list), width:100% + side margins overflows the aside by 2×--space-sm, overlapping the resize bar and rendering wider than the padded item highlights. Raise specificity (.left-sidebar-nav .left-sidebar-nav__new-task) so width:auto wins: align-self:stretch then fills the aside minus the --space-sm side margins, exactly matching an item highlight box (list content width).
+*/
+.left-sidebar-nav .left-sidebar-nav__new-task {
   flex-shrink: 0;
   justify-content: center;
   align-self: stretch;
+  box-sizing: border-box;
   width: auto;
   margin: var(--space-sm) var(--space-sm) 0;
   border-radius: var(--radius-md);
@@ -59,11 +64,15 @@ The New Task CTA must occupy exactly the same box as a sidebar item highlight: s
   color: var(--accent-text);
 }
 
+/*
+FNXC:Navigation 2026-06-22-00:00:
+With the secondary divider removed the nav reads as one continuous list, so the gap between the primary and secondary sections must match the within-section row rhythm (--space-xs) instead of the larger --space-sm. Otherwise the boundary (e.g. Compound → Goals) shows a doubled gap.
+*/
 .left-sidebar-nav__list {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-sm);

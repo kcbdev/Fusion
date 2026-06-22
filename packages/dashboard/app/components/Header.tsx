@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings, LayoutGrid, List, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, Grid3X3, Mail, MessageSquare, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge, ChevronDown, ChevronRight } from "lucide-react";
+import { Settings, LayoutGrid, List, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, Grid3X3, Mail, MessageSquare, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge, ChevronDown, ChevronRight, PanelRight } from "lucide-react";
 import "./Header.css";
 // ProjectSelector styles used by the imported standalone component.
 import "./ProjectSelector.css";
@@ -96,6 +96,16 @@ export interface HeaderProps {
   mobileNavEnabled?: boolean;
   /** When true on non-mobile screens, persistent left sidebar owns primary view navigation. */
   leftSidebarNavActive?: boolean;
+  /*
+  FNXC:Navigation 2026-06-22-00:00:
+  The right dock is no longer a persistent rail. On non-mobile surfaces the Header owns a single show/hide toggle (replacing the tablet three-dots overflow) that opens/closes the right sidebar; mobile keeps its existing overflow menu untouched.
+  */
+  /** Whether the right dock is available on this surface (non-mobile + enabled). */
+  rightDockAvailable?: boolean;
+  /** Current open state of the right dock. */
+  rightDockOpen?: boolean;
+  /** Toggle the right dock open/closed. */
+  onToggleRightDock?: () => void;
   /** Available nodes for the node selector */
   availableNodes?: NodeConfig[];
   /** Currently selected node (null for local) */
@@ -145,6 +155,9 @@ export function Header({
   shellHost = { kind: "browser" },
   mobileNavEnabled,
   leftSidebarNavActive = false,
+  rightDockAvailable = false,
+  rightDockOpen = false,
+  onToggleRightDock,
   availableNodes = [],
   currentNode,
   onSelectNode,
@@ -958,8 +971,26 @@ export function Header({
         {/* Plugin UI slot for header actions */}
         <PluginSlot slotId="header-action" projectId={projectId} />
 
-        {/* Compact overflow menu trigger (mobile + tablet) */}
-        {isCompact && !hideFullNav && (
+        {/*
+        FNXC:Navigation 2026-06-22-00:00:
+        Non-mobile surfaces (desktop + tablet) get a single right-sidebar show/hide toggle that owns the right dock visibility. It replaces the tablet three-dots overflow; the dock is fully hidden when closed and reopened from here. Mobile is intentionally excluded — it keeps its existing overflow menu untouched and has no right dock.
+        */}
+        {!isMobile && rightDockAvailable && onToggleRightDock && (
+          <button
+            className={`btn-icon${rightDockOpen ? " btn-icon--active" : ""}`}
+            onClick={onToggleRightDock}
+            title={rightDockOpen ? t("header.hideRightSidebar", "Hide right sidebar") : t("header.showRightSidebar", "Show right sidebar")}
+            aria-label={rightDockOpen ? t("header.hideRightSidebar", "Hide right sidebar") : t("header.showRightSidebar", "Show right sidebar")}
+            aria-expanded={rightDockOpen}
+            aria-pressed={rightDockOpen}
+            data-testid="header-right-dock-toggle"
+          >
+            <PanelRight size={16} />
+          </button>
+        )}
+
+        {/* Compact overflow menu trigger (mobile only — tablet uses the right-sidebar toggle above) */}
+        {isMobile && !hideFullNav && (
           <button
             ref={overflowButtonRef}
             className="btn-icon compact-overflow-trigger"
@@ -973,8 +1004,8 @@ export function Header({
           </button>
         )}
 
-        {/* Compact overflow menu (mobile + tablet) */}
-        {isCompact && !hideFullNav && isOverflowMenuOpen && (
+        {/* Compact overflow menu (mobile only) */}
+        {isMobile && !hideFullNav && isOverflowMenuOpen && (
           <div
             ref={overflowMenuRef}
             className="mobile-overflow-menu"
