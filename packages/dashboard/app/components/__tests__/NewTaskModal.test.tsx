@@ -167,10 +167,79 @@ describe("NewTaskModal", () => {
 
     fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
 
+    expect(screen.getByTestId("task-form-execution-mode-select")).toBeInTheDocument();
     expect(screen.getByTestId("task-form-github-tracking")).toBeInTheDocument();
     expect(screen.getByTestId("task-priority-select")).toBeInTheDocument();
     expect(screen.getByText(/Attachments/i)).toBeInTheDocument();
     expect(screen.getByText(/Node Override/i)).toBeInTheDocument();
+  });
+
+  it("renders the Fast and standard execution-mode affordance inside More options", () => {
+    renderNewTaskModal();
+
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    const select = screen.getByTestId("task-form-execution-mode-select") as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select).toHaveValue("standard");
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(["standard", "fast"]);
+  });
+
+  it("includes executionMode fast in the create payload when Fast is selected", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByTestId("task-form-execution-mode-select"), { target: { value: "fast" } });
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Fast parity task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+    await waitFor(() => {
+      expect(props.onCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({ executionMode: "fast" }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("task-form-execution-mode-select")).toHaveValue("standard");
+    });
+  });
+
+  it("omits executionMode from the create payload when Standard is selected", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Standard parity task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+    await waitFor(() => {
+      expect(props.onCreateTask).toHaveBeenCalledTimes(1);
+    });
+    const payload = vi.mocked(props.onCreateTask).mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("executionMode");
+  });
+
+  it("resets executionMode to standard after canceling and discarding changes", async () => {
+    const { props, rerender } = renderNewTaskModal();
+
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByTestId("task-form-execution-mode-select"), { target: { value: "fast" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-form-execution-mode-select")).toHaveValue("fast");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(mockConfirm).toHaveBeenCalledWith({
+        title: "Discard Changes",
+        message: "You have unsaved changes. Discard them?",
+        danger: true,
+      });
+    });
+
+    rerender(<NewTaskModal {...props} isOpen={false} />);
+    rerender(<NewTaskModal {...props} isOpen={true} />);
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    expect(screen.getByTestId("task-form-execution-mode-select")).toHaveValue("standard");
   });
 
   it("hands trimmed descriptions to planning and subtask callbacks without discard confirmation", () => {

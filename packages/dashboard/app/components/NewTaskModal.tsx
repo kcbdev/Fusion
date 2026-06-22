@@ -71,6 +71,11 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [autoMerge, setAutoMerge] = useState<boolean | undefined>(undefined);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [nodeId, setNodeId] = useState<string | undefined>(undefined);
+  /**
+   * FNXC:NewTaskDialogAffordances 2026-06-21-18:35:
+   * The New Task dialog must expose the same Fast/standard execution-mode affordance as QuickEntryBox's `quick-entry-fast-toggle`. Reuse TaskForm's `task-form-execution-mode-select` and forward only Fast into `TaskCreateInput.executionMode` so Standard keeps the store default.
+   */
+  const [executionMode, setExecutionMode] = useState<"standard" | "fast">("standard");
   const [githubTrackingEnabled, setGithubTrackingEnabled] = useState(false);
   const [githubRepoOverride, setGithubRepoOverride] = useState("");
 
@@ -180,13 +185,14 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       autoMerge !== undefined ||
       priority !== DEFAULT_TASK_PRIORITY ||
       nodeId !== undefined ||
+      executionMode === "fast" ||
       branchMode !== "project-default" ||
       branch !== "" ||
       baseBranch !== "" ||
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, selectedWorkflowId, enabledWorkflowSteps, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, selectedWorkflowId, enabledWorkflowSteps, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, executionMode, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
   const resetForm = useCallback(() => {
     // Clean up object URLs
@@ -209,6 +215,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setAutoMerge(undefined);
     setPriority(DEFAULT_TASK_PRIORITY);
     setNodeId(undefined);
+    setExecutionMode("standard");
     setBranchMode("project-default");
     setBranch("");
     setBaseBranch("");
@@ -281,6 +288,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
         ...(autoMerge !== undefined ? { autoMerge } : {}),
         priority,
         nodeId,
+        ...(executionMode === "fast" ? { executionMode: "fast" } : {}),
         branchSelection: {
           mode: branchMode,
           ...(isBranchNameRequired && branch.trim() ? { branchName: branch.trim() } : {}),
@@ -335,6 +343,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setAutoMerge(undefined);
       setPriority(DEFAULT_TASK_PRIORITY);
       setNodeId(undefined);
+      setExecutionMode("standard");
       setBranchMode("project-default");
       setBranch("");
       setBaseBranch("");
@@ -346,7 +355,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, enabledWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, enabledWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, executionMode, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -565,6 +574,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             nodeId={nodeId}
             onNodeIdChange={setNodeId}
             nodeOptions={nodes}
+            executionMode={executionMode}
+            onExecutionModeChange={setExecutionMode}
             githubTrackingEnabled={githubTrackingEnabled}
             onGithubTrackingEnabledChange={setGithubTrackingEnabled}
             githubRepoOverride={githubRepoOverride}
