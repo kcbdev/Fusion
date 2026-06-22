@@ -82,8 +82,14 @@ Hidden until a file is selected; when selected it overlays the tree as the singl
 }
 
 .dock-files-viewer__back,
-.dock-files-viewer__popout {
+.dock-files-viewer__popout,
+.dock-files-viewer__save {
   flex: 0 0 auto;
+}
+
+.dock-files-viewer__save {
+  gap: var(--space-xs);
+  white-space: nowrap;
 }
 
 .dock-files-viewer__body {

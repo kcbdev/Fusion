@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Maximize2 } from "lucide-react";
-import { getErrorMessage } from "@fusion/core";
+import { ArrowLeft, Maximize2, Save } from "lucide-react";
 import type { PluginDashboardViewContext } from "../plugins/types";
-import { fetchWorkspaceFileContent } from "../api";
 import { useWorkspaceFileBrowser } from "../hooks/useWorkspaceFileBrowser";
+import { useWorkspaceFileEditor } from "../hooks/useWorkspaceFileEditor";
 import { getScopedItem, removeScopedItem, scopedKey, setScopedItem } from "../utils/projectStorage";
 import { FileBrowser } from "./FileBrowser";
 import { FileEditor } from "./FileEditor";
@@ -50,6 +49,7 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
   // FNXC:RightDockFiles 2026-06-22-12:00: selected file drives the inline read-only viewer; null returns to the tree.
   // FNXC:RightDockFiles 2026-06-22-23:30: initialize from the shared scoped-storage key so the expand pop-out opens the same file the dock is showing.
   const [selectedFile, setSelectedFile] = useState<string | null>(() => getScopedItem(DOCK_FILES_CURRENT_KEY, projectId) || null);
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
 
   /*
   FNXC:RightDockFiles 2026-06-22-23:30:
@@ -78,45 +78,25 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
     return () => window.removeEventListener("storage", onStorage);
   }, [projectId]);
 
-  const [content, setContent] = useState<string>("");
-  const [contentLoading, setContentLoading] = useState(false);
-  const [contentError, setContentError] = useState<string | null>(null);
-
-  // Load the selected file's content read-only from the project workspace.
-  useEffect(() => {
-    if (!selectedFile) {
-      setContent("");
-      setContentError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setContentLoading(true);
-    setContentError(null);
-
-    fetchWorkspaceFileContent("project", selectedFile, projectId)
-      .then((response) => {
-        if (cancelled) return;
-        setContent(response.content);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setContentError(getErrorMessage(err) || t("editor.failedToLoadFile", "Failed to load file"));
-        setContent("");
-      })
-      .finally(() => {
-        if (!cancelled) setContentLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedFile, projectId, t]);
+  /*
+  FNXC:RightDockFiles 2026-06-22-16:28:
+  The right-sidebar file viewer must be the same editor surface as the modal/mobile file browser: real workspace editor state, visible toolbar options, Preview/Edit for markdown, Line #, and Wrap. Use the shared editor hook instead of the old read-only content fetch so edits can be saved and the toolbar is not a reduced sidebar-only variant.
+  */
+  const {
+    content,
+    setContent,
+    loading: contentLoading,
+    saving,
+    error: contentError,
+    save,
+    hasChanges,
+  } = useWorkspaceFileEditor("project", selectedFile, Boolean(selectedFile), projectId);
 
   const handleBack = useCallback(() => selectFile(null), [selectFile]);
   const handlePopOut = useCallback(() => {
     if (selectedFile) openFile?.(selectedFile, { workspace: "project" });
   }, [openFile, selectedFile]);
+  const handleToggleLineNumbers = useCallback(() => setShowLineNumbers((current) => !current), []);
 
   const fileName = selectedFile ? selectedFile.split("/").pop() || selectedFile : "";
 
@@ -175,6 +155,18 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
           >
             <Maximize2 size={14} />
           </button>
+          {selectedFile ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary dock-files-viewer__save"
+              onClick={() => void save()}
+              disabled={!hasChanges || saving}
+              data-testid="right-dock-files-save"
+            >
+              <Save size={14} />
+              {saving ? t("fileBrowser.saving", "Saving…") : t("actions.save", "Save")}
+            </button>
+          ) : null}
         </div>
         <div className="dock-files-viewer__body">
           {!selectedFile ? (
@@ -186,7 +178,15 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
           ) : contentError ? (
             <div className="dock-files-viewer__status dock-files-viewer__status--error">{contentError}</div>
           ) : (
-            <FileEditor content={content} onChange={() => {}} readOnly filePath={selectedFile} />
+            <FileEditor
+              content={content}
+              onChange={setContent}
+              filePath={selectedFile}
+              showLineNumbers={showLineNumbers}
+              onToggleLineNumbers={handleToggleLineNumbers}
+              toolbarExpanded
+              forceToolbarActionsVisible
+            />
           )}
         </div>
       </div>

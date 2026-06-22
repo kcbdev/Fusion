@@ -70,6 +70,21 @@
   border-bottom: 1px solid var(--border);
 }
 
+/*
+FNXC:ChatHeader 2026-06-22-16:18:
+Direct/Rooms now lives in the Chat ViewHeader immediately before New Chat. The control must scale with available header width: bounded flex-basis, minmax grid columns, and truncating labels let it fit desktop, narrow pop-out, and mobile headers without forcing the title/actions to overlap.
+*/
+.chat-view-header-scope-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 1 1 clamp(128px, 24vw, 220px);
+  width: clamp(128px, 24vw, 220px);
+  min-width: min(128px, 100%);
+  max-width: 220px;
+  padding: 0;
+  border-bottom: none;
+}
+
 .chat-sidebar-scope-btn {
   flex: 1;
   padding: var(--space-sm) var(--space-md);
@@ -79,6 +94,17 @@
   color: var(--text-muted);
   font-size: var(--space-md);
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn {
+  min-width: 0;
+  min-height: 0;
+  height: var(--view-header-content-row, 28px);
+  padding: 0 clamp(var(--space-xs), 1.2vw, var(--space-sm));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .chat-sidebar-scope-btn:hover {
@@ -654,11 +680,24 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
 }
 
 .chat-view-header-new-chat {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: fit-content;
 }
 
 .chat-view-header-icon {
   flex: 0 0 auto;
+}
+
+.chat-view .view-header__actions {
+  min-width: 0;
+}
+
+@media (max-width: 768px), (max-height: 480px) {
+  .chat-view-header-scope-toggle {
+    flex-basis: clamp(112px, 42vw, 180px);
+    width: clamp(112px, 42vw, 180px);
+    max-width: 180px;
+  }
 }
 
 /*

@@ -29,15 +29,34 @@ vi.mock("../../hooks/useWorkspaceFileBrowser", () => ({
 }));
 
 const mockFetchContent = vi.fn(() => Promise.resolve({ content: "# hi" }));
+const mockSaveContent = vi.fn(() => Promise.resolve({ mtime: "2026-01-15T10:31:00Z" }));
 vi.mock("../../api", () => ({
   fetchWorkspaceFileContent: (...args: unknown[]) => mockFetchContent(...(args as [])),
+  saveWorkspaceFileContent: (...args: unknown[]) => mockSaveContent(...(args as [])),
 }));
 
-// Keep the viewer simple: surface the file path it was asked to render.
+const capturedFileEditorProps: Array<{
+  filePath?: string;
+  toolbarExpanded?: boolean;
+  forceToolbarActionsVisible?: boolean;
+  showLineNumbers?: boolean;
+  onToggleLineNumbers?: () => void;
+  readOnly?: boolean;
+}> = [];
+
+// Keep the viewer simple: surface the file path it was asked to render and capture toolbar props.
 vi.mock("../FileEditor", () => ({
-  FileEditor: ({ filePath }: { filePath?: string }) => (
-    <div data-testid="mock-file-editor" data-file-path={filePath} />
-  ),
+  FileEditor: (props: {
+    filePath?: string;
+    toolbarExpanded?: boolean;
+    forceToolbarActionsVisible?: boolean;
+    showLineNumbers?: boolean;
+    onToggleLineNumbers?: () => void;
+    readOnly?: boolean;
+  }) => {
+    capturedFileEditorProps.push(props);
+    return <div data-testid="mock-file-editor" data-file-path={props.filePath} />;
+  },
 }));
 
 // Render the tree's files as buttons so we can click one.
@@ -60,6 +79,8 @@ describe("DockFilesView shared current-file state", () => {
   beforeEach(() => {
     window.localStorage.clear();
     mockFetchContent.mockClear();
+    mockSaveContent.mockClear();
+    capturedFileEditorProps.length = 0;
   });
   afterEach(() => cleanup());
 
@@ -108,5 +129,25 @@ describe("DockFilesView shared current-file state", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mock-file-editor")).toHaveAttribute("data-file-path", "readme.md");
     });
+  });
+
+  it("uses the full modal/mobile file editor toolbar in the right dock viewer", async () => {
+    render(<DockFilesView projectId={PROJECT_ID} layout="auto" />);
+    fireEvent.click(screen.getByText("readme.md"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-file-editor")).toHaveAttribute("data-file-path", "readme.md");
+    });
+
+    const latest = capturedFileEditorProps.at(-1);
+    expect(latest).toMatchObject({
+      filePath: "readme.md",
+      toolbarExpanded: true,
+      forceToolbarActionsVisible: true,
+      showLineNumbers: true,
+    });
+    expect(latest?.readOnly).toBeFalsy();
+    expect(latest?.onToggleLineNumbers).toEqual(expect.any(Function));
+    expect(screen.getByTestId("right-dock-files-save")).toBeDisabled();
   });
 });

@@ -3216,6 +3216,34 @@ export function ChatView({ projectId, addToast, experimentalFeatures, floating =
    * FN-6516 refines the tablet keyboard behavior: keep the sidebar at the same persisted width while the keyboard is open instead of narrowing to the minimum. The FN-6210 CSS max-width guard remains the upper bound, and resize controls still stay disabled while typing.
    */
   const sidebarInlineStyle: React.CSSProperties | undefined = isChatMobile ? undefined : { width: `${sidebarWidth}px` };
+  /*
+  FNXC:ChatHeader 2026-06-22-16:18:
+  Direct/Rooms is a view-level scope switch, so it belongs in Chat's canonical header directly before New Chat instead of consuming the first row of the sidebar. Keep the existing test ids while moving the DOM so direct and room conversations share one header control surface.
+  */
+  const scopeToggle = chatRoomsEnabled ? (
+    <div className="chat-sidebar-scope-toggle chat-view-header-scope-toggle" role="tablist" data-testid="chat-sidebar-scope-toggle">
+      <button
+        type="button"
+        role="tab"
+        className={`chat-sidebar-scope-btn${chatScope === "direct" ? " chat-sidebar-scope-btn--active" : ""}`}
+        aria-selected={chatScope === "direct"}
+        data-testid="chat-sidebar-scope-direct"
+        onClick={() => setChatScope("direct")}
+      >
+        {t("chat.scopeDirect", "Direct")}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        className={`chat-sidebar-scope-btn${chatScope === "rooms" ? " chat-sidebar-scope-btn--active" : ""}`}
+        aria-selected={chatScope === "rooms"}
+        data-testid="chat-sidebar-scope-rooms"
+        onClick={() => setChatScope("rooms")}
+      >
+        {t("chat.scopeRooms", "Rooms")}
+      </button>
+    </div>
+  ) : null;
 
   return (
     /*
@@ -3228,6 +3256,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures, floating =
         title={t("chat.title", "Chat")}
         actions={
           <>
+            {scopeToggle}
             {!isChatMobile ? (
               <button
                 className="btn btn-sm btn-primary chat-view-header-new-chat"
@@ -3295,30 +3324,6 @@ export function ChatView({ projectId, addToast, experimentalFeatures, floating =
         className={`chat-sidebar${!sidebarVisible ? " chat-sidebar--hidden" : ""}`}
         style={sidebarInlineStyle}
       >
-        {chatRoomsEnabled && (
-          <div className="chat-sidebar-scope-toggle" role="tablist" data-testid="chat-sidebar-scope-toggle">
-            <button
-              type="button"
-              role="tab"
-              className={`chat-sidebar-scope-btn${chatScope === "direct" ? " chat-sidebar-scope-btn--active" : ""}`}
-              aria-selected={chatScope === "direct"}
-              data-testid="chat-sidebar-scope-direct"
-              onClick={() => setChatScope("direct")}
-            >
-              {t("chat.scopeDirect", "Direct")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={`chat-sidebar-scope-btn${chatScope === "rooms" ? " chat-sidebar-scope-btn--active" : ""}`}
-              aria-selected={chatScope === "rooms"}
-              data-testid="chat-sidebar-scope-rooms"
-              onClick={() => setChatScope("rooms")}
-            >
-              {t("chat.scopeRooms", "Rooms")}
-            </button>
-          </div>
-        )}
         {!chatRoomsEnabled || chatScope === "direct" ? (
           <>
             {/* Search section */}

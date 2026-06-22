@@ -16,6 +16,9 @@ import { WorkflowSwitcher } from "./WorkflowSwitcher";
 import { computeWorkflowStatusCounts } from "./workflowStatusCounts";
 import { writeBoardWorkflowsCache } from "../utils/boardWorkflowsCache";
 import { useBoardWorkflows } from "../hooks/useBoardWorkflows";
+import { useTranslation } from "react-i18next";
+import { LayoutDashboard } from "lucide-react";
+import { ViewHeader } from "./ViewHeader";
 
 interface BoardProps {
   tasks: Task[];
@@ -146,6 +149,7 @@ function BoardWorkflowSkeleton({ empty = false }: { empty?: boolean }) {
 }
 
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
+  const { t } = useTranslation("app");
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
@@ -515,9 +519,29 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   const shouldGateLegacyBoard = boardWorkflows === null
     ? (workflowColumnsEnabled === true || settingsLoaded === false)
     : boardWorkflows.flagEnabled === true && boardWorkflows.workflows.length === 0;
+  /*
+  FNXC:DashboardHeader 2026-06-22-16:05:
+  Dashboard/Board is a first-class left-sidebar view, so it needs the same canonical ViewHeader chrome as Artifacts, Skills, and Goals instead of letting the board columns touch the top app chrome. Keep the board itself as the scroll owner below the header so horizontal lane scrolling and mobile snap behavior are unchanged.
+  */
+  const dashboardHeader = (
+    <ViewHeader
+      icon={LayoutDashboard}
+      title={t("dashboard.title", "Dashboard")}
+      actions={(
+        <span className="dashboard-board-view__count">
+          {t("dashboard.taskCount", "{{count}} task{{plural}}", { count: tasks.length, plural: tasks.length === 1 ? "" : "s" })}
+        </span>
+      )}
+    />
+  );
 
   if (shouldGateLegacyBoard) {
-    return <BoardWorkflowSkeleton empty={boardWorkflows?.flagEnabled === true} />;
+    return (
+      <div className="dashboard-board-view">
+        {dashboardHeader}
+        <BoardWorkflowSkeleton empty={boardWorkflows?.flagEnabled === true} />
+      </div>
+    );
   }
 
   if (workflowMode && selectedWorkflow) {
@@ -549,20 +573,22 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
       : null;
 
     return (
-      <div className="board-workflow-view">
-        {workflowControlsInHeader && headerWorkflowSlot ? relocatedWorkflowToolbar : workflowToolbar}
-        <main
-          className="board board-workflow-columns"
-          id="board"
-          ref={boardRef}
-          onDragStart={(e) => {
-            const id = (e.target as HTMLElement)?.closest?.("[data-id]")?.getAttribute("data-id");
-            if (id) draggingTaskIdRef.current = id;
-          }}
-          onDragEnd={() => {
-            draggingTaskIdRef.current = null;
-          }}
-        >
+      <div className="dashboard-board-view">
+        {dashboardHeader}
+        <div className="board-workflow-view">
+          {workflowControlsInHeader && headerWorkflowSlot ? relocatedWorkflowToolbar : workflowToolbar}
+          <main
+            className="board board-workflow-columns"
+            id="board"
+            ref={boardRef}
+            onDragStart={(e) => {
+              const id = (e.target as HTMLElement)?.closest?.("[data-id]")?.getAttribute("data-id");
+              if (id) draggingTaskIdRef.current = id;
+            }}
+            onDragEnd={() => {
+              draggingTaskIdRef.current = null;
+            }}
+          >
           {selectedWorkflowColumns.map((columnDef) => {
             const isCreateColumn = columnDef.id === selectedWorkflowCreateColumnId;
             return (
@@ -657,13 +683,15 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
               onToggleCollapse={handleToggleArchivedCollapse}
             />
           )}
-        </main>
+          </main>
+        </div>
       </div>
     );
   }
 
   return (
-    <>
+    <div className="dashboard-board-view">
+      {dashboardHeader}
       <main className="board" id="board" ref={boardRef}>
         {COLUMNS.map((col) => (
           <Column
@@ -706,6 +734,6 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
           />
         ))}
       </main>
-    </>
+    </div>
   );
 }

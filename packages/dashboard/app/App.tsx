@@ -2527,7 +2527,11 @@ function AppInner() {
           className="floating-window--chat"
           persistGeometryKey="kb-dashboard-chat-floating-window"
           defaultSize={{ width: 980, height: 680 }}
-          minSize={{ width: 520, height: 420 }}
+          /*
+          FNXC:ChatModal 2026-06-22-16:05:
+          The full Chat pop-out must be resizable into a narrower desktop utility window. ChatView already switches to its mobile one-pane layout at narrow widths, so allow the FloatingWindow to shrink below the old two-pane desktop minimum while preserving enough width for composer controls.
+          */
+          minSize={{ width: 360, height: 420 }}
         >
           <Suspense fallback={null}>
             <ChatView
