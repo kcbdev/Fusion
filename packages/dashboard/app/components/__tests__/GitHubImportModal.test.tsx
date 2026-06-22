@@ -924,8 +924,8 @@ describe("GitHubImportModal", () => {
       vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
       vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
         comments: [
-          { author: "alice", body: "First comment from alice", createdAt: "2024-01-01T00:00:00Z" },
-          { author: "bob", body: "Second comment from bob", createdAt: "2024-01-02T00:00:00Z" },
+          { author: "alice", body: "First comment from alice", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false, authorAvatarUrl: "https://github.com/alice.png?size=40" },
+          { author: "github-actions[bot]", body: "Second comment from bot", createdAt: "2024-01-02T00:00:00Z", authorIsBot: true },
         ],
         checks: [
           { name: "build", status: "completed", conclusion: "success" },
@@ -965,10 +965,111 @@ describe("GitHubImportModal", () => {
       expect(checks.querySelector(".github-import-pr-check-pill--success")).toBeTruthy();
 
       // Full comment thread renders, chronological, with authors + bodies.
-      expect(comments.textContent).toContain("alice");
-      expect(comments.textContent).toContain("First comment from alice");
-      expect(comments.textContent).toContain("bob");
-      expect(comments.textContent).toContain("Second comment from bob");
+      await waitFor(() => {
+        expect(comments.textContent).toContain("alice");
+        expect(comments.textContent).toContain("First comment from alice");
+        expect(comments.textContent).toContain("github-actions[bot]");
+        expect(comments.textContent).toContain("Second comment from bot");
+      });
+
+      // FNXC:GitHubImport 2026-06-23-03:30: per-comment testid + human/bot indicator via data-comment-author-type.
+      const commentEls = within(comments).getAllByTestId("github-import-comment");
+      expect(commentEls).toHaveLength(2);
+      expect(commentEls[0].getAttribute("data-comment-author-type")).toBe("human");
+      expect(commentEls[1].getAttribute("data-comment-author-type")).toBe("bot");
+      // Human/bot badge labels render.
+      expect(commentEls[0].textContent).toContain("Human");
+      expect(commentEls[1].textContent).toContain("Bot");
+      // Avatar image renders for the human author (with the provided avatar URL).
+      const avatarImg = commentEls[0].querySelector("img.github-import-comment__avatar-img") as HTMLImageElement | null;
+      expect(avatarImg?.getAttribute("src")).toBe("https://github.com/alice.png?size=40");
+      // Readable timestamp renders with the full ISO as the title/datetime.
+      const timeEl = commentEls[0].querySelector("time");
+      expect(timeEl?.getAttribute("title")).toBe("2024-01-01T00:00:00Z");
+      expect(timeEl?.textContent?.length).toBeGreaterThan(0);
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:30: The Human filter hides bot comments; All (default) shows both.
+    it("filters bot comments out when the comments filter is set to Human", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 11, title: "Filter PR", body: "PR body", html_url: "https://github.com/owner/repo/pull/11", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "human comment text", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "dependabot[bot]", body: "bot comment text", createdAt: "2024-01-02T00:00:00Z", authorIsBot: true },
+        ],
+        checks: [],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Filter PR")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #11/i }));
+
+      const comments = await screen.findByTestId("github-import-pr-comments");
+      // Default (All): both comments show.
+      await waitFor(() => {
+        expect(within(comments).getAllByTestId("github-import-comment")).toHaveLength(2);
+      });
+
+      // Switch to Human: bot comment is hidden.
+      const filter = within(comments).getByTestId("github-import-comments-filter");
+      fireEvent.click(within(filter).getByText("Human"));
+      await waitFor(() => {
+        const remaining = within(comments).getAllByTestId("github-import-comment");
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].getAttribute("data-comment-author-type")).toBe("human");
+      });
+      expect(comments.textContent).not.toContain("bot comment text");
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:30: Prev/Next nav advances the active comment index across the thread.
+    it("advances the active comment with the prev/next navigation", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 13, title: "Nav PR", body: "PR body", html_url: "https://github.com/owner/repo/pull/13", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "comment one", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "bob", body: "comment two", createdAt: "2024-01-02T00:00:00Z", authorIsBot: false },
+        ],
+        checks: [],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Nav PR")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #13/i }));
+
+      const comments = await screen.findByTestId("github-import-pr-comments");
+      const prev = await within(comments).findByTestId("github-import-comment-prev");
+      const next = within(comments).getByTestId("github-import-comment-next");
+
+      // At the first comment: prev disabled, next enabled.
+      expect((prev as HTMLButtonElement).disabled).toBe(true);
+      expect((next as HTMLButtonElement).disabled).toBe(false);
+
+      // Advance to the last comment: next becomes disabled, prev enabled.
+      fireEvent.click(next);
+      await waitFor(() => {
+        expect((next as HTMLButtonElement).disabled).toBe(true);
+        expect((prev as HTMLButtonElement).disabled).toBe(false);
+      });
     });
 
     // FNXC:GitHubImport 2026-06-23-01:00: Empty detail shows the "No checks"/"No comments" empty states.
@@ -1006,8 +1107,8 @@ describe("GitHubImportModal", () => {
       vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
       vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValueOnce({
         comments: [
-          { author: "alice", body: "First issue comment", createdAt: "2024-01-01T00:00:00Z" },
-          { author: "bob", body: "Second issue comment", createdAt: "2024-01-02T00:00:00Z" },
+          { author: "alice", body: "First issue comment", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "bob", body: "Second issue comment", createdAt: "2024-01-02T00:00:00Z", authorIsBot: false },
         ],
       });
 

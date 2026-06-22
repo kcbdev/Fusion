@@ -16,6 +16,36 @@ import {
 
 const execAsync = promisify(exec);
 
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Resolve a comment author's bot flag + avatar URL for the Import Tasks preview.
+isBot: true when the author type is a GitHub Bot (gh GraphQL `__typename === "Bot"` / `is_bot`, REST `user.type === "Bot"`) OR the login ends in `[bot]`.
+avatarUrl: prefer the API-provided avatar; otherwise fall back to `https://github.com/{login}.png?size=40` — but NOT for bots, whose `[bot]`-suffixed login does not resolve to a real avatar (the frontend renders a generic bot icon instead of a broken image).
+*/
+function resolveCommentAuthor(input: {
+  login: string;
+  typename?: string | null;
+  isBot?: boolean | null;
+  type?: string | null;
+  avatarUrl?: string | null;
+}): { authorIsBot: boolean; authorAvatarUrl?: string } {
+  const login = input.login || "unknown";
+  const authorIsBot = Boolean(
+    input.isBot === true ||
+      input.typename === "Bot" ||
+      input.type === "Bot" ||
+      /\[bot\]$/i.test(login),
+  );
+  const providedAvatar = input.avatarUrl?.trim();
+  let authorAvatarUrl: string | undefined;
+  if (providedAvatar) {
+    authorAvatarUrl = providedAvatar;
+  } else if (!authorIsBot && login !== "unknown") {
+    authorAvatarUrl = `https://github.com/${encodeURIComponent(login)}.png?size=40`;
+  }
+  return { authorIsBot, authorAvatarUrl };
+}
+
 function quoteGitArg(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -3579,12 +3609,17 @@ export class GitHubClient {
   Returns the issue-level comment thread (author/body/createdAt, chronological) and the status-check rollup mapped to { name, status, conclusion?, detailsUrl? }.
   Falls back to REST when gh CLI auth is unavailable; check failures degrade to an empty checks array rather than failing the whole detail.
   */
+  /*
+  FNXC:GitHubImport 2026-06-23-03:30:
+  Comment shape extends to { authorAvatarUrl?, authorIsBot } so the Import Tasks preview can render an avatar and a reliable human/bot badge per comment.
+  authorIsBot is true when the author type resolves to a GitHub Bot OR the login ends in `[bot]`. authorAvatarUrl is the API-provided avatar when present, else a `https://github.com/{login}.png?size=40` fallback (suppressed for bot logins, whose `[bot]`-suffixed handle does not resolve — the frontend renders a generic bot icon instead).
+  */
   async getPullRequestDetail(
     owner: string,
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
     checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
   }> {
     if (this.hasGhAuth()) {
@@ -3608,11 +3643,12 @@ export class GitHubClient {
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
     checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
   }> {
     const pr = await runGhJsonAsync<{
-      comments?: Array<{ author?: { login?: string } | null; body?: string; createdAt?: string }>;
+      // gh pr view comment authors expose login + avatarUrl; `__typename`/`is_bot` surface bot actors when present.
+      comments?: Array<{ author?: { login?: string; avatarUrl?: string; __typename?: string; is_bot?: boolean } | null; body?: string; createdAt?: string }>;
       // `gh pr view --json statusCheckRollup` returns a flat array of mixed CheckRun/StatusContext shapes.
       statusCheckRollup?: Array<{
         name?: string;
@@ -3630,11 +3666,16 @@ export class GitHubClient {
       "--json", "comments,statusCheckRollup",
     ]);
 
-    const comments = (pr.comments ?? []).map((c) => ({
-      author: c.author?.login ?? "unknown",
-      body: c.body ?? "",
-      createdAt: c.createdAt ?? "",
-    }));
+    const comments = (pr.comments ?? []).map((c) => {
+      const author = c.author?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        typename: c.author?.__typename,
+        isBot: c.author?.is_bot,
+        avatarUrl: c.author?.avatarUrl,
+      });
+      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
+    });
 
     const checks = (pr.statusCheckRollup ?? []).map((c) => ({
       name: c.name ?? c.context ?? "check",
@@ -3652,7 +3693,7 @@ export class GitHubClient {
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
     checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
   }> {
     const headers = this.buildHeaders();
@@ -3667,15 +3708,19 @@ export class GitHubClient {
       throw new Error(`GitHub API error: ${commentsRes.status} ${commentsRes.statusText}`);
     }
     const commentData = (await commentsRes.json()) as Array<{
-      user?: { login?: string } | null;
+      user?: { login?: string; avatar_url?: string; type?: string } | null;
       body?: string;
       created_at?: string;
     }>;
-    const comments = commentData.map((c) => ({
-      author: c.user?.login ?? "unknown",
-      body: c.body ?? "",
-      createdAt: c.created_at ?? "",
-    }));
+    const comments = commentData.map((c) => {
+      const author = c.user?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        type: c.user?.type,
+        avatarUrl: c.user?.avatar_url,
+      });
+      return { author, body: c.body ?? "", createdAt: c.created_at ?? "", authorAvatarUrl, authorIsBot };
+    });
 
     // Per-check status via the combined check-runs endpoint on the PR head sha.
     // Check failures degrade to an empty checks array rather than failing the whole detail.
@@ -3719,7 +3764,7 @@ export class GitHubClient {
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
   }> {
     if (this.hasGhAuth()) {
       try {
@@ -3742,21 +3787,26 @@ export class GitHubClient {
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
   }> {
     const issue = await runGhJsonAsync<{
-      comments?: Array<{ author?: { login?: string } | null; body?: string; createdAt?: string }>;
+      comments?: Array<{ author?: { login?: string; avatarUrl?: string; __typename?: string; is_bot?: boolean } | null; body?: string; createdAt?: string }>;
     }>([
       "issue", "view", String(number),
       "--repo", `${owner}/${repo}`,
       "--json", "comments",
     ]);
 
-    const comments = (issue.comments ?? []).map((c) => ({
-      author: c.author?.login ?? "unknown",
-      body: c.body ?? "",
-      createdAt: c.createdAt ?? "",
-    }));
+    const comments = (issue.comments ?? []).map((c) => {
+      const author = c.author?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        typename: c.author?.__typename,
+        isBot: c.author?.is_bot,
+        avatarUrl: c.author?.avatarUrl,
+      });
+      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
+    });
 
     return { comments };
   }
@@ -3766,7 +3816,7 @@ export class GitHubClient {
     repo: string,
     number: number
   ): Promise<{
-    comments: Array<{ author: string; body: string; createdAt: string }>;
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
   }> {
     const headers = this.buildHeaders();
 
@@ -3779,15 +3829,19 @@ export class GitHubClient {
       throw new Error(`GitHub API error: ${commentsRes.status} ${commentsRes.statusText}`);
     }
     const commentData = (await commentsRes.json()) as Array<{
-      user?: { login?: string } | null;
+      user?: { login?: string; avatar_url?: string; type?: string } | null;
       body?: string;
       created_at?: string;
     }>;
-    const comments = commentData.map((c) => ({
-      author: c.user?.login ?? "unknown",
-      body: c.body ?? "",
-      createdAt: c.created_at ?? "",
-    }));
+    const comments = commentData.map((c) => {
+      const author = c.user?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        type: c.user?.type,
+        avatarUrl: c.user?.avatar_url,
+      });
+      return { author, body: c.body ?? "", createdAt: c.created_at ?? "", authorAvatarUrl, authorIsBot };
+    });
 
     return { comments };
   }

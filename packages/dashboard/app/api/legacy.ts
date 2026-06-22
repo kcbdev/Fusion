@@ -2433,8 +2433,20 @@ FNXC:GitHubImport 2026-06-23-01:00:
 Per-PR detail for the Import Tasks PR preview pane. `gh pr list` (apiFetchGitHubPulls) returns only comment COUNT + no per-check status, so the preview fetches the FULL comment thread + per-check status ON SELECTION via this client fn (never for the whole list — too expensive).
 `status` is the gh CheckRun status (queued/in_progress/completed) or StatusContext state; `conclusion` (success/failure/neutral/...) is present once a check completes.
 */
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Comment shape carries `authorAvatarUrl?` (optional, backward-compatible) and `authorIsBot` so the preview renders an avatar + human/bot badge per comment. `authorIsBot` is derived server-side (author type is a GitHub Bot OR login ends in `[bot]`); `authorAvatarUrl` is omitted for bots whose synthetic login does not resolve to a real avatar.
+*/
+export interface GitHubCommentDetail {
+  author: string;
+  body: string;
+  createdAt: string;
+  authorAvatarUrl?: string;
+  authorIsBot: boolean;
+}
+
 export interface GitHubPullDetail {
-  comments: Array<{ author: string; body: string; createdAt: string }>;
+  comments: GitHubCommentDetail[];
   checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
 }
 
@@ -2452,7 +2464,7 @@ Per-issue detail for the Import Tasks issue preview pane. Mirrors apiFetchGitHub
 Issues have no checks rollup, so only `comments` is returned.
 */
 export interface GitHubIssueDetail {
-  comments: Array<{ author: string; body: string; createdAt: string }>;
+  comments: GitHubCommentDetail[];
 }
 
 /** Fetch the full comment thread for a single GitHub issue (called on selection in the import preview). */

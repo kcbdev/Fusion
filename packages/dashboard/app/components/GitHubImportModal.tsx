@@ -1,5 +1,5 @@
 import "./GitHubImportModal.css";
-import { useState, useEffect, useCallback, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -16,11 +16,13 @@ import {
   type GitHubPull,
   type GitHubPullDetail,
   type GitHubIssueDetail,
+  type GitHubCommentDetail,
   type GitRemote,
 } from "../api";
-import { Loader2, RefreshCw, ArrowLeft, GitPullRequest, CircleDot } from "lucide-react";
+import { Loader2, RefreshCw, ArrowLeft, GitPullRequest, CircleDot, ChevronUp, ChevronDown, Bot, User } from "lucide-react";
 import { GithubIcon } from "./GithubIcon";
 import { MailboxMessageContent } from "./MailboxMessageContent";
+import type { TFunction } from "i18next";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -70,6 +72,230 @@ function clampListPaneWidth(width: number, containerWidth = 0) {
   const ratioMax = containerWidth > 0 ? containerWidth * GITHUB_IMPORT_LIST_PANE_MAX_RATIO : Number.POSITIVE_INFINITY;
   const maxWidth = Math.min(GITHUB_IMPORT_LIST_PANE_MAX_WIDTH, ratioMax);
   return Math.max(GITHUB_IMPORT_LIST_PANE_MIN_WIDTH, Math.min(maxWidth, width));
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Comment-thread filter modes: DEFAULT is "all" so both human AND bot comments show. "human"/"bot" narrow the thread.
+*/
+type CommentFilter = "all" | "human" | "bot";
+
+/**
+ * FNXC:GitHubImport 2026-06-23-03:30:
+ * Format a comment's createdAt ISO into a readable timestamp (e.g. "Jun 23, 2026, 3:15 PM") via toLocaleString.
+ * Returns "" for missing/invalid timestamps so the UI can omit the label rather than render "Invalid Date".
+ */
+function formatCommentTimestamp(iso: string | undefined): string {
+  if (!iso) return "";
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms).toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Shared comment-thread renderer for BOTH the PR (.github-import-pr-comments) and Issue (.github-import-issue-comments) preview sections.
+Adds, per comment: avatar (img with generic User/Bot lucide fallback on load error), author name, a readable createdAt timestamp (title = full ISO), and a human/bot badge (data-comment-author-type).
+Across the thread: a top filter (All/Human/Bot, default All shows both) and prev/next chevrons that scroll to + briefly highlight the active comment (tracked via a current index that clamps to the filtered list).
+The body still renders via MailboxMessageContent. Test ids: github-import-comment (per comment), github-import-comments-filter, github-import-comment-prev/-next.
+*/
+function CommentsThread({
+  comments,
+  loading,
+  error,
+  sectionClassName,
+  sectionTestId,
+  loadingTestId,
+  errorTestId,
+  emptyTestId,
+  bodyTestId,
+  t,
+}: {
+  comments: GitHubCommentDetail[];
+  loading: boolean;
+  error: string | null;
+  sectionClassName: string;
+  sectionTestId: string;
+  loadingTestId: string;
+  errorTestId: string;
+  emptyTestId: string;
+  bodyTestId: string;
+  t: TFunction<"app">;
+}) {
+  const [filter, setFilter] = useState<CommentFilter>("all");
+  // Index into the FILTERED list for prev/next navigation; clamped whenever the filtered list changes.
+  const [activeIndex, setActiveIndex] = useState(0);
+  const commentRefs = useRef<Array<HTMLLIElement | null>>([]);
+  // Avatar URLs that failed to load fall back to a generic lucide icon.
+  const [brokenAvatars, setBrokenAvatars] = useState<Set<string>>(new Set());
+
+  const filtered = useMemo(() => {
+    if (filter === "human") return comments.filter((c) => !c.authorIsBot);
+    if (filter === "bot") return comments.filter((c) => c.authorIsBot);
+    return comments;
+  }, [comments, filter]);
+
+  // Keep the active index within the filtered range as filter/data changes.
+  useEffect(() => {
+    setActiveIndex((current) => (filtered.length === 0 ? 0 : Math.min(current, filtered.length - 1)));
+  }, [filtered.length]);
+
+  const scrollToIndex = useCallback((index: number) => {
+    const el = commentRefs.current[index];
+    if (!el) return;
+    if (typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    // Brief highlight: add then remove a class so the destination comment flashes.
+    el.classList.add("github-import-pr-comment--active");
+    window.setTimeout(() => el.classList.remove("github-import-pr-comment--active"), 1200);
+  }, []);
+
+  const goPrev = useCallback(() => {
+    setActiveIndex((current) => {
+      const next = Math.max(0, current - 1);
+      scrollToIndex(next);
+      return next;
+    });
+  }, [scrollToIndex]);
+
+  const goNext = useCallback(() => {
+    setActiveIndex((current) => {
+      const next = Math.min(filtered.length - 1, current + 1);
+      scrollToIndex(next);
+      return next;
+    });
+  }, [scrollToIndex, filtered.length]);
+
+  const renderFilter = (
+    <div className="github-import-comments-filter" data-testid="github-import-comments-filter" role="group" aria-label={t("git.filterCommentsAriaLabel", "Filter comments by author type")}>
+      {(["all", "human", "bot"] as CommentFilter[]).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className={`github-import-comments-filter__chip ${filter === mode ? "active" : ""}`}
+          aria-pressed={filter === mode}
+          data-filter={mode}
+          onClick={() => setFilter(mode)}
+        >
+          {mode === "all"
+            ? t("git.commentFilterAll", "All")
+            : mode === "human"
+              ? t("git.commentFilterHuman", "Human")
+              : t("git.commentFilterBot", "Bot")}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className={sectionClassName} data-testid={sectionTestId}>
+      <div className="github-import-pr-comments__header">
+        <h5 className="preview-section-heading">{t("git.commentsHeading", "Comments")}</h5>
+        {/* Prev/next chevrons jump to the previous/next comment in the (filtered) thread. */}
+        {filtered.length > 1 && (
+          <div className="github-import-comments-nav" role="group" aria-label={t("git.commentNavAriaLabel", "Navigate comments")}>
+            <button
+              type="button"
+              className="github-import-comments-nav__btn"
+              data-testid="github-import-comment-prev"
+              onClick={goPrev}
+              disabled={activeIndex <= 0}
+              aria-label={t("git.commentPrevAriaLabel", "Previous comment")}
+              title={t("git.commentPrevAriaLabel", "Previous comment")}
+            >
+              <ChevronUp size={14} aria-hidden="true" />
+            </button>
+            <span className="github-import-comments-nav__pos" aria-live="polite">
+              {t("git.commentNavPosition", "{{current}} / {{total}}", { current: activeIndex + 1, total: filtered.length })}
+            </span>
+            <button
+              type="button"
+              className="github-import-comments-nav__btn"
+              data-testid="github-import-comment-next"
+              onClick={goNext}
+              disabled={activeIndex >= filtered.length - 1}
+              aria-label={t("git.commentNextAriaLabel", "Next comment")}
+              title={t("git.commentNextAriaLabel", "Next comment")}
+            >
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+      </div>
+      {/* Filter is always visible (above the thread) so the user can narrow Human/Bot at any time; default All shows both. */}
+      {!loading && !error && comments.length > 0 && renderFilter}
+      {loading ? (
+        <div className="preview-detail-loading" data-testid={loadingTestId}>
+          <Loader2 size={14} className="spin" aria-hidden="true" />
+          <span>{t("git.loadingComments", "Loading comments…")}</span>
+        </div>
+      ) : error ? (
+        <div className="preview-detail-error" data-testid={errorTestId}>{error}</div>
+      ) : filtered.length > 0 ? (
+        <ul className="github-import-pr-comments__list">
+          {filtered.map((comment, idx) => {
+            const authorType = comment.authorIsBot ? "bot" : "human";
+            const timestamp = formatCommentTimestamp(comment.createdAt);
+            const avatarKey = `${comment.author}-${idx}`;
+            const showAvatarImg = comment.authorAvatarUrl && !brokenAvatars.has(avatarKey);
+            return (
+              <li
+                key={idx}
+                ref={(el) => { commentRefs.current[idx] = el; }}
+                className="github-import-pr-comment github-import-comment"
+                data-testid="github-import-comment"
+                data-comment-author-type={authorType}
+              >
+                <div className="github-import-pr-comment__meta">
+                  <span className="github-import-comment__avatar" aria-hidden="true">
+                    {showAvatarImg ? (
+                      <img
+                        src={comment.authorAvatarUrl}
+                        alt={t("git.commentAvatarAlt", "{{author}} avatar", { author: comment.author })}
+                        className="github-import-comment__avatar-img"
+                        onError={() => setBrokenAvatars((prev) => new Set(prev).add(avatarKey))}
+                      />
+                    ) : comment.authorIsBot ? (
+                      <Bot size={16} aria-hidden="true" />
+                    ) : (
+                      <User size={16} aria-hidden="true" />
+                    )}
+                  </span>
+                  <span className="github-import-pr-comment__author">{comment.author}</span>
+                  <span className={`github-import-comment__type-badge github-import-comment__type-badge--${authorType}`}>
+                    {comment.authorIsBot ? <Bot size={11} aria-hidden="true" /> : <User size={11} aria-hidden="true" />}
+                    <span>{comment.authorIsBot ? t("git.commentBot", "Bot") : t("git.commentHuman", "Human")}</span>
+                  </span>
+                  {timestamp && (
+                    <time className="github-import-comment__time" dateTime={comment.createdAt} title={comment.createdAt}>
+                      {timestamp}
+                    </time>
+                  )}
+                </div>
+                <MailboxMessageContent
+                  className="github-import-pr-comment__body preview-body--markdown"
+                  content={comment.body || t("git.noCommentBody", "(empty comment)")}
+                  testId={bodyTestId}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      ) : comments.length > 0 ? (
+        /* All comments filtered out by the current Human/Bot filter. */
+        <div className="preview-detail-empty" data-testid={emptyTestId}>{t("git.noCommentsForFilter", "No comments match the filter")}</div>
+      ) : (
+        <div className="preview-detail-empty" data-testid={emptyTestId}>{t("git.noComments", "No comments")}</div>
+      )}
+    </div>
+  );
 }
 
 /*
@@ -1179,32 +1405,18 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                     Comments render BELOW the issue body inside the already-scrollable preview pane. They stream in after the per-issue detail fetch resolves and never block the body above.
                     Mirrors the PR comments markup/classes; markdown via MailboxMessageContent with an empty state.
                     */}
-                    <div className="github-import-pr-comments github-import-issue-comments" data-testid="github-import-issue-comments">
-                      <h5 className="preview-section-heading">{t("git.commentsHeading", "Comments")}</h5>
-                      {issueDetailLoading ? (
-                        <div className="preview-detail-loading" data-testid="github-import-issue-comments-loading">
-                          <Loader2 size={14} className="spin" aria-hidden="true" />
-                          <span>{t("git.loadingComments", "Loading comments…")}</span>
-                        </div>
-                      ) : issueDetailError ? (
-                        <div className="preview-detail-error" data-testid="github-import-issue-comments-error">{issueDetailError}</div>
-                      ) : issueDetail && issueDetail.comments.length > 0 ? (
-                        <ul className="github-import-pr-comments__list">
-                          {issueDetail.comments.map((comment, idx) => (
-                            <li key={idx} className="github-import-pr-comment">
-                              <div className="github-import-pr-comment__author">{comment.author}</div>
-                              <MailboxMessageContent
-                                className="github-import-pr-comment__body preview-body--markdown"
-                                content={comment.body || t("git.noCommentBody", "(empty comment)")}
-                                testId="github-import-issue-comment-body"
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="preview-detail-empty" data-testid="github-import-issue-comments-empty">{t("git.noComments", "No comments")}</div>
-                      )}
-                    </div>
+                    <CommentsThread
+                      comments={issueDetail?.comments ?? []}
+                      loading={issueDetailLoading}
+                      error={issueDetailError}
+                      sectionClassName="github-import-pr-comments github-import-issue-comments"
+                      sectionTestId="github-import-issue-comments"
+                      loadingTestId="github-import-issue-comments-loading"
+                      errorTestId="github-import-issue-comments-error"
+                      emptyTestId="github-import-issue-comments-empty"
+                      bodyTestId="github-import-issue-comment-body"
+                      t={t}
+                    />
                   </div>
                 ) : activeTab === "issues" ? (
                   <div className="github-import-state github-import-state--idle" data-testid="github-import-preview-empty">
@@ -1291,32 +1503,18 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                         <div className="preview-detail-empty" data-testid="github-import-pr-checks-empty">{t("git.noChecks", "No checks")}</div>
                       )}
                     </div>
-                    <div className="github-import-pr-comments" data-testid="github-import-pr-comments">
-                      <h5 className="preview-section-heading">{t("git.commentsHeading", "Comments")}</h5>
-                      {pullDetailLoading ? (
-                        <div className="preview-detail-loading" data-testid="github-import-pr-comments-loading">
-                          <Loader2 size={14} className="spin" aria-hidden="true" />
-                          <span>{t("git.loadingComments", "Loading comments…")}</span>
-                        </div>
-                      ) : pullDetailError ? (
-                        <div className="preview-detail-error" data-testid="github-import-pr-comments-error">{pullDetailError}</div>
-                      ) : pullDetail && pullDetail.comments.length > 0 ? (
-                        <ul className="github-import-pr-comments__list">
-                          {pullDetail.comments.map((comment, idx) => (
-                            <li key={idx} className="github-import-pr-comment">
-                              <div className="github-import-pr-comment__author">{comment.author}</div>
-                              <MailboxMessageContent
-                                className="github-import-pr-comment__body preview-body--markdown"
-                                content={comment.body || t("git.noCommentBody", "(empty comment)")}
-                                testId="github-import-pr-comment-body"
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="preview-detail-empty" data-testid="github-import-pr-comments-empty">{t("git.noComments", "No comments")}</div>
-                      )}
-                    </div>
+                    <CommentsThread
+                      comments={pullDetail?.comments ?? []}
+                      loading={pullDetailLoading}
+                      error={pullDetailError}
+                      sectionClassName="github-import-pr-comments"
+                      sectionTestId="github-import-pr-comments"
+                      loadingTestId="github-import-pr-comments-loading"
+                      errorTestId="github-import-pr-comments-error"
+                      emptyTestId="github-import-pr-comments-empty"
+                      bodyTestId="github-import-pr-comment-body"
+                      t={t}
+                    />
                   </div>
                 ) : activeTab === "pulls" ? (
                   <div className="github-import-state github-import-state--idle" data-testid="github-import-preview-empty">
