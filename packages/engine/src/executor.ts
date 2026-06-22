@@ -66,7 +66,7 @@ import {
   VERIFICATION_LOG_MAX_CHARS,
   type VerificationResult,
 } from "./verification-utils.js";
-import { canonicalStepInstanceBranchName, generateWorktreeName, resolveTaskWorkingBranch } from "./worktree-names.js";
+import { canonicalFusionBranchName, canonicalStepInstanceBranchName, generateWorktreeName, resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { describeModel, promptWithFallback, compactSessionContext } from "./pi.js";
@@ -7895,6 +7895,47 @@ export class TaskExecutor {
           const allSuccess = results.every(r => r.success);
           if (allSuccess) {
             const updatedTask = await this.store.getTask(task.id);
+            // FNXC:Workspace 2026-06-21-23:30: KTD1 — per-repo post-session capture.
+            // The singular call below runs UNGATED with worktreePath = the browse-only non-git workspace root and silently returns [] (resolveDiffBaseRef swallows the git failure at the root). In workspace mode there is nothing to diff at the root; the real changes live in each acquired sub-repo worktree. So we ADD (not replace) a workspace branch that loops `task.workspaceWorktrees` and reuses the EXISTING captureModifiedFiles per repo — reusing it (rather than hand-building `git diff <base>..HEAD`) gives us the merge-base fallback for an undefined repo.baseCommitSha (resolveDiffBaseRef) AND restores the contamination/divergence audit (filterFilesToOwnTaskCommits) for free per repo. Returned files are repo-prefixed (e.g. `repo-a/src/foo.ts`) and aggregated into task.modifiedFiles.
+            if (this.workspaceConfig) {
+              const workspaceWorktrees = updatedTask.workspaceWorktrees ?? {};
+              const aggregated = await this.captureWorkspaceModifiedFiles(updatedTask, audit, "post-session");
+              for (const [repoRel, repo] of Object.entries(workspaceWorktrees)) {
+                // Per-repo branch-attribution audit (cwd = sub-repo). Run against repo.worktreePath/repo.branch, NOT the non-git root (a root call would fail and surface nothing). The contamination signal already rides on captureWorkspaceModifiedFiles above; this is the supplementary commit-attribution surface (FN-5233 pattern).
+                try {
+                  const attributionBase = await this.resolveContaminationBaseRef(repo.worktreePath);
+                  if (attributionBase && repo.branch) {
+                    const attribution = await reportBranchAttribution(repo.worktreePath, repo.branch, attributionBase, task.id);
+                    const hasAnomaly = attribution.foreign.length > 0 || attribution.unattributed.length > 0 || attribution.ownUntrailed.length > 0;
+                    if (hasAnomaly) {
+                      const summary = `branch-attribution anomalies on ${repoRel}@${repo.branch}: foreign=${attribution.foreign.length}, unattributed=${attribution.unattributed.length}, ownUntrailed=${attribution.ownUntrailed.length}, ownTrailed=${attribution.ownTrailed}`;
+                      executorLog.warn(`${task.id}: ${summary}`);
+                      await this.store.logEntry(task.id, `[branch-attribution] ${summary}`, undefined, this.getRunContextFor(task.id));
+                      await audit.git({
+                        type: "branch:attribution-anomaly",
+                        target: repo.branch,
+                        metadata: {
+                          taskId: task.id,
+                          repo: repoRel,
+                          baseSha: attributionBase,
+                          ownTrailed: attribution.ownTrailed,
+                          foreign: attribution.foreign,
+                          unattributed: attribution.unattributed,
+                          ownUntrailed: attribution.ownUntrailed,
+                        },
+                      });
+                    }
+                  }
+                } catch (attributionErr: unknown) {
+                  executorLog.warn(`${task.id}: post-session per-repo branch-attribution audit failed for ${repoRel}: ${attributionErr instanceof Error ? attributionErr.message : String(attributionErr)}`);
+                }
+              }
+              if (aggregated.length > 0) {
+                await this.store.updateTask(task.id, { modifiedFiles: aggregated });
+                executorLog.log(`${task.id}: captured ${aggregated.length} modified files across ${Object.keys(workspaceWorktrees).length} sub-repo(s)`);
+                await audit.filesystem({ type: "file:capture-modified", target: task.id, metadata: { files: aggregated } });
+              }
+            } else {
             const modifiedFiles = await this.captureModifiedFiles(worktreePath, updatedTask.baseCommitSha, task.id, audit, "post-session");
             if (modifiedFiles.length > 0) {
               await this.store.updateTask(task.id, { modifiedFiles });
@@ -7936,6 +7977,7 @@ export class TaskExecutor {
             } catch (attributionErr: unknown) {
               executorLog.warn(`${task.id}: post-session branch-attribution audit failed: ${attributionErr instanceof Error ? attributionErr.message : String(attributionErr)}`);
             }
+            } // end !this.workspaceConfig singular capture (FNXC:Workspace KTD1)
 
             this.scheduleCompletedTaskWatchdog(task.id, "step-session completion");
             if (await this.shouldDeferCompletionForGlobalPause(task.id, "before workflow steps after step-session completion")) {
@@ -10502,10 +10544,87 @@ export class TaskExecutor {
     worktreePathOverride?: string,
     allowReanchor = true,
     options?: { noOpCompletion?: boolean; noOpCompletionReason?: string },
-  ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string }> {
+  ): Promise<{ ok: true } | { ok: false; reason: "wrong_toplevel" | "wrong_branch" | "no_commits"; observed: string; expected: string; repo?: string }> {
     const settings = await this.store.getSettings();
-    // FNXC:Workspace 2026-06-21-12:00: KTD1/KTD2 — workspace tasks have no root worktree and no single `task.worktree`; the singular per-task invariant is meaningless against the non-git root. Phase B (master U3) iterates this check per sub-repo worktree. Until then it is gated OFF in workspace mode so fn_task_done (its only caller path) does not requeue a zero-acquire workspace task for "missing task.worktree".
+    // FNXC:Workspace 2026-06-21-23:30: KTD2 — un-stubbed per-repo worktree-invariant verification.
+    // Phase A returned a flat {ok:true} stub here (no root worktree to verify against the non-git root). Phase B iterates every `task.workspaceWorktrees` entry, asserting (a) the sub-repo worktree's git toplevel matches the recorded repo.worktreePath and (b) its HEAD is on the recorded `fusion/<id>` branch (repo.branch). The result union is PRESERVED EXACTLY — `{ok:true} | {ok:false; reason:'wrong_toplevel'|'wrong_branch'|'no_commits'; observed; expected}` — because the :10889 consumer switches on `reason` to drive requeue/handoff (:10894-10936). We ADD an optional `repo` field to the failure shape (purely additive; the consumer only reads reason/observed/expected) and return the FIRST failing repo. A zero-acquire workspace task (empty map) verifies vacuously → {ok:true}, matching Phase A so fn_task_done does not requeue it.
     if (this.workspaceConfig) {
+      const workspaceWorktrees = task.workspaceWorktrees ?? {};
+      for (const [repoRel, repo] of Object.entries(workspaceWorktrees)) {
+        const expectedBranch = repo.branch || canonicalFusionBranchName(task.id);
+        // Skip git checks if the worktree dir is gone (mirrors the singular FN-009 carve-out below): completion does not require a live worktree on disk.
+        if (!existsSync(repo.worktreePath)) {
+          executorLog.log(`${task.id}: workspace worktree for ${repoRel} not found at ${repo.worktreePath} — skipping git validation`);
+          continue;
+        }
+        let expectedWorktreeRealpath: string;
+        try {
+          expectedWorktreeRealpath = canonicalizePath(repo.worktreePath);
+        } catch (error) {
+          return {
+            ok: false,
+            reason: "wrong_toplevel",
+            repo: repoRel,
+            observed: `unresolvable repo worktree (${repo.worktreePath}): ${error instanceof Error ? error.message : String(error)}`,
+            expected: `resolvable worktree for ${repoRel}`,
+          };
+        }
+        try {
+          const { stdout } = await execAsync("git rev-parse --show-toplevel", {
+            cwd: repo.worktreePath,
+            encoding: "utf-8",
+            timeout: 10_000,
+            maxBuffer: 1024 * 1024,
+          });
+          const observedTopLevelRaw = stdout.trim();
+          if (observedTopLevelRaw) {
+            const observedTopLevel = canonicalizePath(observedTopLevelRaw);
+            if (observedTopLevel !== expectedWorktreeRealpath) {
+              return {
+                ok: false,
+                reason: "wrong_toplevel",
+                repo: repoRel,
+                observed: observedTopLevel,
+                expected: expectedWorktreeRealpath,
+              };
+            }
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            reason: "wrong_toplevel",
+            repo: repoRel,
+            observed: error instanceof Error ? error.message : String(error),
+            expected: expectedWorktreeRealpath,
+          };
+        }
+        try {
+          const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
+            cwd: repo.worktreePath,
+            encoding: "utf-8",
+            timeout: 10_000,
+            maxBuffer: 1024 * 1024,
+          });
+          const observedBranch = stdout.trim();
+          if (observedBranch && observedBranch !== expectedBranch) {
+            return {
+              ok: false,
+              reason: "wrong_branch",
+              repo: repoRel,
+              observed: observedBranch,
+              expected: expectedBranch,
+            };
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            reason: "wrong_branch",
+            repo: repoRel,
+            observed: error instanceof Error ? error.message : String(error),
+            expected: expectedBranch,
+          };
+        }
+      }
       return { ok: true };
     }
     const branchName = resolveTaskWorkingBranch(task);
@@ -12262,6 +12381,26 @@ ${failureFeedback}
       executorLog.log(`Failed to capture modified files: ${errorMessage}`);
       return [];
     }
+  }
+
+  /**
+   * FNXC:Workspace 2026-06-21-23:30: KTD1 — per-repo modified-file capture for workspace tasks.
+   * Loops `task.workspaceWorktrees` and REUSES `captureModifiedFiles` per sub-repo (NOT a hand-built `git diff`), so each repo gets: (a) resolveDiffBaseRef's merge-base fallback when repo.baseCommitSha is undefined, and (b) the filterFilesToOwnTaskCommits raw-vs-attributed divergence/contamination audit for free. Returned files are repo-prefixed (`<repoRel>/<file>`) and aggregated, so a downstream File-Scope check / merge can attribute each change to its sub-repo. Returns [] for a zero-acquire workspace task.
+   */
+  private async captureWorkspaceModifiedFiles(
+    task: Task,
+    audit?: RunAuditor,
+    source = "post-session",
+  ): Promise<string[]> {
+    const workspaceWorktrees = task.workspaceWorktrees ?? {};
+    const aggregated: string[] = [];
+    for (const [repoRel, repo] of Object.entries(workspaceWorktrees)) {
+      const repoFiles = await this.captureModifiedFiles(repo.worktreePath, repo.baseCommitSha, task.id, audit, source);
+      for (const file of repoFiles) {
+        aggregated.push(`${repoRel}/${file}`);
+      }
+    }
+    return aggregated;
   }
 
   private async captureUncommittedModifiedFiles(worktreePath: string): Promise<string[]> {
