@@ -7708,7 +7708,7 @@ export class TaskExecutor {
       }
       } // end !this.workspaceConfig preflight gate (FNXC:Workspace KTD1)
 
-      // FNXC:Workspace 2026-06-21-12:00: KTD2 — register the worktree path under the task's Set. In workspace mode `worktreePath` is the browse-only root; per-repo paths are added as the agent acquires them. Non-workspace tasks add exactly one path → a one-element set (unchanged liveness/owner semantics).
+      // FNXC:Workspace 2026-06-21-12:00: KTD2 — register the worktree path under the task's Set. In workspace mode `worktreePath` is the browse-only root; per-repo sub-repo worktree paths ARE now added to the same Set as the agent acquires them (F2: fn_acquire_repo_worktree's onAcquired callback → addActiveWorktree), so the Set holds root + N sub-repo paths, not just the root. Non-workspace tasks add exactly one path → a one-element set (unchanged liveness/owner semantics).
       this.addActiveWorktree(task.id, worktreePath);
       executorLog.log(`${task.id}: worktree ready at ${worktreePath}`);
 
@@ -8406,6 +8406,9 @@ export class TaskExecutor {
           logger: executorLog,
           secretsStore: this.options.secretsStore,
           runContext: engineRunContext,
+          audit,
+          // FNXC:Workspace 2026-06-21-22:30: F2 — register each freshly-acquired sub-repo worktree path in this task's activeWorktrees Set (KTD2) so owner/liveness checks see live per-repo worktrees, not just the browse-only root.
+          onAcquired: (worktreePath: string) => this.addActiveWorktree(task.id, worktreePath),
         }));
       }
 
@@ -15295,6 +15298,20 @@ You have access to the file system to review changes.${verdictBlock}`;
           const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
           const latestTask = await this.store.getTask(taskId);
           const worktreePath = this.getWorktreePath(taskId) ?? latestTask.worktree;
+          /*
+          FNXC:Workspace 2026-06-21-22:30:
+          F8 — observability for the workspace case. A workspace task has no singular
+          worktree (getWorktreePath returns undefined for a multi-worktree task, and
+          latestTask.worktree is null on the browse-only root), so the removeWorktree
+          block below silently no-ops. Per-repo teardown is Phase B; until then make
+          the skip visible rather than silent. Behavior is unchanged.
+          */
+          if (this.workspaceConfig && !worktreePath) {
+            await this.store.logEntry(
+              taskId,
+              `workspace task ${taskId}: no singular worktree to force-requeue (per-repo teardown is Phase B)`,
+            );
+          }
           await this.store.logEntry(
             taskId,
             `Force-kill cleanup starting after stuck-kill unwind timeout — reaping in-flight surfaces and worktree`,

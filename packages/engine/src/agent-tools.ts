@@ -28,7 +28,7 @@ import { computeApprovalDedupeKey } from "./agent-action-gate.js";
 import { MessageDeliveryAutoRecoveryHandler } from "./auto-recovery-handlers/message-delivery.js";
 import { emitGoalRetrievalAudit } from "./goal-anchoring-audit.js";
 import { recordRetry } from "./retry-burned-logger.js";
-import { acquireWorkspaceRepoWorktree } from "./worktree-acquisition.js";
+import { acquireWorkspaceRepoWorktree, WorkspaceRepoAcquireBusyError } from "./worktree-acquisition.js";
 
 // ── Tool parameter schemas (canonical definitions) ────────────────────────
 
@@ -3601,8 +3601,19 @@ export function createAcquireRepoWorktreeTool(opts: {
   logger?: { log: (m: string) => void; warn: (m: string) => void };
   secretsStore?: Pick<import("@fusion/core").SecretsStore, "listEnvExportable">;
   runContext?: RunMutationContext;
+  audit?: Pick<RunAuditor, "git" | "filesystem">;
+  /*
+  FNXC:Workspace 2026-06-21-22:30:
+  F2 — executor-supplied callback invoked after a SUCCESSFUL fresh acquire so the
+  acquired sub-repo worktree path is registered in the executor's per-task
+  activeWorktrees Set (KTD2). Without this the Set only ever held the browse-only
+  root and the "task holds N sub-repo paths" invariant was hollow — owner/liveness
+  checks never saw live sub-repo worktrees. Not called on the already-acquired
+  short-circuit (the path was registered on the original fresh acquire).
+  */
+  onAcquired?: (worktreePath: string) => void;
 }): ToolDefinition {
-  const { workspaceRootDir, workspaceRepos, task, store, settings, logger, secretsStore, runContext } = opts;
+  const { workspaceRootDir, workspaceRepos, task, store, settings, logger, secretsStore, runContext, audit, onAcquired } = opts;
   return {
     name: "fn_acquire_repo_worktree",
     label: "Acquire Repo Worktree",
@@ -3621,15 +3632,47 @@ export function createAcquireRepoWorktreeTool(opts: {
         };
       }
       const freshTask = await store.getTask(task.id);
-      const result = await acquireWorkspaceRepoWorktree({
-        repoRelPath: repo,
-        workspaceRootDir,
-        task: freshTask,
-        store,
-        settings,
-        logger,
-        secretsStore,
-      });
+      /*
+      FNXC:Workspace 2026-06-21-22:30:
+      F1 — acquireWorkspaceRepoWorktree can throw WorkspaceRepoAcquireBusyError on
+      same-sub-repo contention (KTD4) or a generic failure. Both must surface as a
+      structured isError tool result, never an uncaught throw that crashes the agent
+      loop. The busy message is sanitized — it does NOT leak the holder task id into
+      agent-facing text (only into details). runContext is forwarded so the helper's
+      audit/log entries keep run attribution.
+      */
+      let result: Awaited<ReturnType<typeof acquireWorkspaceRepoWorktree>>;
+      try {
+        result = await acquireWorkspaceRepoWorktree({
+          repoRelPath: repo,
+          workspaceRootDir,
+          task: freshTask,
+          store,
+          settings,
+          logger,
+          secretsStore,
+          audit,
+          runContext,
+        });
+      } catch (err) {
+        if (err instanceof WorkspaceRepoAcquireBusyError) {
+          return {
+            content: [{ type: "text" as const, text: `Sub-repo ${repo} is temporarily locked by another task's acquisition; retry fn_acquire_repo_worktree shortly.` }],
+            details: { holderTaskId: err.holderTaskId },
+            isError: true,
+          };
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Failed to acquire worktree for ${repo}: ${message}` }],
+          details: {},
+          isError: true,
+        };
+      }
+      // FNXC:Workspace 2026-06-21-22:30: F2 — register a freshly-acquired sub-repo worktree in the executor's activeWorktrees Set (skip the already-acquired short-circuit; that path was registered on its original fresh acquire).
+      if (!result.alreadyAcquired) {
+        onAcquired?.(result.worktreePath);
+      }
       await store.logEntry(
         task.id,
         result.alreadyAcquired

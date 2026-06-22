@@ -657,17 +657,35 @@ export async function acquireWorkspaceRepoWorktree(
   */
   const exclusivityHolder = registry.lookupByPath(repoAbsPath);
   if (exclusivityHolder && exclusivityHolder.ownerKey === WORKSPACE_REPO_ACQUIRE_OWNER_KEY && exclusivityHolder.taskId !== task.id) {
-    const message = `sub-repo ${repoRelPath} is being acquired by ${exclusivityHolder.taskId}; serializing concurrent workspace acquisition`;
-    logger?.warn(`${task.id}: ${message}`);
-    await store.logEntry(task.id, message, undefined, runContext);
     const err = new WorkspaceRepoAcquireBusyError(repoRelPath, exclusivityHolder.taskId, task.id);
-    await audit?.git({
-      type: "worktree:workspace-repo-acquire-busy",
-      target: repoAbsPath,
-      metadata: { repoRelPath, holderTaskId: exclusivityHolder.taskId, requestingTaskId: task.id },
-    });
+    /*
+    FNXC:Workspace 2026-06-21-22:30:
+    F6 — the busy short-circuit's logEntry/audit are best-effort observability; if
+    either throws (e.g. a DB write hiccup) it must NOT replace the
+    WorkspaceRepoAcquireBusyError the caller relies on to classify "serialized,
+    retry later". Swallow logging failures so the busy error is what propagates.
+    */
+    try {
+      const message = `sub-repo ${repoRelPath} is being acquired by ${exclusivityHolder.taskId}; serializing concurrent workspace acquisition`;
+      logger?.warn(`${task.id}: ${message}`);
+      await store.logEntry(task.id, message, undefined, runContext);
+      await audit?.git({
+        type: "worktree:workspace-repo-acquire-busy",
+        target: repoAbsPath,
+        metadata: { repoRelPath, holderTaskId: exclusivityHolder.taskId, requestingTaskId: task.id },
+      });
+    } catch {
+      // best-effort observability only — never mask the busy error
+    }
     throw err;
   }
+  /*
+  FNXC:Workspace 2026-06-21-22:30:
+  F9 — no `await` may be inserted between lookupByPath and registerPath: the
+  atomicity of the exclusivity claim depends on staying in one synchronous slice.
+  An interleaved await would let a second task pass the lookup gate before this
+  task registers, defeating the same-sub-repo serialization (KTD4).
+  */
   registry.registerPath(repoAbsPath, {
     taskId: task.id,
     kind: "workspace-repo-acquire",
@@ -699,6 +717,17 @@ export async function acquireWorkspaceRepoWorktree(
     });
 
     /*
+    FNXC:Workspace 2026-06-21-22:30:
+    F3 — post-acquire steps are NON-FATAL. Once acquireTaskWorktree has created the
+    on-disk worktree, a failure of the identity-guard install or the base-SHA capture
+    must NOT strand that worktree (the previous catch re-threw, leaving the worktree
+    orphaned while the exclusivity entry released). The worktree is usable without the
+    identity guard, and an undefined baseCommitSha is already an accepted state. Only a
+    failure of acquireTaskWorktree ITSELF fails the acquisition. Each step is wrapped to
+    log a warning (and emit the existing failure audit event) but CONTINUE.
+    */
+
+    /*
     FNXC:Workspace 2026-06-21-20:10:
     Identity guard (single-repo parity): acquireTaskWorktree above runs WITHOUT a
     createWorktree override, so the default native backend installs NO identity
@@ -707,33 +736,70 @@ export async function acquireWorkspaceRepoWorktree(
     args (commitMsgHookEnabled / taskPrefix / first taskAttributionTrailerName) so a
     commit on a non-fusion/<id> branch is refused inside every sub-repo worktree too.
     */
-    await installTaskWorktreeIdentityGuard({
-      worktreePath: result.worktreePath,
-      taskId: task.id,
-      commitMsgHookEnabled: settings.commitMsgHookEnabled,
-      taskPrefix: settings.taskPrefix,
-      taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
-    });
+    try {
+      await installTaskWorktreeIdentityGuard({
+        worktreePath: result.worktreePath,
+        taskId: task.id,
+        commitMsgHookEnabled: settings.commitMsgHookEnabled,
+        taskPrefix: settings.taskPrefix,
+        taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+      });
+    } catch (guardErr) {
+      // FNXC:Workspace 2026-06-21-22:30: F3 — identity-guard install is non-fatal; worktree is usable without it.
+      const message = guardErr instanceof Error ? guardErr.message : String(guardErr);
+      logger?.warn(`${task.id}: identity-guard install failed for sub-repo ${repoRelPath} (non-fatal): ${message}`);
+      await store.logEntry(task.id, `Workspace sub-repo identity-guard install failed for ${repoRelPath} (non-fatal): ${message}`, undefined, runContext);
+      await audit?.git({
+        type: "worktree:workspace-repo-acquire-failed",
+        target: repoAbsPath,
+        metadata: { repoRelPath, taskId: task.id, error: message, stage: "identity-guard" },
+      });
+    }
 
     /*
     FNXC:Workspace 2026-06-21-20:10:
     Per-repo base SHA (KTD3): resolve THIS sub-repo's integration branch with the
-    shared settings.integrationBranch override STRIPPED. resolveIntegrationBranch
-    checks settings.integrationBranch FIRST, so without stripping it every sub-repo
-    would resolve to the shared workspace branch — defeating per-repo resolution.
-    With it undefined, each sub-repo falls through to its own origin/HEAD. Capture
-    the base local-first against that branch so local-ahead-of-origin integration
-    tips don't inflate the per-repo diff (FN-5937 invariant, per sub-repo).
+    shared settings.integrationBranch AND settings.baseBranch overrides STRIPPED.
+    resolveFromSettings (integration-branch.ts) falls back integrationBranch →
+    baseBranch → origin/HEAD, so leaving either set means every sub-repo resolves to
+    the shared workspace branch — defeating per-repo resolution (F4). With both
+    undefined, each sub-repo falls through to its own origin/HEAD. Capture the base
+    local-first against that branch so local-ahead-of-origin integration tips don't
+    inflate the per-repo diff (FN-5937 invariant, per sub-repo).
     */
-    const integrationBranch = await resolveIntegrationBranch(
-      repoAbsPath,
-      { ...settings, integrationBranch: undefined },
-      { logger },
-    );
-    const baseCommitSha = await resolveCapturedBaseCommitSha(result.worktreePath, logger, integrationBranch);
+    let baseCommitSha: string | undefined;
+    try {
+      const integrationBranch = await resolveIntegrationBranch(
+        repoAbsPath,
+        { ...settings, integrationBranch: undefined, baseBranch: undefined },
+        { logger },
+      );
+      baseCommitSha = await resolveCapturedBaseCommitSha(result.worktreePath, logger, integrationBranch);
+    } catch (baseErr) {
+      // FNXC:Workspace 2026-06-21-22:30: F3 — base-SHA capture is non-fatal; an undefined baseCommitSha is an accepted state.
+      const message = baseErr instanceof Error ? baseErr.message : String(baseErr);
+      logger?.warn(`${task.id}: base-SHA capture failed for sub-repo ${repoRelPath} (non-fatal): ${message}`);
+      await store.logEntry(task.id, `Workspace sub-repo base-SHA capture failed for ${repoRelPath} (non-fatal): ${message}`, undefined, runContext);
+      await audit?.git({
+        type: "worktree:workspace-repo-acquire-failed",
+        target: repoAbsPath,
+        metadata: { repoRelPath, taskId: task.id, error: message, stage: "base-sha-capture" },
+      });
+    }
 
+    /*
+    FNXC:Workspace 2026-06-21-22:30:
+    F5 — re-read the task fresh immediately before building the merged
+    workspaceWorktrees map. store.updateTask wholesale-replaces the map, and the
+    `task` snapshot was read earlier; two sequential acquires for DIFFERENT sub-repos
+    in one task would otherwise clobber a sibling's entry. Merging into the LATEST map
+    closes the common sequential-tool-call case. NOTE: a fully-atomic store-level
+    per-repo merge is the complete fix (it also covers truly-concurrent writes); it is
+    deferred to Phase B, which exercises multi-repo acquisition.
+    */
+    const latest = await store.getTask(task.id);
     const updated: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string }> = {
-      ...(task.workspaceWorktrees ?? {}),
+      ...(latest.workspaceWorktrees ?? {}),
       [repoRelPath]: { worktreePath: result.worktreePath, branch: result.branch, baseCommitSha },
     };
     await store.updateTask(task.id, { workspaceWorktrees: updated });

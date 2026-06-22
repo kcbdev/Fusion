@@ -626,10 +626,13 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.blockedBy === nextTask.blockedBy &&
     previousTask.overlapBlockedBy === nextTask.overlapBlockedBy &&
     previousTask.worktree === nextTask.worktree &&
-    // FNXC:Workspace 2026-06-21-00:00: re-render the card when a workspace task acquires/
+    // FNXC:Workspace 2026-06-21-22:30: re-render the card when a workspace task acquires/
     // releases sub-repo worktrees so the "N repos acquired" placeholder stays current (U3).
-    Object.keys(previousTask.workspaceWorktrees ?? {}).length ===
-      Object.keys(nextTask.workspaceWorktrees ?? {}).length &&
+    // F7 — compare the sorted key SETS, not just the count: a same-count repo swap (one
+    // repo released, a different one acquired) keeps the count but must still re-render,
+    // otherwise the placeholder shows a stale repo set.
+    JSON.stringify(Object.keys(previousTask.workspaceWorktrees ?? {}).sort()) ===
+      JSON.stringify(Object.keys(nextTask.workspaceWorktrees ?? {}).sort()) &&
     previousTask.branch === nextTask.branch &&
     previousTask.baseBranch === nextTask.baseBranch &&
     previousTask.breakIntoSubtasks === nextTask.breakIntoSubtasks &&

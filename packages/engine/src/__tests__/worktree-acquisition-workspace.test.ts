@@ -270,4 +270,78 @@ describeIfGit("acquireWorkspaceRepoWorktree (U2 per-repo hardening)", { timeout:
     // The exclusivity entry is released even on the failure path.
     expect(registry.isPathActive(join(fixture.rootDir, "does-not-exist"))).toBe(false);
   });
+
+  /*
+  FNXC:Workspace 2026-06-21-22:30:
+  F4 — resolveFromSettings falls back integrationBranch → settings.baseBranch →
+  origin/HEAD. A shared settings.baseBranch must be STRIPPED alongside
+  integrationBranch, otherwise a baseBranch absent from this sub-repo leaks through
+  and the per-repo base resolves against the wrong branch. Here repo-a's only branch
+  is its own origin/HEAD (develop); a shared baseBranch of 'shared-trunk' (absent in
+  the sub-repo) must NOT be honored — the base must resolve to develop's tip.
+  */
+  it("strips a shared settings.baseBranch so the base resolves against the sub-repo's own origin/HEAD (KTD3 / F4)", async () => {
+    fixture = await createWorkspaceFixture(["repo-a"], "develop");
+    const repoA = fixture.repoPath("repo-a");
+    const origin = `${repoA}-origin`;
+    git(repoA, "git init --bare " + JSON.stringify(origin));
+    git(repoA, `git remote add origin ${JSON.stringify(origin)}`);
+    git(repoA, "git push -u origin develop");
+    git(repoA, "git remote set-head origin develop");
+    const developTip = git(repoA, "git rev-parse develop");
+
+    const { store, current } = makeFakeStore(makeTask("FN-6"));
+    const registry = new ActiveSessionRegistry();
+    const result = await acquireWorkspaceRepoWorktree({
+      repoRelPath: "repo-a",
+      workspaceRootDir: fixture.rootDir,
+      task: current(),
+      store,
+      // A shared baseBranch (no integrationBranch) that does NOT exist in this
+      // sub-repo. If it leaked through, base capture would resolve against
+      // 'shared-trunk' instead of develop.
+      settings: { ...SETTINGS, baseBranch: "shared-trunk" } as Partial<Settings>,
+      registry,
+    });
+
+    expect(result.baseCommitSha).toBe(developTip);
+  });
+
+  /*
+  FNXC:Workspace 2026-06-21-22:30:
+  F5 — two sequential acquires for DIFFERENT sub-repos in one task must each persist
+  their own workspaceWorktrees entry. The acquisition re-reads the task fresh before
+  the merge so the second acquire does not clobber the first repo's entry.
+  */
+  it("preserves a sibling sub-repo's workspaceWorktrees entry across two different-repo acquires (F5)", async () => {
+    fixture = await createWorkspaceFixture(["repo-a", "repo-b"]);
+    const { store, current } = makeFakeStore(makeTask("FN-7"));
+    const registry = new ActiveSessionRegistry();
+
+    const first = await acquireWorkspaceRepoWorktree({
+      repoRelPath: "repo-a",
+      workspaceRootDir: fixture.rootDir,
+      task: current(),
+      store,
+      settings: SETTINGS,
+      registry,
+    });
+    expect(first.alreadyAcquired).toBe(false);
+
+    const second = await acquireWorkspaceRepoWorktree({
+      repoRelPath: "repo-b",
+      workspaceRootDir: fixture.rootDir,
+      task: current(),
+      store,
+      settings: SETTINGS,
+      registry,
+    });
+    expect(second.alreadyAcquired).toBe(false);
+
+    // Both entries survive — the second acquire merged into the latest map, not the
+    // stale snapshot, so repo-a was not clobbered.
+    const persisted = current().workspaceWorktrees ?? {};
+    expect(persisted["repo-a"]?.worktreePath).toBe(first.worktreePath);
+    expect(persisted["repo-b"]?.worktreePath).toBe(second.worktreePath);
+  });
 });
