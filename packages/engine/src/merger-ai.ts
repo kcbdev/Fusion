@@ -946,6 +946,205 @@ export async function landSquash(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Per-repo land (extracted from runAiMerge's inline clean-room closure)
+// ---------------------------------------------------------------------------
+
+/*
+FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1):
+`landOneRepo` is the per-repo land mechanic extracted byte-for-byte from
+`runAiMerge`'s former inline clean-room closure: pre-merge prune (rooted at THIS
+repo) → mkdtemp clean room → `git worktree add --detach` → installWorktreeDependencies
+→ mergeAndReview → landSquash → the concurrent-advance CAS retry loop → the
+activeSessionRegistry register/unregister + cleanup-finally. It advances ONE local
+integration ref (no remote push) and returns what landed. It deliberately does NOT
+move the task or write task-level mergeDetails — that task-global finalization
+(`finalizeMerged`/`finalizeTask`/`evaluateNoCommitsNoOpFinalize`) stays with the
+caller, so the same primitive is callable per sub-repo from `landWorkspaceTask`
+without finalizing the whole task per repo (KTD3).
+
+`runAiMerge` is the SINGLE-REPO caller: it builds the same context it always built
+and calls `landOneRepo` once against the project root, then runs its existing
+finalization on the result. Single-repo behavior is unchanged.
+*/
+
+/** Per-task context shared by every per-repo land (agents/audit/log are bound to
+ *  the task, not the repo). The repo-varying inputs (rootDir/branch/integrationBranch)
+ *  are explicit `landOneRepo` args. */
+export interface LandRepoContext {
+  taskId: string;
+  settings: Settings;
+  audit: RunAuditor;
+  log: (message: string) => Promise<void>;
+  setStatus: (status: string | null) => Promise<unknown>;
+  maxPasses: number;
+  mergeAgent: (cwd: string, prompt: string) => Promise<void>;
+  reviewAgent: (cwd: string, prompt: string) => Promise<string>;
+  stashResolveAgent: (cwd: string, prompt: string) => Promise<void>;
+  includeTaskId: boolean;
+  trailers: string[];
+  taskTitle?: string;
+  signal?: AbortSignal;
+  allowDirtyLocalCheckoutSync?: boolean;
+}
+
+/** What a single repo's land produced. No task move / mergeDetails — the caller
+ *  decides task-global finalization. */
+export type LandOneRepoResult =
+  | {
+      /** The branch had no net changes vs the integration tip — nothing landed. */
+      outcome: "empty";
+      tipSha: string;
+      integrationBranch: string;
+    }
+  | {
+      /** The squash landed; the local integration ref now points at `squashSha`. */
+      outcome: "landed";
+      squashSha: string;
+      localSync: LocalSyncOutcome;
+      tipSha: string;
+      integrationBranch: string;
+    };
+
+/**
+ * Land `branch` onto `integrationBranch`'s LOCAL ref in `repoRootDir` via a
+ * repo-scoped clean room, retrying on concurrent advance. No remote push. See
+ * the FNXC note above for the extraction contract.
+ */
+export async function landOneRepo(
+  store: TaskStore,
+  repoRootDir: string,
+  branch: string,
+  integrationBranch: string,
+  ctx: LandRepoContext,
+): Promise<LandOneRepoResult> {
+  const {
+    taskId, settings, audit, log, setStatus, maxPasses,
+    mergeAgent, reviewAgent, stashResolveAgent,
+    includeTaskId, trailers, taskTitle, signal,
+  } = ctx;
+
+  // Pre-merge prune is rooted at THIS sub-repo (KTD1): N per-repo clean rooms for
+  // one task share the `fusion-ai-merge-<taskId>-` prefix, so a prune rooted at a
+  // shared root could reap a sibling repo's live clean room. Rooting it at
+  // repoRootDir keeps each repo's prune to its own temp roots.
+  try {
+    const pruned = await pruneExistingAiMergeWorktrees(taskId, repoRootDir, audit, log, settings);
+    if (pruned > 0) await log(`AI merge: pruned ${pruned} pre-existing worktree(s) for ${taskId}`);
+  } catch (err: unknown) {
+    await log(`AI merge: pre-merge prune failed: ${getErrorMessage(err)}`);
+  }
+  let advanceRetries = 0;
+  while (true) {
+    throwIfAborted(signal, taskId);
+    const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], repoRootDir);
+
+    // 1. Clean-room worktree at the integration tip.
+    let mergeRoot: string | undefined;
+    let worktreeAdded = false;
+    const registeredMergePaths = new Set<string>();
+    const registerMergeRoot = (pathToRegister: string): void => {
+      if (registeredMergePaths.has(pathToRegister)) return;
+      activeSessionRegistry.registerPath(pathToRegister, { taskId, kind: "ai-merge", ownerKey: `ai-merge:${taskId}` });
+      registeredMergePaths.add(pathToRegister);
+    };
+    try {
+      mergeRoot = await mkdtemp(join(resolveAiMergeRoot(repoRootDir, settings), `fusion-ai-merge-${taskId.toLowerCase()}-`));
+      /*
+       * FNXC:AIMerge 2026-06-14-16:36:
+       * The AI-merge clean-room directory must be created and registered inside the cleanup guard. Any terminal path or interrupt after `mkdtemp`, including active-session registration failure before `git worktree add`, must still unregister known paths and remove the `fusion-ai-merge-*` directory.
+       */
+      // Register the repo-local clean-room path as soon as it exists, before
+      // `git worktree add`, so self-healing/pre-merge sweeps cannot reap a
+      // just-created clean room in the small window before canonical registration
+      // is available.
+      registerMergeRoot(mergeRoot);
+      await git(["worktree", "add", "--detach", mergeRoot, tipSha], repoRootDir);
+      worktreeAdded = true;
+      let canonicalMergeRoot = mergeRoot;
+      try {
+        canonicalMergeRoot = realpathSync(mergeRoot);
+      } catch {
+        canonicalMergeRoot = mergeRoot;
+      }
+      for (const pathToRegister of new Set([canonicalMergeRoot, mergeRoot])) {
+        registerMergeRoot(pathToRegister);
+      }
+      await audit.git({ type: "merge:ai-clean-room", target: integrationBranch, metadata: { taskId, tipSha, mergeRoot } });
+      await log(`AI merge: merging ${branch} into ${integrationBranch} (clean room at ${short(tipSha)})${advanceRetries ? ` — retry ${advanceRetries} after concurrent advance` : ""}`);
+
+      /*
+       * FNXC:AIMerge 2026-06-13-20:32:
+       * The detached AI-merge clean room is rebuilt from the integration tip and starts without workspace dependencies. Hard-fail configured or inferred install failures so verification cannot silently run against an uninstalled checkout; aborts propagate before merge agents run.
+       */
+      const depsSyncStartedAt = Date.now();
+      const depsSyncResult = await installWorktreeDependencies({
+        cwd: canonicalMergeRoot,
+        settings,
+        taskId,
+        signal,
+        context: "for AI merge clean room",
+        logger: aiMergeLog,
+        log,
+      });
+      await audit.git({
+        type: "merge:ai-deps-sync",
+        target: integrationBranch,
+        metadata: {
+          taskId,
+          tipSha,
+          mergeRoot: canonicalMergeRoot,
+          installCommand: depsSyncResult.installCommand,
+          configured: depsSyncResult.configured,
+          skipped: depsSyncResult.skipped,
+          skipReason: depsSyncResult.skipReason,
+          durationMs: depsSyncResult.durationMs,
+        },
+      });
+      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)"}`);
+
+      // 2 + 3. Merge + review loop (corrective passes).
+      const squashSha = await mergeAndReview({
+        mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
+        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal,
+      });
+
+      if (!squashSha) {
+        // Branch had no net changes vs the tip — nothing to land. The caller
+        // decides how to finalize the (possibly multi-repo) task.
+        await audit.git({ type: "merge:ai-empty", target: integrationBranch, metadata: { taskId, tipSha } });
+        return { outcome: "empty", tipSha, integrationBranch };
+      }
+
+      // 4 + 5. Land the squash on the target branch and sync the user's
+      //        checkout (AI reconciles a conflicting restore).
+      await setStatus("landing");
+      const landed = await landSquash({
+        projectRootDir: repoRootDir, mergeRoot, integrationBranch, tipSha, squashSha, taskId, audit,
+        resolveConflicts: stashResolveAgent,
+        allowDirtyLocalCheckoutSync: ctx.allowDirtyLocalCheckoutSync === true,
+      });
+      if (landed.outcome === "concurrent") {
+        if (advanceRetries < MAX_CONCURRENT_ADVANCE_RETRIES) {
+          advanceRetries++;
+          await log(`AI merge: ${integrationBranch} moved during merge — rebuilding on new tip (retry ${advanceRetries})`);
+          continue; // rebuild the clean room on the new tip
+        }
+        throw new Error(`AI merge could not advance ${integrationBranch} for ${taskId} after ${advanceRetries} retries (concurrent advances)`);
+      }
+      await log(`AI merge: advanced ${integrationBranch} → ${short(squashSha)} (local checkout: ${landed.localSync})`);
+      return { outcome: "landed", squashSha, localSync: landed.localSync, tipSha, integrationBranch };
+    } finally {
+      for (const registeredPath of registeredMergePaths) {
+        activeSessionRegistry.unregisterPath(registeredPath);
+      }
+      if (mergeRoot) {
+        await cleanupAiMergeWorktree({ taskId, mergeRoot, projectRootDir: repoRootDir, worktreeAdded, audit, log });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
 
@@ -1055,165 +1254,215 @@ export async function runAiMerge(
   const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
 
   await setStatus("merging");
-  try {
-    const pruned = await pruneExistingAiMergeWorktrees(taskId, projectRootDir, audit, log, settings);
-    if (pruned > 0) await log(`AI merge: pruned ${pruned} pre-existing worktree(s) for ${taskId}`);
-  } catch (err: unknown) {
-    await log(`AI merge: pre-merge prune failed: ${getErrorMessage(err)}`);
-  }
-  let advanceRetries = 0;
-  while (true) {
-    throwIfAborted(options.signal, taskId);
-    const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], projectRootDir);
+  // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1):
+  // runAiMerge is now the SINGLE-REPO caller of the extracted `landOneRepo`. It
+  // builds the same per-task context it always built and lands the project root
+  // once; the task-global finalization below (empty no-op / no-commits demote /
+  // finalizeMerged) is unchanged byte-for-byte — only the inline clean-room land
+  // loop moved into `landOneRepo` so `landWorkspaceTask` can reuse it per sub-repo.
+  const landResult = await landOneRepo(store, projectRootDir, branch, integrationBranch, {
+    taskId, settings, audit, log, setStatus, maxPasses,
+    mergeAgent, reviewAgent, stashResolveAgent,
+    includeTaskId, trailers, taskTitle, signal: options.signal,
+    allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
+  });
 
-    // 1. Clean-room worktree at the integration tip.
-    let mergeRoot: string | undefined;
-    let worktreeAdded = false;
-    const registeredMergePaths = new Set<string>();
-    const registerMergeRoot = (pathToRegister: string): void => {
-      if (registeredMergePaths.has(pathToRegister)) return;
-      activeSessionRegistry.registerPath(pathToRegister, { taskId, kind: "ai-merge", ownerKey: `ai-merge:${taskId}` });
-      registeredMergePaths.add(pathToRegister);
-    };
-    try {
-      mergeRoot = await mkdtemp(join(resolveAiMergeRoot(projectRootDir, settings), `fusion-ai-merge-${taskId.toLowerCase()}-`));
+  if (landResult.outcome === "empty") {
+    const noCommitsFinalize = evaluateNoCommitsNoOpFinalize(task);
+    if (noCommitsFinalize.blocked) {
+      const reason = noCommitsFinalize.reason ?? "no-commits task has incomplete work with no net branch changes";
       /*
-       * FNXC:AIMerge 2026-06-14-16:36:
-       * The AI-merge clean-room directory must be created and registered inside the cleanup guard. Any terminal path or interrupt after `mkdtemp`, including active-session registration failure before `git worktree add`, must still unregister known paths and remove the `fusion-ai-merge-*` directory.
+       * FNXC:Lifecycle 2026-06-14-20:02:
+       * FN-6461/FN-6455 requires the AI empty-merge lane to demote no-commits tasks whose skipped/incomplete steps outweigh done steps instead of finalizing the operational work as done.
        */
-      // Register the repo-local clean-room path as soon as it exists, before
-      // `git worktree add`, so self-healing/pre-merge sweeps cannot reap a
-      // just-created clean room in the small window before canonical registration
-      // is available.
-      registerMergeRoot(mergeRoot);
-      await git(["worktree", "add", "--detach", mergeRoot, tipSha], projectRootDir);
-      worktreeAdded = true;
-      let canonicalMergeRoot = mergeRoot;
-      try {
-        canonicalMergeRoot = realpathSync(mergeRoot);
-      } catch {
-        canonicalMergeRoot = mergeRoot;
-      }
-      for (const pathToRegister of new Set([canonicalMergeRoot, mergeRoot])) {
-        registerMergeRoot(pathToRegister);
-      }
-      await audit.git({ type: "merge:ai-clean-room", target: integrationBranch, metadata: { taskId, tipSha, mergeRoot } });
-      await log(`AI merge: merging ${branch} into ${integrationBranch} (clean room at ${short(tipSha)})${advanceRetries ? ` — retry ${advanceRetries} after concurrent advance` : ""}`);
-
-      /*
-       * FNXC:AIMerge 2026-06-13-20:32:
-       * The detached AI-merge clean room is rebuilt from the integration tip and starts without workspace dependencies. Hard-fail configured or inferred install failures so verification cannot silently run against an uninstalled checkout; aborts propagate before merge agents run.
-       */
-      const depsSyncStartedAt = Date.now();
-      const depsSyncResult = await installWorktreeDependencies({
-        cwd: canonicalMergeRoot,
-        settings,
+      await store.updateTask(taskId, { error: reason });
+      await store.logEntry(
         taskId,
-        signal: options.signal,
-        context: "for AI merge clean room",
-        logger: aiMergeLog,
-        log,
-      });
-      await audit.git({
-        type: "merge:ai-deps-sync",
-        target: integrationBranch,
+        `Finalize blocked (no-commits incomplete-work guard): ${reason} — moving back to todo with progress preserved`,
+        JSON.stringify({
+          doneCount: noCommitsFinalize.doneCount,
+          incompleteCount: noCommitsFinalize.incompleteCount,
+          branch,
+          integrationBranch,
+          lane: "ai-empty-merge",
+        }, null, 2),
+      );
+      await audit.database({
+        type: "task:no-commits-finalize-blocked-incomplete-steps" as Parameters<typeof audit.database>[0]["type"],
+        target: taskId,
         metadata: {
-          taskId,
-          tipSha,
-          mergeRoot: canonicalMergeRoot,
-          installCommand: depsSyncResult.installCommand,
-          configured: depsSyncResult.configured,
-          skipped: depsSyncResult.skipped,
-          skipReason: depsSyncResult.skipReason,
-          durationMs: depsSyncResult.durationMs,
+          reason,
+          doneCount: noCommitsFinalize.doneCount,
+          incompleteCount: noCommitsFinalize.incompleteCount,
+          branch,
+          integrationBranch,
+          lane: "ai-empty-merge",
         },
       });
-      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)"}`);
+      await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
+      return {
+        task,
+        branch,
+        merged: false,
+        noOp: false,
+        ok: true,
+        reason,
+        error: reason,
+        worktreeRemoved: false,
+        branchDeleted: false,
+      };
+    }
+    await log(`AI merge: ${branch} had no net changes vs ${integrationBranch} — finalizing as no-op`);
+    return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.tipSha, audit, log, { empty: true });
+  }
 
-      // 2 + 3. Merge + review loop (corrective passes).
-      const squashSha = await mergeAndReview({
-        mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
-        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal: options.signal,
-      });
+  return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.squashSha, audit, log, { empty: false });
+}
 
-      if (!squashSha) {
-        // Branch had no net changes vs the tip — nothing to land.
-        await audit.git({ type: "merge:ai-empty", target: integrationBranch, metadata: { taskId, tipSha } });
-        const noCommitsFinalize = evaluateNoCommitsNoOpFinalize(task);
-        if (noCommitsFinalize.blocked) {
-          const reason = noCommitsFinalize.reason ?? "no-commits task has incomplete work with no net branch changes";
-          /*
-           * FNXC:Lifecycle 2026-06-14-20:02:
-           * FN-6461/FN-6455 requires the AI empty-merge lane to demote no-commits tasks whose skipped/incomplete steps outweigh done steps instead of finalizing the operational work as done.
-           */
-          await store.updateTask(taskId, { error: reason });
-          await store.logEntry(
-            taskId,
-            `Finalize blocked (no-commits incomplete-work guard): ${reason} — moving back to todo with progress preserved`,
-            JSON.stringify({
-              doneCount: noCommitsFinalize.doneCount,
-              incompleteCount: noCommitsFinalize.incompleteCount,
-              branch,
-              integrationBranch,
-              lane: "ai-empty-merge",
-            }, null, 2),
-          );
-          await audit.database({
-            type: "task:no-commits-finalize-blocked-incomplete-steps" as Parameters<typeof audit.database>[0]["type"],
-            target: taskId,
-            metadata: {
-              reason,
-              doneCount: noCommitsFinalize.doneCount,
-              incompleteCount: noCommitsFinalize.incompleteCount,
-              branch,
-              integrationBranch,
-              lane: "ai-empty-merge",
-            },
-          });
-          await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
-          return {
-            task,
-            branch,
-            merged: false,
-            noOp: false,
-            ok: true,
-            reason,
-            error: reason,
-            worktreeRemoved: false,
-            branchDeleted: false,
-          };
-        }
-        await log(`AI merge: ${branch} had no net changes vs ${integrationBranch} — finalizing as no-op`);
-        return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, tipSha, audit, log, { empty: true });
-      }
+// ---------------------------------------------------------------------------
+// Workspace-mode per-repo merge loop (Phase C U1)
+// ---------------------------------------------------------------------------
 
-      // 4 + 5. Land the squash on the target branch and sync the user's
-      //        checkout (AI reconciles a conflicting restore).
-      await setStatus("landing");
-      const landed = await landSquash({
-        projectRootDir, mergeRoot, integrationBranch, tipSha, squashSha, taskId, audit,
-        resolveConflicts: stashResolveAgent,
+/** Per-repo land outcome inside a workspace task, tagged with its sub-repo. */
+export interface WorkspaceRepoLandResult {
+  /** The sub-repo's relative path (the `workspaceWorktrees` key). */
+  repo: string;
+  /** Absolute path to the sub-repo's main checkout (where the ref advanced). */
+  repoRootDir: string;
+  /** The per-repo integration branch this repo landed onto (origin/HEAD-derived). */
+  integrationBranch: string;
+  /** The `fusion/<id>` branch that was landed. */
+  branch: string;
+  /** What happened: landed, empty (no net changes), or failed. */
+  status: "landed" | "empty" | "failed";
+  /** The squash sha when `status === "landed"`. */
+  landedSha?: string;
+  /** How the sub-repo checkout was reconciled when landed. */
+  localSync?: LocalSyncOutcome;
+  /** Failure message when `status === "failed"`. */
+  error?: string;
+}
+
+/** Aggregated result of a workspace task's per-repo merge loop. */
+export interface WorkspaceMergeResult {
+  taskId: string;
+  repos: WorkspaceRepoLandResult[];
+  /** True iff every acquired sub-repo landed (or was empty) with no failure. */
+  allLanded: boolean;
+}
+
+/*
+FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1/KTD2):
+`landWorkspaceTask` replaces U0's R7 fail-fast throw with the real per-repo merge
+loop. For each acquired sub-repo (iterated by SORTED relative-path key for
+determinism) it lands that repo's `fusion/<id>` branch onto THAT repo's own LOCAL
+integration ref via the extracted `landOneRepo` — no remote push, land-as-you-go
+(settled D2/D5).
+
+Per-repo integration branch (KTD1): `workspaceWorktrees[repo]` does NOT store the
+integration branch (acquisition computes then discards it), so we re-resolve it per
+repo with the SAME override-stripping acquisition used — integrationBranch/baseBranch
+undefined — so each sub-repo falls through to its own origin/HEAD rather than a shared
+workspace branch.
+
+U1 scope: on a repo failure we stop the loop and return a PARTIAL result (repo A may
+have landed; B reports the failure). The landed-state predicate + idempotent retry and
+the finalize-task-ONCE move-to-done are U2 — `landWorkspaceTask` here deliberately does
+NOT call finalizeMerged/finalizeTask or move the task. Routing the engine + CLI doors
+to this loop is KTD2.
+*/
+export async function landWorkspaceTask(
+  store: TaskStore,
+  task: Task,
+  workspaceRootDir: string,
+  options: MergerOptions = {},
+  deps: AgentDeps = {},
+): Promise<WorkspaceMergeResult> {
+  const taskId = task.id;
+  const settings = await store.getSettings();
+  const audit = createRunAuditor(store, {
+    runId: generateSyntheticRunId("ai-merge", taskId),
+    agentId: "merger",
+    taskId,
+    phase: "merge",
+  });
+  const log = async (message: string): Promise<void> => {
+    await store.logEntry(taskId, message, "AiMerge").catch(() => undefined);
+    await store.appendAgentLog(taskId, message, "text", undefined, "merger").catch(() => undefined);
+  };
+  const setStatus = (status: string | null): Promise<unknown> =>
+    store.updateTask(taskId, { status }).catch(() => undefined);
+
+  const maxPasses = Math.max(0, Math.trunc(settings.merger?.maxReviewPasses ?? 3));
+  const mergeAgent = deps.mergeAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildMergeSystemPrompt(settings.agentPrompts));
+  const reviewAgent = deps.reviewAgent ?? makeReviewAgent(store, settings, taskId, options, audit);
+  const stashResolveAgent = deps.stashResolveAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildStashResolveSystemPrompt());
+  const includeTaskId = settings.includeTaskIdInCommit !== false;
+  const trailers = taskTrailers(taskId, task.lineageId);
+  const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
+
+  const workspaceWorktrees = task.workspaceWorktrees ?? {};
+  // SORTED keys for deterministic land order (KTD1).
+  const repoKeys = Object.keys(workspaceWorktrees).sort();
+  const repos: WorkspaceRepoLandResult[] = [];
+  let allLanded = true;
+
+  await setStatus("merging");
+  for (const repoRel of repoKeys) {
+    throwIfAborted(options.signal, taskId);
+    const entry = workspaceWorktrees[repoRel];
+    const repoRootDir = join(workspaceRootDir, repoRel);
+
+    // Re-resolve THIS sub-repo's integration branch with the shared overrides
+    // stripped (KTD1) so each sub-repo lands on its OWN origin/HEAD, not a shared
+    // workspace branch.
+    let integrationBranch: string;
+    try {
+      integrationBranch = await resolveIntegrationBranch(
+        repoRootDir,
+        { ...settings, integrationBranch: undefined, baseBranch: undefined },
+      );
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      await log(`AI merge (workspace): failed to resolve integration branch for sub-repo ${repoRel}: ${message}`);
+      repos.push({ repo: repoRel, repoRootDir, integrationBranch: "", branch: entry.branch, status: "failed", error: message });
+      allLanded = false;
+      break;
+    }
+
+    try {
+      const landResult = await landOneRepo(store, repoRootDir, entry.branch, integrationBranch, {
+        taskId, settings, audit, log, setStatus, maxPasses,
+        mergeAgent, reviewAgent, stashResolveAgent,
+        includeTaskId, trailers, taskTitle, signal: options.signal,
         allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
       });
-      if (landed.outcome === "concurrent") {
-        if (advanceRetries < MAX_CONCURRENT_ADVANCE_RETRIES) {
-          advanceRetries++;
-          await log(`AI merge: ${integrationBranch} moved during merge — rebuilding on new tip (retry ${advanceRetries})`);
-          continue; // rebuild the clean room on the new tip
-        }
-        throw new Error(`AI merge could not advance ${integrationBranch} for ${taskId} after ${advanceRetries} retries (concurrent advances)`);
+      if (landResult.outcome === "landed") {
+        repos.push({
+          repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
+          status: "landed", landedSha: landResult.squashSha, localSync: landResult.localSync,
+        });
+      } else {
+        repos.push({ repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch, status: "empty" });
       }
-      await log(`AI merge: advanced ${integrationBranch} → ${short(squashSha)} (local checkout: ${landed.localSync})`);
-      return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, squashSha, audit, log, { empty: false });
-    } finally {
-      for (const registeredPath of registeredMergePaths) {
-        activeSessionRegistry.unregisterPath(registeredPath);
-      }
-      if (mergeRoot) {
-        await cleanupAiMergeWorktree({ taskId, mergeRoot, projectRootDir, worktreeAdded, audit, log });
-      }
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      await log(`AI merge (workspace): sub-repo ${repoRel} land failed: ${message}`);
+      await audit.git({ type: "merge:ai-no-branch", target: entry.branch, metadata: { taskId, kind: "workspace-repo-land-failed", repo: repoRel, error: message } }).catch(() => undefined);
+      repos.push({ repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch, status: "failed", error: message });
+      allLanded = false;
+      // U1: stop on first failure and return a partial result. U2 adds the landed
+      // predicate + idempotent retry so a re-run skips the already-landed repos.
+      break;
     }
   }
+
+  await setStatus(null);
+  // TODO(Phase C U2): when `allLanded` and every acquired repo landed, finalize the
+  // task ONCE (finalizeTask / move-done) — NEVER per repo. Until U2's landed
+  // predicate + idempotent retry land, this loop leaves the task in place; the
+  // engine dispatch (KTD2) does not move it on a partial result.
+  return { taskId, repos, allLanded };
 }
 
 async function mergeAndReview(input: {

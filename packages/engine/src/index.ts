@@ -190,6 +190,16 @@ export {
 // FNXC:MergerUnification 2026-06-21-19:05: runAiMerge is the sole merge path
 // (master-plan U0); exported for the CLI callers (fn task merge + UI-only merge).
 export { runAiMerge } from "./merger-ai.js";
+// FNXC:Workspace 2026-06-21-23:40 (Phase C U1): per-repo workspace merge loop +
+// the extracted per-repo land primitive, exported for the CLI/dashboard merge doors.
+export {
+  landWorkspaceTask,
+  landOneRepo,
+  type WorkspaceMergeResult,
+  type WorkspaceRepoLandResult,
+  type LandOneRepoResult,
+  type LandRepoContext,
+} from "./merger-ai.js";
 export {
   resolveMergePolicy,
   type ResolvedMergePolicy,

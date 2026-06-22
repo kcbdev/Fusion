@@ -13,7 +13,7 @@ import type {
   ResearchSynthesisRequest,
   ResearchSynthesisResult,
 } from "@fusion/core";
-import { allowsAutoMergeProcessing, assertNotWorkspaceTaskMerge, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, resolveMaxAutoMergeRetries, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
+import { allowsAutoMergeProcessing, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, resolveMaxAutoMergeRetries, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
@@ -31,7 +31,7 @@ import { createFusionAuthStorage, getFusionOAuthAlertStatePath } from "./auth-st
 import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
 import type { RoutineRunner } from "./routine-runner.js";
 import { sweepStaleAutostashes, VerificationError } from "./merger.js";
-import { runAiMerge } from "./merger-ai.js";
+import { runAiMerge, landWorkspaceTask } from "./merger-ai.js";
 import { promoteBranchGroup, type BranchGroupPromotionResult, type CreateGroupPrFn, type SyncGroupPrFn } from "./group-merge-coordinator.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
@@ -2287,17 +2287,44 @@ export class ProjectEngine {
                   this.activeMergeSession = session;
                 },
               };
-              // FNXC:Workspace 2026-06-21-19:40:
-              // R7 merge-boundary guard (master-plan U0). Reject workspace-mode
-              // tasks BEFORE any git work — they need the per-repo merge loop that
-              // lands in master-plan U6 (which removes this guard). Load the task
-              // here so the dispatch shares the one predicate in @fusion/core.
-              // This door is a FAST-FAIL only: a getTask failure is swallowed to null
-              // and the guard is skipped, but the unconditional chokepoint guard inside
-              // runAiMerge (which re-reads the task) is the authoritative enforcement,
-              // so a transient read failure here cannot let a workspace task reach git work.
+              // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
+              // Engine merge dispatch door. A workspace-mode task (non-empty
+              // `workspaceWorktrees`) routes to the per-repo merge loop
+              // `landWorkspaceTask` (Phase C U1) instead of the singular runAiMerge —
+              // each sub-repo lands on its own LOCAL integration ref, no push. The
+              // U0 R7 throw is REPLACED by this routing (the runAiMerge chokepoint
+              // + store.mergeTask/aiMergeTask keep throwing as defense-in-depth).
+              // FAST-FAIL note preserved: a getTask failure is swallowed to null and
+              // routing falls through to runAiMerge, whose chokepoint guard re-reads
+              // the task and is the authoritative workspace enforcement.
               const mergeTask = await store.getTask(taskId).catch(() => null);
-              if (mergeTask) assertNotWorkspaceTaskMerge(mergeTask);
+              const isWorkspaceMerge =
+                !!mergeTask?.workspaceWorktrees && Object.keys(mergeTask.workspaceWorktrees).length > 0;
+              if (isWorkspaceMerge) {
+                // U1: land each acquired sub-repo on its own local integration ref.
+                // Task move-to-done (finalize once after all land) + idempotent retry
+                // are U2 — for now the loop returns a partial/aggregate result and the
+                // task is left in place.
+                const settings = await store.getSettings().catch(() => ({}) as Settings);
+                const workspaceResult = await landWorkspaceTask(
+                  store,
+                  mergeTask!,
+                  cwd,
+                  { ...mergerOptions, allowDirtyLocalCheckoutSync: settings.merger?.allowDirtyLocalCheckoutSync === true },
+                );
+                const latest = await store.getTask(taskId).catch(() => mergeTask!);
+                return {
+                  task: latest ?? mergeTask!,
+                  branch: mergeTask!.branch ?? "",
+                  // U1 does not finalize the task; report merged=false until U2 wires
+                  // the finalize-once move-to-done after every repo lands.
+                  merged: false,
+                  noOp: !workspaceResult.repos.some((r) => r.status === "landed"),
+                  ok: workspaceResult.allLanded,
+                  worktreeRemoved: false,
+                  branchDeleted: false,
+                } as MergeResult;
+              }
 
               // FNXC:MergerUnification 2026-06-21-19:05:
               // Master-plan U0 collapsed the merge dispatch: `runAiMerge` (the

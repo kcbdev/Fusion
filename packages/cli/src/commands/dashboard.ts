@@ -9,7 +9,6 @@ import {
   CentralCore,
   AgentStore,
   PluginLoader,
-  assertNotWorkspaceTaskMerge,
   getTaskMergeBlocker,
   getEnabledPiExtensionPaths,
   isEphemeralAgent,
@@ -43,6 +42,7 @@ import {
 } from "@fusion/dashboard";
 import {
   runAiMerge,
+  landWorkspaceTask,
   MissionAutopilot,
   MissionExecutionLoop,
   HeartbeatMonitor,
@@ -1305,11 +1305,31 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // aiMergeTask is soft-deprecated.
   //
   const onMergeImpl = async (taskId: string) => {
-    // FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
-    // Reject workspace-mode tasks before any merge work; per-repo merge lands in
-    // master-plan U6, which removes this guard.
+    // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
+    // Dashboard merge button (UI-only mode). A workspace-mode task routes through
+    // the ENGINE per-repo merge loop `landWorkspaceTask` (each sub-repo lands on its
+    // own LOCAL integration ref, no push) instead of throwing — manual merge works in
+    // Phase C (user decision). U0's R7 throw is replaced here by routing; the engine
+    // chokepoint + store.mergeTask/aiMergeTask keep throwing as defense-in-depth.
     const mergeTask = await store.getTask(taskId).catch(() => null);
-    if (mergeTask) assertNotWorkspaceTaskMerge(mergeTask);
+    const isWorkspaceMerge =
+      !!mergeTask?.workspaceWorktrees && Object.keys(mergeTask.workspaceWorktrees).length > 0;
+    if (isWorkspaceMerge) {
+      const workspaceResult = await landWorkspaceTask(store, mergeTask!, cwd, {
+        agentStore,
+      });
+      const latest = await store.getTask(taskId).catch(() => mergeTask!);
+      // U1 does not finalize the workspace task (finalize-once move-to-done is U2);
+      // report merged=false until then.
+      return {
+        task: latest ?? mergeTask!,
+        branch: getTaskBranchName(taskId),
+        merged: false,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        error: workspaceResult.allLanded ? undefined : "partial workspace land — see task log",
+      };
+    }
 
     const settings = await store.getSettings();
     if (getMergeStrategy(settings) === "pull-request") {
