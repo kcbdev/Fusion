@@ -569,7 +569,8 @@ const MAX_POLL_CYCLES = 150;
  * 1. AI Setup - Provider credential setup (OAuth login or API key entry) and default model selection
  * 2. GitHub (Optional) - GitHub connection status and login
  * 3. Project Setup - Register a project directory (or clone a repository URL via setup wizard)
- * 4. First Task - CTA to create first task or import from GitHub
+ * 4. Agent - Optional persistent coordinating agent from a template or AI-generated draft
+ * 5. First Task - CTA to create first task or import from GitHub
  *
  * Dismissing the modal marks onboarding as complete to prevent repeated popups.
  */

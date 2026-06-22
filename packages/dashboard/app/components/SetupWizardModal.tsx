@@ -4,7 +4,6 @@ import { X, Loader2, CheckCircle, ChevronRight, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AgentOnboardingSummary, ProjectInfo, ProjectCreateInput } from "../api";
 import { createAgent, registerProject } from "../api";
-import { getAuthToken, setAuthToken, clearAuthToken } from "../auth";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { suggestProjectName } from "../utils/projectDetection";
 import { useNodes } from "../hooks/useNodes";
@@ -29,9 +28,11 @@ export interface SetupWizardModalProps {
   onClose?: () => void;
   /** Enables the existing AI interview entry point for first-agent drafting. */
   agentOnboardingEnabled?: boolean;
+  /** When false, register the project and return control to a parent onboarding flow. */
+  includeAgentStep?: boolean;
 }
 
-type WizardStep = "auth" | "manual" | "agent" | "complete";
+type WizardStep = "manual" | "agent" | "complete";
 type ManualSetupMode = "existing" | "clone";
 type AgentOutcome = "created" | "skipped" | null;
 
@@ -54,22 +55,27 @@ interface WizardState {
 }
 
 /**
- * Setup wizard for first-run project registration.
+ * Setup wizard for project registration.
  *
- * Provides a polished onboarding experience with a directory picker
- * for selecting the project directory and auto-name suggestion.
+ * Provides a focused project-details -> project-agent flow with a directory
+ * picker for selecting the project directory and auto-name suggestion.
  */
 export function SetupWizardModal({
   onProjectRegistered,
   onClose,
   agentOnboardingEnabled = false,
+  includeAgentStep = true,
 }: SetupWizardModalProps) {
   const { t } = useTranslation("app");
   const helpUrl = "https://discord.gg/ksrfuy7WYR";
   /*
   FNXC:Onboarding 2026-06-22-03:11:
-  First-run project setup must offer a first persistent agent after registration, defaulting to the CEO preset while still letting users choose another template or skip creation.
+  New-project setup must collect project details first, then offer a project-specific persistent agent after registration, defaulting to the CEO preset while still letting users choose another template or skip creation.
   The AI interview entry point is feature-flagged by `agentOnboardingEnabled`; preset creation and skip remain available without it.
+
+  FNXC:Onboarding 2026-06-22-05:16:
+  Brand-new onboarding already has its own Agent step after AI, GitHub, and Project setup.
+  When this wizard is opened as that Project sub-flow, register the project and return immediately so users do not see two agent prompts.
   */
   const ceoPreset = useMemo(
     () => getPresetById("ceo") ?? AGENT_PRESETS[0]!,
@@ -77,7 +83,7 @@ export function SetupWizardModal({
   );
   const [isOpen, setIsOpen] = useState(true);
   const [state, setState] = useState<WizardState>(() => ({
-    step: getAuthToken() ? "manual" : "auth",
+    step: "manual",
     manualMode: "existing",
     manualPath: "",
     manualCloneUrl: "",
@@ -94,8 +100,6 @@ export function SetupWizardModal({
     agentOutcome: null,
   }));
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  const [authTokenInput, setAuthTokenInput] = useState("");
-  const [storedAuthToken, setStoredAuthToken] = useState(() => getAuthToken());
   const [isInterviewOpen, setIsInterviewOpen] = useState(false);
   const agentErrorRef = useRef<HTMLDivElement | null>(null);
 
@@ -153,6 +157,11 @@ export function SetupWizardModal({
 
       const result = await registerProject(input);
 
+      if (!includeAgentStep) {
+        onProjectRegistered(result);
+        return;
+      }
+
       setState((prev) => ({
         ...prev,
         step: "agent",
@@ -166,27 +175,7 @@ export function SetupWizardModal({
         error: err instanceof Error ? err.message : "Failed to register project",
       }));
     }
-  }, [state.manualPath, state.manualName, state.manualCloneUrl, state.manualMode, state.manualIsolationMode, state.manualNodeId]);
-
-  const handleSetAuthToken = useCallback(() => {
-    const token = authTokenInput.trim();
-    if (!token) return;
-    setAuthToken(token);
-    setStoredAuthToken(token);
-    setAuthTokenInput("");
-    // If we're on the auth step, advance to the manual step
-    setState((prev) => prev.step === "auth" ? { ...prev, step: "manual" } : prev);
-  }, [authTokenInput]);
-
-  const handleResetAuthToken = useCallback(() => {
-    clearAuthToken();
-    setStoredAuthToken(undefined);
-    setAuthTokenInput("");
-  }, []);
-
-  const handleSkipAuth = useCallback(() => {
-    setState((prev) => ({ ...prev, step: "manual" }));
-  }, []);
+  }, [includeAgentStep, onProjectRegistered, state.manualPath, state.manualName, state.manualCloneUrl, state.manualMode, state.manualIsolationMode, state.manualNodeId]);
 
   const handlePresetSelect = useCallback((presetId: string) => {
     const preset = getPresetById(presetId);
@@ -310,7 +299,6 @@ export function SetupWizardModal({
               <span className="setup-wizard-brand-name">{t("setup.brandName", "Fusion")}</span>
             </div>
             <h2 id="wizard-title" className="setup-wizard-title">
-              {state.step === "auth" && t("setup.setAuthToken", "Set Auth Token")}
               {state.step === "manual" && t("setup.welcomeToFusion", "Welcome to Fusion")}
               {state.step === "agent" && t("setup.firstAgentTitle", "Create your first agent")}
               {state.step === "complete" && t("setup.setupCompleteTitle", "Setup Complete!")}
@@ -329,36 +317,6 @@ export function SetupWizardModal({
 
         {/* Content */}
         <div className="setup-wizard-content">
-          {/* Auth Step */}
-          {state.step === "auth" && (
-            <div className="setup-wizard-auth-step">
-              <p className="setup-wizard-auth-step-description">
-                {t("setup.authDescription", "This dashboard requires an auth token to communicate with the Fusion daemon. Paste the token below to continue.")}
-              </p>
-              <div className="form-group">
-                <label htmlFor="setup-auth-token">{t("setup.authToken", "Auth Token")}</label>
-                <input
-                  id="setup-auth-token"
-                  type="password"
-                  value={authTokenInput}
-                  onChange={(e) => setAuthTokenInput(e.target.value)}
-                  placeholder={t("setup.pasteTokenPlaceholder", "Paste the daemon auth token")}
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoFocus
-                />
-                <p className="form-hint">
-                  {t("setup.tokenEnvVar", "The token was set via the {{env}} environment variable when starting the dashboard.", { env: "FUSION_DAEMON_TOKEN" })}
-                </p>
-              </div>
-              {state.error && (
-                <div className="wizard-error" role="alert">
-                  {state.error}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Manual Step */}
           {state.step === "manual" && (
             <div className="setup-wizard-manual">
@@ -511,44 +469,6 @@ export function SetupWizardModal({
                       </div>
                     </div>
 
-                    <div className="form-group">
-                      <label htmlFor="advanced-auth-token">{t("setup.browserAuthToken", "Browser Auth Token")}</label>
-                      <div className="setup-wizard-auth-token">
-                        <input
-                          id="advanced-auth-token"
-                          type="password"
-                          value={authTokenInput}
-                          onChange={(e) => setAuthTokenInput(e.target.value)}
-                          placeholder={storedAuthToken ? t("setup.replaceTokenPlaceholder", "Enter a new token to replace the stored one") : t("setup.pasteTokenForBrowserPlaceholder", "Paste the auth token for this browser")}
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <div className="setup-wizard-auth-token-actions">
-                          <button
-                            type="button"
-                            className="btn"
-                            onClick={handleSetAuthToken}
-                            disabled={authTokenInput.trim().length === 0}
-                          >
-                            {storedAuthToken ? t("setup.updateToken", "Update token") : t("setup.setToken", "Set token")}
-                          </button>
-                          {storedAuthToken && (
-                            <button
-                              type="button"
-                              className="btn"
-                              onClick={handleResetAuthToken}
-                            >
-                              {t("setup.resetToken", "Reset token")}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <p className="form-hint">
-                        {storedAuthToken
-                          ? t("setup.tokenStoredHint", "A token is already stored in this browser. You can update or reset it below.")
-                          : t("setup.noTokenHint", "No token is stored. Use the auth prompt at the top of the wizard, or set one here.")}
-                      </p>
-                    </div>
                   </div>
                 )}
               </div>
@@ -682,23 +602,6 @@ export function SetupWizardModal({
           >
             {t("setup.needHelp", "Need help?")}
           </a>
-          {state.step === "auth" && (
-            <>
-              <button
-                className="btn"
-                onClick={handleSkipAuth}
-              >
-                {t("setup.skip", "Skip")}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleSetAuthToken}
-                disabled={authTokenInput.trim().length === 0}
-              >
-                <span>{t("setup.setTokenContinue", "Set Token & Continue")}</span>
-              </button>
-            </>
-          )}
           {state.step === "manual" && (
             <button
               className="btn btn-primary"

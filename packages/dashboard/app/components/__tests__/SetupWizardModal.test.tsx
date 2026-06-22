@@ -78,21 +78,11 @@ vi.mock("../ExperimentalAgentOnboardingModal", () => ({
   ),
 }));
 
-vi.mock("../../auth", () => ({
-  getAuthToken: vi.fn(() => undefined),
-  setAuthToken: vi.fn(),
-  clearAuthToken: vi.fn(),
-}));
-
 import { createAgent, registerProject } from "../../api";
-import { getAuthToken, setAuthToken, clearAuthToken } from "../../auth";
 import { useNodes } from "../../hooks/useNodes";
 
 const mockRegisterProject = vi.mocked(registerProject);
 const mockCreateAgent = vi.mocked(createAgent);
-const mockGetAuthToken = vi.mocked(getAuthToken);
-const mockSetAuthToken = vi.mocked(setAuthToken);
-const mockClearAuthToken = vi.mocked(clearAuthToken);
 const mockUseNodes = vi.mocked(useNodes);
 
 function buildMockProject(overrides = {}) {
@@ -133,42 +123,13 @@ async function registerProjectFromWizard() {
 }
 
 describe("SetupWizardModal", () => {
-  let reloadMock: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockRegisterProject.mockReset();
     mockCreateAgent.mockReset();
-    // Default: auth token is stored so wizard starts on the project form step.
-    // Tests for the auth step explicitly unset this.
-    mockGetAuthToken.mockReturnValue("stored-token");
-    reloadMock = vi.fn();
-    vi.stubGlobal("location", { ...window.location, reload: reloadMock });
   });
 
-  it("renders with auth step when no token is stored", () => {
-    mockGetAuthToken.mockReturnValue(undefined);
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    // No token stored → shows auth step first
-    expect(screen.getByText("Set Auth Token")).toBeDefined();
-    expect(screen.getByText("Skip")).toBeDefined();
-    expect(screen.getByText("Set Token & Continue")).toBeDefined();
-    expect(screen.getByRole("link", { name: "Need help?" })).toHaveAttribute(
-      "href",
-      "https://discord.gg/ksrfuy7WYR"
-    );
-  });
-
-  it("skips auth step and shows project form when auth token is already stored", () => {
-    mockGetAuthToken.mockReturnValue("stored-token");
-
+  it("starts on the project form without an auth token step", () => {
     render(
       <SetupWizardModal
         onProjectRegistered={vi.fn()}
@@ -180,46 +141,12 @@ describe("SetupWizardModal", () => {
     expect(screen.getByText("Project Name")).toBeDefined();
     expect(screen.getByLabelText("Fusion logo")).toBeDefined();
     expect(screen.getByText("Advanced settings")).toBeDefined();
-  });
-
-  it("auth step advances to project form after setting token", () => {
-    mockGetAuthToken.mockReturnValue(undefined);
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
+    expect(screen.queryByText("Set Auth Token")).toBeNull();
+    expect(screen.queryByText("Set Token & Continue")).toBeNull();
+    expect(screen.getByRole("link", { name: "Need help?" })).toHaveAttribute(
+      "href",
+      "https://discord.gg/ksrfuy7WYR"
     );
-
-    // On auth step initially
-    expect(screen.getByText("Set Auth Token")).toBeDefined();
-
-    // Set a token
-    fireEvent.change(screen.getByPlaceholderText("Paste the daemon auth token"), {
-      target: { value: "my-daemon-token" },
-    });
-    fireEvent.click(screen.getByText("Set Token & Continue"));
-
-    expect(mockSetAuthToken).toHaveBeenCalledWith("my-daemon-token");
-    // Should now show the project form
-    expect(screen.getByText("Welcome to Fusion")).toBeDefined();
-    expect(screen.getByText("Project Name")).toBeDefined();
-  });
-
-  it("auth step can be skipped", () => {
-    mockGetAuthToken.mockReturnValue(undefined);
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    expect(screen.getByText("Set Auth Token")).toBeDefined();
-    fireEvent.click(screen.getByText("Skip"));
-    expect(screen.getByText("Welcome to Fusion")).toBeDefined();
   });
 
   it("has DirectoryPicker for path selection", () => {
@@ -478,6 +405,34 @@ describe("SetupWizardModal", () => {
     expect(screen.queryByText("AI Interview")).toBeNull();
 
     expect(onProjectRegistered).not.toHaveBeenCalled();
+  });
+
+  it("can register project only when embedded in brand-new onboarding", async () => {
+    const mockProject = buildMockProject();
+    mockRegisterProject.mockResolvedValueOnce(mockProject);
+
+    const onProjectRegistered = vi.fn();
+    render(
+      <SetupWizardModal
+        onProjectRegistered={onProjectRegistered}
+        onClose={vi.fn()}
+        includeAgentStep={false}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("/path/to/your/project"), {
+      target: { value: "/home/user/project" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("my-project"), {
+      target: { value: "test-project" },
+    });
+    fireEvent.click(screen.getByText("Register Project"));
+
+    await waitFor(() => {
+      expect(mockRegisterProject).toHaveBeenCalled();
+      expect(onProjectRegistered).toHaveBeenCalledWith(mockProject);
+    });
+    expect(screen.queryByText("Create your first agent")).toBeNull();
   });
 
   it("can skip first-agent creation and finish setup", async () => {
@@ -756,77 +711,6 @@ describe("SetupWizardModal", () => {
 
     fireEvent.click(childProcessRadio);
     expect(childProcessRadio.checked).toBe(true);
-  });
-
-  it("shows a set token action when no browser auth token is stored", () => {
-    mockGetAuthToken.mockReturnValue(undefined);
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    // Skip auth step to get to the project form
-    fireEvent.click(screen.getByText("Skip"));
-
-    fireEvent.click(screen.getByText("Advanced settings"));
-
-    expect(screen.getByLabelText("Browser Auth Token")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Set token" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Reset token" })).toBeNull();
-  });
-
-  it("stores a browser auth token without reloading", () => {
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByText("Advanced settings"));
-    fireEvent.change(screen.getByLabelText("Browser Auth Token"), {
-      target: { value: "daemon-token" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Update token" }));
-
-    expect(mockSetAuthToken).toHaveBeenCalledWith("daemon-token");
-    expect(reloadMock).not.toHaveBeenCalled();
-  });
-
-  it("shows reset when a browser auth token is already stored", () => {
-    mockGetAuthToken.mockReturnValue("stored-token");
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByText("Advanced settings"));
-
-    expect(screen.getByRole("button", { name: "Update token" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Reset token" })).toBeDefined();
-  });
-
-  it("resets the stored browser auth token without reloading", () => {
-    mockGetAuthToken.mockReturnValue("stored-token");
-
-    render(
-      <SetupWizardModal
-        onProjectRegistered={vi.fn()}
-        onClose={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByText("Advanced settings"));
-    fireEvent.click(screen.getByRole("button", { name: "Reset token" }));
-
-    expect(mockClearAuthToken).toHaveBeenCalledTimes(1);
-    expect(reloadMock).not.toHaveBeenCalled();
   });
 
   describe("node selector", () => {

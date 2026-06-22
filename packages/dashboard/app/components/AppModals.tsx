@@ -475,11 +475,13 @@ export function AppModals({
             onProjectRegistered={projectActions.handleSetupComplete}
             onClose={closeSetupWizardWithNav}
             agentOnboardingEnabled={agentOnboardingEnabled}
+            includeAgentStep={!modalManager.modelOnboardingOpen}
           />
         </Suspense>
       )}
 
-      {modalManager.modelOnboardingOpen && (
+      {/* FNXC:Onboarding 2026-06-22-05:06: Brand-new onboarding owns AI/GitHub first, then opens the project setup wizard only as the Project step sub-flow. Hide model onboarding while that project wizard is mounted so users never see both flows at once. */}
+      {modalManager.modelOnboardingOpen && !modalManager.setupWizardOpen && (
         <ModelOnboardingModal
           onComplete={projectActions.handleModelOnboardingComplete}
           addToast={addToast}
