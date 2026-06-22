@@ -147,6 +147,8 @@ describe("LeftSidebarNav", () => {
       expect(screen.getByTestId(testId)).toBeDefined();
     }
 
+    expect(screen.getByTestId("sidebar-nav-documents")).toHaveTextContent("Artifacts");
+
     const sidebar = screen.getByTestId("left-sidebar-nav");
     const footer = screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer");
     expect(footer).not.toBeNull();

@@ -23,7 +23,7 @@ Task Detail modal opens from onboarding, activity log, and task-to-task navigati
 
 **Left Sidebar Navigation** is enabled by default for desktop/tablet project screens, moving project navigation out of the Header and into a persistent left sidebar. To opt out, open **Settings → Experimental Features** and turn **Left Sidebar Navigation** off (`leftSidebarNav: false`).
 
-When enabled on desktop or tablet project screens, the sidebar contains the primary destinations (Board, List, Agents, Command Center, Missions, Chat, Documents, Mailbox, and plugin primary views), selected auxiliary destinations as regular entries (Research, Insights, Skills, Memory, Stash Recovery, Evals, Goals, Dev Server, and plugin overflow views when their flags/plugins are enabled), and a footer with the collapse toggle directly above the Settings button. Secrets and Todos are intentionally not listed in the left sidebar; use the Right Dock for those auxiliary views on desktop/tablet. The Header retains the Fusion brand and project selector, keeps its non-navigation controls, and hides the view-toggle row and **More views** trigger so there is only one canonical primary navigation surface.
+When enabled on desktop or tablet project screens, the sidebar contains the primary destinations (Board, List, Agents, Command Center, Missions, Chat, Artifacts, Mailbox, and plugin primary views), selected auxiliary destinations as regular entries (Research, Insights, Skills, Memory, Stash Recovery, Evals, Goals, Dev Server, and plugin overflow views when their flags/plugins are enabled), and a footer with the collapse toggle directly above the Settings button. Secrets and Todos are intentionally not listed in the left sidebar; use the Right Dock for those auxiliary views on desktop/tablet. The Header retains the Fusion brand and project selector, keeps its non-navigation controls, and hides the view-toggle row and **More views** trigger so there is only one canonical primary navigation surface.
 
 While the sidebar is active on desktop/tablet project screens, Board and List workflow controls move into the Header slot that replaces the hidden view toggle. Board and List share one workflow dropdown: each workflow row includes an inline edit action, and a persistent **New workflow** action remains at the bottom of the dropdown while the workflow list scrolls. The standalone workflow row above the board/list content is removed in this mode. When the flag is off, outside project screens, or on mobile, workflow controls remain inline with the same consolidated dropdown.
 
@@ -471,9 +471,9 @@ You may also see matching run-audit events in logs, including `pull:fast-forward
 Goal run-audit metadata is IDs-only (`goalIds` + counts/tool fields) and never includes goal titles/descriptions/prompt text.
 For per-run aggregation, `GET /api/agents/:id/runs/:runId/cited-goals` returns `{ runId, taskId?, injectedGoalIds, retrievedGoalIds, citedGoalIds }`.
 
-## Documents View
+## Artifacts View
 
-Documents view aggregates task documents, project markdown files, and registered artifacts.
+Artifacts view aggregates task documents, project markdown files, and registered artifacts.
 
 Features:
 
@@ -486,7 +486,7 @@ Features:
 - Toggle between raw text and rendered markdown using the **Markdown/Plain** button
 - Highlight text in raw or rendered project-file previews, choose **Add comment**, and send the file path, selected snippet, and your comment to the **New Task** dialog
 
-![Documents view](./screenshots/documents-view.png)
+![Artifacts view](./screenshots/documents-view.png)
 
 ## Reports View
 
@@ -508,7 +508,7 @@ For plugin internals (registration, API routes, rendering/export pipeline), see 
 
 ### Markdown Rendering
 
-Documents view supports toggling between raw text and formatted markdown when viewing document content:
+Artifacts view supports toggling between raw text and formatted markdown when viewing document content:
 
 - **Raw mode** (default): Shows markdown syntax as plain text (e.g., `**bold**`)
 - **Markdown mode**: Renders markdown with proper formatting (e.g., **bold**, headings, lists, tables)

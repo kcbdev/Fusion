@@ -215,6 +215,7 @@ describe("DocumentsView", () => {
   it("renders project files tab with markdown file list", () => {
     render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
 
+    expect(screen.getByRole("heading", { name: "Artifacts" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /show project markdown files/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: "Open README.md" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open docs/guide.md" })).toBeInTheDocument();

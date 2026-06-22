@@ -77,7 +77,8 @@ describe("RightDock", () => {
     );
 
     expect(screen.getByTestId("right-dock-tab-files")).toBeInTheDocument();
-    expect(screen.getByTestId("right-dock-tab-documents")).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-tab-documents")).toHaveAttribute("aria-label", "Artifacts");
+    expect(screen.getByTestId("right-dock-tab-documents")).toHaveAttribute("title", "Artifacts");
     expect(screen.getByTestId("right-dock-tab-secrets")).toBeInTheDocument();
     expect(screen.getByTestId("right-dock-tab-stash-recovery")).toBeInTheDocument();
     expect(screen.queryByTestId("right-dock-tab-research")).toBeNull();

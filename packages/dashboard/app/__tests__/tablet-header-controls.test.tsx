@@ -88,28 +88,28 @@ describe("tablet header controls", () => {
     expect(screen.getByTitle("List view")).toBeDefined();
     expect(screen.getByTitle("Agents view")).toBeDefined();
     expect(screen.getByTestId("view-toggle-command-center")).toBeDefined();
-    expect(screen.queryByTitle("Documents view")).toBeNull();
+    expect(screen.queryByTitle("Artifacts view")).toBeNull();
     // Skills and Insights are NOT inline (they're in overflow)
     expect(screen.queryByTitle("Skills view")).toBeNull();
     expect(screen.queryByTitle("Roadmaps view")).toBeNull();
     expect(screen.queryByTitle("Insights view")).toBeNull();
   });
 
-  it("places tablet Command Center inline immediately after Agents and Documents only in overflow", () => {
+  it("places tablet Command Center inline immediately after Agents and Artifacts only in overflow", () => {
     renderTabletHeader({ onChangeView: noop, showAgentsTab: true });
 
     expect(screen.getByTestId("view-toggle-command-center").previousElementSibling).toBe(screen.getByTitle("Agents view"));
-    expect(screen.queryByTitle("Documents view")).toBeNull();
+    expect(screen.queryByTitle("Artifacts view")).toBeNull();
 
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    expect(screen.getByTestId("view-overflow-documents")).toBeDefined();
+    expect(screen.getByTestId("view-overflow-documents")).toHaveTextContent("Artifacts view");
     expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
   });
 
-  it("keeps desktop Documents and Command Center inline without Command Center overflow", () => {
+  it("keeps desktop Artifacts and Command Center inline without Command Center overflow", () => {
     renderDesktopHeader({ onChangeView: noop, showAgentsTab: true });
 
-    expect(screen.getByTitle("Documents view")).toBeDefined();
+    expect(screen.getByTitle("Artifacts view")).toBeDefined();
     expect(screen.getByTestId("view-toggle-command-center")).toBeDefined();
     expect(screen.getByTestId("view-toggle-command-center").previousElementSibling).toBe(screen.getByTitle("Agents view"));
 

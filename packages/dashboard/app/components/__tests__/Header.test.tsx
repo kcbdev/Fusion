@@ -386,10 +386,10 @@ describe("Header", () => {
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
 
-    it("keeps desktop Documents and Command Center inline without Command Center overflow", () => {
+    it("keeps desktop Artifacts and Command Center inline without Command Center overflow", () => {
       renderHeader({ onChangeView: noop, showAgentsTab: true }, "desktop");
 
-      expect(screen.getByTitle("Documents view")).toBeInTheDocument();
+      expect(screen.getByTitle("Artifacts view")).toBeInTheDocument();
       const agentsButton = screen.getByTitle("Agents view");
       const commandCenterButton = screen.getByTestId("view-toggle-command-center");
       expect(commandCenterButton.previousElementSibling).toBe(agentsButton);
@@ -399,16 +399,16 @@ describe("Header", () => {
       expect(screen.queryByTestId("view-overflow-documents")).toBeNull();
     });
 
-    it("promotes Command Center after Agents and moves Documents to overflow on tablet", () => {
+    it("promotes Command Center after Agents and moves Artifacts to overflow on tablet", () => {
       renderHeader({ onChangeView: noop, showAgentsTab: true }, "tablet");
 
       const agentsButton = screen.getByTitle("Agents view");
       const commandCenterButton = screen.getByTestId("view-toggle-command-center");
       expect(commandCenterButton.previousElementSibling).toBe(agentsButton);
-      expect(screen.queryByTitle("Documents view")).toBeNull();
+      expect(screen.queryByTitle("Artifacts view")).toBeNull();
 
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-      expect(screen.getByTestId("view-overflow-documents")).toBeInTheDocument();
+      expect(screen.getByTestId("view-overflow-documents")).toHaveTextContent("Artifacts view");
       expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
     });
 

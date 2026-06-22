@@ -140,7 +140,11 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
   },
   {
     key: "documents",
-    label: "Documents",
+    /*
+    FNXC:Navigation 2026-06-21-18:25:
+    Top-level Documents was renamed to Artifacts for FN-6890; keep the documents key, route, and test id stable while changing only the displayed label.
+    */
+    label: "Artifacts",
     icon: FileText,
     testId: "right-dock-tab-documents",
     render: (props) => wrapOverflowView(

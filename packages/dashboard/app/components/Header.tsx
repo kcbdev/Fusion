@@ -1061,11 +1061,15 @@ export function Header({
               )}
             </button>
             {!isTablet && (
+              /*
+              FNXC:Navigation 2026-06-21-18:25:
+              The top-level documents destination now displays as Artifacts (FN-6890), but the documents route id remains stable for navigation and tests.
+              */
               <button
                 className={`view-toggle-btn${view === "documents" ? " active" : ""}`}
                 onClick={() => onChangeView("documents")}
-                title={t("header.documentsView", "Documents view")}
-                aria-label={t("header.documentsView", "Documents view")}
+                title={t("header.documentsView", "Artifacts view")}
+                aria-label={t("header.documentsView", "Artifacts view")}
                 aria-pressed={view === "documents"}
               >
                 <FileText size={16} />
@@ -1263,7 +1267,7 @@ export function Header({
                         data-testid="view-overflow-documents"
                       >
                         <FileText size={14} />
-                        <span>{t("header.documentsView", "Documents view")}</span>
+                        <span>{t("header.documentsView", "Artifacts view")}</span>
                       </button>
                     )}
                     {experimentalFeatures?.devServerView && (

@@ -3,10 +3,12 @@ import { getVisibleOverflowViewEntries, STATIC_OVERFLOW_VIEW_ENTRIES } from "../
 import type { PluginDashboardViewEntry } from "../../api";
 
 describe("overflowViewRegistry", () => {
-  it("keeps Files as the default first entry and Documents visible without a viewport gate", () => {
+  it("keeps Files as the default first entry and Artifacts visible without a viewport gate", () => {
     const entries = getVisibleOverflowViewEntries();
     expect(entries[0]?.key).toBe("files");
-    expect(entries.some((entry) => entry.key === "documents")).toBe(true);
+    const documentsEntry = entries.find((entry) => entry.key === "documents");
+    expect(documentsEntry?.label).toBe("Artifacts");
+    expect(documentsEntry?.testId).toBe("right-dock-tab-documents");
   });
 
   it("matches Header feature gates for flag-controlled overflow destinations", () => {

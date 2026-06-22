@@ -507,7 +507,8 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onSendSelecti
         <div className="documents-view-title-row">
           <h2 className="documents-view-title">
             <FileText size={20} />
-            {t("documents.title", "Documents")}
+            {/* FNXC:Navigation 2026-06-21-18:25: FN-6890 renames the top-level Documents view header to Artifacts without changing internal task-document tabs or artifact sub-tabs. */}
+            {t("documents.title", "Artifacts")}
           </h2>
           <span className="documents-view-count">
             {t("documents.resultCount", "{{count}} result{{plural}}", { count: activeCount, plural: activeCount !== 1 ? "s" : "" })}

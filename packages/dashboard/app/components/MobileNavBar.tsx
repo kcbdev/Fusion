@@ -670,7 +670,8 @@ export function MobileNavBar({
               onClick={() => handleMoreAction(() => onChangeView("documents"))}
             >
               <FileText />
-              <span>{t("nav.documents", "Documents")}</span>
+              {/* FNXC:Navigation 2026-06-21-18:25: FN-6890 changes only the displayed top-level label to Artifacts; mobile-more-item-documents and the documents view id stay stable. */}
+              <span>{t("nav.documents", "Artifacts")}</span>
             </button>
 
             {experimentalFeatures?.evalsView && (

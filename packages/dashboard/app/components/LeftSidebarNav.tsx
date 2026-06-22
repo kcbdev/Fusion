@@ -288,7 +288,11 @@ export function LeftSidebarNav({
     },
     {
       id: "documents",
-      label: t("nav.documents", "Documents"),
+      /*
+      FNXC:Navigation 2026-06-21-18:25:
+      FN-6890 renames the top-level Documents label to Artifacts while preserving the documents view id and sidebar-nav-documents test id.
+      */
+      label: t("nav.documents", "Artifacts"),
       view: "documents",
       isActive: view === "documents",
       icon: FileText,

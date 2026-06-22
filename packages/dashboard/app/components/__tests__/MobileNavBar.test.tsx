@@ -272,6 +272,17 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-more")).toHaveClass("mobile-nav-tab--active");
   });
 
+  it("shows Artifacts in More and routes to the stable documents view", () => {
+    const props = createDefaultProps();
+    render(<MobileNavBar {...props} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-documents")).toHaveTextContent("Artifacts");
+    fireEvent.click(screen.getByTestId("mobile-more-item-documents"));
+
+    expect(props.onChangeView).toHaveBeenCalledWith("documents");
+  });
+
   it("shows secrets in More and routes to secrets view", () => {
     const props = createDefaultProps();
     render(<MobileNavBar {...props} />);
