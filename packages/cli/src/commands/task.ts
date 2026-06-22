@@ -850,14 +850,16 @@ export async function runTaskMerge(id: string, projectName?: string) {
 
   console.log(`\n  Merging ${id} with AI...\n`);
 
-  // FNXC:Workspace 2026-06-21-00:00: R7 merge-boundary guard (master-plan U0).
-  // Reject workspace-mode tasks before any merge work; per-repo merge lands in
-  // master-plan U6, which removes this guard.
-  // FNXC:MergerUnification 2026-06-21-00:00: unified onto runAiMerge (U0).
-  const mergeTaskRecord = await store.getTask(id).catch(() => null);
-  if (mergeTaskRecord) assertNotWorkspaceTaskMerge(mergeTaskRecord);
-
   try {
+    // FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
+    // Reject workspace-mode tasks before any merge work; per-repo merge lands in
+    // master-plan U6, which removes this guard.
+    // FNXC:MergerUnification 2026-06-21-19:05: unified onto runAiMerge (U0).
+    // The guard lives INSIDE this try so its throw renders via the formatted
+    // `  ✗ ...` output below instead of the generic top-level bin.ts handler.
+    const mergeTaskRecord = await store.getTask(id).catch(() => null);
+    if (mergeTaskRecord) assertNotWorkspaceTaskMerge(mergeTaskRecord);
+
     const result = await runAiMerge(store, projectPath, id, {
       onAgentText: (delta) => process.stdout.write(delta),
     });

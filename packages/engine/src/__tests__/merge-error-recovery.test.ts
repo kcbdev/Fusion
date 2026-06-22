@@ -19,7 +19,7 @@ const testState = vi.hoisted(() => {
   };
 });
 
-// FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 unified the merge
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified the merge
 // dispatch onto runAiMerge (merger-ai.js). These error-recovery tests use the
 // merge fn as a mockable seam; they now mock/assert runAiMerge. VerificationError
 // still comes from merger.js (shared, not deprecated).
@@ -125,7 +125,7 @@ function makeStore({
       globalPause: false,
       enginePaused: false,
       pollIntervalMs: 15_000,
-      // FNXC:MergerUnification 2026-06-21-00:00: U0 unified merges onto runAiMerge;
+      // FNXC:MergerUnification 2026-06-21-19:05: U0 unified merges onto runAiMerge;
       // these tests mock/assert runAiMerge directly. No `merger.mode` pin needed —
       // the dispatch ignores the value.
       ...settings,

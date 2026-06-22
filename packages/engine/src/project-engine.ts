@@ -13,7 +13,7 @@ import type {
   ResearchSynthesisRequest,
   ResearchSynthesisResult,
 } from "@fusion/core";
-import { allowsAutoMergeProcessing, assertNotWorkspaceTaskMerge, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, resolveMaxAutoMergeRetries, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
+import { allowsAutoMergeProcessing, assertNotWorkspaceTaskMerge, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, normalizeMergerMode, resolveMaxAutoMergeRetries, sortTasksByPriorityThenAgeAndId, WorkspaceTaskMergeError } from "@fusion/core";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
@@ -81,14 +81,23 @@ const execFileAsync = promisify(execFile);
 const MERGE_HANDOFF_GRACE_MS = 300;
 
 /*
-FNXC:MergerUnification 2026-06-21-00:00:
+FNXC:MergerUnification 2026-06-21-19:05:
 Master-plan U0 made `runAiMerge` the SOLE merge path; `merger.mode` is now inert
 (the type/field are retained as published surface — see types.ts MergerMode). When a
 project still resolves `merger.mode === "deterministic"` we WARN (never error) once
-per process and proceed via `runAiMerge` anyway. This module-level flag gates the
-warning to exactly one emission per engine process.
+per project per process and proceed via `runAiMerge` anyway. The warning is keyed by
+project root so EACH project with the stale setting warns once — a single module-level
+boolean would suppress the warning for all other projects after the first emission.
 */
-let deterministicMergerModeDeprecationWarned = false;
+const deterministicMergerModeDeprecationWarnedProjects = new Set<string>();
+
+/**
+ * Test-only: clears the per-project deprecation-warning ledger so a test can assert
+ * the warning fires exactly once per project per process. Not used by production code.
+ */
+export function __resetDeterministicMergerModeDeprecationWarned(): void {
+  deterministicMergerModeDeprecationWarnedProjects.clear();
+}
 
 interface RemoteLifecycleEvaluation {
   provider: TunnelProvider;
@@ -2278,7 +2287,7 @@ export class ProjectEngine {
                   this.activeMergeSession = session;
                 },
               };
-              // FNXC:Workspace 2026-06-21-00:00:
+              // FNXC:Workspace 2026-06-21-19:05:
               // R7 merge-boundary guard (master-plan U0). Reject workspace-mode
               // tasks BEFORE any git work — they need the per-repo merge loop that
               // lands in master-plan U6 (which removes this guard). Load the task
@@ -2286,18 +2295,20 @@ export class ProjectEngine {
               const mergeTask = await store.getTask(taskId).catch(() => null);
               if (mergeTask) assertNotWorkspaceTaskMerge(mergeTask);
 
-              // FNXC:MergerUnification 2026-06-21-00:00:
+              // FNXC:MergerUnification 2026-06-21-19:05:
               // Master-plan U0 collapsed the merge dispatch: `runAiMerge` (the
               // FN-5633 clean-room AI merge path) is the SOLE merge path. The
               // `merger.mode` setting is inert — we no longer branch on it. A
-              // resolved "deterministic" value only triggers a one-time deprecation
-              // warning (warn, never error) before proceeding via `runAiMerge`.
+              // resolved "deterministic" value only triggers a once-per-project
+              // deprecation warning (warn, never error) before proceeding via
+              // `runAiMerge`; the warning is keyed by project root (cwd) so each
+              // stale project warns once rather than just the first project seen.
               const settings = await store.getSettings().catch(() => ({}) as Settings);
               if (
                 normalizeMergerMode(settings.merger?.mode) === "deterministic"
-                && !deterministicMergerModeDeprecationWarned
+                && !deterministicMergerModeDeprecationWarnedProjects.has(cwd)
               ) {
-                deterministicMergerModeDeprecationWarned = true;
+                deterministicMergerModeDeprecationWarnedProjects.add(cwd);
                 runtimeLog.warn(
                   'merger.mode "deterministic" is deprecated and inert: all merges now use the unified AI merge path (runAiMerge). Remove the setting; the legacy aiMergeTask pipeline is soft-deprecated.',
                 );
@@ -2343,6 +2354,33 @@ export class ProjectEngine {
               this.rejectMergeResolvers(taskId, err instanceof Error ? err : new Error(errorMsg));
             } else {
               await store.updateTask(taskId, { status: null }).catch(() => undefined);
+            }
+            continue;
+          }
+
+          // FNXC:Workspace 2026-06-21-19:05:
+          // R7 workspace merge-boundary park (master-plan U0). A WorkspaceTaskMergeError
+          // is a PERMANENT config error (workspace task hit a merge door before the
+          // per-repo merge loop exists — master-plan U6), NOT a transient merge failure.
+          // Park the task WITHOUT burning mergeRetries (set to 0) so a human can manually
+          // retry after addressing the config; the default failed-path below would
+          // otherwise pin mergeRetries to the cap and permanently block manual retry.
+          const isWorkspaceMergeError =
+            err instanceof WorkspaceTaskMergeError
+            || (err as { name?: string } | null)?.name === "WorkspaceTaskMergeError";
+          if (isWorkspaceMergeError) {
+            runtimeLog.error(
+              `${hasManualResolver ? "Manual" : "Auto"}-merge blocked for ${taskId}: workspace-mode tasks cannot merge until per-repo merge support (master-plan U6) lands; parking without burning mergeRetries so a human can retry after the config is addressed: ${errorMsg}`,
+            );
+            await store
+              .logEntry(taskId, `Merge blocked: ${errorMsg}`, "WorkspaceTaskMergeError")
+              .catch(() => undefined);
+            if (hasManualResolver) {
+              this.rejectMergeResolvers(taskId, err instanceof Error ? err : new Error(errorMsg));
+            } else {
+              await store
+                .updateTask(taskId, { status: null, mergeRetries: 0, error: errorMsg })
+                .catch(() => undefined);
             }
             continue;
           }

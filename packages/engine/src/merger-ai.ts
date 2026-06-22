@@ -5,7 +5,7 @@
  * does NOT share the legacy `aiMergeTask` pipeline (prerebase / conflict-strategy
  * ladder / transient self-heal), which is buggy and error-prone.
  *
- * FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 made this the SOLE
+ * FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 made this the SOLE
  * merge path. Every merge entry point (engine dispatch, `fn task merge`, the
  * UI-only dashboard merge) routes here; `merger.mode` is inert (a "deterministic"
  * value only logs a one-time deprecation warning). The legacy `aiMergeTask`
@@ -42,6 +42,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import {
+  assertNotWorkspaceTaskMerge,
   buildTaskLineageTrailer,
   evaluateNoCommitsNoOpFinalize,
   getPrimaryPrInfo,
@@ -969,6 +970,13 @@ export async function runAiMerge(
   deps: AgentDeps = {},
 ): Promise<MergeResult> {
   const task = await store.getTask(taskId);
+  // FNXC:MergerUnification 2026-06-21-19:05:
+  // Chokepoint R7 guard. runAiMerge is the SOLE merge path (master-plan U0), so it
+  // self-enforces the workspace merge-boundary here — immediately after the task read
+  // and BEFORE any git work — even if a door's pre-read was skipped/swallowed or a
+  // direct importer calls runAiMerge without the door-level guard. Throws the named
+  // WorkspaceTaskMergeError; the door guards remain as fast-fail defense-in-depth.
+  assertNotWorkspaceTaskMerge(task);
   const branch = resolveTaskWorkingBranch(task);
 
   if (task.column === "done" || task.column === "archived") {

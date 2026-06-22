@@ -13,7 +13,7 @@ const testState = vi.hoisted(() => ({
   currentStore: null as (TaskStore & EventEmitter) | null,
 }));
 
-// FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 unified the merge
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified the merge
 // dispatch onto runAiMerge (merger-ai.js). This test injects a verification
 // failure through the merge seam, so it now mocks runAiMerge. merger.js stays
 // real (importOriginal) for commitOrAmendMergeWithFixes used below.
@@ -61,7 +61,7 @@ function createStore(task: Task, taskSequence?: Task[]) {
       globalPause: false,
       enginePaused: false,
       pollIntervalMs: 15_000,
-      // FNXC:MergerUnification 2026-06-21-00:00: U0 unified merges onto runAiMerge;
+      // FNXC:MergerUnification 2026-06-21-19:05: U0 unified merges onto runAiMerge;
       // no `merger.mode` pin needed (dispatch ignores it).
     } as Settings)),
     listTasks: vi.fn(async () => [task]),

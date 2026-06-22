@@ -11151,7 +11151,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const task = await this.readTaskJson(dir);
-      // FNXC:Workspace 2026-06-21-00:00:
+      // FNXC:Workspace 2026-06-21-19:05:
       // R7 merge-boundary guard (master-plan U0). Reject workspace-mode tasks
       // BEFORE any git checkout/squash — they need the per-repo merge loop that
       // lands in master-plan U6, which removes this guard. See the predicate's

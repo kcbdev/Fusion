@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assertNotWorkspaceTaskMerge } from "../types.js";
 
-// FNXC:Workspace 2026-06-21-00:00: R7 merge-boundary guard (master-plan U0).
+// FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
 // This shared predicate is called at all four merge entry points (engine
 // dispatch, store.mergeTask, CLI onMergeImpl, CLI runTaskMerge). Workspace-mode
 // tasks (populated workspaceWorktrees) must be held until per-repo merge support

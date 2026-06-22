@@ -73,6 +73,7 @@ import {
 import { isBranchAuthoritativeForTask } from "./branch-conflicts.js";
 import { hostname } from "node:os";
 import {
+  assertNotWorkspaceTaskMerge,
   buildTaskLineageTrailer,
   evaluateNoCommitsNoOpFinalize,
   getTaskMergeBlocker,
@@ -7644,7 +7645,7 @@ export async function syncGroupPrOnLanding(input: {
  * deletion pass and direct unit tests, but new callers must use `runAiMerge`.
  * The `merger.mode === "deterministic"` setting that once routed here is inert.
  *
- * FNXC:MergerUnification 2026-06-21-00:00: legacy deterministic merge pipeline,
+ * FNXC:MergerUnification 2026-06-21-19:05: legacy deterministic merge pipeline,
  * superseded by runAiMerge. Helpers it shares with runAiMerge (e.g.
  * captureSingleCommitLandedMetadata) are NOT deprecated.
  */
@@ -7658,6 +7659,11 @@ export async function aiMergeTask(
 
   // 1. Validate task state
   const task = await store.getTask(taskId);
+  // FNXC:MergerUnification 2026-06-21-19:05: defense-in-depth R7 guard on the
+  // deprecated path — even though no production code calls aiMergeTask, its body is
+  // reachable via direct unit tests/importers, so enforce the workspace merge-boundary
+  // here too (throws the named WorkspaceTaskMergeError) before any git work.
+  assertNotWorkspaceTaskMerge(task);
   if (task.column === "done" || task.column === "archived") {
     const message = `merger: skipping squash for ${taskId} — task already finalized (column=${task.column})`;
     mergerLog.log(message);

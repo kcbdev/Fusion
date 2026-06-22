@@ -1300,12 +1300,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // In engine mode: replaced by engine.onMerge() after ProjectEngine starts
   // (semaphore-gated via the engine's InProcessRuntime).
   //
-  // FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 unified all merge
+  // FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified all merge
   // entry points onto runAiMerge (the FN-5633 clean-room AI merge path);
   // aiMergeTask is soft-deprecated.
   //
   const onMergeImpl = async (taskId: string) => {
-    // FNXC:Workspace 2026-06-21-00:00: R7 merge-boundary guard (master-plan U0).
+    // FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
     // Reject workspace-mode tasks before any merge work; per-repo merge lands in
     // master-plan U6, which removes this guard.
     const mergeTask = await store.getTask(taskId).catch(() => null);

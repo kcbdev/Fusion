@@ -508,7 +508,7 @@ export const MERGER_MODES = ["ai", "deterministic"] as const;
  *    avoid a breaking `@runfusion/fusion` type change, and the engine logs a
  *    one-time deprecation warning when it observes a resolved "deterministic".
  *
- * FNXC:MergerUnification 2026-06-21-00:00: `merger.mode` is published surface, so
+ * FNXC:MergerUnification 2026-06-21-19:05: `merger.mode` is published surface, so
  * the type and the `MergerSettings.mode` field stay; only the "deterministic"
  * VALUE is deprecated/inert. Removing the type is a separate breaking change.
  */
@@ -2601,7 +2601,7 @@ export interface Task {
 }
 
 /*
-FNXC:Workspace 2026-06-21-00:00:
+FNXC:Workspace 2026-06-21-19:05:
 R7 workspace merge-boundary guard (master-plan U0). Workspace-mode tasks populate
 `task.workspaceWorktrees` (one git worktree per sub-repo); their merge must run a
 per-repo loop that does NOT exist yet — it lands in master-plan U6. Until then, a
@@ -2611,18 +2611,34 @@ the NON-GIT workspace root and crash. This single shared predicate is called at 
 top of every merge door, BEFORE any git work, so the task is held with a clear,
 actionable error instead. It lives in @fusion/core so all four call sites — including
 store.mergeTask, which cannot import from @fusion/engine — share ONE implementation.
-Master-plan U6 REMOVES this guard when the per-repo merge loop becomes the gate.
+The guard throws a NAMED `WorkspaceTaskMergeError` so callers (e.g. the engine merge
+dispatch catch) can distinguish this permanent config error from a transient merge
+failure and avoid burning mergeRetries. Master-plan U6 REMOVES this guard when the
+per-repo merge loop becomes the gate.
 */
 
 /**
- * Throws when `task.workspaceWorktrees` has at least one entry (a workspace-mode
- * task). No-op for single-repo tasks. See the FNXC:Workspace note above.
+ * Error thrown by {@link assertNotWorkspaceTaskMerge} when a workspace-mode task
+ * reaches a merge path. Named so callers can branch on it (e.g. park without
+ * burning mergeRetries) rather than treating it as a transient merge failure.
+ */
+export class WorkspaceTaskMergeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceTaskMergeError";
+  }
+}
+
+/**
+ * Throws {@link WorkspaceTaskMergeError} when `task.workspaceWorktrees` has at least
+ * one entry (a workspace-mode task). No-op for single-repo tasks. See the
+ * FNXC:Workspace note above.
  * @param task the task about to enter a merge path
  */
 export function assertNotWorkspaceTaskMerge(task: Pick<Task, "id" | "workspaceWorktrees">): void {
   const worktrees = task.workspaceWorktrees;
   if (worktrees && Object.keys(worktrees).length > 0) {
-    throw new Error(
+    throw new WorkspaceTaskMergeError(
       `Workspace task ${task.id} cannot merge until per-repo merge support (master-plan U6) lands`,
     );
   }

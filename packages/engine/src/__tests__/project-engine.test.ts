@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "@fusion/core";
-import { ProjectEngine } from "../project-engine.js";
+import { ProjectEngine, __resetDeterministicMergerModeDeprecationWarned } from "../project-engine.js";
 import { runtimeLog } from "../logger.js";
 import { TunnelProcessManager } from "../remote-access/tunnel-process-manager.js";
 import { NtfyNotifier } from "../notifier.js";
@@ -61,7 +61,7 @@ vi.mock("../cron-runner.js", () => {
   };
 });
 
-// FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 unified the merge
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified the merge
 // dispatch onto runAiMerge (merger-ai.js). project-engine no longer imports
 // aiMergeTask; the merge seam these tests mock/assert is now runAiMerge.
 vi.mock("../merger.js", () => ({
@@ -261,7 +261,7 @@ const baseSettings: Record<string, unknown> = {
   globalPause: false,
   enginePaused: false,
   pollIntervalMs: 15_000,
-  // FNXC:MergerUnification 2026-06-21-00:00: U0 unified merges onto runAiMerge;
+  // FNXC:MergerUnification 2026-06-21-19:05: U0 unified merges onto runAiMerge;
   // the onMerge tests mock/assert runAiMerge. The old `merger.mode` pin is gone
   // (the dispatch ignores it) — a dedicated test below covers the inert-mode +
   // one-time deprecation-warning behavior.
@@ -421,7 +421,8 @@ describe("ProjectEngine PR monitoring wiring", () => {
     await engine.start();
 
     expect(mocks.runtimeConfigurePrMonitoring).toHaveBeenCalled();
-    const configArg = mocks.runtimeConfigurePrMonitoring.mock.calls.at(-1)?.[0] as {
+    const calls = mocks.runtimeConfigurePrMonitoring.mock.calls;
+    const configArg = calls[calls.length - 1]?.[0] as {
       onClosedPrFeedback?: (taskId: string, prInfo: Record<string, unknown>, comments: unknown[]) => Promise<void> | void;
     };
     expect(typeof configArg.onClosedPrFeedback).toBe("function");
@@ -1214,7 +1215,7 @@ describe("ProjectEngine manual merge plumbing", () => {
   });
 });
 
-// FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 made runAiMerge the
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 made runAiMerge the
 // sole merge path. These tests pin the unified dispatch: every merger.mode value
 // routes to runAiMerge, "deterministic" warns exactly once (never errors), and
 // the R7 workspace guard rejects populated-workspaceWorktrees tasks at the engine
@@ -1222,6 +1223,13 @@ describe("ProjectEngine manual merge plumbing", () => {
 describe("ProjectEngine U0 merge unification dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // FNXC:MergerUnification 2026-06-21-19:05: the deterministic-mode deprecation
+    // warning is gated by a per-project module-level ledger. Reset it before each
+    // test so the once-per-project-per-process assertion is deterministic regardless
+    // of which sibling test populated the ledger first (createEngine always uses the
+    // same project root, so without this a prior deterministic merge would suppress
+    // the warning here and the "fires once" test would see zero emissions).
+    __resetDeterministicMergerModeDeprecationWarned();
   });
 
   async function runOnMergeWithMode(mode: string | undefined) {
@@ -1262,18 +1270,25 @@ describe("ProjectEngine U0 merge unification dispatch", () => {
     );
   });
 
-  it('logs the merger.mode "deterministic" deprecation warning exactly once per process (warn, not error)', async () => {
+  it('logs the merger.mode "deterministic" deprecation warning exactly once per project per process (warn, not error)', async () => {
     const warnSpy = vi.spyOn(runtimeLog, "warn").mockImplementation(() => undefined);
-    try {
-      // Two deterministic merges; the module-level flag must gate the warning to
-      // a single emission across the whole process.
-      await runOnMergeWithMode("deterministic");
-      await runOnMergeWithMode("deterministic");
-      const deprecationWarnings = warnSpy.mock.calls.filter((call) =>
+    const deprecationWarnings = () =>
+      warnSpy.mock.calls.filter((call) =>
         String(call[0]).includes("merger.mode") && String(call[0]).includes("deprecated"),
       );
-      expect(deprecationWarnings.length).toBeLessThanOrEqual(1);
-      // The merge still proceeds via runAiMerge despite the deprecated value.
+    try {
+      // First deterministic merge: the warning must fire EXACTLY once.
+      await runOnMergeWithMode("deterministic");
+      expect(deprecationWarnings()).toHaveLength(1);
+
+      // A SECOND deterministic merge in the same process (same project root) must
+      // NOT warn again — the per-project ledger suppresses the repeat. Total stays 1.
+      await runOnMergeWithMode("deterministic");
+      expect(deprecationWarnings()).toHaveLength(1);
+
+      // The warning is a warn (never an error), and the merge still proceeds via
+      // runAiMerge despite the deprecated value.
+      expect(deprecationWarnings()).toHaveLength(1);
       expect(mocks.runAiMerge).toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();

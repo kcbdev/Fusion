@@ -7,7 +7,7 @@ const testState = vi.hoisted(() => ({
   currentStore: null as (TaskStore & EventEmitter) | null,
 }));
 
-// FNXC:MergerUnification 2026-06-21-00:00: master-plan U0 unified the merge
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified the merge
 // dispatch onto runAiMerge (merger-ai.js). This test uses the merge fn as a
 // mockable seam to inject a verification failure; it now mocks runAiMerge.
 vi.mock("../../merger-ai.js", async (importOriginal) => {
@@ -66,7 +66,7 @@ function createStore(task: Task, sequence: Task[]) {
       globalPause: false,
       enginePaused: false,
       pollIntervalMs: 15_000,
-      // FNXC:MergerUnification 2026-06-21-00:00: U0 unified merges onto runAiMerge;
+      // FNXC:MergerUnification 2026-06-21-19:05: U0 unified merges onto runAiMerge;
       // no `merger.mode` pin needed (dispatch ignores it).
     } as Settings)),
     listTasks: vi.fn(async () => [task]),
@@ -132,7 +132,7 @@ describe("post-finalize verification noop status-write guard", () => {
       mergeDetails: { mergeConfirmed: true, commitSha: "abcdef1234567890" },
     });
 
-    // FNXC:MergerUnification 2026-06-21-00:00: the U0 R7 guard adds one
+    // FNXC:MergerUnification 2026-06-21-19:05: the U0 R7 guard adds one
     // store.getTask read at the merge dispatch before runAiMerge, so the read
     // sequence gains one leading in-review entry; the post-failure recovery still
     // resolves the same done-task tail (the "already-done task" no-op path).

@@ -167,6 +167,7 @@ export {
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
+/** @deprecated Use runAiMerge — aiMergeTask is the soft-deprecated legacy path. */
 export {
   aiMergeTask,
   listAutostashOrphans,
@@ -186,7 +187,7 @@ export {
   getConflictedFiles,
   type AutostashHandle,
 } from "./merger.js";
-// FNXC:MergerUnification 2026-06-21-00:00: runAiMerge is the sole merge path
+// FNXC:MergerUnification 2026-06-21-19:05: runAiMerge is the sole merge path
 // (master-plan U0); exported for the CLI callers (fn task merge + UI-only merge).
 export { runAiMerge } from "./merger-ai.js";
 export {
