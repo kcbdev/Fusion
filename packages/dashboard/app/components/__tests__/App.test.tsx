@@ -302,9 +302,9 @@ vi.mock("../../components/GitHubImportModal", () => ({
 }));
 
 vi.mock("../../components/PlanningModeModal", () => ({
-  PlanningModeModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+  PlanningModeModal: ({ isOpen, onClose, presentation = "modal" }: { isOpen: boolean; onClose: () => void; presentation?: "modal" | "embedded" }) =>
     isOpen ? (
-      <div className="modal-overlay open">
+      <div className={presentation === "embedded" ? "planning-view open" : "modal-overlay open"} data-testid={presentation === "embedded" ? "planning-view" : undefined}>
         <button type="button" aria-label="Close" onClick={onClose}>
           Close
         </button>
@@ -2326,14 +2326,9 @@ describe("App view switching", () => {
       },
     });
 
+    localStorage.setItem(taskViewStorageKey(), "todos");
+
     render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(screen.getByTestId("view-overflow-todos"));
 
     await waitFor(() => {
       expect(screen.getByTestId("todo-view")).toBeInTheDocument();
@@ -2342,6 +2337,7 @@ describe("App view switching", () => {
     fireEvent.click(screen.getByTestId("todo-planning-button"));
 
     await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeInTheDocument();
       expect(screen.getByText("Planning Mode")).toBeInTheDocument();
     });
 
@@ -2775,61 +2771,48 @@ describe("App GitHub import", () => {
 });
 
 describe("App Planning Mode", () => {
-  it("opens Planning Mode modal when plan button is clicked", async () => {
+  it("opens Planning Mode as an embedded view from the sidebar destination", async () => {
     render(<App />);
 
-    // Wait for the header to render
-    await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
-    });
+    const planningNavItem = await screen.findByTestId("sidebar-nav-planning");
+    fireEvent.click(planningNavItem);
 
-    // Click the plan button
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-
-    // Planning modal should be visible
     await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
       expect(screen.getByText("Planning Mode")).toBeTruthy();
     });
+    expect(screen.queryByTestId("planning-btn")).toBeNull();
   });
 
-  it("closes Planning Mode modal on close button click", async () => {
+  it("closes Planning Mode embedded view back to the board", async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByTestId("sidebar-nav-planning"));
     await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
     });
 
-    // Open the modal
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-    await waitFor(() => {
-      expect(screen.getByText("Planning Mode")).toBeTruthy();
-    });
-
-    // Close the modal using the close button
     fireEvent.click(screen.getByLabelText("Close"));
 
-    // Modal should be closed
     await waitFor(() => {
       expect(screen.queryByText("Transform your idea into a detailed task")).toBeNull();
+      expect(screen.getByTestId("sidebar-nav-board").getAttribute("aria-current")).toBe("page");
     });
   });
 
-  it("renders planning modal with correct initial state", async () => {
+  it("renders planning embedded view with correct initial state", async () => {
+    localStorage.setItem(taskViewStorageKey(), "planning");
+
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
-    });
-
-    // Open the modal
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-
-    // Initial view should show
-    await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
       expect(screen.getByText("Transform your idea into a detailed task")).toBeTruthy();
       expect(screen.getByPlaceholderText(/e.g., Build a user authentication system with login/)).toBeTruthy();
       expect(screen.getByText("Start Planning")).toBeTruthy();
     });
+
+    localStorage.removeItem(taskViewStorageKey());
   });
 });
 

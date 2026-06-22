@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings, Play, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge, PanelRight } from "lucide-react";
+import { Settings, Play, LayoutGrid, List, Terminal, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge, PanelRight } from "lucide-react";
 import "./Header.css";
 // ProjectSelector styles used by the imported standalone component.
 import "./ProjectSelector.css";
@@ -58,11 +58,6 @@ interface DropdownPosition {
 export interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenGitHubImport?: () => void;
-  onOpenPlanning?: () => void;
-  /** Resume an in-flight planning session. Takes priority over onOpenPlanning when activePlanningSessionCount > 0 */
-  onResumePlanning?: () => void;
-  /** Number of active planning sessions. When > 0, shows a badge on the Planning button. */
-  activePlanningSessionCount?: number;
   onOpenUsage?: (anchorRect?: DOMRect | null) => void;
   onOpenActivityLog?: () => void;
   /** Opens the mailbox view */
@@ -131,9 +126,6 @@ export interface HeaderProps {
 export function Header({
   onOpenSettings,
   onOpenGitHubImport,
-  onOpenPlanning,
-  onResumePlanning,
-  activePlanningSessionCount = 0,
   onOpenUsage,
   onOpenActivityLog,
   onOpenMailbox,
@@ -1354,26 +1346,10 @@ export function Header({
           </button>
         )}
 
-        {!isCompact && (
-          <button
-            className={`btn-icon${activePlanningSessionCount > 0 ? " btn-icon--has-indicator" : ""}`}
-            onClick={activePlanningSessionCount > 0 && onResumePlanning ? onResumePlanning : onOpenPlanning}
-            title={activePlanningSessionCount > 0 ? t("header.resumePlanningSession", "Resume planning session") : t("header.createTaskWithPlanning", "Create a task with AI planning")}
-            data-testid="planning-btn"
-            style={{ position: "relative" }}
-          >
-            <Lightbulb size={16} />
-            {activePlanningSessionCount > 0 && (
-              <span
-                className="header-badge header-badge--pulse"
-                data-testid="planning-badge"
-                aria-label={t("header.activePlanningSessions", { count: activePlanningSessionCount, defaultValue_one: "{{count}} active planning session", defaultValue_other: "{{count}} active planning sessions" })}
-              >
-                {activePlanningSessionCount}
-              </span>
-            )}
-          </button>
-        )}
+        {/*
+        FNXC:Navigation 2026-06-21-00:00:
+        FN-6886 removes the header Lightbulb affordances because Planning Mode is now a primary left-sidebar destination after Command Center and a single canonical MobileNavBar More item on compact breakpoints.
+        */}
 
         {/* Terminal split button - desktop only (moved to overflow on mobile/tablet) */}
         {!isCompact && (
@@ -1621,22 +1597,6 @@ export function Header({
                 <span>{t("header.browseFiles", "Browse Files")}</span>
               </button>
             )}
-            <button
-              className={`mobile-overflow-item${activePlanningSessionCount > 0 ? " mobile-overflow-item--has-indicator" : ""}`}
-              onClick={() => handleOverflowAction(activePlanningSessionCount > 0 && onResumePlanning ? onResumePlanning : onOpenPlanning)}
-              role="menuitem"
-              data-testid="overflow-planning-btn"
-            >
-              <span className="mobile-overflow-icon-wrapper">
-                <Lightbulb size={16} />
-                {activePlanningSessionCount > 0 && (
-                  <span className="header-badge header-badge--pulse" data-testid="overflow-planning-badge">
-                    {activePlanningSessionCount}
-                  </span>
-                )}
-              </span>
-              <span>{activePlanningSessionCount > 0 ? t("header.resumePlanningSessionCount", "Resume planning session ({{count}})", { count: activePlanningSessionCount }) : t("header.createTaskWithPlanning", "Create a task with AI planning")}</span>
-            </button>
             {/* Git Manager - in overflow on mobile */}
             {onOpenGitManager && (
               <button

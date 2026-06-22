@@ -98,6 +98,7 @@ import { getScopedItem, removeScopedItem, setScopedItem } from "./utils/projectS
 import { subscribeSse } from "./sse-bus";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "./auth";
 import { AuthTokenRecoveryDialog } from "./components/AuthTokenRecoveryDialog";
+import { PlanningModeModal } from "./components/PlanningModeModal";
 
 // ChatView's CSS is imported eagerly so the styles bundle into the main
 // CSS file. Without this, the lazy ChatView JS chunk loaded its own CSS
@@ -1249,20 +1250,24 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeNewTask });
   }, [modalManager, pushNav]);
 
+  /*
+  FNXC:Navigation 2026-06-21-00:00:
+  FN-6886 keeps the existing planning payload setters but routes every programmatic Planning Mode entry point to the docked `planning` view instead of pushing a modal overlay history entry.
+  */
   const openPlanningWithNav = useCallback(() => {
     modalManager.openPlanning();
-    pushNav({ type: "modal", close: modalManager.closePlanning });
-  }, [modalManager, pushNav]);
+    handleTaskViewChange("planning");
+  }, [handleTaskViewChange, modalManager]);
 
   const openPlanningWithInitialPlanWithNav = useCallback((initialPlan: string, workflowId?: string | null) => {
     modalManager.openPlanningWithInitialPlan(initialPlan, workflowId);
-    pushNav({ type: "modal", close: modalManager.closePlanning });
-  }, [modalManager, pushNav]);
+    handleTaskViewChange("planning");
+  }, [handleTaskViewChange, modalManager]);
 
   const resumePlanningWithNav = useCallback(() => {
     modalManager.resumePlanning();
-    pushNav({ type: "modal", close: modalManager.closePlanning });
-  }, [modalManager, pushNav]);
+    handleTaskViewChange("planning");
+  }, [handleTaskViewChange, modalManager]);
 
   const openSubtaskBreakdownWithNav = useCallback((description: string, workflowId?: string | null) => {
     modalManager.openSubtaskBreakdown(description, workflowId);
@@ -1810,6 +1815,33 @@ function AppInner() {
       );
     }
 
+    if (taskView === "planning") {
+      /*
+      FNXC:Navigation 2026-06-21-00:00:
+      FN-6886 renders Planning Mode as a top-level main-content destination. Sidebar navigation opens an empty planning view, while Board, Todos, inline create, and resume entry points carry their initial plan/workflow/session state through modalManager.
+      */
+      const closePlanningView = () => {
+        modalManager.closePlanning();
+        handleChangeTaskView("board");
+      };
+      return (
+        <PageErrorBoundary>
+          <PlanningModeModal
+            isOpen={true}
+            onClose={closePlanningView}
+            onTaskCreated={handlePlanningTaskCreated}
+            onTasksCreated={handlePlanningTasksCreated}
+            tasks={tasks}
+            initialPlan={modalManager.planningInitialPlan ?? undefined}
+            projectId={currentProject?.id}
+            workflowId={modalManager.planningWorkflowId}
+            resumeSessionId={modalManager.planningResumeSessionId}
+            presentation="embedded"
+          />
+        </PageErrorBoundary>
+      );
+    }
+
     if (taskView === "devserver" || taskView === "dev-server") {
       if (!settingsLoaded || !devServerEnabled) {
         return null;
@@ -1944,9 +1976,6 @@ function AppInner() {
         shellHost={shellHost.host}
         onOpenSettings={openSettingsWithNav}
         onOpenGitHubImport={openGitHubImportWithNav}
-        onOpenPlanning={openPlanningWithNav}
-        onResumePlanning={resumePlanningWithNav}
-        activePlanningSessionCount={bgPlanningSessions.length}
         onOpenUsage={openUsageWithNav}
         onOpenActivityLog={openActivityLogWithNav}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}

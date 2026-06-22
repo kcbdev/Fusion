@@ -8,7 +8,6 @@ import type { Toast, ToastType } from "../hooks/useToast";
 import { ModalErrorBoundary } from "./ErrorBoundary";
 import { TaskDetailModal } from "./TaskDetailModal";
 import { GitHubImportModal } from "./GitHubImportModal";
-import { PlanningModeModal } from "./PlanningModeModal";
 import { SubtaskBreakdownModal } from "./SubtaskBreakdownModal";
 import { TerminalModal } from "./TerminalModal";
 import { ScriptsModal } from "./ScriptsModal";
@@ -156,11 +155,6 @@ export function AppModals({
     removeNav(modalManager.closeGitHubImport);
     modalManager.closeGitHubImport();
   }, [modalManager.closeGitHubImport, removeNav]);
-
-  const closePlanningWithNav = useCallback(() => {
-    removeNav(modalManager.closePlanning);
-    modalManager.closePlanning();
-  }, [modalManager.closePlanning, removeNav]);
 
   const closeSubtaskWithNav = useCallback(() => {
     removeNav(modalManager.closeSubtask);
@@ -353,20 +347,6 @@ export function AppModals({
         tasks={tasks}
         projectId={projectId}
       />
-
-      <ModalErrorBoundary>
-        <PlanningModeModal
-          isOpen={modalManager.isPlanningOpen}
-          onClose={closePlanningWithNav}
-          onTaskCreated={taskHandlers.handlePlanningTaskCreated}
-          onTasksCreated={taskHandlers.handlePlanningTasksCreated}
-          tasks={tasks}
-          initialPlan={modalManager.planningInitialPlan ?? undefined}
-          projectId={projectId}
-          workflowId={modalManager.planningWorkflowId}
-          resumeSessionId={modalManager.planningResumeSessionId}
-        />
-      </ModalErrorBoundary>
 
       <ModalErrorBoundary>
         <SubtaskBreakdownModal

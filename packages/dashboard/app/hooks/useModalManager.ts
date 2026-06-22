@@ -199,7 +199,10 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       groupModalGroupId ||
       settingsOpen ||
       newTaskModalOpen ||
-      isPlanningOpen ||
+      /*
+      FNXC:Navigation 2026-06-21-00:00:
+      FN-6886 reuses Planning Mode state only as docked-view payload storage, so it must not make the app behave as though a blocking modal overlay is open.
+      */
       isSubtaskOpen ||
       terminalOpen ||
       filesOpen ||

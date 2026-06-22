@@ -14,6 +14,7 @@ import {
   FileText,
   Gauge,
   History,
+  Lightbulb,
   LayoutGrid,
   List,
   Mail,
@@ -271,6 +272,19 @@ export function LeftSidebarNav({
       icon: Gauge,
       testId: "sidebar-nav-command-center",
       onSelect: () => onChangeView("command-center"),
+    },
+    {
+      id: "planning",
+      /*
+      FNXC:Navigation 2026-06-21-00:00:
+      FN-6886 makes Planning Mode a first-class sidebar destination immediately after Command Center so the experimental sidebar owns the desktop planning affordance.
+      */
+      label: t("nav.planning", "Planning"),
+      view: "planning",
+      isActive: view === "planning",
+      icon: Lightbulb,
+      testId: "sidebar-nav-planning",
+      onSelect: () => onChangeView("planning"),
     },
     {
       id: "missions",

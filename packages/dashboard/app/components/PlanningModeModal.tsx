@@ -1,7 +1,7 @@
 import "./PlanningModeModal.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, PlanningQuestion, PlanningSummary, TaskPriority } from "@fusion/core";
@@ -71,6 +71,8 @@ interface PlanningModeModalProps {
   workflowId?: string | null;
   /** When set, reconnect to a persisted background session instead of starting fresh */
   resumeSessionId?: string;
+  /** Render without the full-screen modal chrome when Planning Mode is mounted as a top-level app view. */
+  presentation?: "modal" | "embedded";
 }
 
 interface QuestionResponse {
@@ -193,8 +195,9 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId }: PlanningModeModalProps) {
+export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, presentation = "modal" }: PlanningModeModalProps) {
   const { t } = useTranslation("app");
+  const isEmbedded = presentation === "embedded";
   const [initialPlan, setInitialPlan] = useState("");
   const [view, setView] = useState<ViewState>({ type: "initial" });
   const [error, setError] = useState<string | null>(null);
@@ -298,7 +301,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     modelId?: string;
   } | null>(null);
 
-  useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
+  useModalResizePersist(modalRef, isOpen && !isEmbedded, "fusion:planning-modal-size");
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const { addToast } = useToast();
@@ -306,7 +309,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } =
     useMobileKeyboard({ enabled: viewportMode === "mobile" });
-  useMobileScrollLock(viewportMode === "mobile" && isOpen);
+  useMobileScrollLock(viewportMode === "mobile" && isOpen && !isEmbedded);
 
   // Drive --vv-height / --keyboard-overlap / --vv-offset-top imperatively
   // rather than via React's style prop. Reason: when React removes a CSS
@@ -1799,24 +1802,30 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const activeRemoteTab = activeLockInfo && activeLockInfo.tabId !== sessionTabId;
   const allowTakeover = isLockedByOther && (!activeRemoteTab || activeLockInfo.stale);
 
+  /*
+  FNXC:PlanningMode 2026-06-21-00:00:
+  FN-6886 keeps the existing Planning Mode workflow component but lets App mount it as an embedded main-content view. Embedded mode must not draw a full-screen overlay, close on backdrop clicks, lock mobile scrolling, or persist resizable modal dimensions.
+  */
   if (!isOpen) return null;
 
   return (
     <div
-      className="modal-overlay open"
-      onMouseDown={(e) => {
+      className={isEmbedded ? "planning-view open" : "modal-overlay open"}
+      data-testid={isEmbedded ? "planning-view" : undefined}
+      onMouseDown={isEmbedded ? undefined : (e: MouseEvent<HTMLDivElement>) => {
         overlayMouseDownOnSelfRef.current = e.target === e.currentTarget;
       }}
-      onClick={(e) => {
+      onClick={isEmbedded ? undefined : (e: MouseEvent<HTMLDivElement>) => {
         if (e.target === e.currentTarget && overlayMouseDownOnSelfRef.current) {
           handleClose();
         }
         overlayMouseDownOnSelfRef.current = false;
       }}
-      role="dialog"
-      aria-modal="true"
+      role={isEmbedded ? "region" : "dialog"}
+      aria-label={isEmbedded ? t("planning.title", "Planning Mode") : undefined}
+      aria-modal={isEmbedded ? undefined : "true"}
     >
-      <div className="modal modal-lg planning-modal" ref={modalRef}>
+      <div className={isEmbedded ? "modal modal-lg planning-modal planning-modal--embedded" : "modal modal-lg planning-modal"} ref={modalRef}>
         <div className="modal-header">
           <div className="detail-title-row">
             {mobileShowDetail && (

@@ -162,7 +162,7 @@ describe("tablet header controls", () => {
   });
 
   it("does not render planning button inline on tablet", () => {
-    renderTabletHeader({ onOpenPlanning: noop });
+    renderTabletHeader();
     expect(screen.queryByTitle("Create a task with AI planning")).toBeNull();
   });
 
@@ -214,10 +214,10 @@ describe("tablet header controls", () => {
     expect(screen.getByText("Settings")).toBeDefined();
   });
 
-  it("overflow menu contains planning on tablet", () => {
-    renderTabletHeader({ onOpenPlanning: noop });
+  it("overflow menu omits planning on tablet", () => {
+    renderTabletHeader();
     fireEvent.click(screen.getByTitle("More header actions"));
-    expect(screen.getByTestId("overflow-planning-btn")).toBeDefined();
+    expect(screen.queryByTestId("overflow-planning-btn")).toBeNull();
   });
 
   it("overflow menu contains GitHub import on tablet", () => {
@@ -294,14 +294,6 @@ describe("tablet header controls", () => {
     fireEvent.click(screen.getByTitle("More header actions"));
     fireEvent.click(screen.getByTestId("overflow-terminal-primary-btn"));
     expect(onToggleTerminal).toHaveBeenCalled();
-  });
-
-  it("calls onOpenPlanning from overflow menu on tablet", () => {
-    const onOpenPlanning = vi.fn();
-    renderTabletHeader({ onOpenPlanning });
-    fireEvent.click(screen.getByTitle("More header actions"));
-    fireEvent.click(screen.getByTestId("overflow-planning-btn"));
-    expect(onOpenPlanning).toHaveBeenCalled();
   });
 
   it("calls onOpenUsage from overflow menu on tablet", () => {

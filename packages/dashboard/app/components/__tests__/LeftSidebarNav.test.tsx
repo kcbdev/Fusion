@@ -211,6 +211,7 @@ describe("LeftSidebarNav", () => {
       "sidebar-nav-list",
       "sidebar-nav-agents",
       "sidebar-nav-command-center",
+      "sidebar-nav-planning",
       "sidebar-nav-missions",
       "sidebar-nav-chat",
       "sidebar-nav-documents",
@@ -231,6 +232,11 @@ describe("LeftSidebarNav", () => {
     }
 
     expect(screen.getByTestId("sidebar-nav-documents")).toHaveTextContent("Artifacts");
+    expect(screen.getByTestId("sidebar-nav-planning")).toHaveTextContent("Planning");
+
+    const primaryNav = screen.getByRole("navigation", { name: "Primary navigation" });
+    const primaryButtons = within(primaryNav).getAllByRole("button");
+    expect(primaryButtons.indexOf(screen.getByTestId("sidebar-nav-planning"))).toBe(primaryButtons.indexOf(screen.getByTestId("sidebar-nav-command-center")) + 1);
 
     const sidebar = screen.getByTestId("left-sidebar-nav");
     const footer = screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer");
@@ -358,6 +364,7 @@ describe("LeftSidebarNav", () => {
   it.each<[TaskView, string]>([
     ["board", "sidebar-nav-board"],
     ["research", "sidebar-nav-research"],
+    ["planning", "sidebar-nav-planning"],
     ["plugin:fusion-plugin-primary:primary-view", "sidebar-nav-plugin-fusion-plugin-primary-primary-view"],
     ["plugin:fusion-plugin-overflow:overflow-view", "sidebar-nav-plugin-fusion-plugin-overflow-overflow-view"],
   ])("highlights active destination %s", (view, testId) => {
@@ -527,6 +534,9 @@ describe("LeftSidebarNav", () => {
 
     fireEvent.click(screen.getByTestId("sidebar-nav-list"));
     expect(onChangeView).toHaveBeenCalledWith("list");
+
+    fireEvent.click(screen.getByTestId("sidebar-nav-planning"));
+    expect(onChangeView).toHaveBeenCalledWith("planning");
 
     fireEvent.click(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-overflow-overflow-view"));
     expect(onChangeView).toHaveBeenCalledWith("plugin:fusion-plugin-overflow:overflow-view");

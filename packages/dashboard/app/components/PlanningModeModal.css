@@ -49,6 +49,29 @@
   resize: both;
 }
 
+/*
+FNXC:PlanningMode 2026-06-21-00:00:
+FN-6886 promotes Planning Mode into the main app content area. The embedded shell fills the available content pane and intentionally disables modal-only sizing/resizing so the left sidebar owns navigation and no backdrop shell remains.
+*/
+.planning-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  padding: var(--space-lg);
+  overflow: hidden;
+}
+
+.planning-modal--embedded {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  box-shadow: none;
+}
+
 .planning-modal .modal-header {
   flex-shrink: 0;
 }
