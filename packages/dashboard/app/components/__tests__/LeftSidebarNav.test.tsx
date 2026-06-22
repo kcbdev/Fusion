@@ -137,16 +137,18 @@ describe("LeftSidebarNav", () => {
     expect(singleSidebarRendererMatches.length).toBeGreaterThan(0);
   });
 
-  it("renders the New Task CTA above the nav list and invokes the provided global trigger", () => {
+  it("renders the New Task CTA in the footer above Collapse and invokes the provided global trigger", () => {
     const onNewTask = vi.fn();
     renderSidebar({ onNewTask });
 
     const sidebar = screen.getByTestId("left-sidebar-nav");
     const newTaskButton = screen.getByTestId("sidebar-nav-new-task");
-    const navList = sidebar.querySelector(".left-sidebar-nav__list");
+    const footer = sidebar.querySelector(".left-sidebar-nav__footer");
+    const collapseToggle = screen.getByTestId("sidebar-nav-collapse-toggle");
 
-    expect(sidebar.children[0]).toBe(newTaskButton);
-    expect(newTaskButton.nextElementSibling).toBe(navList);
+    // FNXC:Navigation 2026-06-23-02:30: New Task moved into the footer, directly above Collapse.
+    expect(footer?.contains(newTaskButton)).toBe(true);
+    expect(newTaskButton.nextElementSibling).toBe(collapseToggle);
     expect(newTaskButton).toHaveAccessibleName("New Task");
     expect(newTaskButton).toHaveAttribute("title", "New Task");
     expect(newTaskButton).toHaveTextContent("New Task");
