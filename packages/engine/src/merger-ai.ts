@@ -1023,8 +1023,11 @@ export type LandOneRepoResult =
  * repo-scoped clean room, retrying on concurrent advance. No remote push. See
  * the FNXC note above for the extraction contract.
  */
+// FNXC:Workspace 2026-06-22-09:30 (Phase C review B12): `landOneRepo` takes its store access
+// exclusively through the `ctx` callbacks (log/setStatus/audit) and pre-built agents — it never
+// touches a TaskStore directly. The former leading `store` param was dead and misleading at the
+// call sites (they looked like they forwarded a store the function ignored), so it was dropped.
 export async function landOneRepo(
-  store: TaskStore,
   repoRootDir: string,
   branch: string,
   integrationBranch: string,
@@ -1273,7 +1276,7 @@ export async function runAiMerge(
   // once; the task-global finalization below (empty no-op / no-commits demote /
   // finalizeMerged) is unchanged byte-for-byte — only the inline clean-room land
   // loop moved into `landOneRepo` so `landWorkspaceTask` can reuse it per sub-repo.
-  const landResult = await landOneRepo(store, projectRootDir, branch, integrationBranch, {
+  const landResult = await landOneRepo(projectRootDir, branch, integrationBranch, {
     taskId, settings, audit, log, setStatus, maxPasses,
     mergeAgent, reviewAgent, stashResolveAgent,
     includeTaskId, trailers, taskTitle, signal: options.signal,
@@ -1561,11 +1564,28 @@ export async function landWorkspaceTask(
     // ancestor of (or equals) its CURRENT integration tip is already landed — SKIP
     // it so a retry never re-advances the ref. This makes a re-run after a partial
     // land idempotent for the already-landed repos.
-    if (await isRepoLanded(repoRootDir, integrationBranch, entry.landedSha, taskId, entry.branch)) {
-      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(entry.landedSha!)} ⊑ ${integrationBranch}) — skipping`);
+    /*
+    FNXC:Workspace 2026-06-22-09:30 (Phase C review A1 — concrete landedSha on the skip path):
+    Resolve a CONCRETE landed sha (recorded landedSha OR the trailer-fallback squash sha) rather
+    than trusting `entry.landedSha`, which is `undefined` when the land's persist was lost and only
+    the A1 trailer fallback recognises the repo. If we recovered the sha via the fallback, REPAIR
+    the persisted entry so a later run (and `finalizeWorkspaceTask`) sees a present landedSha. A
+    repair-persist failure is non-fatal: we still carry the concrete sha in-memory for this run's
+    finalize, and the trailer fallback will re-recover it next time.
+    */
+    const recoveredLandedSha = await resolveLandedShaIfLanded(
+      repoRootDir, integrationBranch, entry.landedSha, taskId, entry.branch,
+    );
+    if (recoveredLandedSha) {
+      if (!entry.landedSha) {
+        await persistRepoLandedSha(store, taskId, repoRel, recoveredLandedSha).catch(async (persistErr: unknown) => {
+          await log(`AI merge (workspace): sub-repo ${repoRel} re-recorded landedSha (${short(recoveredLandedSha)}) persist failed (non-fatal, trailer fallback will re-recover): ${getErrorMessage(persistErr)}`);
+        });
+      }
+      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(recoveredLandedSha)} ⊑ ${integrationBranch}) — skipping`);
       repos.push({
         repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
-        status: "landed", landedSha: entry.landedSha, alreadyLanded: true,
+        status: "landed", landedSha: recoveredLandedSha, alreadyLanded: true,
       });
       continue;
     }
@@ -1601,7 +1621,7 @@ export async function landWorkspaceTask(
     });
 
     try {
-      const landResult = await landOneRepo(store, repoRootDir, entry.branch, integrationBranch, {
+      const landResult = await landOneRepo(repoRootDir, entry.branch, integrationBranch, {
         taskId, settings, audit, log, setStatus, maxPasses,
         mergeAgent, reviewAgent, stashResolveAgent,
         includeTaskId, trailers, taskTitle, signal: options.signal,
@@ -1723,9 +1743,36 @@ export async function isRepoLanded(
   taskId?: string,
   branch?: string,
 ): Promise<boolean> {
+  return (
+    (await resolveLandedShaIfLanded(repoRootDir, integrationBranch, landedSha, taskId, branch)) !==
+    undefined
+  );
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-09:30 (Phase C review A1 — concrete landedSha on trailer fallback):
+ * The shared core of {@link isRepoLanded}: returns a CONCRETE landed sha when the sub-repo is
+ * already landed, else `undefined`. When the recorded `landedSha` survives it is returned as-is;
+ * when the A1 trailer fallback matches (the persist was lost so no `landedSha` is recorded) the
+ * concrete squash sha is read off the integration ref via the same bounded trailer scan.
+ *
+ * Why this matters (review A1 / finalize misfinalise): the `landWorkspaceTask` skip path and
+ * `finalizeWorkspaceTask` both key off a present `landedSha`. A trailer-fallback match with a
+ * `undefined` recorded sha would be dropped by the finalize filter, finalizing an already-landed
+ * task as a no-op (`mergeConfirmed:false`, empty `workspaceLandedShas`) — the exact dashboard
+ * `merged:false` contradiction Phase C set out to eliminate. Resolving the concrete sha here lets
+ * the skip path persist+propagate it so the repo is correctly counted as landed.
+ */
+async function resolveLandedShaIfLanded(
+  repoRootDir: string,
+  integrationBranch: string,
+  landedSha: string | undefined,
+  taskId?: string,
+  branch?: string,
+): Promise<string | undefined> {
   const intRef = `refs/heads/${integrationBranch}`;
   if (!(await gitOk(["rev-parse", "--verify", intRef], repoRootDir))) {
-    return false;
+    return undefined;
   }
   // Primary: recorded landedSha is an ancestor of (or equals) the integration tip.
   // `merge-base --is-ancestor X Y` exits 0 iff X is an ancestor of (or equal to) Y.
@@ -1733,12 +1780,13 @@ export async function isRepoLanded(
     landedSha &&
     (await gitOk(["merge-base", "--is-ancestor", landedSha, intRef], repoRootDir))
   ) {
-    return true;
+    return landedSha;
   }
   // A1 fallback: even without a recorded landedSha, the repo is already landed if the
   // integration ref carries a commit with this task's Fusion-Task-Id trailer (the squash
   // we lost the persist for). Bound the scan to commits gained since the branch's land base
-  // so a stale historical trailer of the same id cannot false-positive.
+  // so a stale historical trailer of the same id cannot false-positive. Return the MOST RECENT
+  // matching commit sha (the squash) so callers can persist a concrete landedSha.
   if (taskId) {
     const branchRef = branch ? `refs/heads/${branch}` : undefined;
     let range = intRef;
@@ -1751,9 +1799,10 @@ export async function isRepoLanded(
       ["log", "--format=%H", `--grep=${trailer}`, "--fixed-strings", range],
       repoRootDir,
     );
-    if (found && found.trim().length > 0) return true;
+    const firstSha = found?.split(/\r?\n/).map((s) => s.trim()).find((s) => s.length > 0);
+    if (firstSha) return firstSha;
   }
-  return false;
+  return undefined;
 }
 
 /**

@@ -48,8 +48,10 @@ describeIfGit("workspace fixture", () => {
 
   it("builds a non-git root with two real git sub-repos and a resolvable workspace config", async () => {
     fx = await createWorkspaceFixture();
-    // Root is NOT a git repo.
-    expect(() => fx.git("..", "git rev-parse --git-dir")).toThrow();
+    // Root itself is NOT a git repo (`.` resolves to rootDir, not its parent — `..` would
+    // test tmpdir, which proves nothing about the invariant). git rev-parse --git-dir throws
+    // (exits non-zero) only when run outside any git repo.
+    expect(() => fx.git(".", "git rev-parse --git-dir")).toThrow();
     // Each sub-repo is a real git repo with a commit on main.
     expect(fx.git("repo-a", "git rev-parse --abbrev-ref HEAD")).toBe("main");
     expect(fx.git("repo-b", "git rev-list --count HEAD")).toBe("1");
