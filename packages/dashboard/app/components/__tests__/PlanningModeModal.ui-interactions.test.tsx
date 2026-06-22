@@ -859,6 +859,83 @@ describe("PlanningModeModal", () => {
     });
   });
 
+  /*
+  FNXC:Planning 2026-06-23-02:00:
+  The embedded Planning sidebar is resizable like Missions: a desktop-only drag handle (role=separator) drives an inline width on .planning-sidebar that persists to localStorage and is clamped to the PLANNING_SIDEBAR_MIN/MAX range. These tests assert the handle exists on desktop, persists a clamped width on arrow-key resize, restores from localStorage, and is absent on mobile (where the sidebar stacks full-width).
+  */
+  describe("Resizable sidebar (Missions parity)", () => {
+    const STORAGE_KEY = "fusion:planning-sidebar-width";
+
+    beforeEach(() => {
+      window.localStorage.removeItem(STORAGE_KEY);
+    });
+
+    function renderEmbedded() {
+      return render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation="embedded"
+        />,
+      );
+    }
+
+    it("renders a desktop resize handle and defaults the sidebar to 300px", () => {
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      const handle = container.querySelector(".planning-sidebar-resize-handle");
+      expect(handle).not.toBeNull();
+      expect(handle?.getAttribute("role")).toBe("separator");
+      expect(handle?.getAttribute("aria-orientation")).toBe("vertical");
+
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("300px");
+    });
+
+    it("clamps and persists width on arrow-key resize", () => {
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      const handle = container.querySelector<HTMLElement>(".planning-sidebar-resize-handle")!;
+      // Shift+ArrowRight steps +50 -> 350px, persisted.
+      fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("350px");
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe("350");
+
+      // ArrowLeft below the minimum clamps to PLANNING_SIDEBAR_MIN_WIDTH (220).
+      for (let i = 0; i < 20; i += 1) {
+        fireEvent.keyDown(handle, { key: "ArrowLeft", shiftKey: true });
+      }
+      expect(sidebar?.style.width).toBe("220px");
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe("220");
+    });
+
+    it("restores a persisted clamped width from localStorage", () => {
+      window.localStorage.setItem(STORAGE_KEY, "9999");
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      // Out-of-range stored value clamps to PLANNING_SIDEBAR_MAX_WIDTH (560).
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("560px");
+    });
+
+    it("omits the resize handle and inline width on mobile", () => {
+      mockViewport("mobile");
+      const { container } = renderEmbedded();
+
+      expect(container.querySelector(".planning-sidebar-resize-handle")).toBeNull();
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("");
+    });
+  });
+
   describe("Summary markdown preview toggle", () => {
     it("toggles description between plain textarea and formatted markdown preview", async () => {
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {

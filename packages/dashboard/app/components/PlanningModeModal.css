@@ -53,13 +53,16 @@
 FNXC:PlanningMode 2026-06-21-00:00:
 FN-6886 promotes Planning Mode into the main app content area. The embedded shell fills the available content pane and intentionally disables modal-only sizing/resizing so the left sidebar owns navigation and no backdrop shell remains.
 */
+/*
+FNXC:Planning 2026-06-23-02:00:
+The embedded Planning wrapper matches Missions' shell: NO outer padding. Missions' inline shell (mission-manager--inline) has no wrapper inset — its header supplies the top/side padding (var(--space-lg) var(--space-xl)) and the split body fills edge-to-edge below. Mirroring that here removes the previous extra var(--space-lg) inset so Planning's header and two-pane body align with Missions.
+*/
 .planning-view {
   height: 100%;
   min-height: 0;
   width: 100%;
   flex: 1;
   display: flex;
-  padding: var(--space-lg);
   overflow: hidden;
 }
 
@@ -91,12 +94,12 @@ Embedded planning must blend into the main content like Command Center: no panel
 }
 
 /*
-FNXC:PlanningMode 2026-06-22-00:00:
-The embedded planning title must read like other embedded-view titles (Command Center cc-header/cc-title): a plain heading with no tinted modal-header bar, no bottom divider, and no close button. Strip the modal-header background/border and align the title to the content edge; bump the heading to the shared 1.125rem embedded-title size.
+FNXC:Planning 2026-06-23-02:00:
+The embedded planning header now matches MissionManager's inline header (mission-manager__header--inline) EXACTLY: var(--surface) background, padding var(--space-lg) var(--space-xl), no bottom divider, and the shared 1.125rem title metric. This aligns the top header and the spacing between header and the two-pane body with Missions (previously the header used 0 0 var(--space-md) padding + a transparent fill, which read inconsistently next to Missions).
 */
 .planning-modal--embedded .modal-header--embedded {
-  padding: 0 0 var(--space-md);
-  background: transparent;
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--surface);
   border-bottom: none;
 }
 
@@ -152,21 +155,56 @@ Embedded Planning is a real two-pane view mirroring Missions (mission-manager__s
 }
 
 /*
-FNXC:Planning 2026-06-23-01:15:
-The sidebar footer pins the primary "New session" action to the bottom (parity with mission-manager__sidebar-footer) with the show/hide-archived link beneath it. A top border separates it from the scrolling list.
+FNXC:Planning 2026-06-23-02:00:
+Sidebar resize handle — identical treatment to MissionManager's mission-manager__sidebar-resize-handle: a thin (var(--space-sm)) col-resize strip whose ::before center bar tints with var(--todo) on hover/active, plus a focus ring for keyboard resize. touch-action:none keeps the pointer drag from scrolling on trackpads.
+*/
+.planning-sidebar-resize-handle {
+  position: relative;
+  width: var(--space-sm);
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  transition: background var(--transition-fast);
+}
+
+.planning-sidebar-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--space-xs);
+  transform: translateX(-50%);
+}
+
+.planning-sidebar-resize-handle:hover::before,
+.planning-sidebar-resize-handle:active::before {
+  background: color-mix(in srgb, var(--todo) 30%, transparent);
+}
+
+.planning-sidebar-resize-handle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+/*
+FNXC:Planning 2026-06-23-02:00:
+Footer matches MissionManager's mission-manager__sidebar-footer EXACTLY: padding var(--space-md), a single border-top divider (var(--btn-border-width) solid var(--border)), gap var(--space-sm), centered. Missions has no separate footer band styling beyond the centered CTA, so we mirror that — no extra bottom padding/margin and no empty space. The column direction is the only deviation, required because Planning carries the show/hide-archived link beneath the CTA (Missions has a single child); align-items stays stretch so the full-width CTA fills the footer like Missions'.
 */
 .planning-sidebar-footer {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  justify-content: center;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-top: var(--btn-border-width) solid var(--border);
   flex-shrink: 0;
-  text-align: center;
 }
 
 .planning-sidebar-toggle-archived-link {
+  align-self: center;
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-muted);
   text-decoration: none;
@@ -186,17 +224,15 @@ The sidebar footer pins the primary "New session" action to the bottom (parity w
 }
 
 /*
-FNXC:Planning 2026-06-23-01:15:
-The New session button carries the shared "btn btn-primary" classes so its size/color match Missions' primary sidebar CTA (mission-manager__sidebar-cta) exactly; this local rule only stretches it full-width and centers the icon+label. The .active state (no session selected) keeps the primary fill and adds an inset ring so the user can tell they're on the new-session view without losing the Missions color match.
+FNXC:Planning 2026-06-23-02:00:
+The New session button must look EXACTLY like Missions' primary sidebar create button (mission-manager__sidebar-cta with btn btn-primary): same full-width fill, same min-height (calc(--space-lg * 2 + --space-xs)), centered icon+label gap, inherited font-size. The earlier .active "inset ring" outline is REMOVED — Missions' CTA has no ring in any state, so the no-session-selected (.active) state now relies solely on the empty/initial detail pane to signal the new-session view, keeping the two buttons visually identical.
 */
 .planning-sidebar-new {
   width: 100%;
+  min-height: calc(var(--space-lg) * 2 + var(--space-xs));
   justify-content: center;
   gap: var(--space-sm);
-}
-
-.planning-sidebar-new.active {
-  box-shadow: inset 0 0 0 var(--btn-border-width) var(--cta-text);
+  font-size: inherit;
 }
 
 .planning-sidebar-list {

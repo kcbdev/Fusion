@@ -60,6 +60,15 @@ import { getSessionTabId } from "../utils/getSessionTabId";
 
 const WARNING_ICON = "⚠️";
 
+/*
+FNXC:Planning 2026-06-23-02:00:
+The embedded Planning sidebar is resizable exactly like Missions (MissionManager's MISSION_SIDEBAR_* constants). Default 300px matches Missions' default (calc(--space-lg 16px * 18.75)); min/max/storage mirror Missions so the two views resize identically and persist independently.
+*/
+const PLANNING_SIDEBAR_DEFAULT_WIDTH = 300;
+const PLANNING_SIDEBAR_MIN_WIDTH = 220;
+const PLANNING_SIDEBAR_MAX_WIDTH = 560;
+const PLANNING_SIDEBAR_STORAGE_KEY = "fusion:planning-sidebar-width";
+
 interface PlanningModeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -310,6 +319,77 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const isMobile = viewportMode === "mobile";
   const { addToast } = useToast();
   const { pushNav } = useNavigationHistoryContext();
+
+  /*
+  FNXC:Planning 2026-06-23-02:00:
+  Resizable Planning sidebar — pointer-drag + arrow-key resize with localStorage persistence, mirroring MissionManager.handleSidebarResizeStart/handleSidebarResizeKeyDown. Width is clamped to PLANNING_SIDEBAR_MIN/MAX and applied as an inline width on the sidebar <aside>. Disabled on mobile where the sidebar stacks full-width.
+  */
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return PLANNING_SIDEBAR_DEFAULT_WIDTH;
+    const stored = window.localStorage.getItem(PLANNING_SIDEBAR_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    if (!Number.isFinite(parsed)) return PLANNING_SIDEBAR_DEFAULT_WIDTH;
+    return Math.max(PLANNING_SIDEBAR_MIN_WIDTH, Math.min(PLANNING_SIDEBAR_MAX_WIDTH, parsed));
+  });
+
+  const persistSidebarWidth = useCallback((width: number) => {
+    try {
+      window.localStorage.setItem(PLANNING_SIDEBAR_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    if (typeof handle.setPointerCapture === "function") {
+      handle.setPointerCapture(event.pointerId);
+    }
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let latestWidth = startWidth;
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = Math.max(
+        PLANNING_SIDEBAR_MIN_WIDTH,
+        Math.min(PLANNING_SIDEBAR_MAX_WIDTH, startWidth + deltaX),
+      );
+      latestWidth = nextWidth;
+      setSidebarWidth(nextWidth);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (typeof handle.releasePointerCapture === "function") {
+        handle.releasePointerCapture(upEvent.pointerId);
+      }
+      document.body.style.userSelect = "";
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      persistSidebarWidth(latestWidth);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
+  const handleSidebarResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 50 : 10;
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    const nextWidth = Math.max(
+      PLANNING_SIDEBAR_MIN_WIDTH,
+      Math.min(PLANNING_SIDEBAR_MAX_WIDTH, sidebarWidth + delta),
+    );
+    setSidebarWidth(nextWidth);
+    persistSidebarWidth(nextWidth);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
 
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } =
     useMobileKeyboard({ enabled: viewportMode === "mobile" });
@@ -1869,6 +1949,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             selectedSessionId={selectedSessionId}
             pendingDeleteId={pendingDeleteId}
             showArchived={showArchived}
+            sidebarWidth={isMobile ? undefined : sidebarWidth}
             onToggleShowArchived={() => setShowArchived((v) => !v)}
             onArchive={(id) => void handleArchiveSession(id)}
             onSelectSession={handleSelectSession}
@@ -1877,6 +1958,25 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             onConfirmDelete={(id) => void handleDeleteSession(id)}
             onCancelDelete={() => setPendingDeleteId(null)}
           />
+
+          {/*
+          FNXC:Planning 2026-06-23-02:00:
+          Sidebar resize handle — parity with MissionManager's mission-manager__sidebar-resize-handle. Rendered only on desktop (sidebar stacks on mobile). Pointer-drag and arrow-key resize both clamp + persist width.
+          */}
+          {!isMobile && (
+            <div
+              className="planning-sidebar-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={PLANNING_SIDEBAR_MIN_WIDTH}
+              aria-valuemax={PLANNING_SIDEBAR_MAX_WIDTH}
+              aria-valuenow={sidebarWidth}
+              aria-label={t("planning.resizeSidebar", "Resize planning sidebar")}
+              tabIndex={0}
+              onPointerDown={handleSidebarResizeStart}
+              onKeyDown={handleSidebarResizeKeyDown}
+            />
+          )}
 
           <div className="planning-detail">
           {error && <div className="form-error planning-error">{error}</div>}
@@ -3130,6 +3230,8 @@ interface PlanningSessionListProps {
   selectedSessionId: string | null;
   pendingDeleteId: string | null;
   showArchived: boolean;
+  /** Resizable sidebar width (px) on desktop; undefined on mobile where it stacks full-width. */
+  sidebarWidth?: number;
   onToggleShowArchived: () => void;
   onArchive: (id: string) => void;
   onSelectSession: (id: string) => void;
@@ -3145,6 +3247,7 @@ function PlanningSessionList({
   selectedSessionId,
   pendingDeleteId,
   showArchived,
+  sidebarWidth,
   onToggleShowArchived,
   onArchive,
   onSelectSession,
@@ -3155,7 +3258,11 @@ function PlanningSessionList({
 }: PlanningSessionListProps) {
   const { t } = useTranslation("app");
   return (
-    <aside className="planning-sidebar" aria-label={t("planning.planningSessions", "Planning sessions")}>
+    <aside
+      className="planning-sidebar"
+      aria-label={t("planning.planningSessions", "Planning sessions")}
+      style={sidebarWidth === undefined ? undefined : { width: `${sidebarWidth}px` }}
+    >
       {/*
       FNXC:Planning 2026-06-23-01:15:
       The embedded Planning view reads as a real two-pane layout matching Missions: the left sidebar is a full-height flex column whose session list scrolls and whose primary action ("New session") is pinned to a bottom footer (parity with MissionManager's mission-manager__sidebar-footer + sidebar-cta). The header that previously held the New session button is removed so the list owns the top of the sidebar like the Missions list.
