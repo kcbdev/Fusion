@@ -640,13 +640,56 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
   box-shadow: var(--shadow-sm);
 }
 
+/*
+FNXC:WorkflowMiniMap 2026-06-22-10:15:
+MiniMap node fill is supplied by WorkflowNodeEditor.tsx so background-only
+column bands can be transparent and real workflow nodes remain visible. Keep
+CSS scoped to chrome/stroke details only; a CSS fill here overrides React
+Flow's SVG attributes and makes the graph preview read blank.
+*/
 .wf-editor-canvas .react-flow__minimap-node {
-  fill: var(--bg-secondary);
-  stroke: var(--border);
+  stroke: var(--border-strong, var(--border));
 }
 
 .wf-editor-canvas .react-flow__minimap-mask {
   fill: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.wf-minimap-toggle {
+  position: absolute;
+  right: calc(200px + var(--space-sm));
+  bottom: var(--space-sm);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 28px;
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.wf-minimap-toggle:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.wf-minimap-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.wf-minimap-toggle--collapsed {
+  right: var(--space-sm);
 }
 
 .wf-mobile-shell {
@@ -1554,6 +1597,37 @@ Built-in workflow prompts need visible override state and a reset action without
 .wf-column-name {
   flex: 1;
   min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+/*
+FNXC:WorkflowEditorTheme 2026-06-22-10:15:
+Column-panel name fields, trait checkboxes, and agent-mode radios sit on the
+same sidebar surface as workflow fields. Theme all native form controls with
+Fusion tokens so light/dark themes never show browser-default white controls.
+*/
+.wf-column-name:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.wf-column-name:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.wf-column-name:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-dim);
+  cursor: not-allowed;
 }
 
 .wf-column-item-actions {
@@ -1599,6 +1673,17 @@ Column trait toggles are left-sidebar workflow controls; keep their enabled and 
 */
 .wf-column-trait input[type="checkbox"] {
   accent-color: var(--todo);
+}
+
+.wf-column-trait input[type="checkbox"],
+.wf-column-agent-mode-option input[type="radio"] {
+  margin: 0;
+  accent-color: var(--todo);
+}
+
+.wf-column-trait input[type="checkbox"]:disabled,
+.wf-column-agent-mode-option input[type="radio"]:disabled {
+  cursor: not-allowed;
 }
 
 .wf-column-traits-label,

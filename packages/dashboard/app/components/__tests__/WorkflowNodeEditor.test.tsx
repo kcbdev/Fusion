@@ -438,6 +438,30 @@ describe("WorkflowNodeEditor", () => {
     expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
   });
 
+  it("lets users collapse and restore the workflow mini map", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    const { container } = render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    const toggle = await screen.findByTestId("wf-minimap-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeTruthy();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeTruthy();
+  });
+
   it("lets desktop users switch to the simple graph layout and back", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
 

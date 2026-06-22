@@ -77,16 +77,23 @@ describe("WorkflowNodeEditor themed React Flow CSS contract", () => {
     expectNoHardcodedWhiteBackground(minimapRule);
 
     const minimapNodeRule = findRule([baseCss], /\.wf-editor-canvas \.react-flow__minimap-node\s*\{[^}]*\}/);
-    expect(minimapNodeRule).toMatch(/fill\s*:\s*var\(--bg-secondary\)\s*;/);
-    expect(minimapNodeRule).toMatch(/stroke\s*:\s*var\(--border\)\s*;/);
+    expect(minimapNodeRule).not.toMatch(/\bfill\s*:/);
+    expect(minimapNodeRule).toMatch(/stroke\s*:\s*var\(--border-strong, var\(--border\)\)\s*;/);
 
     const minimapMaskRule = findRule([baseCss], /\.wf-editor-canvas \.react-flow__minimap-mask\s*\{[^}]*\}/);
     expect(minimapMaskRule).toMatch(/fill\s*:\s*color-mix\(in srgb, var\(--surface\) 70%, transparent\)\s*;/);
+
+    const minimapToggleRule = findRule([baseCss], /\.wf-minimap-toggle\s*\{[^}]*\}/);
+    expect(minimapToggleRule).toMatch(/position\s*:\s*absolute\s*;/);
+    expect(minimapToggleRule).toMatch(/background\s*:\s*var\(--surface\)\s*;/);
+    expect(minimapToggleRule).toMatch(/border\s*:\s*var\(--btn-border-width\) solid var\(--border\)\s*;/);
+    expectNoHardcodedWhiteBackground(minimapToggleRule);
 
     for (const selector of [
       /\.wf-setting--checkbox input\[type="checkbox"\]\s*\{[^}]*\}/,
       /\.wf-field--checkbox input\[type="checkbox"\]\s*\{[^}]*\}/,
       /\.wf-column-trait input\[type="checkbox"\]\s*\{[^}]*\}/,
+      /\.wf-column-agent-mode-option input\[type="radio"\]\s*\{[^}]*\}/,
     ]) {
       const checkboxRule = findRule([baseCss], selector);
       expect(checkboxRule).toMatch(/accent-color\s*:\s*var\(--todo\)\s*;/);

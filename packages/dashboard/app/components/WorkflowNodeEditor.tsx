@@ -158,6 +158,26 @@ function parseModelDropdownValue(value: string): { provider: string; modelId: st
   return { provider: value.slice(0, slashIndex), modelId: value.slice(slashIndex + 1) };
 }
 
+/*
+FNXC:WorkflowMiniMap 2026-06-22-10:15:
+The workflow minimap must show the actual graph, not the large column swimlane
+band nodes that exist only as canvas background scaffolding. Use explicit
+theme-token colors so React Flow's SVG attributes do not fall back to blank
+default chrome in dark/light themes.
+*/
+function miniMapNodeColor(node: FlowNode<WorkflowFlowNodeData>): string {
+  if (isColumnBandNode(node.id)) return "transparent";
+  if (node.data.kind === "start") return "var(--ws-success)";
+  if (node.data.kind === "end") return "var(--ws-info)";
+  if (node.data.kind === "gate" || node.data.kind === "step-review") return "var(--ws-warning)";
+  if (node.data.kind === "merge" || node.data.kind === "join") return "var(--accent)";
+  return "var(--todo)";
+}
+
+function miniMapNodeStrokeColor(node: FlowNode<WorkflowFlowNodeData>): string {
+  return isColumnBandNode(node.id) ? "transparent" : "var(--border-strong, var(--border))";
+}
+
 /** Normalized serialization of the editor's authoring state for dirty tracking
  *  (U4). Serializes nodes/edges through flowToIr (so mapping-layer defaults are
  *  materialized identically on the loaded and live sides) plus the editor-owned
@@ -731,6 +751,7 @@ function InnerEditor({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [miniMapCollapsed, setMiniMapCollapsed] = useState(false);
   const [compactLayoutEnabled, setCompactLayoutEnabled] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobileWorkflowPanel>(() =>
     initialPanel === "settings" ? "settings" : "graph",
@@ -3461,7 +3482,32 @@ function InnerEditor({
                   >
                     <Background />
                     <Controls />
-                    <MiniMap pannable zoomable />
+                    <button
+                      type="button"
+                      className={`wf-minimap-toggle nodrag nopan${miniMapCollapsed ? " wf-minimap-toggle--collapsed" : ""}`}
+                      aria-expanded={!miniMapCollapsed}
+                      aria-controls="wf-workflow-minimap"
+                      data-testid="wf-minimap-toggle"
+                      onClick={() => setMiniMapCollapsed((collapsed) => !collapsed)}
+                    >
+                      {miniMapCollapsed ? <Maximize2 size={13} aria-hidden /> : <Minimize2 size={13} aria-hidden />}
+                      <span>
+                        {miniMapCollapsed
+                          ? t("workflowNodes.showMiniMap", "Show mini map")
+                          : t("workflowNodes.hideMiniMap", "Hide mini map")}
+                      </span>
+                    </button>
+                    {!miniMapCollapsed && (
+                      <MiniMap
+                        id="wf-workflow-minimap"
+                        pannable
+                        zoomable
+                        nodeColor={miniMapNodeColor}
+                        nodeStrokeColor={miniMapNodeStrokeColor}
+                        maskColor="color-mix(in srgb, var(--surface) 70%, transparent)"
+                        bgColor="var(--surface)"
+                      />
+                    )}
                   </ReactFlow>
                   </WorkflowEditorCatalogContext.Provider>
                 </div>
