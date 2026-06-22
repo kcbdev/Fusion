@@ -39,10 +39,16 @@ export async function resolveCapturedBaseCommitSha(
   integrationBranch: string = "main",
 ): Promise<string | undefined> {
   const branch = integrationBranch.trim() || "main";
-  // Shell-quote defensively; integration branch names are normalized upstream
-  // but may carry slashes (e.g. "release/2026-06") that are valid in refs.
-  const localRef = JSON.stringify(branch);
-  const originRef = JSON.stringify(`origin/${branch}`);
+  // FNXC:Workspace 2026-06-22-00:00:
+  // Shell-quote with POSIX single quotes, NOT JSON.stringify. JSON.stringify wraps
+  // in double quotes, under which the shell expands `$VAR`/backticks — a branch like
+  // `release/$2.0` would expand `$2` to a positional. Admin-configured integration
+  // branch names are not guaranteed to exclude `$`, and `$` is valid in git refs, so
+  // double-quoting is an injection/correctness risk. Single-quoting (with the embedded
+  // `'` → `'\''` escape) is literal and safe for slashes (e.g. "release/2026-06") too.
+  const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+  const localRef = shellQuote(branch);
+  const originRef = shellQuote(`origin/${branch}`);
   let baseCommitSha: string | undefined;
   try {
     const { stdout } = await execAsync(
