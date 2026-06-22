@@ -219,9 +219,14 @@ html {
   transform-origin: center;
 }
 
+/*
+FNXC:PlanningMode 2026-06-21-23:45:
+Lucide SVG loaders must rotate on the first Planning loading paint, before later streaming output forces a repaint.
+Use the painted geometry box for shared spinner utilities so `transform-origin: center` is resolved immediately instead of waiting on the SVG viewBox layout.
+*/
 svg.animate-spin,
 svg.spin {
-  transform-box: view-box;
+  transform-box: fill-box;
 }
 
 :root {

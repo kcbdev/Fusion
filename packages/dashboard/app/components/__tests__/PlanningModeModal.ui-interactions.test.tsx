@@ -5,6 +5,8 @@ FN-6441 rescued this orphaned component test after standalone dashboard-app exec
 FNXC:DashboardTests 2026-06-14-08:32:
 PlanningModeModal calls useToast(), which throws without a ToastProvider. These tests render it bare, so the hook stays mocked in the same style as PlanningModeModal.autosize.test.tsx instead of introducing broad provider wiring during skip-list rescue.
 */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../hooks/useToast", () => ({
@@ -217,6 +219,115 @@ describe("PlanningModeModal", () => {
   });
 
   describe("Loading state", () => {
+    function getPlanningLoadingSpinner(container: HTMLElement): SVGSVGElement {
+      const spinner = container.querySelector<SVGSVGElement>(".planning-loading svg.spin");
+      expect(spinner).not.toBeNull();
+      return spinner!;
+    }
+
+    async function startPlanningAndHoldLoading(container: HTMLElement): Promise<SVGSVGElement> {
+      mockConnectPlanningStream.mockImplementationOnce(() => ({
+        close: vi.fn(),
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      return getPlanningLoadingSpinner(container);
+    }
+
+    it.each([
+      { presentation: "modal" as const, viewport: "desktop" as const },
+      { presentation: "modal" as const, viewport: "mobile" as const },
+      { presentation: "embedded" as const, viewport: "desktop" as const },
+      { presentation: "embedded" as const, viewport: "mobile" as const },
+    ])("keeps the first loading-frame spinner animated for $presentation on $viewport", async ({ presentation, viewport }) => {
+      mockViewport(viewport);
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation={presentation}
+        />
+      );
+
+      const spinner = await startPlanningAndHoldLoading(container);
+
+      expect(spinner).toHaveClass("spin");
+      expect(spinner).toHaveClass("icon-todo");
+      expect(spinner.style.animation).toBe("");
+      expect(spinner.style.animationName).toBe("");
+    });
+
+    it("uses SVG-safe spin geometry so the first Planning loading paint rotates", () => {
+      const styles = readFileSync(resolve(process.cwd(), "app/styles.css"), "utf8");
+      const sharedSvgSpinRule = styles.match(/svg\.animate-spin,\s*\nsvg\.spin\s*\{[^}]*\}/)?.[0] ?? "";
+
+      expect(sharedSvgSpinRule).toContain("transform-box: fill-box");
+    });
+
+    it("keeps the streaming loading-frame spinner on the same animation contract", async () => {
+      let streamHandlers: any = null;
+
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation="embedded"
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onThinking?.("Analyzing requirements...");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+      });
+
+      const spinner = getPlanningLoadingSpinner(container);
+      expect(spinner).toHaveClass("spin");
+      expect(spinner.style.animation).toBe("");
+      expect(spinner.style.animationName).toBe("");
+    });
+
+    it("keeps other Planning Mode Loader2 spin affordances wired", () => {
+      const source = readFileSync(resolve(process.cwd(), "app/components/PlanningModeModal.tsx"), "utf8");
+
+      expect(source).toContain('className="spin planning-sidebar-status-icon planning-sidebar-status-generating"');
+      expect(source).toContain('className="spin icon-mr-8"');
+      expect(source).toContain('className="spin icon-mr-6"');
+    });
+
     it("shows 'Generating next question...' text when loading without streaming content", async () => {
       // Mock to delay the question response so we stay in loading state
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
