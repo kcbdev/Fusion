@@ -262,7 +262,11 @@ export function MobileNavBar({
 
   // Keep optional primary tabs limited to preserve touch-target width.
   // Overflowed destinations remain available in the More sheet.
-  const showSkillsTopLevel = skillsEnabled;
+  /*
+  FNXC:Navigation 2026-06-22-01:40:
+  Skills is never a top-level mobile tab; when enabled it lives only in the three-dot More overflow sheet.
+  */
+  const showSkillsTopLevel = false;
   const showSkillsInMore = skillsEnabled && !showSkillsTopLevel;
   const sortedPrimaryPluginViews = pluginDashboardViews
     .filter((entry) => entry.view.placement === "primary")
@@ -307,6 +311,24 @@ export function MobileNavBar({
         role="tablist"
         aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}
       >
+        {/*
+        FNXC:Navigation 2026-06-22-01:40:
+        Dashboard (Command Center) is the first mobile tab, before Tasks, matching the desktop sidebar order.
+        */}
+        <button
+          type="button"
+          className={`mobile-nav-tab${view === "command-center" ? " mobile-nav-tab--active" : ""}`}
+          data-testid="mobile-nav-tab-command-center"
+          role="tab"
+          aria-selected={view === "command-center"}
+          onClick={() => onChangeView("command-center")}
+        >
+          <span className="mobile-nav-tab-icon-wrapper">
+            <Gauge />
+          </span>
+          <span className="mobile-nav-tab-label">{t("nav.commandCenter", "Dashboard")}</span>
+        </button>
+
         <button
           type="button"
           className={`mobile-nav-tab${view === "board" || view === "list" ? " mobile-nav-tab--active" : ""}`}
@@ -397,20 +419,6 @@ export function MobileNavBar({
           {mailboxUnreadCount > 0 && (
             <span className="mobile-nav-tab-badge">{formatCount(mailboxUnreadCount)}</span>
           )}
-        </button>
-
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "command-center" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-command-center"
-          role="tab"
-          aria-selected={view === "command-center"}
-          onClick={() => onChangeView("command-center")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Gauge />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.commandCenter", "Command Center")}</span>
         </button>
 
         {showSkillsTopLevel && (
