@@ -17,12 +17,13 @@
   background: var(--surface);
 }
 
-/* FNXC:ListView 2026-06-23-00:00: No border below the controls — the toolbar (Bulk Edit / View options / New Task) flows straight into the quick-add box with no divider between them. */
+/* FNXC:ListView 2026-06-23-00:00: No border below the controls — the toolbar (Bulk Edit / View / New Task) flows straight into the quick-add box with no divider between them.
+   FNXC:ListView 2026-06-23-04:00: Tight bottom padding so the toolbar sits close to the quick-add box below (paired with the quick-add's reduced top padding). */
 .list-sidebar-controls {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-xl);
+  padding: var(--space-md) var(--space-xl) var(--space-xs);
   background: var(--surface);
 }
 
@@ -268,10 +269,11 @@ Compact count for the single header row: smaller, dimmer, and non-dominant so th
   margin: 0 auto;
 }
 
-/* New class for QuickEntryBox positioned above the table in list view */
+/* New class for QuickEntryBox positioned above the table in list view.
+   FNXC:ListView 2026-06-23-04:00: Reduced top padding so the quick-add box sits close to the toolbar above it. */
 .list-quick-entry-above-table {
   width: 100%;
-  padding: var(--space-md) var(--space-xl);
+  padding: var(--space-xs) var(--space-xl) var(--space-md);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }

@@ -516,11 +516,14 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   padding: var(--space-xl);
 }
 
+/*
+FNXC:Planning 2026-06-23-04:00:
+The footer is a light action row, NOT a heavy bordered band. Drop the border-top divider and trim the padding so the Start-Planning button flows with the content above instead of reading as a large bottom footer.
+*/
 .planning-view-footer {
   display: flex;
   justify-content: center;
-  padding: 16px 24px 24px;
-  border-top: 1px solid var(--border);
+  padding: var(--space-sm) var(--space-xl) var(--space-md);
   flex-shrink: 0;
 }
 
