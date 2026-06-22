@@ -439,21 +439,25 @@ Widen the split resize column so the task-list sidebar is easy to grab and drag 
   overflow: auto;
 }
 
+/*
+FNXC:SidebarDivider 2026-06-23-01:45:
+The List split divider must read identically to the Chat sidebar divider: a single 1px var(--border) line, with the wider var(--space-sm) handle track acting only as an invisible drag hit-area that tints on hover/focus. Previously the handle painted a persistent color-mix band across its full var(--space-sm) width plus a 2px ::after grip, so the List divider looked noticeably thicker than Chat's clean 1px line. Keep the drag hit-area width (var(--space-sm) grid track) for usability; only the visible line thickness/color changes — handle background is transparent and the centered ::after line is 1px var(--border).
+*/
 .list-split-resize-handle {
   position: relative;
   cursor: col-resize;
-  background: color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
   transition: background var(--transition-fast);
   touch-action: none;
 }
 
-/* Centered grip line so the drag affordance is visible. */
+/* Centered 1px grip line — the static visible divider, matching Chat's 1px sidebar border. */
 .list-split-resize-handle::after {
   content: "";
   position: absolute;
   inset-block: 0;
   inset-inline-start: 50%;
-  width: 2px;
+  width: 1px;
   transform: translateX(-50%);
   background: var(--border);
   transition: background var(--transition-fast);
