@@ -131,7 +131,7 @@ describe("ProjectOverview", () => {
       />
     );
 
-    expect(screen.getByText("Projects")).toBeDefined();
+    expect(screen.getByRole("heading", { name: /Dashboard/ })).toBeDefined();
   });
 
   it("displays project cards when projects provided", () => {

@@ -3226,6 +3226,16 @@ describe("ChatView CSS — active state edge highlights", () => {
     expect(activeScopeRule).not.toContain("inset");
   });
 
+  it("renders the header Direct/Rooms toggle with visible borders", async () => {
+    const headerScopeRule = findRule(".chat-view-header-scope-toggle");
+    const headerScopeButtonRule = findRule(".chat-view-header-scope-toggle .chat-sidebar-scope-btn");
+    const headerActiveScopeRule = findRule(".chat-view-header-scope-toggle .chat-sidebar-scope-btn--active");
+
+    expect(headerScopeRule).toContain("border: 1px solid var(--border)");
+    expect(headerScopeButtonRule).toContain("border: 1px solid transparent");
+    expect(headerActiveScopeRule).toContain("border-color: var(--todo)");
+  });
+
   it("keeps active chat-row background without the removed left edge or offset", async () => {
     const activeSessionRule = findRule(".chat-session-item--active");
 

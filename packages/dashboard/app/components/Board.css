@@ -2,35 +2,6 @@
 FNXC:BoardWorkflows 2026-06-20-09:02:
 The board needs a neutral first-paint shell whenever workflow lanes are enabled but metadata is not ready, so users never see the legacy single-lane board flash before workflow lanes load.
 */
-.dashboard-board-view {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-/*
-FNXC:DashboardHeader 2026-06-22-16:05:
-The Dashboard board now sits under the shared ViewHeader like Artifacts/Skills. The board remains the scroll container below the header, so reset the old full-height assumption within this shell and let flex allocate the remaining height.
-*/
-.dashboard-board-view > .board,
-.dashboard-board-view .board-workflow-view {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 0;
-}
-
-.dashboard-board-view__count {
-  font-size: 14px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .board.board-workflows-skeleton {
   display: flex;
   align-items: stretch;

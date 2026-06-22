@@ -81,8 +81,10 @@ Direct/Rooms now lives in the Chat ViewHeader immediately before New Chat. The c
   width: clamp(128px, 24vw, 220px);
   min-width: min(128px, 100%);
   max-width: 220px;
-  padding: 0;
-  border-bottom: none;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
 
 .chat-sidebar-scope-btn {
@@ -101,6 +103,8 @@ Direct/Rooms now lives in the Chat ViewHeader immediately before New Chat. The c
   min-height: 0;
   height: var(--view-header-content-row, 28px);
   padding: 0 clamp(var(--space-xs), 1.2vw, var(--space-sm));
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-md) - 2px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -120,6 +124,10 @@ Direct/Rooms now lives in the Chat ViewHeader immediately before New Chat. The c
 .chat-sidebar-scope-btn--active {
   background: var(--card);
   color: var(--text);
+}
+
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn--active {
+  border-color: var(--todo);
 }
 
 .chat-sidebar-rooms {
