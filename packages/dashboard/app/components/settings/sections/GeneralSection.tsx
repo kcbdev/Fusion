@@ -190,7 +190,15 @@ export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast
           <option value="new-tasks">{t("settings.general.onForNewTasks", "On for new tasks")}</option>
         </select>
         <small>{t("settings.general.controlsWhetherNewlyCreatedTasksHaveGitHubIssue", " Controls whether newly created tasks have GitHub issue tracking enabled by default. Individual tasks can still override this from the task detail modal. ")}</small>
-        <small>{t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task&apos;s title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}{!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
+        {/*
+          FNXC:SettingsGeneral 2026-06-22-03:20:
+          Tracking-issue helper copy. The FN-6771 JSX→t() extraction left a raw HTML
+          entity ("&apos;") in this default string. As a t() argument the string is a
+          plain JS value (not JSX-decoded), so the entity rendered verbatim as the
+          literal "&apos;" instead of an apostrophe. Use a real apostrophe so the copy
+          reads correctly in both modal and embedded presentations.
+        */}
+        <small>{t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task's title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}{!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
             ? t("settings.general.enableSummarizationInProjectModelsToConfigureThatModel", " Enable summarization in Project Models to configure that model.")
             : ""}
         </small>

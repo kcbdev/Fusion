@@ -173,7 +173,14 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
 
     expect(baseCss).toMatch(/\.wf-editor-modal\s*\{[^}]*min-width\s*:\s*640px\s*;/);
 
-    const editorModalRule = findRule(mobileBlocks, /\.wf-editor-modal,\s*\.wf-create-modal\s*\{[^}]*\}/);
+    // FN-6: the mobile viewport-takeover rule is scoped to the dialog presentation
+    // via :not(.wf-editor-modal--embedded) so the embedded main-view variant keeps its
+    // 100%-of-pane sizing. Match the scoped selector; .wf-create-modal has no embedded
+    // variant and stays unscoped.
+    const editorModalRule = findRule(
+      mobileBlocks,
+      /\.wf-editor-modal:not\(\.wf-editor-modal--embedded\),\s*\.wf-create-modal\s*\{[^}]*\}/,
+    );
     expect(editorModalRule).toMatch(/width\s*:\s*100vw\s*;/);
     expect(editorModalRule).toMatch(/height\s*:\s*100dvh\s*;/);
     expect(editorModalRule).toMatch(/border-radius\s*:\s*0\s*;/);
@@ -344,7 +351,13 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
     const editorCss = readComponentCss("WorkflowNodeEditor.css");
     const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
 
-    const overlayRule = findRule(mobileBlocks, /\.modal-overlay:has\(\.wf-editor-modal\),\s*\.modal-overlay:has\(\.wf-create-modal\)\s*\{[^}]*\}/);
+    // FN-6: overlay stretch is likewise scoped to the dialog editor via
+    // :not(.wf-editor-modal--embedded) so the embedded variant's overlay-less main view
+    // isn't forced full-bleed. .wf-create-modal stays unscoped.
+    const overlayRule = findRule(
+      mobileBlocks,
+      /\.modal-overlay:has\(\.wf-editor-modal:not\(\.wf-editor-modal--embedded\)\),\s*\.modal-overlay:has\(\.wf-create-modal\)\s*\{[^}]*\}/,
+    );
     expect(overlayRule).toMatch(/padding-top\s*:\s*0\s*;/);
     expect(overlayRule).toMatch(/align-items\s*:\s*stretch\s*;/);
 

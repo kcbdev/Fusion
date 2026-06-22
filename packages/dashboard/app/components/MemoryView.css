@@ -10,11 +10,16 @@ The title row now comes from the shared .view-header (which supplies the --space
   overflow: hidden;
 }
 
+/*
+FNXC:Navigation 2026-06-22-02:30:
+After the header migrated to the shared .view-header (which is flex-shrink:0), the sibling description and tab bar must also be flex-shrink:0. Without it they collapse under the flex column at constrained heights, letting .memory-view-content overlap the header/tabs. The scroll owner is the active tab pane (.memory-*-tab, flex:1 + min-height:0 + overflow-y:auto); the editor container keeps min-height:0 through the chain so CodeMirror bounds itself and never overruns the action bar.
+*/
 .memory-view-description {
   color: var(--text-muted);
   font-size: 13px;
   margin: 0;
   padding: 0 var(--space-lg);
+  flex-shrink: 0;
 }
 
 .memory-view-tabs {
@@ -24,6 +29,7 @@ The title row now comes from the shared .view-header (which supplies the --space
   border-bottom: 1px solid var(--border);
   margin: var(--space-md) 0 var(--space-lg);
   padding: 0 var(--space-lg);
+  flex-shrink: 0;
 }
 
 .memory-view-tab {

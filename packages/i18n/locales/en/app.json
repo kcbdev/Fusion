@@ -5741,7 +5741,7 @@
       "showTheFloatingChatButtonInTheDashboard": "Show the floating chat button in the dashboard. Chat is still accessible from the Chat tab in the mobile navigation.",
       "taskPrefix": "Task Prefix",
       "todoThreshold": "Todo threshold",
-      "trackingIssuesUseThisTaskAposSTitle": " Tracking issues use this task&apos;s title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ",
+      "trackingIssuesUseThisTaskAposSTitle": " Tracking issues use this task's title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ",
       "updateAvailablePrefix": "v{{version}} available",
       "updateCheckFailed": "Failed to check for updates",
       "updateFailed": "Update failed",
