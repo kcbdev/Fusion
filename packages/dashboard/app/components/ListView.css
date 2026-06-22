@@ -382,9 +382,13 @@
   padding: 0;
 }
 
+/*
+FNXC:ListView 2026-06-22-00:40:
+Widen the split resize column so the task-list sidebar is easy to grab and drag (the 4px --space-xs target was hard to hit). The handle shows a centered grip line that brightens on hover/focus.
+*/
 .list-split-layout {
   display: grid;
-  grid-template-columns: auto var(--space-xs) minmax(0, 1fr);
+  grid-template-columns: auto var(--space-sm) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
@@ -396,14 +400,33 @@
 }
 
 .list-split-resize-handle {
+  position: relative;
   cursor: col-resize;
   background: color-mix(in srgb, var(--border) 70%, transparent);
+  transition: background var(--transition-fast);
+  touch-action: none;
+}
+
+/* Centered grip line so the drag affordance is visible. */
+.list-split-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border);
   transition: background var(--transition-fast);
 }
 
 .list-split-resize-handle:hover,
 .list-split-resize-handle:focus-visible {
   background: color-mix(in srgb, var(--todo) 35%, transparent);
+}
+
+.list-split-resize-handle:hover::after,
+.list-split-resize-handle:focus-visible::after {
+  background: var(--todo);
 }
 
 .list-split-resize-handle:focus-visible {
