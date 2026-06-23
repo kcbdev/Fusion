@@ -278,6 +278,8 @@ For the stored settings shape, see [`customProviders` in the Settings Reference]
 
 Planning is a desktop/tablet left-sidebar main-content destination after **Command Center**. It opens the planning-session list and composer in the main content region; mobile continues to use the compact planning entry points. Planning Mode now includes branch controls on the summary screen before you create a task.
 
+![Planning Mode](./screenshots/planning-view.png)
+
 - **Branch strategy** options mirror Subtask Breakdown semantics:
   - `Use project/default branch`
   - `Create auto-named branch per task`

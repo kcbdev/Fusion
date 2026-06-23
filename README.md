@@ -229,8 +229,8 @@ Direct chat and per-task chat with any agent, on any model. Ask why a task faile
 
 <table>
 <tr>
-<td width="50%"><img src="./demo/assets/agent-chat-light.png" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
-<td width="50%"><img src="./demo/assets/agent-chat-gray.png" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-light.gif" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-gray.gif" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
 </tr>
 </table>
 
