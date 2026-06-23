@@ -382,6 +382,7 @@ export class InProcessRuntime
         maxWorktrees: this.config.maxWorktrees,
         semaphore: this.globalSemaphore,
         agentStore: this.agentStore,
+        hasActiveAgentExecution: (agentId: string) => this.heartbeatMonitor?.getTrackedAgents().includes(agentId) ?? false,
         missionStore,
         missionAutopilot,
         missionExecutionLoop,

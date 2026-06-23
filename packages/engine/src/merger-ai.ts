@@ -56,8 +56,10 @@ import {
   type MergeResult,
   type Settings,
   type Task,
+  type TaskComment,
   type TaskStore,
 } from "@fusion/core";
+import { buildUserCommentsPromptSection, selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 import { resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { advanceIntegrationBranchRef } from "./merger-ref-update-advance.js";
@@ -81,6 +83,7 @@ module so self-healing can import the predicate without re-entering the self-hea
 import cycle (merger-ai already imports `MIN_TEMP_WORKTREE_REAP_AGE_MS` from self-healing).
 */
 import { isRepoLanded, FUSION_TASK_ID_TRAILER_KEY } from "./workspace-land-predicate.js";
+import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 
 const execFileAsync = promisify(execFile);
 const aiMergeLog = createLogger("merger-ai");
@@ -515,6 +518,7 @@ export function buildMergePrompt(input: {
   /** Required trailers to append (board association). */
   trailers: string[];
   correctiveReasons?: string[];
+  userComments?: TaskComment[];
 }): string {
   const subjectShape = input.includeTaskId
     ? `"${input.taskId}: <concise imperative summary of the squashed changes>"`
@@ -539,6 +543,10 @@ export function buildMergePrompt(input: {
     "If `git merge --squash` reports the branch is already up to date (nothing to",
     "merge), do nothing and leave HEAD unchanged.",
   ];
+  const userCommentsSection = buildUserCommentsPromptSection(input.userComments ?? []);
+  if (userCommentsSection) {
+    lines.push("", userCommentsSection);
+  }
   if (input.correctiveReasons && input.correctiveReasons.length > 0) {
     lines.push(
       "",
@@ -590,6 +598,7 @@ export function buildReviewPrompt(input: {
   squashSha: string;
   diffStat: string;
   priorReasons?: string[];
+  userComments?: TaskComment[];
 }): string {
   const lines = [
     `Review the squash merge for task ${input.taskId} (branch ${input.branch} → ${input.integrationBranch}).`,
@@ -604,6 +613,10 @@ export function buildReviewPrompt(input: {
     "Files changed (git diff --stat):",
     input.diffStat.trim() || "(none reported)",
   ];
+  const userCommentsSection = buildUserCommentsPromptSection(input.userComments ?? []);
+  if (userCommentsSection) {
+    lines.push("", userCommentsSection);
+  }
   if (input.priorReasons && input.priorReasons.length > 0) {
     lines.push(
       "",
@@ -1110,7 +1123,7 @@ export async function landOneRepo(
       // 2 + 3. Merge + review loop (corrective passes).
       const squashSha = await mergeAndReview({
         mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
-        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal,
+        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, store, signal,
       });
 
       if (!squashSha) {
@@ -1791,9 +1804,10 @@ async function mergeAndReview(input: {
   audit: RunAuditor;
   log: (message: string) => Promise<void>;
   setStatus: (status: string | null) => Promise<unknown>;
+  store: TaskStore;
   signal?: AbortSignal;
 }): Promise<string | null> {
-  const { mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId, maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, signal } = input;
+  const { mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId, maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, store, signal } = input;
   let priorReasons: string[] = [];
 
   for (let attempt = 0; ; attempt++) {
@@ -1807,9 +1821,12 @@ async function mergeAndReview(input: {
       await setStatus("merging");
       await log(`AI merge: corrective re-merge (pass ${attempt}/${maxPasses}) addressing: ${priorReasons.join("; ")}`);
     }
+    const latestTaskForMergePrompt = await store.getTask(taskId);
+    const mergeUserComments = selectUserCommentsForAgentContext(latestTaskForMergePrompt);
     await mergeAgent(mergeRoot, buildMergePrompt({
       taskId, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers,
       correctiveReasons: priorReasons.length ? priorReasons : undefined,
+      userComments: mergeUserComments,
     }));
 
     let head = await git(["rev-parse", "HEAD"], mergeRoot);
@@ -1823,8 +1840,11 @@ async function mergeAndReview(input: {
 
     await setStatus("reviewing");
     const diffStat = await git(["diff", "--stat", `${tipSha}..${head}`], mergeRoot);
+    const latestTaskForReviewPrompt = await store.getTask(taskId);
+    const reviewUserComments = selectUserCommentsForAgentContext(latestTaskForReviewPrompt);
     const verdict = parseReviewVerdict(await reviewAgent(mergeRoot, buildReviewPrompt({
       taskId, branch, integrationBranch, tipSha, squashSha: head, diffStat, priorReasons,
+      userComments: reviewUserComments,
     })));
     await audit.git({
       type: "merge:ai-review-verdict",
@@ -1933,29 +1953,37 @@ async function finalizeMerged(
     branchDeleted,
   };
   await audit.git({ type: "merge:ai-landed", target: integrationBranch, metadata: { taskId, landedSha, empty: opts.empty } }).catch(() => undefined);
+  await log(opts.empty ? `AI merge: finalized ${taskId} (no-op), finalizing task row` : `AI merge: landed ${short(landedSha)}, finalizing task row`);
+  const finalized = await finalizeTask(store, taskId, result, audit, log);
   await log(opts.empty ? `AI merge: finalized ${taskId} (no-op) → done` : `AI merge: landed ${short(landedSha)}, task → done`);
-  return await finalizeTask(store, taskId, result);
+  return finalized;
 }
 
 /** Move the task to done and emit, mirroring the legacy completeTask. */
-async function finalizeTask(store: TaskStore, taskId: string, result: MergeResult): Promise<MergeResult> {
-  const mergedAt = new Date().toISOString();
-  const mergeDetails: MergeDetails = {
-    ...result.task.mergeDetails,
-    ...(result.commitSha ? { commitSha: result.commitSha } : {}),
-    ...(result.rebaseBaseSha ? { rebaseBaseSha: result.rebaseBaseSha } : {}),
-    ...(result.landedFiles ? { landedFiles: result.landedFiles } : {}),
-    ...(typeof result.filesChanged === "number" ? { filesChanged: result.filesChanged } : {}),
-    ...(typeof result.insertions === "number" ? { insertions: result.insertions } : {}),
-    ...(typeof result.deletions === "number" ? { deletions: result.deletions } : {}),
-    ...(result.mergeCommitMessage ? { mergeCommitMessage: result.mergeCommitMessage } : {}),
-    mergedAt,
-    mergeConfirmed: result.mergeConfirmed === true,
-    ...(result.noOp ? { noOpMerge: true, noOpReason: result.reason } : {}),
-  };
-  await store.updateTask(taskId, { status: null, mergeDetails }).catch(() => undefined);
-  const task = await store.moveTask(taskId, "done");
-  result.task = task;
+async function finalizeTask(
+  store: TaskStore,
+  taskId: string,
+  result: MergeResult,
+  audit?: RunAuditor,
+  log?: (message: string) => Promise<void>,
+): Promise<MergeResult> {
+  const finalization = await finalizeProvenAutoMergeTask({
+    store,
+    taskId,
+    result,
+    audit,
+    auditAgentId: "merger",
+    auditPhase: "direct-ai-merge-finalize",
+    source: "direct-ai-merge",
+    log,
+  });
+  if (finalization.outcome === "blocked") {
+    throw new Error(`AI merge finalization blocked for ${taskId}: ${finalization.reason ?? "unknown"}`);
+  }
+  if (!finalization.task) {
+    throw new Error(`AI merge finalization could not find task ${taskId}`);
+  }
+  result.task = finalization.task;
   store.emit("task:merged", result);
   return result;
 }
