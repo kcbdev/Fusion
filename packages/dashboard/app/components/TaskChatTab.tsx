@@ -2,7 +2,7 @@ import type { AgentLogEntry, AgentRole, SteeringComment, Task, TaskDetail } from
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { addSteeringComment, refineTask } from "../api";
@@ -11,7 +11,6 @@ import type { ToastType } from "../hooks/useToast";
 import { getErrorMessage } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { formatRelativeTimeAgo } from "../utils/relativeTimeAgo";
-import { AgentAvatar } from "./AgentAvatar";
 import { ProviderIcon } from "./ProviderIcon";
 import { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
 import { markdownComponents } from "./AgentLogViewer";
@@ -88,21 +87,6 @@ function getRoleLabel(role: AgentLogRole, t: TFunction<"app">): string {
   }
 }
 
-function getRoleIcon(role: AgentLogRole): string | undefined {
-  switch (role) {
-    case "triage":
-      return "🧭";
-    case "executor":
-      return "⚙️";
-    case "reviewer":
-      return "🔎";
-    case "merger":
-      return "🔀";
-    default:
-      return undefined;
-  }
-}
-
 function parseModelMarker(entry: AgentLogEntry): TaskChatModelInfo | null {
   if (entry.type !== "text") return null;
   const match = entry.text.match(/^(?:Triage|Executor|Reviewer) using model: (.+?)\/(.+)$/);
@@ -156,12 +140,16 @@ function TaskChatAgentIcon({ label, modelInfo, role }: { label: string; modelInf
     );
   }
 
-  const avatarAgent = {
-    id: role ?? "agent",
-    name: label,
-    icon: getRoleIcon(role),
-  };
-  return <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />;
+  /*
+  FNXC:TaskDetailChat 2026-06-23-00:42:
+  Task chat role headers should use provider logos whenever the role's model provider is known, and a neutral CPU fallback when it is not. Avoid role clip-art avatars so executor/reviewer/merger rows read as professional model execution blocks rather than cartoon agent identities.
+  */
+  const title = `${label}: model provider unknown`;
+  return (
+    <span className="task-chat-provider-icon task-chat-provider-icon--fallback" title={title} aria-label={title}>
+      <Cpu size={18} aria-hidden="true" />
+    </span>
+  );
 }
 
 function getEntryKey(entry: AgentLogEntry, index: number): string {

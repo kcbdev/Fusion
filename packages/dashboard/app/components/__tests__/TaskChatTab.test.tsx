@@ -423,6 +423,7 @@ describe("TaskChatTab", () => {
     expect(screen.getByText("Merger")).toBeTruthy();
     expect(screen.getByText("Agent")).toBeTruthy();
     expect(screen.getByText("legacy output")).toBeTruthy();
+    expect(screen.getAllByLabelText(/model provider unknown/)).toHaveLength(5);
   });
 
   it("renders provider icons for task chat roles from task model overrides", () => {

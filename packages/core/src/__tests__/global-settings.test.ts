@@ -219,6 +219,19 @@ describe("GlobalSettingsStore", () => {
       expect(settings.themeMode).toBe("dark"); // preserved default
     });
 
+    it("does not overwrite an existing invalid settings file with defaults", async () => {
+      await mkdir(dir, { recursive: true });
+      const settingsPath = join(dir, "settings.json");
+      const invalidContents = '{"themeMode":"light",';
+      await writeFile(settingsPath, invalidContents);
+
+      await expect(store.updateSettings({ colorTheme: "shadcn-gray" })).rejects.toThrow(
+        /Refusing to update global settings/,
+      );
+
+      await expect(readFile(settingsPath, "utf-8")).resolves.toBe(invalidContents);
+    });
+
     it("round-trips cliOnboardingCompletedAt without changing setupComplete", async () => {
       await store.init();
 
