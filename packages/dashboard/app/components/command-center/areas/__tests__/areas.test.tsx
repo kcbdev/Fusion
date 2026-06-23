@@ -2,6 +2,8 @@
 FNXC:CommandCenter 2026-06-16-09:42:
 Command Center area component tests (PR #1683). Pin loading/error/unavailable-vs-zero rendering for each analytics area against mocked fixtures so the "—" sentinel and cost-unavailable contracts can't regress.
 */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act, renderHook } from "@testing-library/react";
 import type { OrgTreeNode } from "@fusion/core";
@@ -10,6 +12,7 @@ import type { OrgTreeNode } from "@fusion/core";
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   backfillGithubSourceIssueClosedAt: vi.fn(),
+  backfillCommitAssociationDiffStats: vi.fn(),
   fetchOrgTree: vi.fn(),
   fetchExecutorStats: vi.fn(),
   fetchSettings: vi.fn(),
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const apiMock = mocks.api;
 const backfillGithubSourceIssueClosedAtMock = mocks.backfillGithubSourceIssueClosedAt;
+const backfillCommitAssociationDiffStatsMock = mocks.backfillCommitAssociationDiffStats;
 const fetchOrgTreeMock = mocks.fetchOrgTree;
 const fetchExecutorStatsMock = mocks.fetchExecutorStats;
 const toggleEnginePauseMock = mocks.toggleEnginePause;
@@ -27,6 +31,8 @@ vi.mock("../../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => mocks.api(path, opts),
   apiBackfillGithubSourceIssueClosedAt: (options?: { offset?: number; limit?: number }, projectId?: string) =>
     mocks.backfillGithubSourceIssueClosedAt(options, projectId),
+  backfillCommitAssociationDiffStats: (options?: { dryRun?: boolean }, projectId?: string) =>
+    mocks.backfillCommitAssociationDiffStats(options, projectId),
   fetchOrgTree: mocks.fetchOrgTree,
   fetchExecutorStats: mocks.fetchExecutorStats,
   fetchSettings: mocks.fetchSettings,
@@ -50,6 +56,7 @@ import { TeamArea } from "../TeamArea";
 import { ActivityArea } from "../ActivityArea";
 import { EcosystemArea } from "../EcosystemArea";
 import { useAnalyticsArea } from "../useAnalyticsArea";
+import { ConfirmDialogProvider } from "../../../../hooks/useConfirm";
 import type { DateRange } from "../DateRangePicker";
 
 const range7d: DateRange = { from: "2026-06-08", to: null, preset: "7d" };
@@ -132,6 +139,27 @@ function githubFixture() {
       { repo: "acme/beta", filed: 1, fixed: 2 },
     ],
     resolved: [],
+  };
+}
+
+function productivityFixture() {
+  return {
+    from: "2026-06-08",
+    to: null,
+    modifiedFiles: 7,
+    commits: 4,
+    pullRequests: 2,
+    byLanguage: [{ language: "TypeScript", count: 7 }],
+    loc: { value: null, unavailable: true },
+    hoursSaved: { value: null, unavailable: true },
+    taskDuration: {
+      completedTasks: 3,
+      averageMs: 90 * 60 * 1000,
+      medianMs: 60 * 60 * 1000,
+      p90Ms: 2 * 60 * 60 * 1000,
+      totalMs: 270 * 60 * 1000,
+      unavailable: false,
+    },
   };
 }
 
@@ -250,6 +278,7 @@ function activityFixture() {
 beforeEach(() => {
   apiMock.mockReset();
   backfillGithubSourceIssueClosedAtMock.mockReset();
+  backfillCommitAssociationDiffStatsMock.mockReset();
   fetchOrgTreeMock.mockReset();
   fetchOrgTreeMock.mockResolvedValue([]);
   fetchExecutorStatsMock.mockReset();
@@ -870,6 +899,14 @@ describe("ToolsArea", () => {
 });
 
 describe("ProductivityArea", () => {
+  function renderProductivityWithConfirm() {
+    return render(
+      <ConfirmDialogProvider>
+        <ProductivityArea range={range7d} />
+      </ConfirmDialogProvider>,
+    );
+  }
+
   it("renders unavailable LOC and hours saved as dash sentinels, duration stats, and finite chart geometry", async () => {
     apiMock.mockResolvedValue({
       from: "2026-06-08",
@@ -1030,6 +1067,169 @@ describe("ProductivityArea", () => {
     expect(screen.getByTestId("cc-productivity-pie")).toBeTruthy();
     expect(screen.getByTestId("cc-productivity-pie").textContent).not.toContain("NaN");
     expect(screen.getByTestId("cc-productivity-pie").textContent).not.toContain("Infinity");
+  });
+
+  it("previews LOC backfill with dry-run counts and preserves the LOC sentinel", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 6,
+      distinctCommits: 4,
+      updatedRows: 3,
+      skippedUnavailableCommits: 2,
+      skippedInvalidShas: 1,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    expect(screen.queryByTestId("cc-productivity-backfill-apply-button")).toBeNull();
+    expect(screen.getByTestId("cc-productivity-loc-unavailable").textContent).toBe("—");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    await waitFor(() => expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledWith({ dryRun: true }, undefined));
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Dry-run preview");
+    expect(result.textContent).toContain("Scanned rows: 6");
+    expect(result.textContent).toContain("Distinct commits: 4");
+    expect(result.textContent).toContain("Updated rows: 3");
+    expect(result.textContent).toContain("Skipped unavailable commits: 2");
+    expect(result.textContent).toContain("Skipped invalid SHAs: 1");
+    expect(screen.getByTestId("cc-productivity-backfill-apply-button")).toBeTruthy();
+    expect(screen.getByTestId("cc-productivity-loc-unavailable").textContent).toBe("—");
+  });
+
+  it("requires confirmation before applying the LOC backfill and aborts cleanly on cancel", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 2,
+      distinctCommits: 2,
+      updatedRows: 2,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+    await screen.findByTestId("cc-productivity-backfill-apply-button");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-apply-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Apply LOC backfill?" });
+    expect(dialog.textContent).toContain("task_commit_associations");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Apply LOC backfill?" })).toBeNull());
+    expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the LOC backfill only after the danger confirmation resolves", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock
+      .mockResolvedValueOnce({
+        scannedRows: 5,
+        distinctCommits: 4,
+        updatedRows: 3,
+        skippedUnavailableCommits: 1,
+        skippedInvalidShas: 0,
+        dryRun: true,
+      })
+      .mockResolvedValueOnce({
+        scannedRows: 5,
+        distinctCommits: 4,
+        updatedRows: 3,
+        skippedUnavailableCommits: 1,
+        skippedInvalidShas: 0,
+        dryRun: false,
+      });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+    await screen.findByText("Dry-run preview");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-apply-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Apply LOC backfill?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply backfill" }));
+
+    await waitFor(() => expect(backfillCommitAssociationDiffStatsMock).toHaveBeenNthCalledWith(2, { dryRun: false }, undefined));
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Applied");
+    expect(result.textContent).toContain("Updated rows: 3");
+  });
+
+  it("disables the preview button and shows pending status while LOC backfill is in flight", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    let resolveBackfill: ((value: { scannedRows: number; distinctCommits: number; updatedRows: number; skippedUnavailableCommits: number; skippedInvalidShas: number; dryRun: boolean }) => void) | null = null;
+    backfillCommitAssociationDiffStatsMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveBackfill = resolve;
+      }),
+    );
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    const button = screen.getByTestId("cc-productivity-backfill-button") as HTMLButtonElement;
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(screen.getByTestId("cc-productivity-backfill-result").textContent).toContain("LOC backfill check is running.");
+    expect(screen.getByTestId("cc-productivity-backfill-result").className).toContain("cc-productivity-backfill-status--warning");
+    fireEvent.click(button);
+    expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledTimes(1);
+
+    resolveBackfill?.({
+      scannedRows: 1,
+      distinctCommits: 1,
+      updatedRows: 1,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+    await screen.findByText("Dry-run preview");
+  });
+
+  it("renders endpoint errors with the tokenized error status", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockRejectedValueOnce(new Error("loc endpoint failed"));
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("loc endpoint failed");
+    expect(result.className).toContain("cc-productivity-backfill-status--error");
+  });
+
+  it("renders an all-zero LOC backfill report truthfully", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 0,
+      distinctCommits: 0,
+      updatedRows: 0,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Scanned rows: 0");
+    expect(result.textContent).toContain("Distinct commits: 0");
+    expect(result.textContent).toContain("Updated rows: 0");
+    expect(result.textContent).toContain("Skipped unavailable commits: 0");
+    expect(result.textContent).toContain("Skipped invalid SHAs: 0");
+  });
+
+  it("keeps LOC backfill mobile actions stacked and full width in CSS", () => {
+    const css = readFileSync(join(process.cwd(), "app/components/command-center/CommandCenter.css"), "utf8");
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.cc-productivity-backfill-actions[\s\S]*flex-direction: column;/);
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.cc-productivity-backfill-actions \.btn[\s\S]*inline-size: 100%;/);
   });
 });
 

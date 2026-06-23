@@ -193,15 +193,20 @@ The stat number must render as large as possible while never overflowing the car
 /*
 FNXC:CommandCenterGithub 2026-06-18-19:27:
 The GitHub closed-at backfill control lives inside the existing Fixed by Fusion card and must use tokenized spacing/status colors so the operator result row stays readable on desktop and mobile without creating a separate layout surface.
+
+FNXC:CommandCenterLocBackfill 2026-06-23-00:00:
+The Productivity LOC backfill control reuses the Command Center backfill layout contract: tokenized gaps, semantic error/warning colors, and full-width mobile stacking at the shared 768px breakpoint.
 */
-.cc-github-backfill-actions {
+.cc-github-backfill-actions,
+.cc-productivity-backfill-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-sm);
 }
 
-.cc-github-backfill-status {
+.cc-github-backfill-status,
+.cc-productivity-backfill-status {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
@@ -209,21 +214,25 @@ The GitHub closed-at backfill control lives inside the existing Fixed by Fusion 
   font-size: 0.75rem;
 }
 
-.cc-github-backfill-status--error {
+.cc-github-backfill-status--error,
+.cc-productivity-backfill-status--error {
   color: var(--color-error);
 }
 
-.cc-github-backfill-status--warning {
+.cc-github-backfill-status--warning,
+.cc-productivity-backfill-status--warning {
   color: var(--color-warning);
 }
 
 @media (max-width: 768px) {
-  .cc-github-backfill-actions {
+  .cc-github-backfill-actions,
+  .cc-productivity-backfill-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .cc-github-backfill-actions .btn {
+  .cc-github-backfill-actions .btn,
+  .cc-productivity-backfill-actions .btn {
     justify-content: center;
     inline-size: 100%;
   }

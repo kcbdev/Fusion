@@ -1584,7 +1584,7 @@ export default interface Resources {
         "trendTitle": "Ecosystem trend",
         "uniqueModels": "Active models"
       },
-      "empty": "No usage data yet. Run some agents to populate the Command Center.",
+      "empty": "No usage data yet. Run some agents to populate the Dashboard.",
       "funnel": {
         "ariaLabel": "Tasks per workflow stage",
         "completionRate": "Completion rate",
@@ -1630,7 +1630,7 @@ export default interface Resources {
         "totalsTitle": "GitHub issue flow"
       },
       "heading": "Dashboard",
-      "loading": "Loading command center...",
+      "loading": "Loading dashboard...",
       "missionControl": {
         "activeNodes": "Active nodes",
         "activeRuns": "Active runs",
@@ -1675,6 +1675,21 @@ export default interface Resources {
       },
       "productivity": {
         "averageDuration": "Average",
+        "backfillAppliedLabel": "Applied",
+        "backfillApply": "Apply backfill",
+        "backfillBusy": "Checking historical LOC…",
+        "backfillButton": "Preview LOC backfill",
+        "backfillConfirmMessage": "This will persist diff stats to task_commit_associations for historical commit associations. Review the dry-run counts before applying.",
+        "backfillConfirmTitle": "Apply LOC backfill?",
+        "backfillDistinctCommits": "Distinct commits",
+        "backfillFailed": "Failed to backfill historical LOC stats",
+        "backfillPending": "LOC backfill check is running.",
+        "backfillPreviewLabel": "Dry-run preview",
+        "backfillResult": "Backfill report",
+        "backfillScannedRows": "Scanned rows",
+        "backfillSkippedInvalidShas": "Skipped invalid SHAs",
+        "backfillSkippedUnavailableCommits": "Skipped unavailable commits",
+        "backfillUpdatedRows": "Updated rows",
         "byLanguage": "Files by language",
         "commits": "Commits",
         "completedTasks": "Completed tasks",
@@ -1918,6 +1933,7 @@ export default interface Resources {
       "initializingDashboard": "Initializing dashboard...",
       "loadingMessage": "Loading Fusion dashboard",
       "loadingProgress": "Dashboard loading progress",
+      "title": "Project Dashboard",
       "updatingMessage": "Updating Fusion dashboard",
       "updatingVersion": "Updating to a new frontend version..."
     },
@@ -2317,6 +2333,7 @@ export default interface Resources {
       "stateIdle": "Idle",
       "statePaused": "Paused",
       "stateRunning": "Running",
+      "stateStopped": "Stopped",
       "status": "Executor status",
       "stuck": "Stuck",
       "temporary": "Temporary",
@@ -3231,7 +3248,7 @@ export default interface Resources {
       "unpauseSelectedTitle": "Unpause selected tasks that are currently paused",
       "unpauseUnavailable": "Unpause action is unavailable",
       "useProjectDefault": "Use project default",
-      "viewOptions": "View options",
+      "viewOptions": "View",
       "workflowLabel": "Workflow"
     },
     "mailbox": {
@@ -8213,7 +8230,7 @@ export default interface Resources {
       "agent": "Column agent",
       "agentBadgeDefer": "Column agent (defer)",
       "agentBadgeOverride": "Column agent (override)",
-      "agentFlagHint": "Enable both experimentalFeatures.workflowColumns and experimentalFeatures.workflowGraphExecutor to staff columns with agents",
+      "agentFlagHint": "Workflow columns are available by default",
       "agentLabel": "Column agent",
       "agentMode": "Agent mode",
       "agentModeDefer": "Defer",
@@ -8496,11 +8513,13 @@ export default interface Resources {
       "widgetDefault": "Default"
     },
     "workflowSwitcher": {
-      "countsAria": "{{todoLabel}}: {{todo}}, {{inProgressLabel}}: {{inProgress}}, {{doneLabel}}: {{done}}",
+      "countsAria": "{{todoLabel}}: {{todo}}, {{inProgressLabel}}: {{inProgress}}, {{doneLabel}}: {{done}}{{mergingSuffix}}",
       "done": "Done",
       "editWorkflow": "Edit workflow",
       "inProgress": "In Progress",
       "label": "Workflow",
+      "merging": "Merging",
+      "mergingTitle": "{{count}} merging task{{plural}}",
       "newWorkflow": "New workflow",
       "todo": "Todo",
       "triggerAria": "Select workflow. Current workflow: {{name}}"
