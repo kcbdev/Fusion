@@ -4065,6 +4065,43 @@ describe("SettingsModal", () => {
       expect(payload.experimentalFeatures.devServer).toBeUndefined();
     });
 
+    it("hides graduated workflow flags while preserving stale persisted values on save", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {
+          workflowColumns: false,
+          workflowGraphExecutor: false,
+          workflowInterpreterDualObserve: true,
+          insights: true,
+        },
+      });
+
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      expect(screen.queryByText("workflowColumns")).not.toBeInTheDocument();
+      expect(screen.queryByText("workflowGraphExecutor")).not.toBeInTheDocument();
+      expect(screen.queryByText(/dual-observe parity/i)).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
+      });
+
+      /*
+      FNXC:SettingsExperimental 2026-06-23-21:20:
+      Workflow runtime flags are hidden because the graph engine and workflow columns are default runtime paths. Saving unrelated Settings changes must preserve stale persisted keys instead of rewriting or resurrecting them as UI-controlled toggles; runtime helpers ignore those stale values.
+      */
+      expect(mockUpdateGlobalSettings.mock.calls[0][0].experimentalFeatures).toEqual({
+        workflowColumns: false,
+        workflowGraphExecutor: false,
+        workflowInterpreterDualObserve: true,
+        insights: true,
+      });
+    });
+
     it("checks Left Sidebar Navigation by default when its flag is unset", async () => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,

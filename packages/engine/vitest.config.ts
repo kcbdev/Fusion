@@ -77,6 +77,7 @@ export default defineConfig({
             "src/__tests__/hold-release.test.ts",
             "src/__tests__/workflow-graph-task-runner.test.ts",
             "src/__tests__/workflow-graph-executor-parity.test.ts",
+            "src/__tests__/scheduler-workflow-cutover.test.ts",
             "src/__tests__/executor-base-commit-capture.test.ts",
             "src/__tests__/executor-capture-modified-files-attribution.test.ts",
             "src/__tests__/triage-preflight.test.ts",

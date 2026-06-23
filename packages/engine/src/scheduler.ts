@@ -874,6 +874,13 @@ export class Scheduler {
    * @returns Object with `valid: true` if checks pass, or `valid: false` with a `reason` string if they fail
    */
   private async validateTaskFilesystem(id: string): Promise<{ valid: boolean; reason?: string }> {
+    if (typeof this.store.getTasksDir !== "function") {
+      /*
+      FNXC:WorkflowScheduling 2026-06-23-11:38:
+      Scheduler test fakes and older embedded stores may not expose task-directory helpers. The production TaskStore still enforces task-dir and PROMPT.md validation, but minimal stores should not abort the workflow sweep before lease recovery and node-routing guards run.
+      */
+      return { valid: true };
+    }
     const taskDir = join(this.store.getTasksDir(), id);
     
     // Check if task directory exists
@@ -2066,7 +2073,18 @@ export class Scheduler {
   private async runHoldReleaseSweepPass(tasks: Task[], settings: Settings): Promise<void> {
     try {
       const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
+      const maxConcurrent = settings.maxConcurrent ?? this.options.maxConcurrent ?? 2;
       let reservedWorktreeSlots = tasks.filter((task) => task.column === "in-progress").length;
+      let reservedConcurrentSlots = reservedWorktreeSlots;
+      const inProgressTaskIds = tasks.filter((task) => task.column === "in-progress").map((task) => task.id);
+      const dispatchPrepByTaskId = new Map<string, {
+        baseBranch: string | null;
+        dispatchStormCount: number;
+        dispatchTimestamp: string;
+        effectiveNodeId: string | null;
+        effectiveNodeSource: string;
+        task: Task;
+      }>();
       const activeScopes = new Map<string, string[]>();
       const activeScopeColumns = new Map<string, Task["column"]>();
       const overlapIgnorePaths = settings.overlapIgnorePaths ?? [];
@@ -2123,10 +2141,340 @@ export class Scheduler {
         }
       }
 
-      await runHoldReleaseSweep(this.store, {
+      const result = await runHoldReleaseSweep(this.store, {
         now: () => Date.now(),
         reserveSlot: async (task): Promise<SlotReservation | null> => {
           let reservedScope = false;
+
+          const unmetDeps = getUnmetSchedulingDependencies(task, tasks, schedulingDependencyOptions);
+          if (unmetDeps.length > 0) {
+            await this.store.updateTask(task.id, {
+              status: "queued",
+              blockedBy: unmetDeps[0],
+            });
+            await this.logDispatchQueuedReason(task.id, `queued — unmet dependencies: ${unmetDeps.join(", ")}`);
+            this.options.onBlocked?.(task, unmetDeps);
+            return null;
+          }
+
+          if (this.options.missionStore && task.sliceId) {
+            try {
+              const slice = this.options.missionStore.getSlice(task.sliceId);
+              const milestone = slice ? this.options.missionStore.getMilestone(slice.milestoneId) : undefined;
+              const mission = milestone ? this.options.missionStore.getMission(milestone.missionId) : undefined;
+              if (mission?.status === "blocked") {
+                await this.store.updateTask(task.id, { status: "queued" });
+                await this.logDispatchQueuedReason(task.id, "queued — mission is blocked");
+                return null;
+              }
+            } catch (err: unknown) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              schedulerLog.warn(
+                `Mission/slice lookup failed during workflow scheduling (task ${task.id}): ${errorMessage} — proceeding without blocked-slice check`,
+              );
+            }
+          }
+
+          /*
+          FNXC:WorkflowScheduling 2026-06-23-11:12:
+          The workflow sweep is the only dispatcher, so the scheduler-only pre-dispatch gates must run before a capacity hold moves to an execution column. Keep dependency, filesystem, node-routing, permanent-agent, and oscillation checks on this path instead of relying on the retired todo loop.
+          */
+          const validation = await this.validateTaskFilesystem(task.id);
+          if (!validation.valid) {
+            schedulerLog.warn(`Task ${task.id} filesystem validation failed: ${validation.reason}`);
+            await this.store.moveTask(task.id, "triage");
+            await this.store.logEntry(task.id, "Task moved to triage — filesystem validation failed", validation.reason);
+            return null;
+          }
+
+          if (typeof this.store.getTasksDir === "function") {
+            const promptPath = getPromptPath(this.store.getTasksDir(), task.id);
+            const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
+            if (staleness.isStale) {
+              schedulerLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
+              await this.store.moveTask(task.id, "triage");
+              await this.store.updateTask(task.id, { status: "needs-replan" });
+              await this.store.logEntry(task.id, staleness.reason);
+              return null;
+            }
+          }
+
+          const freshTask = await this.store.getTask(task.id);
+          if (!freshTask || freshTask.column !== task.column || freshTask.paused || freshTask.userPaused) {
+            if (freshTask?.userPaused === true && freshTask.status !== "queued") {
+              await this.store.updateTask(task.id, { status: "queued" });
+              await this.logDispatchQueuedReason(task.id, "queued — user paused (manual move to todo)");
+            }
+            return null;
+          }
+
+          if (freshTask.checkedOutBy && this.options.leaseManager) {
+            const recovered = await this.options.leaseManager.recoverAbandonedLease(
+              freshTask.id,
+              "scheduler detected stale todo lease",
+              { preserveProgress: true },
+            );
+            if (!recovered) {
+              await this.options.leaseManager.reconcileLeaseRow(freshTask.id);
+              await this.store.updateTask(freshTask.id, { status: "queued" });
+              await this.logDispatchQueuedReason(freshTask.id, "queued — checkout lease recovery blocked dispatch");
+              return null;
+            }
+          }
+
+          const latestSettings = await this.store.getSettings();
+          if (latestSettings.globalPause) {
+            schedulerLog.log(`Task ${task.id} dispatch aborted — globalPause became active mid-pass`);
+            return null;
+          }
+          if (latestSettings.enginePaused) {
+            schedulerLog.log(`Task ${task.id} dispatch aborted — enginePaused became active mid-pass`);
+            return null;
+          }
+
+          let effectiveNode = resolveEffectiveNode(freshTask, settings);
+          schedulerLog.log(`Task ${task.id} routed to node=${effectiveNode.nodeId ?? "local"} (source=${effectiveNode.source})`);
+
+          if (effectiveNode.nodeId !== undefined && this.options.validateNodeDispatch) {
+            const nodeValidation = await this.options.validateNodeDispatch(effectiveNode.nodeId);
+            if (!nodeValidation.allowed) {
+              if (!this.wasNodeDispatchValidationBlocked.has(task.id)) {
+                this.wasNodeDispatchValidationBlocked.add(task.id);
+                schedulerLog.log(`Task ${task.id} dispatch blocked — ${nodeValidation.reason}`);
+                await this.store.logEntry(task.id, nodeValidation.reason);
+              }
+              return null;
+            }
+            this.wasNodeDispatchValidationBlocked.delete(task.id);
+          }
+
+          if (effectiveNode.nodeId !== undefined && this.options.nodeHealthMonitor) {
+            const localNodeId = this.options.localNodeId ?? "local";
+            if (freshTask.checkoutNodeId && freshTask.checkedOutBy && freshTask.checkoutNodeId !== localNodeId) {
+              const ownerNodeHealth = this.options.nodeHealthMonitor.getNodeHealth(freshTask.checkoutNodeId);
+              const handoffDecision = decideOwningNodeHandoff({
+                task: freshTask,
+                ownerNodeId: freshTask.checkoutNodeId,
+                ownerNodeHealth,
+                localNodeId,
+                handoffPolicy: settings.owningNodeHandoffPolicy,
+              });
+
+              if (handoffDecision.action === "park") {
+                if (!this.wasNodeBlocked.has(task.id)) {
+                  this.wasNodeBlocked.add(task.id);
+                  if (ownerNodeHealth === "offline" || ownerNodeHealth === "error" || ownerNodeHealth === "online") {
+                    await this.emitNodeUnreachableRecoveryAudit(freshTask, {
+                      ownerNodeId: freshTask.checkoutNodeId,
+                      ownerNodeHealth,
+                      handoffAction: handoffDecision.action,
+                      handoffReason: handoffDecision.reason,
+                      decisionPath: "scheduler-handoff-park",
+                      newColumn: freshTask.column,
+                      dispatchNodeBefore: effectiveNode.nodeId,
+                      dispatchNodeAfter: effectiveNode.nodeId,
+                    });
+                  }
+                  const reason = `Owning-node handoff parked dispatch: ${handoffDecision.reason}`;
+                  schedulerLog.log(`Task ${task.id} dispatch blocked — ${reason}`);
+                  await this.store.logEntry(task.id, reason);
+                  try {
+                    await this.store.recordRunAuditEvent?.({
+                      taskId: freshTask.id,
+                      agentId: "scheduler",
+                      runId: generateSyntheticRunId("scheduler", freshTask.id),
+                      domain: "database",
+                      mutationType: "node:handoff:parked",
+                      target: freshTask.id,
+                      metadata: {
+                        taskId: freshTask.id,
+                        ownerNodeId: freshTask.checkoutNodeId,
+                        ownerNodeHealth:
+                          ownerNodeHealth === "offline" || ownerNodeHealth === "error" || ownerNodeHealth === "online"
+                            ? ownerNodeHealth
+                            : "unknown",
+                        localNodeId,
+                        handoffPolicy: settings.owningNodeHandoffPolicy,
+                        decisionReason: handoffDecision.reason,
+                        source: "scheduler.dispatch",
+                      },
+                    });
+                  } catch (error) {
+                    schedulerLog.warn(`Task ${task.id} failed to emit node:handoff:parked audit: ${error instanceof Error ? error.message : String(error)}`);
+                  }
+                }
+                return null;
+              }
+
+              await this.store.logEntry(task.id, `Owning-node handoff applied: ${handoffDecision.reason}`);
+              try {
+                await this.store.recordRunAuditEvent?.({
+                  taskId: freshTask.id,
+                  agentId: "scheduler",
+                  runId: generateSyntheticRunId("scheduler", freshTask.id),
+                  domain: "database",
+                  mutationType: handoffDecision.action === "reassign-local" ? "node:handoff:reassign-local" : "node:handoff:reassign-any",
+                  target: freshTask.id,
+                  metadata: {
+                    taskId: freshTask.id,
+                    ownerNodeId: freshTask.checkoutNodeId,
+                    ownerNodeHealth:
+                      ownerNodeHealth === "offline" || ownerNodeHealth === "error" || ownerNodeHealth === "online"
+                        ? ownerNodeHealth
+                        : "unknown",
+                    localNodeId,
+                    handoffPolicy: settings.owningNodeHandoffPolicy,
+                    decisionReason: handoffDecision.reason,
+                    source: "scheduler.dispatch",
+                  },
+                });
+              } catch (error) {
+                schedulerLog.warn(`Task ${task.id} failed to emit node:handoff audit: ${error instanceof Error ? error.message : String(error)}`);
+              }
+              const dispatchNodeBefore = effectiveNode.nodeId;
+              if (handoffDecision.action === "reassign-local") {
+                effectiveNode = { nodeId: undefined, source: "local" };
+              }
+              if (ownerNodeHealth === "offline" || ownerNodeHealth === "error" || ownerNodeHealth === "online") {
+                await this.emitNodeUnreachableRecoveryAudit(freshTask, {
+                  ownerNodeId: freshTask.checkoutNodeId,
+                  ownerNodeHealth,
+                  handoffAction: handoffDecision.action,
+                  handoffReason: handoffDecision.reason,
+                  decisionPath:
+                    handoffDecision.action === "reassign-local"
+                      ? "scheduler-handoff-reassign-local"
+                      : "scheduler-handoff-reassign-any",
+                  newColumn: freshTask.column,
+                  dispatchNodeBefore,
+                  dispatchNodeAfter: effectiveNode.nodeId,
+                });
+              }
+            }
+
+            if (effectiveNode.nodeId !== undefined) {
+              const nodeHealth = this.options.nodeHealthMonitor.getNodeHealth(effectiveNode.nodeId);
+              const decision = applyUnavailableNodePolicy({
+                effectiveNode,
+                nodeHealth,
+                policy: settings.unavailableNodePolicy,
+              });
+              if (!decision.allowed) {
+                if (!this.wasNodeBlocked.has(task.id)) {
+                  this.wasNodeBlocked.add(task.id);
+                  schedulerLog.log(`Task ${task.id} dispatch blocked — ${decision.reason}`);
+                  await this.store.logEntry(task.id, decision.reason);
+                }
+                return null;
+              }
+              this.wasNodeBlocked.delete(task.id);
+              if (decision.fallbackToLocal) {
+                schedulerLog.log(`Task ${task.id} falling back to local — ${decision.reason}`);
+                await this.store.logEntry(task.id, decision.reason);
+                effectiveNode = { nodeId: undefined, source: "local" };
+              }
+            }
+          }
+
+          if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId && this.options.agentStore) {
+            const selectedAgent = await selectPermanentAgentForTask({
+              task: freshTask,
+              agentStore: this.options.agentStore,
+              taskStore: this.store,
+            });
+            if (!selectedAgent) {
+              await this.store.updateTask(task.id, { status: "queued" });
+              if (!this.wasPermanentAgentUnavailable.has(task.id)) {
+                await this.logDispatchQueuedReason(
+                  task.id,
+                  "queued — no permanent executor available (ephemeral agents disabled)",
+                );
+                this.wasPermanentAgentUnavailable.add(task.id);
+              }
+              return null;
+            }
+            await this.store.updateTask(task.id, { assignedAgentId: selectedAgent.id });
+            await this.store.logEntry(
+              task.id,
+              `Auto-assigned to permanent agent ${selectedAgent.id} (ephemeral agents disabled)`,
+            );
+            this.wasPermanentAgentUnavailable.delete(task.id);
+          } else {
+            this.wasPermanentAgentUnavailable.delete(task.id);
+          }
+
+          const oscillationSettings = latestSettings as Settings & {
+            dispatchOscillationSettleMs?: number;
+            dispatchOscillationThreshold?: number;
+            dispatchOscillationWindowMs?: number;
+          };
+          const dispatchSettleMs = oscillationSettings.dispatchOscillationSettleMs
+            ?? DEFAULT_DISPATCH_OSCILLATION_SETTLE_MS;
+          const dispatchOscillationThreshold = oscillationSettings.dispatchOscillationThreshold
+            ?? DEFAULT_DISPATCH_OSCILLATION_THRESHOLD;
+          const dispatchOscillationWindowMs = oscillationSettings.dispatchOscillationWindowMs
+            ?? DEFAULT_DISPATCH_OSCILLATION_WINDOW_MS;
+          const recentEngineTodoMovedAt = this.recentEngineTodoRequeues.get(task.id);
+          if (recentEngineTodoMovedAt) {
+            if (freshTask.columnMovedAt !== recentEngineTodoMovedAt) {
+              this.recentEngineTodoRequeues.delete(task.id);
+            } else {
+              const movedAtMs = Date.parse(recentEngineTodoMovedAt);
+              const settleAgeMs = Number.isFinite(movedAtMs) ? Math.max(0, Date.now() - movedAtMs) : dispatchSettleMs;
+              if (settleAgeMs < dispatchSettleMs) {
+                schedulerLog.log(`Task ${task.id} was engine-requeued ${settleAgeMs}ms ago — waiting ${dispatchSettleMs}ms settle window before redispatch`);
+                return null;
+              }
+              this.recentEngineTodoRequeues.delete(task.id);
+            }
+          }
+
+          const dispatchTimestamp = new Date().toISOString();
+          const lastDispatchAtMs = freshTask.lastDispatchAt ? Date.parse(freshTask.lastDispatchAt) : Number.NaN;
+          const priorDispatchWithinWindow = Number.isFinite(lastDispatchAtMs)
+            && Date.now() - lastDispatchAtMs <= dispatchOscillationWindowMs;
+          const nextDispatchStormCount = priorDispatchWithinWindow
+            ? (freshTask.dispatchStormCount ?? 0) + 1
+            : 1;
+          if (nextDispatchStormCount > dispatchOscillationThreshold) {
+            const oscillationError = freshTask.error
+              ?? `DISPATCH_OSCILLATION: detected ${nextDispatchStormCount} todo↔in-progress cycles within ${dispatchOscillationWindowMs}ms. Task auto-paused for operator review.`;
+            await this.store.updateTask(task.id, {
+              dispatchStormCount: nextDispatchStormCount,
+              lastDispatchAt: dispatchTimestamp,
+              paused: true,
+              pausedReason: "dispatch-oscillation",
+              status: freshTask.status ?? "queued",
+              error: oscillationError,
+            });
+            await this.store.logEntry(
+              task.id,
+              `Dispatch oscillation auto-paused after ${nextDispatchStormCount} cycles within ${dispatchOscillationWindowMs}ms`,
+            );
+            await this.store.appendAgentLog?.(
+              task.id,
+              "Dispatch oscillation detected — task auto-paused for operator review",
+              "text",
+              `cycleCount=${nextDispatchStormCount} windowMs=${dispatchOscillationWindowMs}`,
+            );
+            await this.store.recordRunAuditEvent?.({
+              taskId: task.id,
+              agentId: "scheduler",
+              runId: generateSyntheticRunId("scheduler-dispatch-oscillation", task.id),
+              domain: "database",
+              mutationType: "task:dispatch-oscillation-terminalized",
+              target: task.id,
+              metadata: {
+                taskId: task.id,
+                cycleCount: nextDispatchStormCount,
+                windowMs: dispatchOscillationWindowMs,
+                lastMoveSource: recentEngineTodoMovedAt ? "engine" : "scheduler",
+              },
+            });
+            schedulerLog.warn(`Task ${task.id} auto-paused after dispatch oscillation threshold ${dispatchOscillationThreshold} was exceeded (${nextDispatchStormCount} cycles)`);
+            return null;
+          }
+
           if (settings.groupOverlappingFiles) {
             const taskScope = await getFilteredFileScope(task.id);
             if (taskScope.length > 0 && !isCoordinationOnlyTask(task, taskScope)) {
@@ -2148,32 +2496,58 @@ export class Scheduler {
                 return null;
               }
 
+              if (task.overlapBlockedBy) {
+                await this.store.updateTask(task.id, { overlapBlockedBy: null });
+              }
+
               activeScopes.set(task.id, taskScope);
               activeScopeColumns.set(task.id, "in-progress");
               reservedScope = true;
             } else if (task.overlapBlockedBy) {
               await this.store.updateTask(task.id, { overlapBlockedBy: null });
+              if (isCoordinationOnlyTask(task, taskScope)) {
+                await this.store.logEntry(
+                  task.id,
+                  "coordination/no-commit task bypassed non-implementation overlap lease",
+                );
+              }
             }
           }
 
-          if (Number.isFinite(maxWorktrees) && reservedWorktreeSlots >= maxWorktrees) {
+          const concurrencyDiagnostic = computeConcurrencyGateDiagnostic({
+            agentSlots: reservedConcurrentSlots,
+            maxConcurrent,
+            activeWorktrees: reservedWorktreeSlots,
+            maxWorktrees,
+            semaphore: this.options.semaphore,
+            inProgressTaskIds,
+          });
+          /*
+          FNXC:WorkflowScheduling 2026-06-23-20:58:
+          The workflow hold/release sweep is the only todo pickup path, so it must honor the same maxConcurrent, maxWorktrees, and shared semaphore pressure before releasing a task to in-progress. This is deliberately a non-mutating preflight: executor owns the actual semaphore acquire, and the scheduler only prevents capacity-obvious over-release without double-acquiring slots.
+          */
+          if (concurrencyDiagnostic.available <= 0) {
             if (reservedScope) {
               activeScopes.delete(task.id);
               activeScopeColumns.delete(task.id);
             }
+            const reason = formatConcurrencyLimitReason(concurrencyDiagnostic);
+            await this.store.updateTask(task.id, { status: "queued" });
+            await this.logDispatchQueuedReason(task.id, reason, formatConcurrencyLimitMemoKey(concurrencyDiagnostic));
             return null;
           }
 
-          const sem = this.options.semaphore;
-          if (sem && !sem.tryAcquire()) {
-            if (reservedScope) {
-              activeScopes.delete(task.id);
-              activeScopeColumns.delete(task.id);
-            }
-            return null;
-          }
+          dispatchPrepByTaskId.set(task.id, {
+            baseBranch: this.resolveBaseBranch(freshTask, tasks),
+            dispatchStormCount: nextDispatchStormCount,
+            dispatchTimestamp,
+            effectiveNodeId: effectiveNode.nodeId ?? null,
+            effectiveNodeSource: effectiveNode.source,
+            task: freshTask,
+          });
 
           reservedWorktreeSlots += 1;
+          reservedConcurrentSlots += 1;
           let released = false;
           return {
             release: () => {
@@ -2184,13 +2558,45 @@ export class Scheduler {
                 activeScopeColumns.delete(task.id);
               }
               reservedWorktreeSlots = Math.max(0, reservedWorktreeSlots - 1);
-              sem?.release();
+              reservedConcurrentSlots = Math.max(0, reservedConcurrentSlots - 1);
+              dispatchPrepByTaskId.delete(task.id);
             },
           };
         },
         allocateWorktree: (task, reservedNames) =>
           planTaskWorktreePath(task, this.store.getRootDir(), undefined, reservedNames, {}),
       });
+      for (const taskId of result.released) {
+        const prep = dispatchPrepByTaskId.get(taskId);
+        if (!prep) continue;
+        /*
+        FNXC:WorkflowScheduling 2026-06-23-21:49:
+        A workflow hold release is not a committed dispatch until moveTask succeeds and appears in result.released. Only then may the scheduler emit "Starting" and clear queued state. Call onSchedule before best-effort metadata/log writes so a post-release store/log failure does not strand an in-progress task without executor handoff.
+        */
+        schedulerLog.log(`Starting ${taskId}: ${prep.task.title || taskId} (deps satisfied)`);
+        const latest = await this.store.getTask(taskId).catch(() => null);
+        try {
+          this.options.onSchedule?.(latest ?? prep.task);
+        } catch (error) {
+          schedulerLog.error(`onSchedule failed for ${taskId}:`, error);
+        }
+        await this.store.updateTask(taskId, {
+          status: null,
+          blockedBy: null,
+          executionStartBranch: prep.baseBranch ?? undefined,
+          effectiveNodeId: prep.effectiveNodeId,
+          effectiveNodeSource: prep.effectiveNodeSource,
+          mergeRetries: 0,
+          dispatchStormCount: prep.dispatchStormCount,
+          lastDispatchAt: prep.dispatchTimestamp,
+        });
+        this.recentEngineTodoRequeues.delete(taskId);
+        this.wasNodeBlocked.delete(taskId);
+        this.wasNodeDispatchValidationBlocked.delete(taskId);
+        this.wasPermanentAgentUnavailable.delete(taskId);
+        this.clearDispatchQueuedReasonMemo(taskId);
+        await this.store.logEntry(taskId, `Node routing resolved: ${prep.effectiveNodeId ?? "local"} (source: ${prep.effectiveNodeSource})`);
+      }
     } catch (error) {
       schedulerLog.error("Hold/release sweep failed:", error);
     }

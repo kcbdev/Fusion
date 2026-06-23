@@ -1549,6 +1549,11 @@ export class TaskExecutor {
   private stuckAborted = new Map<string, boolean>();
   /** Tasks explicitly canceled by user move (in-progress → todo). */
   private userCanceledTaskIds = new Set<string>();
+  /*
+  FNXC:WorkflowLifecycle 2026-06-23-21:16:
+  During graph-owned execute nodes, the inner executor may intentionally self-requeue a task to `todo` for recoverable worktree/session repair. Persisted rows can be stale in tests or during store races, so keep a run-local marker that tells the outer graph failure sink not to overwrite that recovery with an in-review handoff.
+  */
+  private graphExecuteSelfRequeued = new Set<string>();
   /** In-memory loop recovery state per task. Keyed by taskId, not persisted.
    *  Tracks compact-and-resume attempt count per execute() lifecycle.
    *  Reset at execute() lifecycle end (finally block). */
@@ -1585,6 +1590,12 @@ export class TaskExecutor {
   private setActiveSession(taskId: string, sessionState: ActiveExecutorSessionState, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
+  }
+
+  private markGraphExecuteSelfRequeued(taskId: string): void {
+    if (this.graphRouting.has(taskId)) {
+      this.graphExecuteSelfRequeued.add(taskId);
+    }
   }
 
   private deleteActiveSession(taskId: string, worktreePath?: string): void {
@@ -3381,6 +3392,7 @@ export class TaskExecutor {
         nextRecoveryAt: decision.nextState.nextRecoveryAt,
         sessionFile: null,
       });
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
       return true;
     }
@@ -4129,8 +4141,15 @@ export class TaskExecutor {
       */
       settings = { ...settings };
       let selection: { workflowId: string; stepIds: string[] } | undefined;
+      if (typeof this.store.getTaskWorkflowSelection !== "function") {
+        /*
+        FNXC:WorkflowExecution 2026-06-23-22:01:
+        Graph execution is the default for production TaskStore implementations, which expose workflow-selection APIs. Minimal test stores and older embedded adapters can lack that API; fall back to the legacy executor instead of half-entering graph routing with no workflow persistence surface.
+        */
+        return false;
+      }
       try {
-        selection = this.store.getTaskWorkflowSelection?.(task.id);
+        selection = this.store.getTaskWorkflowSelection(task.id);
       } catch (err) {
         await this.handleGraphFailure(task, {
           disposition: "failed",
@@ -4268,7 +4287,14 @@ export class TaskExecutor {
       });
       let result: WorkflowGraphTaskRunResult;
       try {
-        const detail = await this.store.getTask(task.id);
+        const loadedDetail = await this.store.getTask(task.id);
+        /*
+        FNXC:WorkflowExecution 2026-06-23-11:36:
+        Graph dispatch must preserve the row identity that entered execute(). Minimal test stores and stale adapters can return an unrelated fallback task from getTask(); trusting that row would run the workflow under the wrong task id and bypass executor invariants. Use the refreshed row only when it matches the dispatch task.
+        */
+        const detail: TaskDetail = loadedDetail?.id === task.id
+          ? loadedDetail
+          : { ...task, prompt: task.prompt ?? task.description ?? "" };
         result = await runner.run(detail, settings);
       } catch (err) {
         executorLog.error(
@@ -4325,6 +4351,7 @@ export class TaskExecutor {
       this.graphColumnAgentResolver.delete(task.id);
       this.graphUnattendedRuns.delete(task.id);
       this.graphSeamGoverningNodeId.delete(task.id);
+      this.graphExecuteSelfRequeued.delete(task.id);
       // Per-instance keys: clear every instance slot owned by this task.
       const ctxPrefix = `${task.id}:`;
       for (const key of this.graphStepActiveContext.keys()) {
@@ -5069,6 +5096,12 @@ export class TaskExecutor {
     // completes; a step-review node (when present) decides done-ness instead.
     try {
       const live = await this.store.getTask(task.id);
+      if (!live || live.id !== task.id) {
+        return {
+          success: false,
+          error: `step ${stepIndex} live task unavailable after implementation pass`,
+        };
+      }
       const active = this.foreachActiveForTask(task.id, instanceId);
       const status = live.steps[stepIndex]?.status;
       if (status === "done" || status === "skipped") return { success: true };
@@ -5123,9 +5156,13 @@ export class TaskExecutor {
     return {
       prepareWorktree: async (_ctx, task) => {
         const live = await this.store.getTask(task.id);
+        /*
+        FNXC:WorkflowExecution 2026-06-23-11:49:
+        The workflow execute node must not perform a second worktree acquisition ahead of the authoritative executor. Passing the repo root as a prepared worktree makes the inner execute() reject a valid fresh-worktree task as repo-root reuse; pass only an existing task worktree and let execute() acquire when none exists.
+        */
         const prepared: PreparedWorktree = {
-          worktreePath: live.worktree || this.rootDir,
-          branchName: live.branch,
+          worktreePath: live.worktree || task.worktree || "",
+          branchName: live.branch || task.branch,
         };
         return { outcome: "success", value: "worktree-ready", data: prepared };
       },
@@ -6713,7 +6750,17 @@ export class TaskExecutor {
     this.clearCompletedTaskWatchdog(task.id);
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
-      const live = await this.store.getTask(task.id);
+      const loadedLive = await this.store.getTask(task.id);
+      /*
+      FNXC:WorkflowLifecycle 2026-06-23-12:01:
+      Graph failure handling must never mutate a different task row than the one that entered execute(). Minimal stores can return fallback rows from getTask(); treat that as an unavailable live snapshot and leave the inner executor recovery result intact instead of handing off the wrong task.
+      */
+      if (!loadedLive || loadedLive.id !== task.id) {
+        executorLog.warn(`${task.id}: graph failure live-state refetch returned ${loadedLive?.id ?? "null"} — preserving inner executor result`);
+        await this.persistTokenUsage(task.id);
+        return;
+      }
+      const live = loadedLive;
       // A paused/aborted implementation is not a graph failure while the task
       // is still in-progress — leave the pause machinery in charge instead of
       // parking the task in review.
@@ -6976,6 +7023,21 @@ export class TaskExecutor {
       const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
       const mergeGraphFailure = this.isMergeGraphFailure(failedNode);
       const failureValue = this.graphFailureValue(result);
+      const executeNodeSelfRequeued = failedNode === "execute" && this.graphExecuteSelfRequeued.has(task.id);
+      if (failedNode === "execute" && (live.column === "todo" || executeNodeSelfRequeued)) {
+        /*
+        FNXC:WorkflowLifecycle 2026-06-23-12:03:
+        The graph execute node delegates to the authoritative executor. If that inner executor requeues the task to todo for self-heal/retry, the outer graph failure must not override it by parking the task in review.
+
+        FNXC:WorkflowLifecycle 2026-06-23-21:19:
+        Also honor the in-process self-requeue marker. Upgrade/restart races and minimal stores can return a stale `in-progress` live row even after the inner executor already moved the task to `todo`; stale reads must not strand progressing tasks in review.
+        */
+        const benignMessage = `Workflow graph execute node ended after executor re-queued task to todo (${failureValue ?? "no-value"}) — executor recovery preserved`;
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+        await this.persistTokenUsage(task.id);
+        return;
+      }
       if (mergeGraphFailure && !this.isTerminalMergeGraphFailureValue(failureValue) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
         return;
       }
@@ -7651,6 +7713,7 @@ export class TaskExecutor {
             undefined,
             this.getRunContextFor(task.id),
           );
+          this.markGraphExecuteSelfRequeued(task.id);
           await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           executorLog.log(`✗ ${task.id} worktree liveness failed — requeued to todo (${nextRequeueCount}/${MAX_TASK_DONE_REQUEUE_RETRIES})`);
         } else {
@@ -7831,6 +7894,7 @@ export class TaskExecutor {
             }
             this.clearPausedAborted(task.id);
             await this.store.logEntry(task.id, "Execution paused — step sessions terminated, moved to todo", undefined, this.getRunContextFor(task.id));
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
@@ -8082,6 +8146,7 @@ export class TaskExecutor {
             }
             this.clearPausedAborted(task.id);
             await this.store.logEntry(task.id, "Execution paused during step-session", undefined, this.getRunContextFor(task.id));
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
           } else if (this.stuckAborted.has(task.id)) {
             stuckRequeue = this.stuckAborted.get(task.id) ?? true;
@@ -8125,6 +8190,7 @@ export class TaskExecutor {
                 worktree: null,
                 branch: null,
               });
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               stuckRequeue = null; // Prevent outer finally from re-processing
               return;
@@ -8218,6 +8284,7 @@ export class TaskExecutor {
                   branch: null,
                 });
                 if (latestTask.column !== "todo") {
+                  this.markGraphExecuteSelfRequeued(task.id);
                   await this.store.moveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined);
                   executorLog.log(`${task.id} moved to todo for retry after stuck kill${preserveProgress ? " (progress preserved)" : ""}`);
                 }
@@ -8731,6 +8798,7 @@ export class TaskExecutor {
             } else {
               executorLog.log(`${task.id} paused (graceful session exit) — moving to todo`);
               await this.store.logEntry(task.id, "Execution paused — session preserved for resume, moved to todo");
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             }
             return;
@@ -9129,6 +9197,7 @@ export class TaskExecutor {
               // the next pickup will re-anchor it on the fresh checkout.
               await this.store.updateTask(task.id, { worktree: null, branch: null, baseCommitSha: null });
               await this.persistTokenUsage(task.id);
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               executorLog.log(silentMessage);
             } else if (refusalHandled) {
@@ -9156,6 +9225,7 @@ export class TaskExecutor {
                   undefined,
                   this.getRunContextFor(task.id),
                 );
+                this.markGraphExecuteSelfRequeued(task.id);
                 await this.store.moveTask(task.id, "todo", { preserveProgress: true });
                 executorLog.log(`✗ ${task.id} failed after ${MAX_TASK_DONE_SESSION_RETRIES} retries — requeued to todo (${nextRequeueCount}/${MAX_TASK_DONE_REQUEUE_RETRIES})`);
               } else {
@@ -9337,6 +9407,7 @@ export class TaskExecutor {
             hasResumableProgress ? { worktree: undefined } : { worktree: undefined, branch: undefined },
           );
           await this.store.logEntry(task.id, "Execution paused — agent terminated, moved to todo", undefined, this.getRunContextFor(task.id));
+          this.markGraphExecuteSelfRequeued(task.id);
           await this.store.moveTask(task.id, "todo", hasResumableProgress ? { preserveResumeState: true } : undefined);
         }
       } else if (this.stuckAborted.has(task.id)) {
@@ -9444,6 +9515,7 @@ export class TaskExecutor {
               nextRecoveryAt: decision.nextState.nextRecoveryAt,
               sessionFile: null,
             });
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
@@ -9626,6 +9698,7 @@ export class TaskExecutor {
               // "worktree gone" from "pointer not yet repopulated". Matches sibling
               // recovery paths in auto-recovery-handlers/contamination.ts,
               // tryBootstrapMisbindingRecovery, and self-healing reclaim.
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveResumeState: true, preserveWorktree: true });
               return;
             }
@@ -9817,6 +9890,7 @@ export class TaskExecutor {
               worktree: null,
               branch: null,
             });
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveProgress: true });
             return;
           }
@@ -9960,6 +10034,7 @@ export class TaskExecutor {
             // the captured snapshot can be hours old and would race against
             // any concurrent recovery (see comment above).
             if (latestTask.column !== "todo") {
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined);
               // Audit trail: record task move (FN-1404)
               await audit.database({ type: "task:move", target: task.id, metadata: { to: "todo" } });
@@ -10768,6 +10843,7 @@ export class TaskExecutor {
         undefined,
         this.getRunContextFor(task.id),
       );
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveProgress: true });
     } else {
       await this.store.updateTask(task.id, {
@@ -13235,6 +13311,7 @@ You have access to the file system to review changes.${verdictBlock}`;
         paused: false,
         pausedReason: null,
       });
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveResumeState: false, preserveWorktree: true });
       return true;
     } catch (error) {
@@ -13859,6 +13936,9 @@ You have access to the file system to review changes.${verdictBlock}`;
       source: "executor-session-start",
       auditor: audit,
     });
+    if (recovery.outcome !== "escalate-exhausted") {
+      this.markGraphExecuteSelfRequeued(task.id);
+    }
 
     await audit.git({
       type: "worktree:auto-recovered",

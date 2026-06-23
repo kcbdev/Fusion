@@ -114,7 +114,7 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import { classifyTaskWorktree, getRegisteredWorktreeBranches, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { classifyTaskWorktree, getRegisteredWorktreeBranches, isRepoRootPath, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
@@ -7925,6 +7925,20 @@ export async function aiMergeTask(
     diagnostics: Record<string, unknown>,
   ): Promise<void> => {
     const priorWorktreePath = task.worktree ?? null;
+    if (priorWorktreePath && isRepoRootPath(projectRootDir, priorWorktreePath)) {
+      /*
+       * FNXC:WorkflowCutover 2026-06-23-04:45:
+       * Merge reuse handoff must reject a task worktree that equals the project root before acquisition fallback can clear the assignment. Executor resume may self-heal stale root assignments, but merge must not hide a handoff contract violation by creating a fresh task worktree.
+       */
+      throw new MergeHandoffRefusedError("reuse-misconfigured", "worktree-equals-project-root", {
+        taskId,
+        projectRoot: projectRootDir,
+        worktreePath: priorWorktreePath,
+        requestedMode: requestedIntegrationMode,
+        reason,
+        diagnostics,
+      });
+    }
 
     // FN-5345/FN-5377: consult existing registration of `fusion/<id>` before
     // creating a fresh worktree. If the branch is already registered at a
@@ -8314,6 +8328,12 @@ export async function aiMergeTask(
           gate: error.gate,
           reason: error.reason,
         });
+      } else if (isRepoRootPath(projectRootDir, reusableWorktreePath)) {
+        /*
+         * FNXC:WorkflowCutover 2026-06-23-04:45:
+         * Merge reuse handoff must reject a task worktree that equals the project root. Executor resume may self-heal stale root assignments, but merge must not turn this dangerous state into a fresh-worktree fallback because that hides a handoff contract violation.
+         */
+        throw error;
       } else {
         const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
         if (!classification.ok) {

@@ -432,9 +432,10 @@ async function issueRelease(
   const onMoved = (data: { task: object; to: string }): void => {
     if (data.to === target) movedTaskObjects.add(data.task);
   };
-  store.on("task:moved", onMoved);
+  store.on?.("task:moved", onMoved);
 
   try {
+    const originalColumn = task.column;
     const result = await store.moveTask(task.id, target, {
       moveSource: "scheduler",
       allocateWorktree:
@@ -442,7 +443,16 @@ async function issueRelease(
           ? (reservedNames) => deps.allocateWorktree!(task, reservedNames)
           : undefined,
     });
-    if (reservation && !movedTaskObjects.has(result)) {
+    /*
+    FNXC:WorkflowScheduling 2026-06-23-21:57:
+    The cutover scheduler uses hold/release in tests and older embedded stores that may not expose task:moved events. Treat a returned task that clearly moved from the original column to the target as the committed release so minimal stores do not leak reservations or falsely report a racing same-column no-op.
+    */
+    const returnedMovedTask = movedTaskObjects.size === 0
+      && (
+        result === undefined
+        || (result.id === task.id && result.column === target && originalColumn !== target)
+      );
+    if (reservation && !movedTaskObjects.has(result) && !returnedMovedTask) {
       // Same-column no-op: a racing sweep already moved this card to the target.
       reservation.release();
       schedulerLog.log(`Hold release for ${task.id} skipped — already at ${target} (racing sweep won)`);
@@ -463,7 +473,7 @@ async function issueRelease(
     );
     return false;
   } finally {
-    store.off("task:moved", onMoved);
+    store.off?.("task:moved", onMoved);
   }
 }
 

@@ -35,6 +35,7 @@ describe("settings defaults invariants", () => {
     expect(isExperimentalFeatureEnabled(undefined, "workflowColumns")).toBe(false);
     expect(isExperimentalFeatureEnabled(undefined, "workflowGraphExecutor")).toBe(false);
     expect(isExperimentalFeatureEnabled(undefined, "workflowInterpreterDualObserve")).toBe(false);
+    expect(isExperimentalFeatureEnabled({ experimentalFeatures: { workflowInterpreterDualObserve: true } }, "workflowInterpreterDualObserve")).toBe(false);
     expect(isWorkflowColumnsEnabled({ experimentalFeatures: { workflowColumns: false } })).toBe(true);
   });
 
