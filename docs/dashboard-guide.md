@@ -24,6 +24,7 @@ Task Detail modal opens from onboarding, activity log, and task-to-task navigati
 **Left Sidebar Navigation** is enabled by default for desktop/tablet project screens, moving project navigation out of the Header and into a persistent left sidebar. To opt out, open **Settings → Experimental Features** and turn **Left Sidebar Navigation** off (`leftSidebarNav: false`).
 
 <!-- FNXC:DashboardDocs 2026-06-22-00:00: The dashboard navigation docs must mirror the post-reshuffle source of truth: the left sidebar owns primary content views plus Workflows, Import Tasks, and Automations, while the right dock owns only inline tool panels. -->
+<!-- FNXC:DashboardNavigationDocs 2026-06-22-09:30: FN-6897 synced the user-facing navigation guide after the sidebar/dock reshuffle. Desktop/tablet navigation is split between left-sidebar main-content destinations, a persistent far-right tools dock, and the footer-launched Terminal; stale Header overflow, duplicate dock/sidebar, and standalone Stash Recovery affordances must not be documented as current behavior. -->
 
 When enabled on desktop or tablet project screens, the sidebar starts with a centered **New Task** button that opens the existing New Task dialog from any project screen. Expanded mode shows the plus icon and **New Task** label; collapsed rail mode keeps the centered icon-only button accessible through its label/title. Below that action, the sidebar contains primary destinations (**Board**, **List**, **Agents** when enabled, **Command Center**, **Planning**, **Missions**, **Chat**, **Artifacts**, **Mailbox**, and plugin primary views) followed by secondary destinations (**Workflows**, **Import Tasks**, **Automations**, optional **Evals**, **Goals**, **Research**, **Insights**, **Skills**, **Memory**, **Dev Server**, and plugin overflow views when their flags/plugins are enabled). The footer contains the sidebar collapse toggle directly above **Settings**.
 
@@ -34,7 +35,7 @@ Use the desktop/tablet sidebar this way:
 2. Select a primary destination such as **Board**, **Command Center**, **Planning**, or **Artifacts**.
    Expected outcome: the selected view renders in the main content region and the sidebar item receives the active highlight.
 3. Select **Workflows**, **Import Tasks**, or **Automations** from the secondary section.
-   Expected outcome: each surface opens as an embedded main-content view, not as a detached desktop toolbar modal. **Import Tasks** is the GitHub import surface.
+   Expected outcome: each surface opens as an embedded main-content view. **Import Tasks** is the GitHub import surface.
 4. Use the footer **Collapse** control or drag the right-edge resize handle.
    Expected outcome: the sidebar switches between labeled and icon-only rail modes or persists the resized width in browser `localStorage` (`fusion:left-sidebar-collapsed` and `fusion:left-sidebar-width`) for the next reload.
 
@@ -42,32 +43,32 @@ While the sidebar is active on desktop/tablet project screens, Board and List wo
 
 The active nav-item highlight and the resize-handle hover/focus accent track the active color theme's `--accent` token across all themes, so shadcn, forest, ocean, and other themes no longer show a fixed blue selected state. The Header retains the Fusion brand and project selector, keeps non-navigation controls, and hides duplicate desktop view-toggle entries while the sidebar is active.
 
-On mobile viewports (`<=768px`), the sidebar is not rendered even when the default-on setting is enabled. The existing bottom `MobileNavBar` remains the navigation surface, with mobile-only More-sheet entries for compact tools such as Git Manager, Terminal, Files, and GitHub import.
+On mobile viewports (`<=768px`), the sidebar is not rendered even when the default-on setting is enabled. The existing bottom `MobileNavBar` remains the navigation surface, with mobile-only More-sheet entries for compact tools such as Git Manager, Terminal, Files, and **Import from GitHub**.
 
 ## Right Dock (experimental, default on)
 
 The **Right Dock Panel** experiment is enabled by default. To disable it, open **Settings → Experimental Features** and turn off **Right Dock Panel**.
 
-When enabled on desktop or tablet project screens, the right dock is visible by default as the far-right sidebar in the project content row. A non-mobile Header **Show/Hide right sidebar** button with the `PanelRight` icon toggles the dock; when hidden, the dock is removed from the layout so the main content reclaims the space. The dock's open/closed state, selected view, width, and expanded modal size persist across reloads.
+When enabled on desktop or tablet project screens, the right dock is a persistent far-right tools sidebar in the project content row. Use the in-dock collapse control to switch between the full tool panel and the compact far-right rail; the selected tool, expanded/collapsed state, width, and expanded modal size persist across reloads.
 
-The dock toolbar has four built-in inline tool panels: **Activity**, **Activity Log**, **Git Manager**, and **Files**. **Activity**, **Activity Log**, and **Git Manager** render in embedded mode inside the dock instead of opening fixed popup overlays; **Files** opens by default and is the fallback when browser storage points at a removed dock key. Inline dock views have an expand button that opens the same view in a resizable modal for more room. Plugin overflow views may add additional right-dock tabs, except plugin destinations that explicitly belong in the left sidebar.
+The dock toolbar has built-in inline tool panels for **Activity**, **Activity Log**, **Git Manager**, **Files**, and project tool launchers such as **Import from GitHub** / **Import Tasks** workflow entry points and **Automation** actions when available. **Activity**, **Activity Log**, **Git Manager**, and **Files** render in embedded mode inside the dock instead of opening fixed popup overlays; **Files** opens by default and is the fallback when browser storage points at a removed dock key. Inline dock views have an expand button that opens the same view in a resizable modal for more room. Plugin overflow views may add additional right-dock tool tabs, except plugin destinations that explicitly belong in the left sidebar.
 
 Use the desktop/tablet right dock this way:
 
 1. Open a project screen with **Right Dock Panel** enabled.
    Expected outcome: the dock appears on the far right with **Files** selected unless a valid previous dock view is stored.
-2. Select **Activity**, **Activity Log**, **Git Manager**, or **Files** in the dock toolbar.
+2. Select **Activity**, **Activity Log**, **Git Manager**, **Files**, or another available tool in the dock toolbar.
    Expected outcome: the selected tool renders inline inside the dock body and the toolbar tab becomes active.
 3. Drag the dock's left-edge resize handle, or focus the separator and use the arrow keys.
    Expected outcome: the dock width changes within its min/max bounds and is saved for future reloads.
 4. Select the dock expand action.
    Expected outcome: the same inline tool opens in a resizable modal while the dock remains the source navigation surface.
-5. Use the Header **Show/Hide right sidebar** button.
-   Expected outcome: the dock is hidden or restored; mobile viewports never render the right dock.
+5. Use the dock's own collapse control.
+   Expected outcome: the far-right surface switches between full panel and compact rail without creating duplicate left-sidebar destinations; mobile viewports never render the right dock.
 
-Content views such as Artifacts, Research, Insights, Skills, Memory, Evals, Goals, Dev Server, **Workflows**, **Import Tasks**, and **Automations** live in the left sidebar (or compact mobile navigation) rather than the right dock. GitHub import is no longer a desktop top-toolbar icon; on desktop/tablet it lives under **Import Tasks**, while mobile keeps compact GitHub import entries in the More surfaces.
+Content views such as Artifacts, Research, Insights, Skills, Memory, Evals, Goals, Dev Server, **Workflows**, **Import Tasks**, and **Automations** live in the left sidebar (or compact mobile navigation) rather than the right dock. On desktop/tablet, GitHub import lives under **Import Tasks**; mobile keeps compact GitHub import entries in the More surfaces.
 
-On mobile viewports, the Right Dock never renders. The compact Header overflow and bottom `MobileNavBar` keep their existing behavior even when the experiment is enabled.
+On mobile viewports, the Right Dock never renders. The compact Header actions and bottom `MobileNavBar` keep their existing mobile behavior even when the experiment is enabled.
 
 ## Deep Links
 
@@ -154,14 +155,19 @@ Use Import Tasks on desktop/tablet:
 5. Select the import action.
    Expected outcome: Fusion creates a task (or review task for a pull request) on the board and preserves GitHub provenance/tracking metadata.
 
-On mobile, use the compact Header overflow or bottom **More** sheet **Import from GitHub** entry. Expected outcome: the same import workflow opens in the mobile modal layout.
+Use GitHub import on mobile:
+
+1. Open the compact Header actions or bottom **More** sheet and select **Import from GitHub**.
+   Expected outcome: the same import workflow opens in the mobile modal layout.
+2. Choose the repository, issue/PR tab, candidate row, and import action.
+   Expected outcome: Fusion creates the board task with the same GitHub provenance/tracking metadata as the desktop/tablet **Import Tasks** view.
 
 ## Graph View
 
 Graph view visualizes task dependencies as an interactive node/edge map.
 
 Navigation:
-- Desktop: **Header → More views → Graph**
+- Desktop/tablet: left sidebar or applicable plugin/content navigation entry for **Graph** when the dependency graph surface is enabled
 - Mobile: **MobileNavBar → More → Graph**
 
 Behavior:
@@ -188,7 +194,7 @@ The workflow editor opens as a full-screen modal editor for inspecting built-ins
 Navigation:
 - Open a task or board surface that shows the workflow selector, then choose **Manage…**.
 - From the Board or List workflow dropdown, use the inline edit button on a workflow row to open that workflow directly, or use the persistent **New workflow** footer to create a workflow without leaving the dropdown. The same dropdown previews each workflow's Todo / In Progress / Done task counts inline before switching.
-- Use the global **Workflow** / **Workflows** entry point from desktop header, compact header overflow, or mobile **More** navigation to browse definitions.
+- Use **Workflows** in the desktop/tablet left sidebar, compact mobile actions, or mobile **More** navigation to browse definitions.
 - From Settings moved-setting stubs, choose **Open workflow settings** to jump to the default workflow's settings values.
 
 Behavior:
@@ -270,7 +276,7 @@ For the stored settings shape, see [`customProviders` in the Settings Reference]
 
 ## Planning Mode
 
-Planning Mode now includes branch controls on the summary screen before you create a task.
+Planning is a desktop/tablet left-sidebar main-content destination after **Command Center**. It opens the planning-session list and composer in the main content region; mobile continues to use the compact planning entry points. Planning Mode now includes branch controls on the summary screen before you create a task.
 
 - **Branch strategy** options mirror Subtask Breakdown semantics:
   - `Use project/default branch`
@@ -304,7 +310,7 @@ Rules:
 - `Merge target / base branch` stays optional for all modes and uses the same branch-dropdown + `Custom…` fallback behavior as Planning Mode.
 - In **More options → Model Configuration**, **Auto-merge** is a per-task override with three states: **Default** (follow project setting), **Enabled**, or **Disabled**.
 
-The dialog also exposes the board quick-add AI handoffs: **Plan** opens Planning Mode with the current description, and **Subtask** opens Subtask Breakdown with the current description when **Settings → Experimental Features → Subtask Breakdown** is enabled. The Subtask handoff is hidden by default; visible handoff buttons remain disabled until the description has content, matching the quick-add row behavior.
+The dialog also exposes the board quick-add AI handoffs: **Plan** opens Planning Mode with the current description, and **Subtask** opens Subtask Breakdown with the current description when **Settings → Experimental Features → Subtask Breakdown** is enabled. The Subtask handoff is hidden by default; visible handoff buttons remain disabled until the description has content, matching the quick-add row behavior. **Execution mode** is available in the New Task dialog as well as quick entry, so users can choose Fast or standard execution before creating a task from either surface.
 
 ## Chat View
 
@@ -473,7 +479,7 @@ Features:
 - One-click **Sync** action in Remotes (`git pull --rebase` followed by push; it stops and surfaces an error instead of pushing when the pull conflicts or fails)
 - Remote editing controls
 - Stash inspection (view stat + patch) before apply/pop/drop actions
-- **Recovery** tab for orphaned merger-autostashes; orphan counts appear on Git Manager entry points instead of a standalone Stash Recovery view
+- **Recovery** tab for orphaned merger-autostashes; orphan counts appear on Git Manager entry points
 - Remotes tab keeps "Recent commits on {remote}" in sync immediately after successful push/pull actions
 
 ![Git Manager](./screenshots/git-manager.png)
@@ -582,7 +588,7 @@ Agent registrations also surface through the [Mailbox View](#mailbox-view): succ
 Reports View is available when the **Reports** plugin is installed and enabled.
 
 Navigation:
-- Desktop: **Header → More views → Reports**
+- Desktop/tablet: left sidebar plugin/content entry for **Reports** when the Reports plugin is installed and enabled
 - Mobile: **More** sheet → **Reports**
 
 Features:
@@ -613,8 +619,7 @@ Todo View is an experimental full-height dashboard surface for managing per-proj
 > Available when `experimentalFeatures.todoView` is enabled.
 
 Navigation:
-- Desktop/tablet with Left Sidebar Navigation enabled: **Left sidebar → Todos**
-- Desktop/tablet with the left-sidebar opt-out layout: **Header → More views → Todos**
+- Desktop/tablet: **Left sidebar → Todos** when the Todo view is enabled
 - Mobile: **More** sheet → **Todos**
 
 For full behavior, API contracts, and storage details, use the canonical [Todo View guide](./todo-view.md).
@@ -637,9 +642,9 @@ Features:
 - Graceful unavailable/setup messaging when research backend capability is disabled or not configured
 
 Navigation:
-- Desktop: **Header → More views** overflow menu
+- Desktop/tablet: **Left sidebar → Research** when the Research view is enabled
 - Mobile: **More** sheet in `MobileNavBar`
-- Research is intentionally not shown in the primary board/list/agents/missions/chat toggle row
+- Research is intentionally separate from the primary Board/List workflow controls
 
 For the full research workflow, provider setup, CLI commands, API reference, and agent integration, see the canonical [Research guide](./research.md).
 
@@ -699,7 +704,7 @@ Roadmaps view manages roadmap hierarchies (roadmaps, milestones, features) and p
 > Hidden when a plugin replaces Roadmaps navigation.
 
 Navigation:
-- Desktop: **Header → More views → Roadmaps**
+- Desktop/tablet: left sidebar plugin/content entry for **Roadmaps** when the Roadmap plugin is enabled
 - Mobile: **More** sheet (or promoted to a top tab when eligible based on mobile nav slot rules)
 
 Features:
@@ -750,7 +755,7 @@ Evals view is a dedicated dashboard surface for reviewing scheduled task-evaluat
 > Available when `experimentalFeatures.evalsView` is enabled.
 
 Navigation:
-- Desktop: **Header → More views → Evals**
+- Desktop/tablet: **Left sidebar → Evals** when evaluations are enabled
 - Mobile: **More** sheet → **Evals**
 
 Features:
@@ -766,7 +771,7 @@ Insights view surfaces categorized project insights and lets you turn findings i
 > Available when `experimentalFeatures.insights` is enabled.
 
 Navigation:
-- Desktop: **Header → More views → Insights**
+- Desktop/tablet: **Left sidebar → Insights** when insights are enabled
 - Mobile: **More** sheet → **Insights**
 
 Features:
@@ -844,7 +849,7 @@ Dev Server view manages detected dev server commands, preview URLs, and live log
 > Available when `experimentalFeatures.devServerView` is enabled (`devServer` is treated as a legacy alias).
 
 Navigation:
-- Desktop: **Header → More views → Dev Server**
+- Desktop/tablet: **Left sidebar → Dev Server** when the Dev Server view is enabled
 - Mobile: **More** sheet → **Dev Server**
 
 Features:
@@ -857,7 +862,7 @@ For module-level behavior and API surfaces, see [Dev Server modules](./dev-serve
 
 ## Stash Recovery in Git Manager
 
-Stash Recovery helps recover orphaned merger autostashes (`fusion-merger-autostash:*`) left behind when merge restore could not fully complete. It now lives as the **Recovery** tab in **Git Manager**; the former standalone top-level Stash Recovery view is removed from desktop and mobile navigation.
+Stash Recovery helps recover orphaned merger autostashes (`fusion-merger-autostash:*`) left behind when merge restore could not fully complete. It now lives as the **Recovery** tab in **Git Manager** and is reached through Git Manager on desktop/tablet and mobile.
 
 Navigation:
 

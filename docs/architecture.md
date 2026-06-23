@@ -1680,7 +1680,7 @@ The GitHub tracking state listener now attaches to every registered project stor
 - New global surfacing adds `merger:autostashOrphans` TaskStore events, engine helpers (`listAutostashOrphans`, `getAutostashDiff`, `applyAutostashBySha`, `dropAutostashBySha`), and dashboard API endpoints under `/api/stash-recovery/*`.
 - `merger:autostashOrphans` records now include provenance fields (`sourcePhase`, `detectedByTaskId`, `detectedAt`) so operators can attribute leftovers to the merge phase and surfacing task/session.
 - `ProjectEngine` consumes the orphan event stream and auto-creates deduplicated `sourceType: "recovery"` follow-up tasks for live leftovers, so repeated detections do not spam the board.
-- Dashboard operators can inspect orphan counts, review diffs, apply stashes, and explicitly drop entries with confirmation.
+- Dashboard operators inspect orphan counts, review diffs, apply stashes, and explicitly drop entries with confirmation from **Git Manager → Recovery**; the recovery controls are part of Git Manager rather than a standalone top-level dashboard view.
 - Decision: recovery stays user-gated. Auto-apply was rejected because clean-tree checks are racy, stash placement is ambiguous after source task merge, and apply conflicts can produce hard-to-untangle state. `sweepAutostashOrphans` continues to auto-drop only subsumed entries while preserving live developer work.
 
 #### Automated follow-up dedup (FN-5232)
