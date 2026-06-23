@@ -787,9 +787,22 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
 }
 
 .agent-task,
-.agent-heartbeat {
+.agent-heartbeat,
+.agent-model-runtime {
   display: flex;
   gap: var(--space-sm);
+}
+
+.agent-model-runtime {
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-model-runtime__value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-heartbeat-control {
@@ -1392,6 +1405,10 @@ AgentsView uses the measured SVG overlay as the single connector system so paren
 
   .org-chart-node__badge {
     font-size: calc(var(--space-sm) + var(--space-xs) * 0.625);
+  }
+
+  .agent-model-runtime {
+    flex-wrap: wrap;
   }
 
   .agent-card-error {

@@ -121,6 +121,37 @@ function getStateCardClass(
   }
 }
 
+interface AgentModelLabel {
+  label: string | null;
+  isRuntime: boolean;
+}
+
+/*
+FNXC:AgentsView 2026-06-23-04:00:
+Agent list cards must expose the configured model or plugin runtime without requiring a detail-view open.
+Use the same runtimeHint/modelProvider+modelId/legacy model fallback order as the detail view and leave no-override agents as Auto at render time.
+*/
+function getAgentModelLabel(agent: Agent): AgentModelLabel {
+  const runtimeConfig = agent.runtimeConfig ?? {};
+  const runtimeHint = typeof runtimeConfig.runtimeHint === "string" ? runtimeConfig.runtimeHint : "";
+  if (runtimeHint) {
+    return { label: runtimeHint, isRuntime: true };
+  }
+
+  const modelProvider = typeof runtimeConfig.modelProvider === "string" ? runtimeConfig.modelProvider : "";
+  const modelId = typeof runtimeConfig.modelId === "string" ? runtimeConfig.modelId : "";
+  if (modelProvider && modelId) {
+    return { label: `${modelProvider}/${modelId}`, isRuntime: false };
+  }
+
+  const legacyModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : "";
+  if (legacyModel.includes("/")) {
+    const slashIdx = legacyModel.indexOf("/");
+    return { label: legacyModel.slice(slashIdx + 1), isRuntime: false };
+  }
+
+  return { label: null, isRuntime: false };
+}
 
 function getOrgChartLeafCount(node: OrgTreeNode): number {
   if (node.children.length === 0) {
@@ -1720,6 +1751,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
               const configuredIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
               const heartbeatOptions = getHeartbeatIntervalOptions(configuredIntervalMs);
               const isUpdatingHeartbeat = updatingHeartbeatAgentId === agent.id;
+              const modelLabel = getAgentModelLabel(agent);
               return (
                 <div
                   key={agent.id}
@@ -1833,6 +1865,12 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   </div>
 
                   <div className="agent-card-body">
+                    <div className="agent-model-runtime">
+                      <span className="text-secondary">{modelLabel.isRuntime ? t("agents.runtime", "Runtime") : t("agents.model", "Model")}:</span>
+                      <span className="badge agent-model-runtime__value" title={modelLabel.label ?? t("agents.auto", "Auto")}>
+                        {modelLabel.label ?? t("agents.auto", "Auto")}
+                      </span>
+                    </div>
                     {agent.state === "error" && agent.lastError ? (
                       <AgentErrorIndicator
                         errorText={agent.lastError}
