@@ -429,8 +429,12 @@ async function issueRelease(
   // the real mover; any other call that reserved performed a redundant no-op and
   // must release the slot it grabbed (FN-1415).
   const movedTaskObjects = new Set<object>();
-  const onMoved = (data: { task: object; to: string }): void => {
-    if (data.to === target) movedTaskObjects.add(data.task);
+  let sawMovedEventForTask = false;
+  const onMoved = (data: { task: Task; to: string }): void => {
+    if (data.to === target && data.task.id === task.id) {
+      sawMovedEventForTask = true;
+      movedTaskObjects.add(data.task);
+    }
   };
   store.on?.("task:moved", onMoved);
 
@@ -446,8 +450,11 @@ async function issueRelease(
     /*
     FNXC:WorkflowScheduling 2026-06-23-21:57:
     The cutover scheduler uses hold/release in tests and older embedded stores that may not expose task:moved events. Treat a returned task that clearly moved from the original column to the target as the committed release so minimal stores do not leak reservations or falsely report a racing same-column no-op.
+
+    FNXC:WorkflowScheduling 2026-06-23-22:39:
+    Eventless-release fallback is scoped to the current task. Other cards moving to the same target column during the same sweep must not disable this task's fallback and leak its reservation.
     */
-    const returnedMovedTask = movedTaskObjects.size === 0
+    const returnedMovedTask = !sawMovedEventForTask
       && (
         result === undefined
         || (result.id === task.id && result.column === target && originalColumn !== target)

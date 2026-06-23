@@ -96,6 +96,86 @@ describe("Scheduler workflow cutover", () => {
     expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-100", column: "in-progress" }));
   });
 
+  it("queues without dispatch when ephemeral agents are disabled and no agent store is available", async () => {
+    const ready = task({ id: "FN-101" });
+    const store = storeWith([ready], { ephemeralAgentsEnabled: false });
+    const onSchedule = vi.fn();
+    const scheduler = new Scheduler(store, { onSchedule });
+    (scheduler as unknown as { running: boolean }).running = true;
+
+    await scheduler.schedule();
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-101", { status: "queued" });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-101",
+      "queued — permanent executor selection unavailable (ephemeral agents disabled)",
+    );
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-101", "in-progress", expect.anything());
+    expect(onSchedule).not.toHaveBeenCalled();
+    expect(ready.column).toBe("todo");
+  });
+
+  it("passes worktree naming and directory settings to the workflow release allocator", async () => {
+    const ready = task({ id: "FN-102" });
+    const store = storeWith([ready], {
+      worktreeNaming: "task-id",
+      worktreesDir: "custom-worktrees",
+    });
+    const scheduler = new Scheduler(store, { onSchedule: vi.fn() });
+    (scheduler as unknown as { running: boolean }).running = true;
+
+    await scheduler.schedule();
+
+    const moveOptions = vi.mocked(store.moveTask).mock.calls[0]?.[2] as {
+      allocateWorktree?: (reservedNames: Set<string>) => string | null;
+    };
+    expect(moveOptions.allocateWorktree?.(new Set())).toBe("/tmp/project/custom-worktrees/fn-102");
+  });
+
+  it("continues executor handoff for all released tasks when post-release metadata or logs fail", async () => {
+    const first = task({ id: "FN-201", status: "queued" });
+    const second = task({ id: "FN-202", status: "queued" });
+    const store = storeWith([first, second], { maxConcurrent: 4, maxWorktrees: 4 });
+    const updateImpl = vi.mocked(store.updateTask).getMockImplementation()!;
+    vi.mocked(store.updateTask).mockImplementation(async (id, patch) => {
+      if (id === "FN-201" && "lastDispatchAt" in patch) {
+        throw new Error("metadata write failed");
+      }
+      return updateImpl(id, patch);
+    });
+    vi.mocked(store.logEntry).mockImplementation(async (id, message) => {
+      if (id === "FN-201" && message.startsWith("Node routing resolved")) {
+        throw new Error("log write failed");
+      }
+    });
+    const onSchedule = vi.fn();
+    const scheduler = new Scheduler(store, { onSchedule });
+    (scheduler as unknown as { running: boolean }).running = true;
+
+    await scheduler.schedule();
+
+    expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      id: "FN-201",
+      column: "in-progress",
+      status: undefined,
+      effectiveNodeSource: "local",
+    }));
+    expect(onSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      id: "FN-202",
+      column: "in-progress",
+      status: undefined,
+      effectiveNodeSource: "local",
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-202", expect.objectContaining({
+      status: null,
+      effectiveNodeSource: "local",
+    }));
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-202",
+      "Node routing resolved: local (source: local)",
+    );
+  });
+
   it("keeps dependency-blocked todo tasks queued on the workflow sweep path", async () => {
     const blocker = task({ id: "FN-001", column: "todo" });
     const dependent = task({ id: "FN-002", dependencies: ["FN-001"] });

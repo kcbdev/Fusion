@@ -2376,7 +2376,23 @@ export class Scheduler {
             }
           }
 
-          if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId && this.options.agentStore) {
+          if (latestSettings.ephemeralAgentsEnabled === false && !freshTask.assignedAgentId) {
+            /*
+            FNXC:WorkflowScheduling 2026-06-23-22:33:
+            The workflow cutover path must not silently dispatch unassigned work when ephemeral agents are disabled. Queue until permanent-agent selection is available so upgrades preserve the executor contract instead of falling through to local execution.
+            */
+            if (!this.options.agentStore) {
+              await this.store.updateTask(task.id, { status: "queued" });
+              if (!this.wasPermanentAgentUnavailable.has(task.id)) {
+                await this.logDispatchQueuedReason(
+                  task.id,
+                  "queued — permanent executor selection unavailable (ephemeral agents disabled)",
+                );
+                this.wasPermanentAgentUnavailable.add(task.id);
+              }
+              return null;
+            }
+
             const selectedAgent = await selectPermanentAgentForTask({
               task: freshTask,
               agentStore: this.options.agentStore,
@@ -2564,23 +2580,21 @@ export class Scheduler {
           };
         },
         allocateWorktree: (task, reservedNames) =>
-          planTaskWorktreePath(task, this.store.getRootDir(), undefined, reservedNames, {}),
+          this.planWorktreePath(task, settings.worktreeNaming, reservedNames, settings),
       });
       for (const taskId of result.released) {
         const prep = dispatchPrepByTaskId.get(taskId);
         if (!prep) continue;
         /*
         FNXC:WorkflowScheduling 2026-06-23-21:49:
-        A workflow hold release is not a committed dispatch until moveTask succeeds and appears in result.released. Only then may the scheduler emit "Starting" and clear queued state. Call onSchedule before best-effort metadata/log writes so a post-release store/log failure does not strand an in-progress task without executor handoff.
+        A workflow hold release is not a committed dispatch until moveTask succeeds and appears in result.released. Only then may the scheduler emit "Starting" and clear queued state.
+
+        FNXC:WorkflowScheduling 2026-06-23-22:36:
+        Persist dispatch metadata before executor handoff when possible, but isolate update/log failures per task. A metadata failure must not block later released tasks or strand an already released task without onSchedule handoff.
         */
         schedulerLog.log(`Starting ${taskId}: ${prep.task.title || taskId} (deps satisfied)`);
         const latest = await this.store.getTask(taskId).catch(() => null);
-        try {
-          this.options.onSchedule?.(latest ?? prep.task);
-        } catch (error) {
-          schedulerLog.error(`onSchedule failed for ${taskId}:`, error);
-        }
-        await this.store.updateTask(taskId, {
+        const dispatchUpdate = {
           status: null,
           blockedBy: null,
           executionStartBranch: prep.baseBranch ?? undefined,
@@ -2589,13 +2603,36 @@ export class Scheduler {
           mergeRetries: 0,
           dispatchStormCount: prep.dispatchStormCount,
           lastDispatchAt: prep.dispatchTimestamp,
-        });
+        };
+        const scheduledTask = {
+          ...(latest?.id === taskId ? latest : prep.task),
+          ...dispatchUpdate,
+          status: undefined,
+          blockedBy: undefined,
+          effectiveNodeId: prep.effectiveNodeId ?? undefined,
+          effectiveNodeSource: prep.effectiveNodeSource as Task["effectiveNodeSource"],
+          column: "in-progress" as const,
+        };
+        try {
+          await this.store.updateTask(taskId, dispatchUpdate);
+        } catch (error) {
+          schedulerLog.error(`Post-release dispatch metadata update failed for ${taskId}:`, error);
+        }
+        try {
+          this.options.onSchedule?.(scheduledTask);
+        } catch (error) {
+          schedulerLog.error(`onSchedule failed for ${taskId}:`, error);
+        }
         this.recentEngineTodoRequeues.delete(taskId);
         this.wasNodeBlocked.delete(taskId);
         this.wasNodeDispatchValidationBlocked.delete(taskId);
         this.wasPermanentAgentUnavailable.delete(taskId);
         this.clearDispatchQueuedReasonMemo(taskId);
-        await this.store.logEntry(taskId, `Node routing resolved: ${prep.effectiveNodeId ?? "local"} (source: ${prep.effectiveNodeSource})`);
+        try {
+          await this.store.logEntry(taskId, `Node routing resolved: ${prep.effectiveNodeId ?? "local"} (source: ${prep.effectiveNodeSource})`);
+        } catch (error) {
+          schedulerLog.error(`Post-release dispatch log failed for ${taskId}:`, error);
+        }
       }
     } catch (error) {
       schedulerLog.error("Hold/release sweep failed:", error);

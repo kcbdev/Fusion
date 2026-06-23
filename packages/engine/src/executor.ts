@@ -5155,14 +5155,18 @@ export class TaskExecutor {
 
     return {
       prepareWorktree: async (_ctx, task) => {
-        const live = await this.store.getTask(task.id);
+        const live = await this.store.getTask(task.id).catch(() => null);
+        const liveTask = live?.id === task.id ? live : null;
         /*
         FNXC:WorkflowExecution 2026-06-23-11:49:
         The workflow execute node must not perform a second worktree acquisition ahead of the authoritative executor. Passing the repo root as a prepared worktree makes the inner execute() reject a valid fresh-worktree task as repo-root reuse; pass only an existing task worktree and let execute() acquire when none exists.
+
+        FNXC:WorkflowExecution 2026-06-23-22:31:
+        Upgrade safety requires the graph primitive to tolerate older or minimal stores that return null or a mismatched row during startup/cutover. Only trust the live row when it is for the requested task; otherwise fall back to the runner snapshot.
         */
         const prepared: PreparedWorktree = {
-          worktreePath: live.worktree || task.worktree || "",
-          branchName: live.branch || task.branch,
+          worktreePath: liveTask?.worktree || task.worktree || "",
+          branchName: liveTask?.branch || task.branch,
         };
         return { outcome: "success", value: "worktree-ready", data: prepared };
       },
