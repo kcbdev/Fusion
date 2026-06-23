@@ -19,6 +19,9 @@ maintenance change.
 
 FNXC:CI 2026-06-21-12:35:
 FN-6871 corrects the stale premise that line-count drift blocks `pnpm test`: FN-5048 removed this guard from pretest, so it now runs only through the opt-in `check:line-count` audit. Eleven grandfathered files were re-ratcheted to current counts after small organic feature/test growth; broad shrink/refactor work for these god-files remains the long-term direction and belongs in dedicated follow-up tasks.
+
+FNXC:CI 2026-06-21-23:53:
+FN-6917 re-confirms the `pnpm test`-blocking premise is stale because FN-5048 left this guard opt-in under `check:line-count` only. Twenty files were re-ratcheted after organic feature/test growth; `TerminalModal.tsx` was grandfathered after crossing the hard cap as a long-existing file, with focused split follow-up FN-6918. Wholesale god-file shrink/refactor remains the long-term direction and stays deferred to dedicated follow-ups.
 */
 // Repo-wide guard: hand-written source files may not exceed a hard line-count
 // cap (MAX_LINES). This stops the next god-file from being born while leaving
