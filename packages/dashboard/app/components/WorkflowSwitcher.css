@@ -13,7 +13,7 @@
 
 /*
 FNXC:WorkflowSwitcher 2026-06-22-00:00:
-The workflow selector trigger must match the project selector trigger styling: transparent background, --radius-md border, muted text that brightens on hover with a --card-hover fill and --text-dim border, and content-driven width (no fixed min-width). Only the max-width clamp is kept so long workflow names stay bounded.
+The board/list workflow dropdown sits beside the project selector in header and toolbar surfaces, so its collapsed trigger must use the same transparent ProjectSelector chrome while preserving bounded, ellipsized workflow names.
 */
 .workflow-switcher-trigger {
   display: inline-flex;
@@ -38,9 +38,13 @@ The workflow selector trigger must match the project selector trigger styling: t
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.workflow-switcher-trigger:hover,
-.workflow-switcher-trigger[aria-expanded="true"] {
+.workflow-switcher-trigger:hover {
   background: var(--card-hover);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.workflow-switcher-trigger[aria-expanded="true"] {
   color: var(--text);
   border-color: var(--text-dim);
 }
@@ -122,32 +126,55 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   color: var(--text-dim);
 }
 
+/*
+FNXC:WorkflowSwitcher 2026-06-22-00:00:
+The workflow listbox is portaled but visually remains the ProjectSelector sibling menu; keep the same rounded surface, shadow, inner padding, and thin token scrollbar while preserving the non-scrolling create footer and row-level edit buttons.
+*/
 .workflow-switcher-menu {
   position: fixed;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: var(--space-sm);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   z-index: 1200;
 }
 
 .workflow-switcher-options {
   display: flex;
   flex-direction: column;
+  gap: calc(var(--space-xs) / 2);
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--space-xs) 0;
+  padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-dim) transparent;
+}
+
+.workflow-switcher-options::-webkit-scrollbar {
+  width: calc(var(--space-xs) + var(--space-xs) / 2);
+}
+
+.workflow-switcher-options::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.workflow-switcher-options::-webkit-scrollbar-thumb {
+  background-color: var(--text-dim);
+  border-radius: var(--radius-pill);
 }
 
 .workflow-switcher-option-row {
   display: flex;
   align-items: stretch;
   gap: var(--space-xs);
-  padding: 0 var(--space-xs);
+  padding: 0;
   background: transparent;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
 }
 
 .workflow-switcher-option-row:hover,
@@ -171,13 +198,15 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   gap: var(--space-sm);
   min-width: 0;
   flex: 1 1 auto;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) calc(var(--space-sm) + var(--space-xs));
   border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background var(--transition-fast);
 }
 
 .workflow-switcher-option:focus-visible,
@@ -191,9 +220,11 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   flex: 0 0 auto;
   align-self: center;
   color: var(--text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .workflow-switcher-edit:hover {
+  background: var(--card-hover);
   color: var(--text);
 }
 
@@ -207,7 +238,8 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
 
 .workflow-switcher-footer {
   flex: 0 0 auto;
-  padding: var(--space-xs);
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
@@ -219,6 +251,16 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   gap: var(--space-sm);
   width: 100%;
   min-height: calc(var(--space-lg) + var(--space-sm));
+  border-radius: var(--radius-md);
+}
+
+[data-theme="light"] .workflow-switcher-option-row--selected {
+  background: color-mix(in srgb, var(--todo) 10%, transparent);
+}
+
+[data-theme="light"] .workflow-switcher-menu,
+[data-theme="light"] .workflow-switcher-footer {
+  background: var(--surface);
 }
 
 @media (max-width: 768px) {
