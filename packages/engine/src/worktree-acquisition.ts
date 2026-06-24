@@ -867,6 +867,9 @@ export async function acquireWorkspaceRepoWorktree(
       });
     } catch (guardErr) {
       // FNXC:Workspace 2026-06-21-22:30: F3 — identity-guard install is non-fatal; worktree is usable without it.
+      // FNXC:Workspace 2026-06-22-00:00: the non-fatal logEntry/audit are themselves best-effort — if either throws
+      // (e.g. a DB write hiccup) it must NOT promote this non-fatal guard failure into a fatal acquisition failure.
+      // Swallow logging errors so acquisition continues (matching the F6 busy-path defensive wrap above).
       const message = guardErr instanceof Error ? guardErr.message : String(guardErr);
       logger?.warn(`${task.id}: identity-guard install failed for sub-repo ${repoRelPath} (non-fatal): ${message}`);
       // FNXC:Workspace 2026-06-22-09:00: the observability writes (store.logEntry / audit.git)
@@ -904,6 +907,8 @@ export async function acquireWorkspaceRepoWorktree(
       baseCommitSha = await resolveCapturedBaseCommitSha(result.worktreePath, logger, integrationBranch);
     } catch (baseErr) {
       // FNXC:Workspace 2026-06-21-22:30: F3 — base-SHA capture is non-fatal; an undefined baseCommitSha is an accepted state.
+      // FNXC:Workspace 2026-06-22-00:00: guard the best-effort logEntry/audit so a logging throw cannot promote this
+      // non-fatal capture failure into a fatal acquisition failure (parity with the F6 busy-path defensive wrap).
       const message = baseErr instanceof Error ? baseErr.message : String(baseErr);
       logger?.warn(`${task.id}: base-SHA capture failed for sub-repo ${repoRelPath} (non-fatal): ${message}`);
       // FNXC:Workspace 2026-06-22-09:00: same non-fatal contract as the identity-guard catch —
@@ -957,6 +962,9 @@ export async function acquireWorkspaceRepoWorktree(
     sub-repo.
     */
     if (!(err instanceof WorkspaceRepoAcquireBusyError)) {
+      // FNXC:Workspace 2026-06-22-00:00: wrap the failure logEntry/audit so a throw here cannot replace the ORIGINAL
+      // acquisition `err` the caller must observe — losing it would mask the real cause and the re-throw below would
+      // surface a logging error instead. Best-effort observability; `err` is always re-thrown.
       const message = err instanceof Error ? err.message : String(err);
       logger?.error?.(`${task.id}: workspace sub-repo acquisition failed for ${repoRelPath}: ${message}`);
       // FNXC:Workspace 2026-06-22-09:30: the fatal-path observability writes must use safeObserve

@@ -155,7 +155,7 @@ The surface-enumeration spine (FN-5893). Every row is a single-worktree / `cwd:r
 
 Additive only — no migration to existing single-repo tasks:
 
-```
+```ts
 Task.workspaceWorktrees: Record<repoRelPath, {
   worktreePath: string;
   branch: string;
