@@ -10,6 +10,7 @@
  * - Planning: raw ideas just landing
  */
 import { TaskStore } from "../packages/core/src/index.js";
+import { AgentStore, ChatStore, MessageStore } from "../packages/core/src/index.js";
 import type { WorkflowIr } from "../packages/core/src/workflow-ir-types.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -291,29 +292,38 @@ async function main() {
   ] as const;
 
   for (const t of browserDemo) {
-    const task = await store.createTask({ description: t.desc, title: t.title });
-    await store.updateTask(task.id, { size: "S", reviewLevel: 0 });
-    await store.selectTaskWorkflowAndReconcile(task.id, browserDemoWorkflow.id);
+    try {
+      const task = await store.createTask({ description: t.desc, title: t.title });
+      await store.updateTask(task.id, { size: "S", reviewLevel: 0 });
+      await store.selectTaskWorkflowAndReconcile(task.id, browserDemoWorkflow.id);
 
-    const steps = generateSteps(t.title);
-    await writePrompt(store, task.id, t.title, t.desc, steps);
+      const steps = generateSteps(t.title);
+      await writePrompt(store, task.id, t.title, t.desc, steps);
 
-    if (t.currentStep !== null) {
-      for (let i = 0; i < Math.min(t.currentStep, steps.length); i++) {
-        await store.updateStep(task.id, i, "done");
-      }
-      if (t.currentStep < steps.length) {
-        await store.updateStep(task.id, t.currentStep, "in-progress");
-      }
+      if (t.currentStep !== null) {
+        for (let i = 0; i < Math.min(t.currentStep, steps.length); i++) {
+          await store.updateStep(task.id, i, "done");
+        }
+        if (t.currentStep < steps.length) {
+          await store.updateStep(task.id, t.currentStep, "in-progress");
+        }
     }
 
     const lifecyclePath = ["todo", "in-progress", "in-review", "qa", "publish"] as const;
     const targetIndex = lifecyclePath.indexOf(t.column);
-    for (const column of lifecyclePath.slice(1, targetIndex + 1)) {
+    // FNXC:DemoSeed 2026-06-23-20:05: Walk the full lifecycle from "todo" so the
+    // transition validator accepts every hop (triage only allows → todo directly).
+    for (const column of lifecyclePath.slice(0, targetIndex + 1)) {
       await store.moveTask(task.id, column, { moveSource: "user", allowDirectInReviewMove: true });
     }
 
-    await addLogs(store, task.id, t.column);
+      await addLogs(store, task.id, t.column);
+    } catch (e) {
+      // FNXC:DemoSeed 2026-06-23-20:10: The Browser Demo Lifecycle workflow uses
+      // custom qa/publish columns whose transitions aren't in the default graph;
+      // skip cards that can't advance rather than aborting the whole seed.
+      console.warn(`  (skipped browser demo card "${t.title}": ${(e as Error).message})`);
+    }
   }
 
   // ── Planning ──────────────────────────────────────────────────────
@@ -340,6 +350,9 @@ async function main() {
     await store.createTask({ description: t.desc });
   }
 
+  // ── Agents, chat, and agent mail ──────────────────────────────────
+  await seedAgentsChatAndMail(store);
+
   const tasks = await store.listTasks();
   const byColumn: Record<string, number> = {};
   for (const t of tasks) {
@@ -355,6 +368,131 @@ async function main() {
   console.log(`  Publish:     ${byColumn["publish"] || 0}`);
   console.log(`  Done:        ${byColumn["done"] || 0}`);
   console.log(`\nRun "kb dashboard" to see the board, including the browser demo lifecycle columns.`);
+}
+
+// ── Agents, chat, and agent mail ───────────────────────────────────────
+/*
+FNXC:DemoSeed 2026-06-23-19:50:
+The README showcase needs realistic agent chat threads, a multi-agent chat room,
+and an inter-agent mailbox with delegation/approval/triage content so the Agent
+Chat, Chat Rooms, and Agent Mail GIFs have believable data. This seeds durable
+agents (CEO, Product Manager, CTO, engineers), a direct chat session, a #leads
+room where the leadership trio coordinates, and mailbox messages covering
+triage summaries, approvals, and hand-offs.
+*/
+async function seedAgentsChatAndMail(store: TaskStore) {
+  const fusionDir = store.getFusionDir();
+  const db = store.getDatabase();
+  const agentStore = new AgentStore({ rootDir: fusionDir });
+  const chatStore = new ChatStore(fusionDir, db);
+  const messageStore = new MessageStore(db);
+
+  const roleDefs: Array<{ name: string; role: "engineer" | "custom"; title: string; reportsTo?: string }> = [
+    { name: "CEO", role: "custom", title: "Chief Executive Officer" },
+    { name: "Product Manager", role: "custom", title: "Product Manager", reportsTo: "CEO" },
+    { name: "CTO", role: "engineer", title: "Chief Technology Officer", reportsTo: "CEO" },
+    { name: "Fullstack Engineer", role: "engineer", title: "Fullstack Engineer", reportsTo: "CTO" },
+    { name: "Frontend Engineer", role: "engineer", title: "Frontend Engineer", reportsTo: "CTO" },
+  ];
+
+  const agentIds: Record<string, string> = {};
+  for (const def of roleDefs) {
+    try {
+      const agent = await agentStore.createAgent({
+        name: def.name,
+        role: def.role,
+        title: def.title,
+        reportsTo: def.reportsTo ? undefined : undefined,
+        metadata: { description: def.title },
+      });
+      agentIds[def.name] = agent.id;
+    } catch {
+      // agent may already exist; look it up
+      const existing = await agentStore.findAgentByName(def.name);
+      if (existing) agentIds[def.name] = existing.id;
+    }
+  }
+
+  // wire up reportsTo now that all ids exist
+  for (const def of roleDefs) {
+    if (def.reportsTo && agentIds[def.name] && agentIds[def.reportsTo]) {
+      try {
+        await agentStore.updateAgent(agentIds[def.name], { reportsTo: agentIds[def.reportsTo] });
+      } catch {
+        // best effort
+      }
+    }
+  }
+
+  // ── Direct chat session: user asks the Fullstack Engineer about a stuck task ──
+  const session = chatStore.createSession({
+    agentId: agentIds["Fullstack Engineer"],
+    title: "FN-6917 is stuck landing — what's going on?",
+  });
+  const chatThread: Array<[string, string]> = [
+    ["user", "FN-6917 has been sitting in In Review for 40 minutes. The auto-merge didn't fire — any idea why?"],
+    ["assistant", "Looking at the logs now. The pre-squash diff-volume gate tripped because the worktree picked up an unrelated `pnpm-lock.yaml` regeneration. The actual code delta is only 12 lines."],
+    ["user", "Can we force it through, or do we need to rebase?"],
+    ["assistant", "Safest path is a rebase onto main to drop the lockfile churn, then the gate passes cleanly. I can do that now — want me to proceed?"],
+    ["user", "Yes, go ahead. Ping me when it's green."],
+    ["assistant", "On it. Rebasing `fusion/FN-6917` onto `origin/main` now. I'll post the merge result in #leads when it lands."],
+  ];
+  for (const [role, content] of chatThread) {
+    chatStore.addMessage(session.id, { role: role as "user" | "assistant", content });
+  }
+
+  // ── Multi-agent chat room: #leads — CEO, PM, CTO coordinate ──
+  const room = chatStore.createRoom({
+    name: "leads",
+    description: "Leadership sync — mission ownership and blockers",
+    memberAgentIds: [agentIds["CEO"], agentIds["Product Manager"], agentIds["CTO"]].filter(Boolean) as string[],
+  });
+  const roomThread: Array<{ sender: string; mentions?: string[]; content: string }> = [
+    { sender: "CEO", content: "Q3 mission is `Ship multi-repo workspaces`. PM — can you break that into milestones by EOD?" },
+    { sender: "Product Manager", mentions: ["CTO"], content: "On it. @CTO what's the rough engineering lift? Need it to size the slices." },
+    { sender: "CTO", content: "Core work is the CentralCore project-path resolver + a migration. Maybe 3 features, ~8 tasks. Frontend is a settings tab." },
+    { sender: "Product Manager", content: "Perfect. Three milestones: infra, migration, UI. I'll file the mission now and assign the infra slice to @CTO." },
+    { sender: "CEO", content: "Great. Let's autopilot the infra slice and gate the migration slice on manual review. Don't want data loss risk." },
+    { sender: "CTO", mentions: ["Fullstack Engineer"], content: "Agreed. @Fullstack Engineer will take the settings tab in parallel once the resolver lands." },
+  ];
+  for (const msg of roomThread) {
+    const senderId = agentIds[msg.sender];
+    if (!senderId) continue;
+    chatStore.addRoomMessage(room.id, {
+      role: "assistant",
+      content: msg.content,
+      senderAgentId: senderId,
+      mentions: msg.mentions?.map((m) => agentIds[m]).filter(Boolean),
+    });
+  }
+
+  // ── Agent mailbox: triage summaries, approvals, hand-offs ──
+  const mailMessages: Array<{
+    from: string; to: string; type: "agent-to-agent" | "agent-to-user"; content: string;
+  }> = [
+    { from: "Product Manager", to: "CTO", type: "agent-to-agent", content: "Triage complete for the inbox batch: 3 actionable issues filed as tasks (FN-6920, FN-6921, FN-6922), 2 duplicates closed, 1 needs your input on the schema migration approach. Summary attached." },
+    { from: "CTO", to: "Fullstack Engineer", type: "agent-to-agent", content: "FN-6920 (LOC backfill controls) is yours. Scope is `packages/dashboard/app/components/ProductivityView.tsx` plus the analytics resolver. Aim for review-level 1." },
+    { from: "Fullstack Engineer", to: "CTO", type: "agent-to-agent", content: "Approval requested: the productivity backfill needs a new `POST /api/productivity/backfill` route. OK to add it, or should I route through the existing insights endpoint?" },
+    { from: "CTO", to: "Product Manager", type: "agent-to-agent", content: "Hand-off: FN-6917 landed after a rebase. The auto-merge gate caught a bogus lockfile delta — I've filed FN-6923 to harden the diff-volume check. Milestone 1 is unblocked." },
+    { from: "Product Manager", to: "user", type: "agent-to-user", content: "Weekly triage digest: 12 issues processed, 7 filed as tasks, 3 closed as duplicates, 2 escalated. Net backlog delta: +2. Full report in Artifacts." },
+    { from: "Frontend Engineer", to: "CTO", type: "agent-to-agent", content: "Settings tab for multi-repo is wired up and behind the experimental flag. Ready for review whenever you have a window — no rush, infra slice isn't merged yet." },
+  ];
+  for (const msg of mailMessages) {
+    const fromId = agentIds[msg.from] ?? "user";
+    const toId = agentIds[msg.to] ?? "user";
+    messageStore.sendMessage({
+      fromId,
+      fromType: msg.from === "user" ? "user" : "agent",
+      toId,
+      toType: msg.to === "user" ? "user" : "agent",
+      content: msg.content,
+      type: msg.type,
+    });
+  }
+
+  console.log(`  Agents:      ${Object.keys(agentIds).length}`);
+  console.log(`  Chat:        1 session (${chatThread.length} msgs), 1 room (${roomThread.length} msgs)`);
+  console.log(`  Mailbox:     ${mailMessages.length} messages`);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

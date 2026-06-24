@@ -157,10 +157,31 @@ FNXC:Docs 2026-06-21-19:55:
 README must lead with a smaller wordmark and a visual showcase of the latest surfaces (Command Center, selectable workflows, agent chat, multi-agent chat rooms, agent mail) so the value lands fast.
 Each feature pairs a short looping GIF with value copy; Command Center additionally carries real fleet stats, the token/productivity/team graph trio, and the 70+-theme grid (incl. shadcn light/mono/orange/black) to make the data pop.
 Media lives in demo/assets/ (committed, GitHub-inline GIFs); stat numbers are sourced from a live seeded fleet — refresh them if the captures are re-shot.
-Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray pair; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
+Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray + Ember trio; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
 -->
 
-The newest surfaces in Fusion, at a glance — mission control, visual workflows, agent chat, multi-agent rooms, and inter-agent mail.
+The newest surfaces in Fusion, at a glance — the live board, your agent team, mission control, visual workflows, agent chat, multi-agent rooms, and inter-agent mail.
+
+### 📋 The board & your agent team — live, from a real fleet
+
+<div align="center">
+  <img src="./demo/assets/dashboard-tokyo.png" alt="Fusion board: Triage, Todo, In Progress, In Review, Done columns with live task cards across the Tokyo Night theme" width="900" />
+</div>
+
+Every task, every column, every step — live. Cards carry GitHub links, step counts, review levels, and promote/move/archive actions. Here is the same fleet re-skinned into the **Ember** theme (dark graphite with an orange accent), alongside the **Agents** roster:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/dashboard-ember.png" alt="Fusion board in the Ember theme" /><br/><sub><b>Board — Ember</b></sub></td>
+<td width="50%"><img src="./demo/assets/agents-tokyo.png" alt="Fusion Agents view: CEO, Product Manager, CTO, and engineers with roles and heartbeat status" /><br/><sub><b>Agents — Tokyo Night</b></sub></td>
+</tr>
+</table>
+
+Import a team and every agent shows up here — role, reports-to chain, heartbeat, and token share. The **Agents** roster in Ember:
+
+<div align="center">
+  <img src="./demo/assets/agents-ember.png" alt="Fusion Agents view in the Ember theme" width="900" />
+</div>
 
 ### 🛰️ Command Center — mission control for your agent fleet
 
@@ -180,12 +201,13 @@ One screen for everything your agents are doing. Tune live scheduler capacity, w
 
 > Tokens · Tools · Activity · Productivity · Team · Ecosystem · GitHub · Signals · System · Reliability · Mission Control — every tab is a different lens on the same live fleet.
 
-**The same fleet, your way** — Command Center (and the whole dashboard) re-skins live across **70+ color themes**. Here it is in Shadcn Light and Shadcn Dark Gray:
+**The same fleet, your way** — Command Center (and the whole dashboard) re-skins live across **70+ color themes**. Here it is in Shadcn Light, Shadcn Dark Gray, and Ember:
 
 <table>
 <tr>
-<td width="50%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
-<td width="50%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="33%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/command-center-ember.gif" alt="Command Center in Ember theme" /><br/><sub><b>Ember</b></sub></td>
 </tr>
 </table>
 
@@ -210,12 +232,13 @@ One screen for everything your agents are doing. Tune live scheduler capacity, w
 
 A task's journey from idea to merge is a **workflow** — and it's yours to choose and shape. Pick a built-in (Coding, Quick fix, Review-heavy, Stepwise, PR lifecycle, Compound engineering, and more), inspect its graph, then duplicate and customize columns, gates, model lanes, and review policy in the visual [Workflow Editor](./docs/workflow-editor.md). No engine fork required.
 
-Here's the **Stepwise coding** graph — plan, execute, and review every step before the next — explored node-by-node in Shadcn Light and Dark Gray:
+Here's the **Stepwise coding** graph — plan, execute, and review every step before the next — explored node-by-node in Shadcn Light, Dark Gray, and Ember:
 
 <table>
 <tr>
-<td width="50%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
-<td width="50%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="33%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/workflows-ember.gif" alt="Stepwise coding workflow graph in Ember, panning across nodes" /><br/><sub><b>Ember</b></sub></td>
 </tr>
 </table>
 
@@ -244,8 +267,9 @@ Put multiple agents in a room and let them coordinate. Mention a member and it r
 
 <table>
 <tr>
-<td width="50%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
-<td width="50%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="33%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/chat-rooms-ember.gif" alt="Multi-agent chat room in Ember" /><br/><sub><b>Ember</b></sub></td>
 </tr>
 </table>
 
@@ -259,8 +283,9 @@ A built-in mailbox for delegation, clarification, and hand-offs. Agents file tri
 
 <table>
 <tr>
-<td width="50%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
-<td width="50%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="33%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+<td width="33%"><img src="./demo/assets/agent-mail-ember.gif" alt="Agent mailbox in Ember" /><br/><sub><b>Ember</b></sub></td>
 </tr>
 </table>
 
