@@ -68,16 +68,24 @@ export async function ensureGitRepositoryForProjectPath(
   CLI interactive setup writes workspace.json explicitly, but dashboard POST /api/projects
   and `fn project add` do not — without this fallback they would create a stray .git at the
   workspace root because loadWorkspaceConfig returned null.
+
+  FNXC:Workspace 2026-06-24-17:00:
+  If the user has explicitly disabled workspace mode (workspaceMode: false in config.json),
+  skip auto-detection and proceed to git init. Without this guard, toggling workspace mode off
+  via the dashboard would have no lasting effect — the fallback would re-detect sub-repos and
+  re-create workspace.json on the next registration call.
   */
-  const detectedRepos = await detectWorkspaceRepos(projectPath, runner, timeout);
-  if (detectedRepos.length > 0) {
-    try {
-      await saveWorkspaceConfig(projectPath, { repos: detectedRepos });
-    } catch {
-      // Best-effort: persist for the fast path on future calls, but don't fail
-      // the current registration if the write fails (permissions, disk full, etc.).
+  if (!(await isWorkspaceModeExplicitlyDisabled(projectPath))) {
+    const detectedRepos = await detectWorkspaceRepos(projectPath, runner, timeout);
+    if (detectedRepos.length > 0) {
+      try {
+        await saveWorkspaceConfig(projectPath, { repos: detectedRepos });
+      } catch {
+        // Best-effort: persist for the fast path on future calls, but don't fail
+        // the current registration if the write fails (permissions, disk full, etc.).
+      }
+      return "existing";
     }
-    return "existing";
   }
 
   try {
@@ -194,6 +202,23 @@ export interface WorkspaceConfig {
 }
 
 const WORKSPACE_CONFIG_FILENAME = "workspace.json";
+
+/**
+ * Reads .fusion/config.json and returns true when `workspaceMode` is explicitly
+ * set to `false`. This guards the auto-detection fallback so a user who has
+ * intentionally disabled workspace mode doesn't get it silently re-enabled.
+ */
+async function isWorkspaceModeExplicitlyDisabled(projectPath: string): Promise<boolean> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const raw = await readFile(join(projectPath, ".fusion", "config.json"), "utf-8");
+    const config = JSON.parse(raw) as { settings?: { workspaceMode?: boolean } };
+    return config.settings?.workspaceMode === false;
+  } catch {
+    return false;
+  }
+}
 
 /*
 FNXC:Workspace 2026-06-22-00:00:

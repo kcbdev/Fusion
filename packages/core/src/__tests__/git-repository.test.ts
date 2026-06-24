@@ -154,8 +154,45 @@ describe("ensureGitRepositoryForProjectPath", () => {
     await git(fakePkg, ["add", "index.js"]);
     await git(fakePkg, ["commit", "-m", "init"]);
 
+    // Also create a real sibling sub-repo to prove it IS detected while node_modules is excluded
+    const realRepo = join(projectPath, "my-app");
+    mkdirSync(realRepo, { recursive: true });
+    await git(realRepo, ["init", "-b", "main"]);
+    await git(realRepo, ["config", "user.email", "test@test.com"]);
+    await git(realRepo, ["config", "user.name", "Test"]);
+    writeFileSync(join(realRepo, "README.md"), "# my-app\n");
+    await git(realRepo, ["add", "README.md"]);
+    await git(realRepo, ["commit", "-m", "init"]);
+
     const detected = await detectWorkspaceRepos(projectPath);
 
-    expect(detected).toEqual([]);
+    // node_modules is excluded; my-app is detected
+    expect(detected).toEqual(["my-app"]);
+  });
+
+  it("skips auto-detection when workspaceMode is explicitly false in config.json", async () => {
+    const projectPath = tempDir("fusion-git-workspace-disabled-");
+    // Create a real git sub-repo so detectWorkspaceRepos would find it
+    const subRepo = join(projectPath, "repo-a");
+    mkdirSync(subRepo, { recursive: true });
+    await git(subRepo, ["init", "-b", "main"]);
+    await git(subRepo, ["config", "user.email", "test@test.com"]);
+    await git(subRepo, ["config", "user.name", "Test"]);
+    writeFileSync(join(subRepo, "README.md"), "# repo-a\n");
+    await git(subRepo, ["add", "README.md"]);
+    await git(subRepo, ["commit", "-m", "init"]);
+
+    // Write config.json with workspaceMode: false (user disabled it via dashboard)
+    mkdirSync(join(projectPath, ".fusion"), { recursive: true });
+    writeFileSync(
+      join(projectPath, ".fusion", "config.json"),
+      JSON.stringify({ settings: { workspaceMode: false } }),
+    );
+
+    const outcome = await ensureGitRepositoryForProjectPath(projectPath);
+
+    // Should proceed to git init, not workspace detection
+    expect(outcome).toBe("initialized");
+    expect(existsSync(join(projectPath, ".git"))).toBe(true);
   });
 });
