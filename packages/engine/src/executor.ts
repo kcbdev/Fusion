@@ -9175,6 +9175,11 @@ export class TaskExecutor {
                   // mirroring the primary execute-seam session above.
                   actionGateContext: this.buildActionGateContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
                   permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
+                  // FNXC:SessionRouting 2026-06-24-11:20:
+                  // #1675: propagate task id so retry-session requests carry the same
+                  // X-Session-Id/X-Session-Affinity as the primary session, keeping the
+                  // task's LLM requests grouped under one stable routing/observability id.
+                  taskId: task.id,
                 });
                 retrySession = createdRetrySession.session;
                 if (createdRetrySession.sessionFile) {
@@ -12176,6 +12181,10 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: extraEnv,
+        // FNXC:SessionRouting 2026-06-24-11:20:
+        // #1675: propagate task id so verification-fix requests carry the same
+        // X-Session-Id/X-Session-Affinity as the primary session.
+        taskId: task.id,
         ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       });
 
@@ -13469,6 +13478,10 @@ You have access to the file system to review changes.${verdictBlock}`;
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: stepEnv,
+        // FNXC:SessionRouting 2026-06-24-11:20:
+        // #1675: propagate task id so workflow-step requests carry the same
+        // X-Session-Id/X-Session-Affinity as the primary session.
+        taskId: task.id,
         // Skill selection: assigned-agent / role-fallback skills, plus the step's
         // own named skill (U1) made discoverable via additionalSkillPaths.
         ...(effectiveSkillSelection ? { skillSelection: effectiveSkillSelection } : {}),
@@ -15028,10 +15041,18 @@ You have access to the file system to review changes.${verdictBlock}`;
       const tasks = await this.store.listTasks({ slim: true, includeArchived: false });
       for (const t of tasks) {
         if (t.id === requestingTaskId) continue;
-        if (t.worktree !== worktreePath) continue;
         if (t.column !== "in-progress") continue;
         if (t.paused === true) continue;
-        return t.id;
+        if (t.worktree === worktreePath) return t.id;
+        // FNXC:Workspace 2026-06-22-09:00: workspace tasks hold their worktrees in
+        // task.workspaceWorktrees, not the singular task.worktree column. The DB liveness
+        // fallback must check those per-sub-repo paths too — otherwise a conflict against a
+        // sub-repo worktree owned by an in-progress workspace task is missed, especially
+        // before its in-memory activeWorktrees entry is (re)registered after restart.
+        const wsEntries = t.workspaceWorktrees;
+        if (wsEntries && Object.values(wsEntries).some((entry) => entry.worktreePath === worktreePath)) {
+          return t.id;
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -16222,6 +16243,10 @@ Child agent: ${agent.id} (${name})`;
             runAuditor: createRunAuditor(this.store, this.getRunContextFor(taskId)),
             settings,
             taskEnv,
+            // FNXC:SessionRouting 2026-06-24-11:20:
+            // #1675: propagate task id so child-agent requests carry the same
+            // X-Session-Id/X-Session-Affinity as the parent task session.
+            taskId,
             // Skill selection: use assigned agent skills if available, otherwise role fallback
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           });
