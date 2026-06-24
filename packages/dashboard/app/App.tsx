@@ -98,6 +98,7 @@ import { useStashOrphanCount } from "./hooks/useStashOrphanCount";
 import { useChatUnreadBadge } from "./hooks/useChatUnreadBadge";
 import { useMailboxUnread } from "./hooks/useMailboxUnread";
 import { useApprovalBanner } from "./hooks/useApprovalBanner";
+import { useBranchTaskFilters } from "./hooks/useBranchTaskFilters";
 import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
@@ -107,9 +108,6 @@ import { fetchDashboardHealth, fetchTaskDetail, fetchWorkflowSteps, refreshDashb
 import { getScopedItem, removeScopedItem, setScopedItem } from "./utils/projectStorage";
 import {
   SETUP_WARNING_DISMISSED_KEY,
-  WORKING_BRANCH_FILTER_STORAGE_KEY,
-  BASE_BRANCH_FILTER_STORAGE_KEY,
-  NO_BRANCH_FILTER_VALUE,
   CAPACITY_RISK_DISMISSED_KEY,
   RETRY_WARNING_RATIO,
   buildRemoteDashboardUrl,
@@ -279,23 +277,6 @@ function AppInner() {
   
   // Search query state - must be defined before useTasks
   const [searchQuery, setSearchQuery] = useState("");
-  const [branchFilter, setBranchFilter] = useState("");
-  const [baseBranchFilter, setBaseBranchFilter] = useState("");
-
-  useEffect(() => {
-    setBranchFilter(getScopedItem(WORKING_BRANCH_FILTER_STORAGE_KEY, currentProject?.id) ?? "");
-    setBaseBranchFilter(getScopedItem(BASE_BRANCH_FILTER_STORAGE_KEY, currentProject?.id) ?? "");
-  }, [currentProject?.id]);
-
-  const handleBranchFilterChange = useCallback((value: string) => {
-    setBranchFilter(value);
-    setScopedItem(WORKING_BRANCH_FILTER_STORAGE_KEY, value, currentProject?.id);
-  }, [currentProject?.id]);
-
-  const handleBaseBranchFilterChange = useCallback((value: string) => {
-    setBaseBranchFilter(value);
-    setScopedItem(BASE_BRANCH_FILTER_STORAGE_KEY, value, currentProject?.id);
-  }, [currentProject?.id]);
 
   // Host capability handed to plugin dashboard views: subscribe to a plugin's
   // custom SSE events (forwarded by the server as `plugin:custom`, scoped to the
@@ -587,47 +568,15 @@ function AppInner() {
     onMailboxRefresh: mailboxRefresh,
   });
 
-  const branchOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        boardSourceTasks
-          .map((task) => task.branch?.trim())
-          .filter((branch): branch is string => Boolean(branch && branch.length > 0)),
-      ),
-    ).sort((a, b) => a.localeCompare(b));
-  }, [boardSourceTasks]);
-
-  const baseBranchOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        boardSourceTasks
-          .map((task) => task.baseBranch?.trim())
-          .filter((baseBranch): baseBranch is string => Boolean(baseBranch && baseBranch.length > 0)),
-      ),
-    ).sort((a, b) => a.localeCompare(b));
-  }, [boardSourceTasks]);
-
-  const filteredBoardTasks = useMemo(() => {
-    return boardSourceTasks.filter((task) => {
-      const taskBranch = task.branch?.trim() ?? "";
-      const taskBaseBranch = task.baseBranch?.trim() ?? "";
-      if (branchFilter === NO_BRANCH_FILTER_VALUE) {
-        if (taskBranch.length > 0) {
-          return false;
-        }
-      } else if (branchFilter.length > 0 && taskBranch !== branchFilter) {
-        return false;
-      }
-      if (baseBranchFilter === NO_BRANCH_FILTER_VALUE) {
-        if (taskBaseBranch.length > 0) {
-          return false;
-        }
-      } else if (baseBranchFilter.length > 0 && taskBaseBranch !== baseBranchFilter) {
-        return false;
-      }
-      return true;
-    });
-  }, [boardSourceTasks, branchFilter, baseBranchFilter]);
+  const {
+    branchFilter,
+    baseBranchFilter,
+    branchOptions,
+    baseBranchOptions,
+    filteredBoardTasks,
+    onBranchFilterChange: handleBranchFilterChange,
+    onBaseBranchFilterChange: handleBaseBranchFilterChange,
+  } = useBranchTaskFilters({ boardSourceTasks, currentProjectId: currentProject?.id });
 
   const [retryingProjects, setRetryingProjects] = useState(false);
   const [missionResumeSessionId, setMissionResumeSessionId] = useState<string | undefined>(undefined);
