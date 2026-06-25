@@ -20,7 +20,24 @@ This will prompt you to:
 - Choose the semver bump type (patch, minor, major)
 - Write a summary of the change
 
-A markdown file will be created in the `.changeset/` directory. Commit this file along with your code changes.
+Then edit the created changeset file to use the structured body format:
+
+```markdown
+---
+"@runfusion/fusion": minor
+---
+
+summary: Add a Command Center productivity control for LOC backfills.
+category: feature
+dev: Uses the new `fn_backfill_loc` tool; settings key `commandCenter.locBackfill`.
+```
+
+Fields:
+- `summary` (required) — one line, user-facing, max 120 chars.
+- `category` (required) — one of: `feature`, `fix`, `breaking`, `security`, `performance`, `internal`.
+- `dev` (optional) — developer/migration detail.
+
+A markdown file will be created in the `.changeset/` directory. Commit this file along with your code changes. Validate with `pnpm check:changesets`.
 
 ### 2. Version PR is created automatically
 
@@ -29,6 +46,7 @@ When changesets are merged to `main`, the `version.yml` workflow automatically o
 - Consumes all pending changeset files
 - Bumps package versions according to the changeset declarations
 - Generates/updates `CHANGELOG.md` files for affected packages
+- Distills the version's changeset summaries into grouped, end-user-facing release notes in the root `CHANGELOG.md`
 
 ### 3. Merge the Version PR to release
 

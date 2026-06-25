@@ -81,6 +81,10 @@ vi.mock("lucide-react", () => ({
   Split: () => null,
   Merge: () => null,
   Repeat: () => null,
+  // FNXC:Test 2026-06-24-23:30: WorkflowNodeEditor (lazy-loaded by TaskDetailModal) uses ToggleRight
+  // for the optional-group node (FN-6880); the explicit mock list omitted it, breaking every
+  // TaskDetailModal suite at import. Keep this list in sync with the node-editor icon set.
+  ToggleRight: () => null,
   ClipboardCheck: () => null,
   ListChecks: () => null,
   Code2: () => null,

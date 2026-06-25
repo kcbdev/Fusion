@@ -1,5 +1,11 @@
 # @fusion/i18n
 
+## 0.39.10
+
+### Patch Changes
+
+- @fusion/core@0.47.0
+
 ## 0.39.9
 
 ### Patch Changes

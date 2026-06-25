@@ -575,7 +575,8 @@ type RebindOutcome =
       | "ambiguous-candidates"
       | "no-unique-work"
       | "unsafe-to-auto-mutate:user-paused"
-      | "unsafe-to-auto-mutate:checked-out";
+      | "unsafe-to-auto-mutate:checked-out"
+      | "workspace-task";
     candidates?: Array<{ branch: string; aheadCount: number }>;
   };
 
@@ -3883,6 +3884,21 @@ export class SelfHealingManager {
 
       for (const task of tasks) {
         if (options?.includeTaskIds && !options.includeTaskIds.has(task.id)) continue;
+
+        /*
+        FNXC:Workspace 2026-06-24-23:10:
+        A workspace task is NEVER a branch-rebind candidate. Its attachment is the per-sub-repo
+        worktrees in `task.workspaceWorktrees`, and its `fusion/<id>` branches live inside each
+        sub-repo — not in `this.options.rootDir`, which for a workspace is the non-git browse-only
+        root. A null `task.branch` is its HEALTHY steady state, so trying to rebind a root branch is
+        meaningless (every git probe below would fail-soft against the non-git root anyway). Skip it
+        explicitly. The slim list select now carries `workspaceWorktrees`, so `isWorkspaceTask` is
+        accurate on these slim rows.
+        */
+        if (isWorkspaceTask(task)) {
+          result.outcomes.push({ taskId: task.id, result: "skipped", reason: "workspace-task" });
+          continue;
+        }
 
         const existingBinding = task.branch;
         if (existingBinding) {

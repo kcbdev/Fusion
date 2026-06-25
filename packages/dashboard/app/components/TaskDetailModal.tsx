@@ -24,8 +24,8 @@ import {
 } from "@fusion/core";
 import { isNearDuplicateCanonicalInactive } from "../../../core/src/near-duplicate-canonical";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, recoverBranchBinding, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
-import type { RecoverBranchBindingOutcome, WorkflowFieldDefinition, CustomFieldRejection } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
+import type { WorkflowFieldDefinition, CustomFieldRejection } from "../api";
 import { ApiRequestError } from "../api";
 import { TaskFieldsSection } from "./TaskFieldsSection";
 import type { ToastType } from "../hooks/useToast";
@@ -936,9 +936,7 @@ export function TaskDetailContent({
   const [githubTrackingEnabledDraft, setGithubTrackingEnabledDraft] = useState<boolean | null>(null);
   const [githubRepoOverrideError, setGithubRepoOverrideError] = useState<string | null>(null);
   const [isSavingGithubTracking, setIsSavingGithubTracking] = useState(false);
-  const [isRecoveringBranchBinding, setIsRecoveringBranchBinding] = useState(false);
   const [isCheckingPrStatus, setIsCheckingPrStatus] = useState(false);
-  const [recoverBranchBindingOutcome, setRecoverBranchBindingOutcome] = useState<RecoverBranchBindingOutcome | null>(null);
   const moveMenuRef = useRef<HTMLDivElement>(null);
   const activityListRef = useRef<HTMLDivElement>(null);
   const moveButtonRef = useRef<HTMLButtonElement>(null);
@@ -1045,8 +1043,6 @@ export function TaskDetailContent({
     setGithubTrackingEnabledDraft(null);
     setGithubRepoOverrideError(null);
     setIsEditing(false);
-    setRecoverBranchBindingOutcome(null);
-    setIsRecoveringBranchBinding(false);
   }, [task.id, task.title, task.description, task.branch, task.baseBranch, task.sourceIssue, task.executionMode, workingTask.githubTracking]);
 
   useEffect(() => {
@@ -2178,25 +2174,6 @@ export function TaskDetailContent({
   }, [onArchiveTask, confirm, task.id, nearDuplicateOf, addToast, requestClose]);
 
   const isTaskPaused = task.paused || task.userPaused;
-  const showRecoverBranchBindingBanner = task.column === "in-review" && !task.branch;
-
-  const handleRecoverBranchBinding = useCallback(async () => {
-    setIsRecoveringBranchBinding(true);
-    try {
-      const outcome = await recoverBranchBinding(task.id, projectId);
-      setRecoverBranchBindingOutcome(outcome);
-      if (outcome.result === "applied") {
-        addToast(t("taskDetail.branchBinding.reattached", "Reattached branch for {{id}} ({{branch}})", { id: task.id, branch: outcome.branch }), "success");
-        onTaskUpdated?.({ ...task, branch: outcome.branch, worktree: undefined });
-      } else {
-        addToast(t("taskDetail.branchBinding.skipped", "Branch reattachment skipped for {{id}}: {{reason}}", { id: task.id, reason: outcome.reason }), "info");
-      }
-    } catch (err) {
-      addToast(getErrorMessage(err), "error");
-    } finally {
-      setIsRecoveringBranchBinding(false);
-    }
-  }, [addToast, onTaskUpdated, projectId, task]);
 
   const handleTogglePause = useCallback(async () => {
     try {
@@ -3422,7 +3399,7 @@ export function TaskDetailContent({
               )}
             </div>
           ) : activeTab === "changes" ? (
-            <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} modifiedFiles={task.modifiedFiles} />
+            <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} modifiedFiles={task.modifiedFiles} isWorkspace={isWorkspaceTask(workingTask)} />
           ) : activeTab === "review" ? (
             <TaskReviewTab
               task={task}
@@ -4299,44 +4276,15 @@ export function TaskDetailContent({
             addToast={addToast}
           />
         )}
-        {showRecoverBranchBindingBanner && (
-          <div className="detail-section rebind-banner" role="status">
-            <div className="rebind-banner-header">
-              <GitBranch aria-hidden="true" />
-              <span className="rebind-banner-headline">{t("taskDetail.branchBinding.headline", "Branch needs reattachment")}</span>
-            </div>
-            <p className="rebind-banner-copy">
-              {t("taskDetail.branchBinding.copy", "This in-review task isn't currently attached to a fusion branch. If a live fusion branch still exists for it, you can reattach it here.")}
-            </p>
-            {recoverBranchBindingOutcome && (
-              <div className="rebind-banner-result">
-                {recoverBranchBindingOutcome.result === "applied"
-                  ? t("taskDetail.branchBinding.reattachedResult", "Reattached {{branch}} ({{count}} commits ahead of {{base}}).", { branch: recoverBranchBindingOutcome.branch, count: recoverBranchBindingOutcome.aheadCount, base: recoverBranchBindingOutcome.integrationBase })
-                  : t("taskDetail.branchBinding.skippedResult", "Reattachment skipped: {{reason}}", { reason: recoverBranchBindingOutcome.reason })}
-                {recoverBranchBindingOutcome.result === "skipped" && recoverBranchBindingOutcome.candidates?.length ? (
-                  <span>
-                    {` ${t("taskDetail.branchBinding.candidates", "Candidates:")} ${recoverBranchBindingOutcome.candidates.map((entry) => `${entry.branch} (${entry.aheadCount})`).join(", ")}`}
-                  </span>
-                ) : null}
-              </div>
-            )}
-            <div className="rebind-banner-actions">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => void handleRecoverBranchBinding()}
-                disabled={isRecoveringBranchBinding}
-              >
-                {isRecoveringBranchBinding ? (
-                  <>
-                    <Loader2 size={16} className="spin" aria-hidden="true" />
-                    {t("taskDetail.branchBinding.reattaching", "Reattaching…")}
-                  </>
-                ) : t("taskDetail.branchBinding.reattachBtn", "Reattach branch")}
-              </button>
-            </div>
-          </div>
-        )}
+        {/*
+        FNXC:Workspace 2026-06-24-23:10:
+        The "Branch needs reattachment" banner was removed. It fired for any in-review task with a
+        null singular `task.branch`, which is the NORMAL, healthy state for a workspace task (its
+        attachment is the per-sub-repo worktrees in `task.workspaceWorktrees`, not a root branch), so
+        the banner was a permanent false positive for workspace tasks. Reattachment of a genuinely
+        lost binding is handled automatically by self-healing's reconcileInReviewBranchRebind, which
+        runs event-driven on the move-to-in-review and on its sweep — no manual user action needed.
+        */}
         <div className="modal-actions">
           {isEditing ? (
             <>

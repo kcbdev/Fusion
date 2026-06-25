@@ -195,7 +195,6 @@ const qualityAppComponentTests = [
   "TaskDetailModal.create-pr-integration",
   "TaskDetailModal.github-tracking-header",
   "TaskDetailModal.github-tracking-stale",
-  "TaskDetailModal.rebind-banner",
   "TaskDocumentsTab",
   "TaskFieldsSection",
   "TaskForm",

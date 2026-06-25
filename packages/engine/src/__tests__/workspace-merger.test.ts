@@ -60,7 +60,10 @@ function createStore(settings: Record<string, unknown> = {}): TaskStore & Record
     updateTask: vi.fn().mockResolvedValue(undefined),
     logEntry: vi.fn().mockResolvedValue(undefined),
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
-    getTask: vi.fn().mockResolvedValue(undefined),
+    // FNXC:Test 2026-06-24-23:50: mergeAndReview reads store.getTask().comments for merge/review
+    // prompt context (selectUserCommentsForAgentContext); an undefined return throws mid-land. Return
+    // a real task shape so the per-repo land reaches landSquash.
+    getTask: vi.fn().mockResolvedValue({ id: TASK_ID, column: "in-review", branch: BRANCH, comments: [], steeringComments: [], steps: [], log: [] }),
     moveTask: vi.fn((id: string, column: string) => {
       moveTaskCalls.push({ id, column });
       return Promise.resolve({ id, column } as Task);

@@ -195,6 +195,16 @@ export async function pruneExistingAiMergeWorktrees(
     try {
       entries = readdirSync(tempRoot).filter((entry) => entry.startsWith(prefix));
     } catch (err: unknown) {
+      /*
+      FNXC:AiMerge 2026-06-24-23:10:
+      An absent ai-merge search root is the NORMAL case, not an error: the clean-room directory
+      (e.g. `<repo>/.fusion/ai-merge`) is created lazily only when an AI-merge worktree is made, so a
+      workspace sub-repo that has never been AI-merged has no such dir. ENOENT therefore means
+      "nothing to prune" — skip it silently rather than emitting an alarming warning on every merge.
+      Only non-ENOENT failures are surfaced, and only a non-ENOENT failure on the system tmpdir
+      (which always exists) remains fatal.
+      */
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") continue;
       await log(`AI merge pre-merge prune: failed to read ${tempRoot}: ${getErrorMessage(err)}`);
       if (tempRoot === tmpdir()) throw err;
       continue;
@@ -1003,6 +1013,15 @@ export interface LandRepoContext {
   taskTitle?: string;
   signal?: AbortSignal;
   allowDirtyLocalCheckoutSync?: boolean;
+  /*
+  FNXC:Workspace 2026-06-24-23:50 (resilient workspace land):
+  When true, a clean-room dependency-sync FAILURE is non-fatal: the land proceeds (the git squash
+  does not need installed deps) and only dep-dependent merge verification degrades for this repo.
+  Set on the workspace per-repo land so one sub-repo's broken/corrupt package manifest (e.g. an
+  invalid `-@0.0.1` lockfile entry npm rejects) cannot block landing the other sub-repos. Defaults
+  off, preserving the documented hard-fail for the single-repo land path.
+  */
+  nonFatalDependencySync?: boolean;
   store: TaskStore;
 }
 
@@ -1099,30 +1118,55 @@ export async function landOneRepo(
        * The detached AI-merge clean room is rebuilt from the integration tip and starts without workspace dependencies. Hard-fail configured or inferred install failures so verification cannot silently run against an uninstalled checkout; aborts propagate before merge agents run.
        */
       const depsSyncStartedAt = Date.now();
-      const depsSyncResult = await installWorktreeDependencies({
-        cwd: canonicalMergeRoot,
-        settings,
-        taskId,
-        signal,
-        context: "for AI merge clean room",
-        logger: aiMergeLog,
-        log,
-      });
-      await audit.git({
-        type: "merge:ai-deps-sync",
-        target: integrationBranch,
-        metadata: {
+      let depsSyncResult: Awaited<ReturnType<typeof installWorktreeDependencies>> | null = null;
+      try {
+        depsSyncResult = await installWorktreeDependencies({
+          cwd: canonicalMergeRoot,
+          settings,
           taskId,
-          tipSha,
-          mergeRoot: canonicalMergeRoot,
-          installCommand: depsSyncResult.installCommand,
-          configured: depsSyncResult.configured,
-          skipped: depsSyncResult.skipped,
-          skipReason: depsSyncResult.skipReason,
-          durationMs: depsSyncResult.durationMs,
-        },
-      });
-      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)"}`);
+          signal,
+          context: "for AI merge clean room",
+          logger: aiMergeLog,
+          log,
+        });
+      } catch (depsErr: unknown) {
+        /*
+        FNXC:Workspace 2026-06-24-23:50 (resilient workspace land):
+        The default contract hard-fails install errors so verification cannot silently run against an
+        uninstalled checkout. For a WORKSPACE per-repo land (ctx.nonFatalDependencySync) we instead
+        degrade: the git squash does not need installed deps, so one sub-repo whose manifest npm
+        refuses to install (e.g. a corrupt `-@0.0.1` lockfile entry) must not block landing the
+        others. Log + audit the degradation and proceed; the merge/review agents still run (they just
+        cannot run dep-dependent build/test verification for this repo). A genuine abort signal still
+        propagates. Non-workspace land keeps the original throw.
+        */
+        throwIfAborted(signal, taskId);
+        if (!ctx.nonFatalDependencySync) throw depsErr;
+        const depsErrMessage = getErrorMessage(depsErr);
+        await log(`AI merge (workspace): dependency sync FAILED for this sub-repo's clean room — landing without dep-dependent verification (deps unavailable): ${depsErrMessage}`);
+        await audit.git({
+          type: "merge:ai-deps-sync",
+          target: integrationBranch,
+          metadata: { taskId, tipSha, mergeRoot: canonicalMergeRoot, failed: true, nonFatal: true, error: depsErrMessage, durationMs: Date.now() - depsSyncStartedAt },
+        });
+      }
+      if (depsSyncResult) {
+        await audit.git({
+          type: "merge:ai-deps-sync",
+          target: integrationBranch,
+          metadata: {
+            taskId,
+            tipSha,
+            mergeRoot: canonicalMergeRoot,
+            installCommand: depsSyncResult.installCommand,
+            configured: depsSyncResult.configured,
+            skipped: depsSyncResult.skipped,
+            skipReason: depsSyncResult.skipReason,
+            durationMs: depsSyncResult.durationMs,
+          },
+        });
+      }
+      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult ? (depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)") : " (failed — non-fatal, deps unavailable)"}`);
 
       // 2 + 3. Merge + review loop (corrective passes).
       const squashSha = await mergeAndReview({
@@ -1616,6 +1660,9 @@ export async function landWorkspaceTask(
         mergeAgent, reviewAgent, stashResolveAgent,
         includeTaskId, trailers, taskTitle, signal: options.signal,
         allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
+        // FNXC:Workspace 2026-06-24-23:50: one sub-repo's dependency-sync failure must not block
+        // landing the others — degrade verification for that repo, still land the git squash.
+        nonFatalDependencySync: true,
         store,
       });
       if (landResult.outcome === "landed") {

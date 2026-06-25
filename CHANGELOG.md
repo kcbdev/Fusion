@@ -2,6 +2,38 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.47.0
+
+### New
+
+- Structured changeset format with AI-distilled release notes for cleaner, user-facing changelogs.
+
+### Internal
+
+- Saved agent tool-output details now default off to reduce persisted log payloads, while timeline rows remain logged and detailed tool arguments/results stay available via the global `persistAgentToolOutput: true` opt-in.
+- Harden the workspace per-repo land loop against partial-failure races. A lost `landedSha` DB write after a sub-repo's integration ref already advanced no longer silently continues — it escalates to a retryable partial-land error, and the landed predicate now recognizes an already-landed repo via its `Fusion-Task-Id` trailer on retry, so a re-run never produces a second squash commit. The land lease is now taskId-aware across registry kinds: a merging task can no longer clobber an executing task's acquire lease on a shared sub-repo (any foreign-task holder is treated as contention), and the active-session registry rejects foreign-task overwrites instead of silently clobbering. The transient `merging` status is always reset before any throw escapes the land loop (no stuck-`merging` leak), and finalize re-reads the latest task and no longer swallows the merge-details persist failure (no finalizing on a stale row).
+- Address Phase C workspace merge-loop review feedback. A sub-repo recognized as already-landed via the `Fusion-Task-Id` trailer fallback (when its `landedSha` persist was lost) now resolves and re-records a concrete `landedSha`, so finalize no longer drops it and mis-reports a fully-landed workspace task as a no-op (`mergeConfirmed:false`). A manual merge that hits sub-repo land-lease contention now surfaces the busy error to the user without consuming the persisted `mergeRetries` quota (matching the auto path's separate busy counter). The partial-land retry persists the incremented retry count before arming the backoff timer — a failed write now fails closed instead of looping without consuming budget — and clears the stale busy-contention counter when a real partial land supersedes transient busy failures. The CLI and dashboard merge doors use the shared `isWorkspaceTask` predicate instead of re-inlining the workspace check, and integration-branch shell interpolation in base-commit capture uses POSIX single-quote escaping.
+- Fix narrow right-sidebar Dev Server preview overlap by replacing the inline preview with an accessible modal launcher when the dock is very narrow, while keeping inline preview for full-page, mobile viewport, and expanded pop-out hosts.
+- Fix ntfy test notifications to honor unsaved Settings form config so users can enable ntfy, enter a valid topic/server/token, and send a test notification before saving.
+- Close task detail dialogs and embedded task-detail hosts immediately after delete confirmations complete, while delete requests continue reporting success or error toasts asynchronously.
+- Stack task-detail Chat agent headers above output blocks in the List View split-pane detail pane while preserving full-width desktop chat layout.
+- Merger unification (master-plan U0): `runAiMerge` (the FN-5633 clean-room AI merge path) is now the **sole** merge path. The engine dispatch, the `fn task merge` CLI command, and the UI-only (`--no-engine`) dashboard merge all route through `runAiMerge`; the legacy `aiMergeTask` pipeline is soft-deprecated (body retained, `@deprecated`). The `merger.mode` setting is now **inert and deprecated** — the type and field are retained as published surface, but the `"deterministic"` value no longer selects a different pipeline; observing it logs a one-time deprecation warning and proceeds via the unified AI merge path. A new shared `assertNotWorkspaceTaskMerge` guard rejects workspace-mode tasks (populated `workspaceWorktrees`) at every merge entry point with a clear error until per-repo merge support (master-plan U6) lands.
+- Fix multiworkspace tasks failing to complete. `task.workspaceWorktrees` is now durably persisted (it previously had no SQLite column, so `fn_acquire_repo_worktree`'s write was dropped on every persist and `fn_task_done` always reported "acquired no sub-repo worktrees"). Concurrent workspace tasks no longer collide on the shared browse-root active-session path — each task gets a task-scoped session key, so a second workspace task no longer fails with "active-session path … is held by …".
+- **Breaking:** the `WorkflowOptionalStep` type, previously exported from `@runfusion/fusion`, is removed — any consumer importing it must migrate to `optional-group` nodes / `ResolvedWorkflowOptionalStep`.
+- Add `X-Session-Id` and `X-Session-Affinity` request headers to all LLM chat completion requests. These let LLM gateways sticky-route consecutive requests from the same conversation to the same backend, and let observability tools (Langfuse, Arize, etc.) group the otherwise-stateless API calls of a session into a single multi-turn trace. Both headers carry the same stable identifier — the task id when available (stable across pause/resume), otherwise the pi session id. (#1675)
+- Workflow editor: add a Help section to the node detail pane. Every node now documents what it does, how to configure it, and its inputs/outputs/edges — including the engine-managed merge-lifecycle nodes (auto-merge gate, branch-group member integration, branch-group promotion, PR and recovery nodes), which are surfaced read-only with an "Engine-managed" badge.
+- Workflow editor: optional steps are now graph-native. A new `optional-group` container node (foreach/loop-style) holds a subgraph the executor runs once when the group is enabled for a task (per-task `enabledWorkflowSteps` + workflow `defaultOn`) and bypasses when disabled. All seven built-in add-ons (documentation-review, qa-check, security-audit, performance-review, accessibility-check, browser-verification, frontend-ux-design) are insertable from the node-editor palette as a node or wrapped in an optional-group. The built-in coding and stepwise-coding workflows now express `browser-verification` as an optional-group. Optional-group enable resolution correctly handles id collisions with add-on template ids, so a group's enable state is not silently bypassed during task creation/update. (The legacy declaration-based optional-steps model is retired in a sibling changeset; only the `workflow-step` seam infrastructure removal remains a follow-up.)
+- Workspace tasks no longer render blank in the dashboard. Task cards and the task
+- Add workspace mode: open a folder of git repositories as a single Fusion
+- Workspace mode (Phase A / U2): harden per-repo worktree acquisition. Each sub-repo worktree now gets the task identity guard installed (single-repo parity), a per-repo base commit SHA captured local-first against that sub-repo's resolved integration branch (shared `integrationBranch` override stripped so each repo falls through to its own `origin/HEAD`), and same-sub-repo acquisition exclusivity registered in the path-keyed active-session registry. Re-acquiring an already-acquired `(taskId, repo)` is idempotent, and acquisition failures surface an error plus an audit event instead of silently stalling.
+- Workspace mode (Phase C U3): serialize concurrent same-sub-repo lands with a per-repo file-scope lease. When two workspace tasks try to land onto the SAME sub-repo's local integration ref at the same time, the merge phase now registers the sub-repo's absolute path in the path-keyed active-session registry under a distinct `workspace-repo-land` kind before each land and releases it in a `finally` (on land success or failure — no stuck lock). A second task contending for the same sub-repo fast-fails with a retryable `WorkspaceRepoLandBusyError`, which the existing partial-land auto-retry-then-park dispatch handles (consume a `mergeRetry`, re-enqueue with backoff, then operator-park). Disjoint sub-repos lease different paths and never serialize against each other. The lease prevents clean-room ai-merge worktree collisions; ref correctness is already guaranteed by `advanceIntegrationBranchRef`'s CAS (concurrent-advance → rebuild).
+- Workspace mode Phase A (U1): executor session scoping. In workspace mode the executor now skips the root worktree acquisition and every rootDir git preflight (base-commit capture, contamination, worktree-liveness), runs the agent session rooted at the browse-only workspace root, and tracks acquired sub-repo worktrees as a per-task set. Single-repo tasks are unchanged (one-element set, byte-for-byte preflight parity).
+- Workspace mode (Phase B, U1): per-repo post-session change capture, contamination detection, and worktree-invariant verification. In workspace mode the executor now loops `task.workspaceWorktrees`, reusing `captureModifiedFiles` per sub-repo (diffing each against its own `baseCommitSha`, with a merge-base fallback when undefined) to aggregate repo-prefixed `task.modifiedFiles` and surface per-repo contamination, and un-stubs `verifyWorktreeInvariants` to assert each acquired worktree's git toplevel and `fusion/<id>` branch. Single-repo behavior is unchanged.
+- Workspace mode (Phase B, U2): per-repo review at both review entry points plus per-repo `fn_task_done` completion + scope-leak verification. In workspace mode both review call sites (the in-session `fn_review_step` tool and the step-inversion review seam) now loop the single-cwd `reviewStep` once per acquired sub-repo (cwd = each repo's worktree) and aggregate the repo-tagged verdicts as a conjunction — the task is reviewed only when every sub-repo approves, and the first failing sub-repo's verdict (with repo-tagged findings) drives the existing verdict→edge mapping. `fn_task_done` now verifies worktree invariants per acquired repo and iterates the scope-leak guard per sub-repo (cwd = repo worktree, repo `baseCommitSha`), blocking completion on any sub-repo carrying off-scope changes and naming the repo. Adds a minimal shared repo-prefix-derivation helper (`workspace-paths.ts`). Single-repo behavior is unchanged.
+- Workspace mode Phase C (U1): per-repo merge loop. Extract `landOneRepo` from the
+- Workspace mode Phase C (U2): per-repo landed predicate, finalize-once, and idempotent
+- Workspace mode Phase D (U1): workspace-aware self-healing. The existing merging-status reconcilers no longer mis-finalize a partial-landed workspace task (recoverInterruptedMergingTasks now clears the transient `merging` status and re-enqueues the idempotent per-repo land instead of running the single-commit finalize over the non-git workspace root), and recoverMergeableReviewTasks now admits workspace tasks (task.worktree is null). Adds three reconcilers: partial-land recovery (re-enqueue via enqueueMerge, FORK-A unrecoverable → park failed; guarded by autoMerge:false + user-pause + workspace-aware liveness), phantom `workspace-repo-land` lease reclaim (new `entriesByKind` registry seam), and per-repo worktree cleanup from stored paths (no temp walk). New run-audit events: `task:reconcile-workspace-partial-land`(`-no-action`), `task:reclaim-phantom-workspace-land-lease`, `task:reconcile-orphaned-workspace-worktree`.
+
 ## 0.46.0
 
 ### @fusion/dashboard
@@ -9736,6 +9768,14 @@ for reference.
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
 
+## 0.39.10
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.47.0
+
 ## 0.39.9
 
 ### @fusion/i18n
@@ -9809,6 +9849,14 @@ for reference.
 #### Patch Changes
 
 - @fusion/core@0.40.0
+
+## 0.11.36
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.36
 
 ## 0.11.35
 
