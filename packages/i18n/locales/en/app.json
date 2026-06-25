@@ -31,6 +31,16 @@
     "update": "Update",
     "yes": "Yes"
   },
+  "engineBanner": {
+    "body": "The engine for this project is not running, so task automation and live updates may be paused. Start it now to reconnect the dashboard.",
+    "dashboardOnly": "This dashboard cannot start engines from the current process. Run `fn serve` for this project to enable task execution and live automation.",
+    "dashboardOnlyPrefix": "This dashboard cannot start engines from the current process. Run",
+    "dashboardOnlySuffix": "for this project to enable task execution and live automation.",
+    "error": "Start failed: {{message}}",
+    "startCta": "Start engine",
+    "starting": "Starting…",
+    "title": "Project engine is not connected"
+  },
   "activityFeed": {
     "emptyHint": "Activity will appear here when tasks are created, moved, or completed",
     "eventCount_one": "{{count}} event",

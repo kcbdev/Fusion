@@ -974,6 +974,14 @@ Use this panel when upgrading a project with pre-FN-6245/FN-6277 in-review rows 
 
 The global AI engine stop/start control and triage pause/resume control live in the executor footer status bar rather than the header. Select the small engine-controls button beside the executor state badge, or select the state text such as **Running**, to open the footer popover. The popover includes **Stop AI engine** / **Start AI engine**, **Pause triage** / **Resume scheduling**, and live scheduler sliders for max concurrent tasks, max triage concurrency, and max worktrees. Slider changes save through the existing `/api/settings` path with the same debounced behavior used by Command Center controls; no separate backend route is required.
 
+### Engine status banner
+
+When a project dashboard is open but no project engine is connected, Fusion shows a sticky **Engine disconnected** banner above the project content. This covers paused projects, failed or still-starting project engines, delayed reconciliation, and dashboard-only/dev launches where the UI is available before an engine manager is attached.
+
+If the server can start the current project engine, use **Start engine** in the banner to resume a paused project or call the project engine startup path without reloading the dashboard. While the start request is in flight the button is disabled and shows the starting state so repeated clicks cannot create duplicate startup attempts. The banner disappears as soon as the status endpoint reports the project engine is connected.
+
+If the dashboard is running without engine management, the banner stays informational and disables the start action. Start the full server with `fn serve` to enable one-click engine startup and live task execution.
+
 ### Identifying high-impact blockers
 
 Use blocker fan-out signals on task cards and in the footer status bar to spot blockers with high downstream impact:

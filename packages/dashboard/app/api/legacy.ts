@@ -255,6 +255,26 @@ export function refreshDashboardHealth(): Promise<DashboardHealthResponse> {
   return api<DashboardHealthResponse>("/health/refresh", { method: "POST" });
 }
 
+export interface EngineStatusResponse {
+  connected: boolean;
+  starting: boolean;
+  canStart: boolean;
+  reason?: "dashboard-only" | "no-project" | string;
+  projectId?: string;
+}
+
+/*
+ * FNXC:EngineStatusBanner 2026-06-22-00:00:
+ * Engine status is project-scoped because a multi-project dashboard can have one running engine while the current project is paused, failed, or not yet started. Thread `projectId` through the existing query helper so the server resolves the same project context as task and settings routes.
+ */
+export function fetchEngineStatus(projectId?: string): Promise<EngineStatusResponse> {
+  return api<EngineStatusResponse>(withProjectId("/engine/status", projectId));
+}
+
+export function startEngine(projectId?: string): Promise<EngineStatusResponse> {
+  return api<EngineStatusResponse>(withProjectId("/engine/start", projectId), { method: "POST" });
+}
+
 export function checkForUpdates(): Promise<UpdateCheckResponse> {
   return api<UpdateCheckResponse>("/updates/check");
 }
