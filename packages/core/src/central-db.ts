@@ -578,7 +578,43 @@ export class CentralDatabase implements CentralClaimStore {
     // and coordinates cross-process access via plain POSIX byte-range locks
     // instead; busy_timeout above absorbs the writer-serialization contention
     // that DELETE mode trades for WAL's reader/writer concurrency.
-    this.db.exec("PRAGMA journal_mode = DELETE");
+    //
+    // FNXC:Database 2026-06-25-07:10:
+    // The WAL→DELETE switch is NOT silent-safe: SQLite needs an exclusive lock to
+    // checkpoint and drop `-wal`/`-shm`. If another connection still holds the DB
+    // open in WAL mode (the rolling-upgrade window, where an old-version process is
+    // still running) the switch cannot complete, and SQLite signals this in one of
+    // TWO ways depending on busy_timeout: it throws SQLITE_BUSY ("database is
+    // locked"), or it no-ops and the PRAGMA *returns the current mode* ("wal").
+    // `exec()` would swallow the return value and let the throw abort the
+    // constructor, so we capture both: try the switch, treat a throw or a non-DELETE
+    // result identically, and warn loudly. We deliberately DO NOT rethrow — the
+    // condition is transient and self-healing (the next start after the last WAL
+    // holder exits migrates cleanly), and the residual SIGBUS surface during the
+    // window is no worse than the pre-fix status quo. Hard-failing here would make
+    // the central DB unopenable during the very upgrade window this describes.
+    let journalMode: string | undefined;
+    let switchError: unknown;
+    try {
+      const journalRow = this.db.prepare("PRAGMA journal_mode = DELETE").get() as
+        | { journal_mode?: string }
+        | undefined;
+      journalMode = journalRow?.journal_mode?.toLowerCase();
+    } catch (error) {
+      switchError = error;
+    }
+    if (journalMode !== "delete") {
+      const detail = switchError
+        ? `failed: ${switchError instanceof Error ? switchError.message : String(switchError)}`
+        : `current mode: ${journalMode ?? "unknown"}`;
+      console.warn(
+        `[fusion:central-db] PRAGMA journal_mode=DELETE did not take effect ` +
+          `(${detail}) at ${this.dbPath}. Another process likely still holds the ` +
+          `database open in WAL mode; this connection keeps the WAL -shm mmap ` +
+          `(SIGBUS) surface until all WAL-mode holders exit and a fresh process ` +
+          `re-runs the migration.`,
+      );
+    }
     // synchronous=FULL is SQLite's compiled-in default; set explicitly so the
     // durability posture is intentional and visible, and so a future change to
     // synchronous=NORMAL is a deliberate edit, not an accidental drift. The WAL-only

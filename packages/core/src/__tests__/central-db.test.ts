@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, statSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CentralDatabase, createCentralDatabase, toJson, fromJson } from "../central-db.js";
+import { DatabaseSync } from "../sqlite-adapter.js";
 
 describe("CentralDatabase", () => {
   let tempDir: string;
@@ -71,6 +72,49 @@ describe("CentralDatabase", () => {
 
       const synchronous = db.prepare("PRAGMA synchronous").get() as { synchronous: number };
       expect(synchronous.synchronous).toBe(2); // FULL — durability posture preserved
+    });
+
+    it("warns (does not throw) when a WAL holder blocks the DELETE migration", () => {
+      // Migration-path regression: during a rolling upgrade an old-version process
+      // can still hold the central DB open in WAL mode. WAL→DELETE needs an exclusive
+      // lock it cannot get, so SQLite keeps WAL and the PRAGMA *returns* "wal" instead
+      // of throwing. The new connection must surface that loudly rather than silently
+      // run with the SIGBUS `-shm` surface still present.
+      const dbFile = join(tempDir, "fusion-central.db");
+      const walHolder = new DatabaseSync(dbFile);
+      walHolder.exec("PRAGMA journal_mode = WAL");
+      walHolder.exec("CREATE TABLE IF NOT EXISTS lock_probe (id INTEGER PRIMARY KEY)");
+      walHolder.exec("INSERT INTO lock_probe (id) VALUES (1)");
+      // Hold an open read transaction so the switch cannot checkpoint/truncate the WAL.
+      walHolder.exec("BEGIN");
+      walHolder.prepare("SELECT * FROM lock_probe").all();
+
+      const warnings: string[] = [];
+      const originalWarn = console.warn;
+      console.warn = (...args: unknown[]) => {
+        warnings.push(args.map(String).join(" "));
+      };
+
+      let blocked: CentralDatabase | undefined;
+      try {
+        // busyTimeoutMs:0 → the failed switch returns immediately instead of waiting.
+        expect(() => {
+          blocked = new CentralDatabase(tempDir, { busyTimeoutMs: 0 });
+        }).not.toThrow();
+
+        const mode = blocked!.prepare("PRAGMA journal_mode").get() as { journal_mode: string };
+        // The switch failed: this connection is still WAL (documents the known gap)…
+        expect(mode.journal_mode).toBe("wal");
+        // …and the failure was surfaced, not swallowed.
+        expect(
+          warnings.some((w) => /journal_mode=DELETE did not take effect/.test(w)),
+        ).toBe(true);
+      } finally {
+        console.warn = originalWarn;
+        blocked?.close();
+        walHolder.exec("ROLLBACK");
+        walHolder.close();
+      }
     });
 
     it("should seed lastModified on init", () => {
