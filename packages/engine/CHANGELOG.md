@@ -1,5 +1,12 @@
 # @fusion/engine
 
+## 0.48.0
+
+### Patch Changes
+
+- @fusion/core@0.48.0
+- @fusion/pi-claude-cli@0.48.0
+
 ## 0.47.0
 
 ### Patch Changes

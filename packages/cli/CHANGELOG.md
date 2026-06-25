@@ -1,5 +1,55 @@
 # @runfusion/fusion
 
+## 0.48.0
+
+### Minor Changes
+
+- d7f3c70: summary: Add a workflow dropdown to filter tasks in the dependency Graph view.
+  category: feature
+  dev: Scopes plugin-hosted graph tasks through the dashboard workflow assignment payload.
+
+### Patch Changes
+
+- a20235b: summary: Fix release pipeline so binaries and desktop installers publish again.
+  category: fix
+  dev: github-release job sparse-checks-out CHANGELOG.md (was missing a checkout, so the release-notes step threw ENOENT and published 0 assets on v0.47.0); desktop esbuild build externalizes @fusion/engine so it no longer tries to bundle node-pty's native .node binaries.
+- 214a60c: summary: Let quick-entry text use the full entry box width instead of wrapping early.
+  category: fix
+  dev: Adds a QuickEntryBox-specific textarea padding override and CSS cascade regression coverage.
+- 5a192ec: summary: Add a New Task dialog picker that seeds prompts from current-remote GitHub issues and PRs.
+  category: feature
+  dev: Reuses existing GitHub remote, issue, and pull list endpoints; PR prompts direct agents to address review comments.
+- a554ceb: summary: Match Quick Chat and Terminal typography in the dashboard footer.
+  category: fix
+  dev: Footer launcher CSS now shares inherited font and color contracts between Quick Chat and Terminal.
+- d359306: summary: Prevent Create PR metadata generation from hanging and provide editable fallback content.
+  category: fix
+  dev: Bounds PR metadata generation and validates non-empty PR bodies before GitHub PR creation.
+- 29530b5: summary: Widen tablet Chat View agent response bubbles for easier reading.
+  category: fix
+  dev: Uses ChatView container queries to target assistant, streaming, and failure bubbles without widening user or Quick Chat bubbles.
+- eb3833a: summary: Retire dual-observe as a workflow-authoritative cutover prerequisite.
+  category: fix
+  dev: Cutover readiness now uses the authoritative flag plus clean populated parity summaries; stale dual-observe settings remain inert.
+- 3ae053e: summary: Keep Planning Mode malformed AI responses retryable instead of stranding sessions.
+  category: fix
+  dev: Hardens planning JSON candidate selection and persists bounded parse failures as retryable AI-session errors.
+- f918896: summary: Keep Git Manager tabs reachable in mobile and docked layouts.
+  category: fix
+  dev: Makes the shared Git Manager tablist a non-wrapping horizontal touch scroller in mobile and embedded narrow containers.
+- bd5a779: summary: Remove helper guidance above the task chat composer.
+  category: fix
+  dev: Task chat placeholders now carry active/idle/done composer guidance without an extra status shell.
+- 7a00811: summary: Open Mission Manager mission-delete confirmations in the standard modal dialog.
+  category: fix
+  dev: Routes mission list and detail delete affordances through ConfirmDialogProvider with regression coverage.
+- e473ba6: summary: Make the task Changes tab inline diff panel wider on narrow screens.
+  category: fix
+  dev: Reclaims task-detail body padding for compact inline diff lists with mobile CSS contract coverage.
+- e702185: summary: Equalize mobile bottom navigation side spacing.
+  category: fix
+  dev: Adds tokenized MobileNavBar horizontal padding while preserving ICB and safe-area behavior.
+
 ## 0.47.0
 
 ### Minor Changes
