@@ -231,7 +231,7 @@ Use the default lane for normal local iteration before PRs. Run `test:deep` when
 Fusion uses Changesets + version PR workflow.
 
 - See [RELEASING.md](../RELEASING.md) for release flow details.
-- For published package behavior changes, include a changeset.
+- For published package behavior changes, include a changeset using the structured body format (`summary`, `category`, optional `dev` fields). See the changeset format guide in [`.changeset/README.md`](../.changeset/README.md).
 
 ## Code Signing
 

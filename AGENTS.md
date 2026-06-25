@@ -44,6 +44,27 @@ Bump types:
 
 Do **NOT** create changesets for AGENTS.md/README/internal docs, CI config, or behavior-preserving refactors. `@fusion/core`, `@fusion/dashboard`, and `@fusion/engine` are private.
 
+#### Changeset body format (required)
+
+Each changeset body must use labeled fields — not freeform paragraphs. The `summary` is the only content that appears in end-user release notes. The audience is Fusion operators, not developers reading internals.
+
+```markdown
+---
+"@runfusion/fusion": minor
+---
+
+summary: Add a Command Center productivity control for LOC backfills.
+category: feature
+dev: Uses the new `fn_backfill_loc` tool; settings key `commandCenter.locBackfill`.
+```
+
+Fields:
+- `summary` (required) — one line, user-facing, max 120 chars. Describe what changed for the operator, not implementation detail.
+- `category` (required) — one of: `feature`, `fix`, `breaking`, `security`, `performance`, `internal`.
+- `dev` (optional) — developer/migration detail. Preserved in per-package CHANGELOGs but excluded from distilled release notes.
+
+A linter (`pnpm check:changesets`) validates this format and runs in the PR-check gate. Legacy freeform changesets pass with a warning during the transition period; use `--strict` to fail on legacy format.
+
 ### Releasing
 
 Use only:
