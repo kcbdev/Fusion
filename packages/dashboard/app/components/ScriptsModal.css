@@ -923,8 +923,8 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   background: color-mix(in srgb, var(--color-info) 5%, var(--card));
 }
 
-.spinner {
-  animation: spin 1s linear infinite;
+.scripts-modal .spinner {
+  animation: scripts-modal-spinner-spin 1s linear infinite;
 }
 
 .routine-card-header {
@@ -1658,10 +1658,10 @@ queries already apply (the container-query rule above also fires and produces th
 }
 
 .activity-log-loading .spin {
-  animation: spin 1s linear infinite;
+  animation: scripts-modal-spinner-spin 1s linear infinite;
 }
 
-@keyframes spin {
+@keyframes scripts-modal-spinner-spin {
   from {
     transform: rotate(0deg);
   }
