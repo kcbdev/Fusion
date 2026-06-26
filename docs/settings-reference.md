@@ -54,8 +54,8 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `dashboardFontScalePct` | `number` | `100` | Dashboard font scale percentage used by Appearance settings. Valid range: `85` to `125`; applied pre-hydration via document root font-size so board typography (column headers/counts, task cards, and quick-entry text) scales with the setting from first paint. |
 | `defaultProvider` | `string` | `undefined` | Default AI provider. |
 | `defaultModelId` | `string` | `undefined` | Default AI model ID. |
-| `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable in Settings → Global Models. |
-| `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing editor. |
+| `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable from Settings → Global Models → View pricing table. |
+| `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing summary. |
 | `modelPricingSource` | `string` | `undefined` | Source label/URL for the current pricing override set, currently the LiteLLM model pricing JSON when fetched through the dashboard. |
 | `fallbackProvider` | `string` | `undefined` | Fallback provider when the primary default model hits transient provider failures or model-compatibility/auth-tier rejections. |
 | `fallbackModelId` | `string` | `undefined` | Fallback model ID (must pair with `fallbackProvider`). |

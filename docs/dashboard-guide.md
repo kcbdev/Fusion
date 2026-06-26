@@ -215,7 +215,7 @@ Behavior:
 
 Custom Providers live in **Settings → Authentication → Custom Providers**, inside the **Advanced: Custom Providers** disclosure. Use this section to add user-defined model providers that speak an OpenAI-compatible API, the OpenAI Responses API, an Anthropic-compatible API, or Google Generative AI. After a provider is saved with models, those models become selectable in model dropdowns, including **Settings → Project Models** lanes and workflow model lanes.
 
-Settings → Global Models also includes **Model pricing overrides** for Command Center estimates. Add or edit rows with lowercased `provider:model` keys (or bare `:model` fallback keys), USD-per-1M token prices for input/output/cache read/cache write, and optional source text. **Fetch LiteLLM pricing** performs an explicit one-click refresh from LiteLLM's published model pricing JSON, replaces the override table only after a successful parse, and records the fetched timestamp/source; failed fetches keep the existing overrides.
+Settings → Global Models also includes **Model pricing overrides** for Command Center estimates. The section shows a compact pricing snapshot/override-count summary; use **View pricing table** to add or edit rows with lowercased `provider:model` keys (or bare `:model` fallback keys), USD-per-1M token prices for input/output/cache read/cache write, and optional source text. **Fetch LiteLLM pricing** remains available from the collapsed summary and performs an explicit one-click refresh from LiteLLM's published model pricing JSON, replaces the override table only after a successful parse, and records the fetched timestamp/source; failed fetches keep the existing overrides.
 
 Supported **API type** values match the dropdown in the form:
 

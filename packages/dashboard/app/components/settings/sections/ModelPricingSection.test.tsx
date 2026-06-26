@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { ModelPricingSection } from "./ModelPricingSection";
 import type { SettingsFormState } from "./context";
@@ -44,14 +44,54 @@ const initialForm = (): SettingsFormState => ({
   },
 } as SettingsFormState);
 
+function openPricingTable() {
+  fireEvent.click(screen.getByRole("button", { name: "View pricing table" }));
+  return screen.getByTestId("model-pricing-table-modal");
+}
+
 describe("ModelPricingSection", () => {
   beforeEach(() => {
     apiMock.mockReset();
   });
 
-  it("renders existing overrides and edits a row", () => {
+  it("renders collapsed override summary without mounting the table shell", () => {
     render(<Harness initial={initialForm()} />);
 
+    expect(screen.getByText("1 pricing override")).toBeInTheDocument();
+    expect(screen.queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("openai:gpt-4o input per 1M")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Model pricing overrides" })).not.toBeInTheDocument();
+  });
+
+  it("shows empty summary copy when no overrides exist", () => {
+    render(<Harness initial={{} as SettingsFormState} />);
+
+    expect(screen.getByText("0 pricing overrides")).toBeInTheDocument();
+    expect(screen.getByText("No model pricing overrides yet. Add one manually or fetch the latest LiteLLM prices.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("New provider:model key")).not.toBeInTheDocument();
+  });
+
+  it("opens and closes the pricing table popup by close button, Escape, and overlay click", () => {
+    render(<Harness initial={initialForm()} />);
+
+    openPricingTable();
+    expect(screen.getByRole("dialog", { name: "Model pricing table" })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("model-pricing-close"));
+    expect(screen.queryByRole("dialog", { name: "Model pricing table" })).not.toBeInTheDocument();
+
+    openPricingTable();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Model pricing table" })).not.toBeInTheDocument();
+
+    const overlay = openPricingTable();
+    fireEvent.click(overlay);
+    expect(screen.queryByRole("dialog", { name: "Model pricing table" })).not.toBeInTheDocument();
+  });
+
+  it("renders existing overrides and edits a row inside the popup", () => {
+    render(<Harness initial={initialForm()} />);
+
+    openPricingTable();
     expect(screen.getByText("openai:gpt-4o")).toBeInTheDocument();
     const inputRate = screen.getByLabelText("openai:gpt-4o input per 1M");
     fireEvent.change(inputRate, { target: { value: "3.75" } });
@@ -59,9 +99,10 @@ describe("ModelPricingSection", () => {
     expect(screen.getByLabelText("openai:gpt-4o input per 1M")).toHaveValue(3.75);
   });
 
-  it("adds and deletes pricing rows through form state", () => {
+  it("adds and deletes pricing rows through form state inside the popup", () => {
     render(<Harness initial={{} as SettingsFormState} />);
 
+    openPricingTable();
     fireEvent.change(screen.getByLabelText("New provider:model key"), { target: { value: "Anthropic:Claude-Test" } });
     fireEvent.change(screen.getByLabelText("New input rate"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("New output rate"), { target: { value: "5" } });
@@ -72,13 +113,15 @@ describe("ModelPricingSection", () => {
 
     expect(screen.getByText("anthropic:claude-test")).toBeInTheDocument();
     expect(screen.getByLabelText("anthropic:claude-test output per 1M")).toHaveValue(5);
+    expect(screen.getByText("1 pricing override")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(screen.queryByText("anthropic:claude-test")).not.toBeInTheDocument();
-    expect(screen.getByText("No model pricing overrides yet. Add one manually or fetch the latest LiteLLM prices.")).toBeInTheDocument();
+    expect(screen.getByText("0 pricing overrides")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog", { name: "Model pricing table" })).getByText("No model pricing overrides yet. Add one manually or fetch the latest LiteLLM prices.")).toBeInTheDocument();
   });
 
-  it("shows an error toast and resets loading when pricing fetch fails", async () => {
+  it("shows an error toast and resets loading when pricing fetch fails from the collapsed view", async () => {
     const addToast = vi.fn();
     let rejectFetch: (error: Error) => void = () => undefined;
     apiMock.mockImplementationOnce(() => new Promise((_resolve, reject) => {
@@ -92,9 +135,10 @@ describe("ModelPricingSection", () => {
     rejectFetch(new Error("pricing unavailable"));
     await waitFor(() => expect(addToast).toHaveBeenCalledWith("pricing unavailable", "error"));
     await waitFor(() => expect(screen.getByRole("button", { name: "Fetch latest prices" })).not.toBeDisabled());
+    expect(screen.queryByLabelText("New provider:model key")).not.toBeInTheDocument();
   });
 
-  it("fetch button calls the API and refreshes fetched pricing state", async () => {
+  it("fetch button calls the API and refreshes fetched pricing state while keeping the table collapsed", async () => {
     apiMock
       .mockResolvedValueOnce({ count: 1, fetchedAt: "2026-06-22T00:00:00.000Z", source: "litellm" })
       .mockResolvedValueOnce({
@@ -118,9 +162,13 @@ describe("ModelPricingSection", () => {
       "/command-center/pricing/fetch?projectId=proj-a",
       { method: "POST" },
     ));
-    await waitFor(() => expect(screen.getByText("openai:gpt-test")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1 pricing override")).toBeInTheDocument());
+    expect(screen.queryByText("openai:gpt-test")).not.toBeInTheDocument();
     expect(apiMock).toHaveBeenCalledTimes(2);
     expect(screen.getByText(/Prices as of/)).toBeInTheDocument();
     expect(screen.getByText(/litellm/)).toBeInTheDocument();
+
+    openPricingTable();
+    expect(screen.getByText("openai:gpt-test")).toBeInTheDocument();
   });
 });
