@@ -230,13 +230,26 @@ function storeFor(
   return store;
 }
 
+const SIGNAL_SECRET_ENV_KEYS = [
+  "FUSION_SIGNAL_WEBHOOK_SECRET",
+  "FUSION_SIGNAL_SENTRY_SECRET",
+  "FUSION_SIGNAL_DATADOG_SECRET",
+  "FUSION_SIGNAL_PAGERDUTY_SECRET",
+] as const;
+
 describe("register-command-center-routes", () => {
   let tmpDir: string;
   let dbA: Database;
   let dbB: Database;
   let app: ReturnType<typeof buildApp>;
+  let savedSignalEnv: Partial<Record<(typeof SIGNAL_SECRET_ENV_KEYS)[number], string | undefined>>;
 
   beforeEach(() => {
+    savedSignalEnv = {};
+    for (const key of SIGNAL_SECRET_ENV_KEYS) {
+      savedSignalEnv[key] = process.env[key];
+      delete process.env[key];
+    }
     tmpDir = mkdtempSync(join(tmpdir(), "kb-cc-routes-"));
     dbA = new Database(join(tmpDir, "a", ".fusion"));
     dbA.init();
@@ -253,8 +266,14 @@ describe("register-command-center-routes", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     mockInvalidateAllGlobalSettingsCaches.mockClear();
+    for (const key of SIGNAL_SECRET_ENV_KEYS) {
+      const value = savedSignalEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     dbA.close();
     dbB.close();
     rmSync(tmpDir, { recursive: true, force: true });
@@ -515,13 +534,75 @@ describe("register-command-center-routes", () => {
       },
     ]);
 
+    process.env.FUSION_SIGNAL_SENTRY_SECRET = "configured-sentry";
+    process.env.FUSION_SIGNAL_WEBHOOK_SECRET = "configured-webhook";
     seedSignalMetrics(dbA, { prefix: "SIG-A", source: "sentry", open: 1, resolved: 1 });
     const signals = await request(app, "GET", `/api/command-center/signals?${range}&projectId=proj-a`);
     expect(signals.status).toBe(200);
-    expect(signals.body).toMatchObject({ totalSignals: 2, open: 1, resolved: 1 });
+    expect(signals.body).toMatchObject({
+      totalSignals: 2,
+      open: 1,
+      resolved: 1,
+      connectors: { configured: ["webhook", "sentry"], anyConfigured: true },
+    });
     expect(signals.body).toHaveProperty("mttr");
     expect(signals.body).toHaveProperty("bySource");
     expect(signals.body).toHaveProperty("bySeverity");
+  });
+
+  it("honors picker-shaped from-only ranges for tokens, activity, and productivity", async () => {
+    vi.useFakeTimers({ now: new Date("2026-04-01T00:00:00.000Z") });
+    seedAgentRun(dbA, { id: "run-open-bound", agentId: "agent-open", startedAt: "2026-03-02T00:00:00.000Z", status: "completed" });
+    seedCompletedTaskDuration(dbA, { id: "FN-open-duration", cumulativeActiveMs: 45_000, completedAt: "2026-03-03T00:00:00.000Z" });
+
+    const pickerRange = "from=2026-02-01T00%3A00%3A00.000Z";
+    const expectedTo = "2026-04-01T00:00:00.000Z";
+    const tokens = await request(app, "GET", `/api/command-center/tokens?${pickerRange}&projectId=proj-a`);
+    const activity = await request(app, "GET", `/api/command-center/activity?${pickerRange}&projectId=proj-a`);
+    const productivity = await request(app, "GET", `/api/command-center/productivity?${pickerRange}&projectId=proj-a`);
+
+    expect(tokens.status).toBe(200);
+    expect(tokens.body).toMatchObject({ from: "2026-02-01T00:00:00.000Z", to: expectedTo });
+    expect((tokens.body as { totals: { totalTokens: number } }).totals.totalTokens).toBe(200);
+    expect(activity.body).toMatchObject({ from: "2026-02-01T00:00:00.000Z", to: expectedTo });
+    expect((activity.body as { agentRuns: { total: number } }).agentRuns.total).toBe(1);
+    expect(productivity.body).toMatchObject({ from: "2026-02-01T00:00:00.000Z", to: expectedTo });
+    expect((productivity.body as { taskDuration: { completedTasks: number } }).taskDuration.completedTasks).toBe(1);
+
+    const defaultTokens = await request(app, "GET", "/api/command-center/tokens?projectId=proj-a");
+    const defaultActivity = await request(app, "GET", "/api/command-center/activity?projectId=proj-a");
+    const defaultProductivity = await request(app, "GET", "/api/command-center/productivity?projectId=proj-a");
+    expect(defaultTokens.body).toMatchObject({ from: "2026-03-25T00:00:00.000Z", to: expectedTo });
+    expect((defaultTokens.body as { totals: { totalTokens: number } }).totals.totalTokens).toBe(0);
+    expect((defaultActivity.body as { agentRuns: { total: number } }).agentRuns.total).toBe(0);
+    expect((defaultProductivity.body as { taskDuration: { completedTasks: number } }).taskDuration.completedTasks).toBe(0);
+  });
+
+  it("applies from-only resolved bounds on every range-consuming analytics endpoint", async () => {
+    vi.useFakeTimers({ now: new Date("2026-04-01T00:00:00.000Z") });
+    const endpoints = [
+      "tokens",
+      "tools",
+      "activity",
+      "productivity",
+      "team",
+      "github",
+      "signals",
+      "plugin-activations",
+    ];
+
+    for (const endpoint of endpoints) {
+      const res = await request(
+        app,
+        "GET",
+        `/api/command-center/${endpoint}?from=2026-02-01T00%3A00%3A00.000Z&projectId=proj-a`,
+      );
+      expect(res.status, endpoint).toBe(200);
+      expect(res.body, endpoint).toMatchObject({
+        from: "2026-02-01T00:00:00.000Z",
+        to: "2026-04-01T00:00:00.000Z",
+      });
+    }
   });
 
   it("runs the productivity LOC backfill route as a dry-run by default and respects writes", async () => {
@@ -650,6 +731,44 @@ describe("register-command-center-routes", () => {
     expect(bAgents.some((agent) => agent.agentId === "agent-a-only" || agent.agentName === "Project A Agent")).toBe(false);
   });
 
+  it("signals endpoint returns zeroed metrics for an empty incidents table", async () => {
+    const range = "from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z";
+    const res = await request(app, "GET", `/api/command-center/signals?${range}&projectId=proj-a`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      totalSignals: 0,
+      open: 0,
+      resolved: 0,
+      mttr: { value: null, unavailable: true, sampleCount: 0 },
+      bySource: [],
+      bySeverity: [],
+      connectors: { configured: [], anyConfigured: false },
+    });
+  });
+
+  it("signals connectors endpoint reports env-backed configuration without leaking secrets", async () => {
+    process.env.FUSION_SIGNAL_WEBHOOK_SECRET = "webhook-secret-value";
+    process.env.FUSION_SIGNAL_DATADOG_SECRET = "datadog-secret-value";
+
+    const a = await request(app, "GET", "/api/command-center/signals/connectors?projectId=proj-a");
+    const b = await request(app, "GET", "/api/command-center/signals/connectors?projectId=proj-b");
+
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(a.body).toEqual(b.body);
+    expect(a.body).toEqual({
+      connectors: [
+        { provider: "webhook", configured: true },
+        { provider: "sentry", configured: false },
+        { provider: "datadog", configured: true },
+        { provider: "pagerduty", configured: false },
+      ],
+    });
+    const serialized = JSON.stringify(a.body);
+    expect(serialized).not.toContain("webhook-secret-value");
+    expect(serialized).not.toContain("datadog-secret-value");
+  });
+
   it("signals endpoint defaults invalid ranges and stays project scoped", async () => {
     seedSignalMetrics(dbA, { prefix: "SIG-A", source: "sentry", open: 1, resolved: 1 });
     seedSignalMetrics(dbB, { prefix: "SIG-B", source: "pagerduty", open: 3, resolved: 2 });
@@ -663,12 +782,14 @@ describe("register-command-center-routes", () => {
     expect(invalid.body).toHaveProperty("totalSignals");
     expect(invalid.body).toHaveProperty("mttr");
     expect(invalid.body).toHaveProperty("bySource");
+    expect(invalid.body).toMatchObject({ connectors: { configured: [], anyConfigured: false } });
 
+    process.env.FUSION_SIGNAL_PAGERDUTY_SECRET = "configured-pd";
     const range = "from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z";
     const a = await request(app, "GET", `/api/command-center/signals?${range}&projectId=proj-a`);
     const b = await request(app, "GET", `/api/command-center/signals?${range}&projectId=proj-b`);
-    expect(a.body).toMatchObject({ totalSignals: 2, open: 1, resolved: 1 });
-    expect(b.body).toMatchObject({ totalSignals: 5, open: 3, resolved: 2 });
+    expect(a.body).toMatchObject({ totalSignals: 2, open: 1, resolved: 1, connectors: { configured: ["pagerduty"], anyConfigured: true } });
+    expect(b.body).toMatchObject({ totalSignals: 5, open: 3, resolved: 2, connectors: { configured: ["pagerduty"], anyConfigured: true } });
     expect((a.body as { bySource: Array<{ source: string }> }).bySource).toContainEqual(expect.objectContaining({ source: "sentry" }));
     expect((a.body as { bySource: Array<{ source: string }> }).bySource).not.toContainEqual(expect.objectContaining({ source: "pagerduty" }));
   });
@@ -889,9 +1010,41 @@ describe("resolveRange / resolveGroupBy / resolveTokenGranularity (param parsing
     expect(r.defaulted).toBe(true);
   });
 
-  it("defaults when a bound is unparseable", () => {
-    const r = resolveRange({ from: "garbage", to: "2026-06-10T00:00:00.000Z" }, NOW);
+  it("honors a from-only bound as the symptom regression anchor", () => {
+    const r = resolveRange({ from: "2026-06-01T00:00:00.000Z" }, NOW);
+    expect(r.defaulted).toBe(false);
+    expect(r.from).toBe("2026-06-01T00:00:00.000Z");
+    expect(r.to).toBe(new Date(NOW).toISOString());
+  });
+
+  it("honors a to-only bound as an all-history window through that date", () => {
+    const r = resolveRange({ to: "2026-06-10T00:00:00.000Z" }, NOW);
+    expect(r.defaulted).toBe(false);
+    expect(r.from).toBe(new Date(0).toISOString());
+    expect(r.to).toBe("2026-06-10T00:00:00.000Z");
+  });
+
+  it("uses the remaining valid bound when the other bound is unparseable", () => {
+    const toOnly = resolveRange({ from: "garbage", to: "2026-06-10T00:00:00.000Z" }, NOW);
+    expect(toOnly).toEqual({
+      from: new Date(0).toISOString(),
+      to: "2026-06-10T00:00:00.000Z",
+      defaulted: false,
+    });
+
+    const fromOnly = resolveRange({ from: "2026-06-01T00:00:00.000Z", to: "garbage" }, NOW);
+    expect(fromOnly).toEqual({
+      from: "2026-06-01T00:00:00.000Z",
+      to: new Date(NOW).toISOString(),
+      defaulted: false,
+    });
+  });
+
+  it("defaults only when neither bound is usable", () => {
+    const r = resolveRange({ from: "garbage", to: "also-bad" }, NOW);
     expect(r.defaulted).toBe(true);
+    expect(r.to).toBe(new Date(NOW).toISOString());
+    expect(r.from).toBe(new Date(NOW - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString());
   });
 
   it("accepts known groupBy values and ignores unknown ones", () => {
@@ -922,6 +1075,7 @@ describe("vite /api proxy negative-lookahead (proxy verification)", () => {
     expect(PROXY_RE.test("/api/command-center/live")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/github")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/signals")).toBe(true);
+    expect(PROXY_RE.test("/api/command-center/signals/connectors")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/activity?from=x&to=y")).toBe(true);
   });
 

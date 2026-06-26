@@ -33,7 +33,10 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
   let compositeAction: any;
   let contributingContent: string;
   let readmeContent: string;
+  let rootPackageJson: any;
+  let enginePackageJson: any;
   let cliPackageJsonContent: string;
+  let engineVitestConfigContent: string;
   let extensionSuiteContent: string;
   let agentExportSuiteContent: string;
   let buildExeSuiteContent: string;
@@ -45,7 +48,10 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
     compositeAction = loadYamlFile(".github", "actions", "setup-node-pnpm", "action.yml").parsed;
     contributingContent = readFileSync(join(workspaceRoot, "docs", "contributing.md"), "utf-8");
     readmeContent = readFileSync(join(workspaceRoot, "README.md"), "utf-8");
+    rootPackageJson = JSON.parse(readFileSync(join(workspaceRoot, "package.json"), "utf-8"));
+    enginePackageJson = JSON.parse(readFileSync(join(workspaceRoot, "packages", "engine", "package.json"), "utf-8"));
     cliPackageJsonContent = readFileSync(join(workspaceRoot, "packages", "cli", "package.json"), "utf-8");
+    engineVitestConfigContent = readFileSync(join(workspaceRoot, "packages", "engine", "vitest.config.ts"), "utf-8");
     extensionSuiteContent = readFileSync(
       join(workspaceRoot, "packages", "cli", "src", "__tests__", "extension-integration.test.ts"),
       "utf-8",
@@ -99,6 +105,26 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
         (step: any) => typeof step.run === "string" && step.run.includes("pnpm test:gate"),
       ),
     ).toBe(true);
+  });
+
+  /*
+  FNXC:CITestGate 2026-06-26-06:40:
+  The merge gate is the thin trusted CI surface. ci-workflow.test.ts must pin not only that the Gate job invokes `pnpm test:gate`, but also test:gate's internal composition (guards + engine test:core + cli test:ci-shape) and that engine test:core references the engine-core vitest project — otherwise a rename could hollow the gate while this CI-shape test stays green (FN-7059).
+  */
+  it("pins test:gate to the audited guard scripts and curated suites", () => {
+    const testGateScript = rootPackageJson.scripts?.["test:gate"] ?? "";
+
+    expect(testGateScript).toContain("node scripts/check-no-nohup.mjs"); // process-supervisor-allowlist: asserts the gate wires the checker; not a real spawn
+    expect(testGateScript).toContain("node scripts/check-no-kill-4040.mjs"); // port-4040-allowlist: asserts the gate wires the checker; not a real port bind
+    expect(testGateScript).toContain("node scripts/check-no-test-timeout-appeasement.mjs");
+    expect(testGateScript).toContain("node scripts/check-changeset-format.mjs");
+    expect(testGateScript).toContain("pnpm --filter @fusion/engine test:core");
+    expect(testGateScript).toContain("pnpm --filter @runfusion/fusion test:ci-shape");
+  });
+
+  it("pins engine test:core to the engine-core vitest project", () => {
+    expect(enginePackageJson.scripts?.["test:core"] ?? "").toContain("--project=engine-core");
+    expect(engineVitestConfigContent).toContain('name: "engine-core"');
   });
 
   it("pins dependency bootstrap to frozen lockfile in every job", () => {
@@ -418,6 +444,18 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(workflow.jobs["github-release"].needs).toContain("build-binaries");
     expect(workflow.jobs["github-release"].needs).toContain("build-android");
   });
+
+  it("wires signed Android AAB artifacts into release aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const collectStep = workflow.jobs["github-release"].steps.find((step: any) => step.name === "Collect release files");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(collectStep.run).toContain('-name "*.apk"');
+    expect(collectStep.run).toContain('-name "*.aab"');
+    expect(collectStep.run).toContain('-name "*.sha256"');
+  });
 });
 
 describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
@@ -484,6 +522,18 @@ describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
     expect(workflow.jobs.collect.needs).toContain("build-binaries");
     expect(workflow.jobs.collect.needs).toContain("build-android");
     expect(content).toContain("all-binaries");
+  });
+
+  it("wires signed Android AAB artifacts into rehearsal aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const combineStep = workflow.jobs.collect.steps.find((step: any) => step.name === "Combine artifacts");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(combineStep.run).toContain('-name "*.apk"');
+    expect(combineStep.run).toContain('-name "*.aab"');
+    expect(combineStep.run).toContain('-name "*.sha256"');
   });
 });
 

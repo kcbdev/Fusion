@@ -78,6 +78,8 @@ export const FOREACH_GROUP_HEIGHT = 220;
 export const FOREACH_CHILD_X = 30;
 export const FOREACH_CHILD_Y = 56;
 export const FOREACH_CHILD_STEP_X = 260;
+export const WF_FALLBACK_GRAPH_X = 80;
+export const WF_FALLBACK_NODE_GAP = WF_CARD_WIDTH / 2;
 
 const FOREACH_CHILD_SEP = "::";
 /** Compose a globally-unique flow-node id for a template child. */
@@ -286,6 +288,24 @@ function groupTemplateConfigOf(
   return foreachConfigOf(node) ?? loopConfigOf(node) ?? optionalGroupConfigOf(node);
 }
 
+function fallbackWidthForNode(node: WorkflowIrNode): number {
+  return groupTemplateConfigOf(node) ? FOREACH_GROUP_WIDTH : WF_CARD_WIDTH;
+}
+
+/**
+ * FNXC:WorkflowContainerEdges 2026-06-26-07:30:
+ * Container nodes are much wider than step cards, so fallback graph layout must advance by each rendered node width. Fixed index spacing lets optional-group/foreach/loop backgrounds overlap adjacent handles, making correct top-level edges look visually disconnected in the workflow editor.
+ */
+function fallbackXPositionsForNodes(nodes: readonly WorkflowIrNode[], originX = WF_FALLBACK_GRAPH_X): Map<string, number> {
+  const positions = new Map<string, number>();
+  let nextX = originX;
+  for (const node of nodes) {
+    positions.set(node.id, nextX);
+    nextX += fallbackWidthForNode(node) + WF_FALLBACK_NODE_GAP;
+  }
+  return positions;
+}
+
 /** CSS class for an edge given its condition + rework kind. Rework takes
  *  precedence; failure edges get the distinct failure styling; success and other
  *  conditions get no class (default styling). R2's two-channel rule (label always
@@ -341,13 +361,20 @@ export function irToFlow(def: WorkflowDefinition): {
   const childNodes: FlowNode<WorkflowFlowNodeData>[] = [];
   const childEdges: FlowEdge[] = [];
 
-  const stepNodes = def.ir.nodes.map((node, index): FlowNode<WorkflowFlowNodeData> => {
-    const pos = def.layout?.[node.id];
+  const fallbackXById = fallbackXPositionsForNodes(def.ir.nodes);
+  /*
+   * FNXC:WorkflowContainerEdges 2026-06-26-07:58:
+   * Built-in workflow layouts can lag behind newly inserted container nodes. Mixing stale saved positions with fallback-only optional-group/foreach/loop positions reintroduces overlapping handles, so an incomplete top-level layout falls back as one coherent graph instead of preserving disconnected partial coordinates.
+   */
+  const hasCompleteTopLevelLayout = def.ir.nodes.every((node) => Boolean(def.layout?.[node.id]));
+  const stepNodes = def.ir.nodes.map((node): FlowNode<WorkflowFlowNodeData> => {
+    const pos = hasCompleteTopLevelLayout ? def.layout?.[node.id] : undefined;
     const kind = editorKind(node);
     const column = isV2(def.ir) ? node.column : undefined;
     const colIndex = column ? columns.findIndex((c) => c.id === column) : -1;
     // Default placement seeds the node inside its column band when no persisted
     // layout exists; otherwise we honor the saved absolute position.
+    const fallbackX = fallbackXById.get(node.id) ?? WF_FALLBACK_GRAPH_X;
     const fallbackY = colIndex >= 0 ? bandTop(colIndex) + 70 : 120;
 
     const groupCfg = groupTemplateConfigOf(node);
@@ -382,7 +409,7 @@ export function irToFlow(def: WorkflowDefinition): {
       return {
         id: node.id,
         type: kind,
-        position: pos ?? { x: 80 + index * 180, y: fallbackY },
+        position: pos ?? { x: fallbackX, y: fallbackY },
         data: {
           kind,
           ...dataIrKind(node, kind),
@@ -400,7 +427,7 @@ export function irToFlow(def: WorkflowDefinition): {
     return {
       id: node.id,
       type: kind,
-      position: pos ?? { x: 80 + index * 180, y: fallbackY },
+      position: pos ?? { x: fallbackX, y: fallbackY },
       data: {
         kind,
         ...dataIrKind(node, kind),
@@ -1159,6 +1186,7 @@ export function insertFragment(
   const minX = placed.length ? Math.min(...placed.map((p) => p.x)) : 0;
   const minY = placed.length ? Math.min(...placed.map((p) => p.y)) : 0;
 
+  const fallbackXById = fallbackXPositionsForNodes(bodyNodes, position.x);
   const insertedNodeIds: string[] = [];
   // Template group children are expanded into parented child flow nodes (the
   // same way irToFlow does), so an inserted group round-trips its full template
@@ -1166,13 +1194,13 @@ export function insertFragment(
   // otherwise rebuild as an empty template from the absent children).
   const childNodes: FlowNode<WorkflowFlowNodeData>[] = [];
   const childEdges: FlowEdge[] = [];
-  const newNodes = bodyNodes.map((node, index): FlowNode<WorkflowFlowNodeData> => {
+  const newNodes = bodyNodes.map((node): FlowNode<WorkflowFlowNodeData> => {
     const id = idMap.get(node.id)!;
     insertedNodeIds.push(id);
     const fromLayout = layout?.[node.id];
     const pos = fromLayout
       ? { x: position.x + (fromLayout.x - minX), y: position.y + (fromLayout.y - minY) }
-      : { x: position.x + index * 180, y: position.y };
+      : { x: fallbackXById.get(node.id) ?? position.x, y: position.y };
     const groupCfg = groupTemplateConfigOf(node);
     if (groupCfg) {
       const template = groupCfg.template;

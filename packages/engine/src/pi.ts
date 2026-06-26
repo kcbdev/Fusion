@@ -50,6 +50,7 @@ import type {
   AgentPermissionPolicyActionCategory,
   PermanentAgentActionCategory,
   PermanentAgentGatingContext,
+  ResolvedMcpServerDefinition,
 } from "@fusion/core";
 import {
   resolveSessionSkills,
@@ -72,6 +73,7 @@ import type { SystemPromptLayers } from "./prompt-layers.js";
 import { READONLY_ALLOWLIST, filterCustomToolsForReadonly, isReadonlyAllowed } from "./workflow-step-tool-policy.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
 import { isModelAuthTierIncompatibilityError, isUnsupportedMessageRoleError } from "./transient-error-detector.js";
+import { logMcpForwardingSkipped, runtimeSupportsMcp } from "./mcp-runtime-support.js";
 export { isModelAuthTierIncompatibilityError } from "./transient-error-detector.js";
 
 const RTK_ACCEPTED_REWRITE_EXIT_CODES = new Set([0, 3]);
@@ -956,6 +958,13 @@ export interface AgentOptions {
   systemPromptLayers?: SystemPromptLayers;
   tools?: "coding" | "readonly";
   customTools?: ToolDefinition[];
+  /**
+   * Optional resolved tool-name allowlist. Undefined preserves the selected tool mode; an empty array deliberately exposes no matched tools.
+   *
+   * FNXC:AutomationTools 2026-06-26-00:00:
+   * Automation AI steps can narrow coding sessions by tool name while legacy steps keep all tools. Normalize names case-insensitively at the engine boundary so dashboard labels like "Read" match pi tool names like "read".
+   */
+  toolsAllowlist?: string[];
   /** Optional allowlist of builtin runtime web tools to keep enabled. */
   builtinToolsAllowlist?: BuiltinWebToolName[];
   onText?: (delta: string) => void;
@@ -991,6 +1000,11 @@ export interface AgentOptions {
    *  loader so callers (e.g. plugins that install skills to a private dir) can
    *  make `skills`/`skillSelection` names discoverable in the live session. */
   additionalSkillPaths?: string[];
+  /**
+   * Resolved/materialized MCP servers for the session. The runtime-support guard
+   * below decides whether to forward or skip them without logging contents.
+   */
+  mcpServers?: ResolvedMcpServerDefinition[];
   /** Optional task-scoped env injected into this session's subprocess tools only. */
   taskEnv?: NodeJS.ProcessEnv;
   /** Last-chance abort hook fired immediately before `createAgentSession`.
@@ -1960,8 +1974,23 @@ export function attachSessionRoutingHeaders(modelRegistry: ModelRegistry, sessio
  * Returned sessions are wrapped so `session.dispose()` emits pi's
  * `session_shutdown` extension event before teardown.
  */
+function withMcpPromptOptions(promptOptions: unknown, mcpServers: ResolvedMcpServerDefinition[] | undefined): unknown {
+  if (!mcpServers || mcpServers.length === 0) return promptOptions;
+  if (promptOptions && typeof promptOptions === "object" && !Array.isArray(promptOptions)) {
+    return { ...(promptOptions as Record<string, unknown>), mcpServers };
+  }
+  return { mcpServers };
+}
+
 export async function createFnAgent(options: AgentOptions): Promise<AgentResult> {
   piLog.log(`createFnAgent called (tools=${options.tools}, provider=${options.defaultProvider}, model=${options.defaultModelId})`);
+  // FNXC:McpConfig 2026-06-25-22:02:
+  // The pi session is the final shared forwarding seam for direct createFnAgent lanes. Forward the resolved MCP set only to MCP-capable provider/runtime combinations and keep unsupported lanes content-free by logging just provider/runtime/count metadata.
+  const requestedMcpServers = options.mcpServers ?? [];
+  const forwardedMcpServers = runtimeSupportsMcp("pi", options.defaultProvider) ? requestedMcpServers : [];
+  if (requestedMcpServers.length > 0 && forwardedMcpServers.length === 0) {
+    logMcpForwardingSkipped({ runtimeId: "pi", provider: options.defaultProvider, skippedCount: requestedMcpServers.length, lane: "createFnAgent" });
+  }
   const authStorage = createFusionAuthStorage();
   const modelRegistry = ModelRegistry.create(authStorage, getModelRegistryModelsPath());
 
@@ -2023,6 +2052,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     : undefined;
 
   const isReadonly = options.tools === "readonly";
+  const normalizedToolsAllowlist = options.toolsAllowlist === undefined
+    ? undefined
+    : new Set(options.toolsAllowlist.map((name) => name.trim().toLowerCase()).filter(Boolean));
+  const isAllowedByToolAllowlist = (toolName: string): boolean => normalizedToolsAllowlist === undefined || normalizedToolsAllowlist.has(toolName.trim().toLowerCase());
   const builtins = [
     createReadTool(options.cwd),
     createBashTool(options.cwd, bashToolOptions),
@@ -2032,9 +2065,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     createFindTool(options.cwd),
     createLsTool(options.cwd),
   ] as ToolDefinition[];
-  const tools = isReadonly
+  const modeFilteredTools = isReadonly
     ? builtins.filter((tool) => isReadonlyAllowed(tool.name))
     : builtins;
+  const tools = modeFilteredTools.filter((tool) => isAllowedByToolAllowlist(tool.name));
   // Suppress lint about unused presets — kept in scope for incremental migration.
   void createCodingTools;
   void createReadOnlyTools;
@@ -2179,6 +2213,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     const readonlyFilteredCustomTools = isReadonly
       ? filterCustomToolsForReadonly(options.customTools ?? [])
       : { allowed: options.customTools ?? [], denied: [] };
+    const allowlistFilteredCustomTools = {
+      ...readonlyFilteredCustomTools,
+      allowed: readonlyFilteredCustomTools.allowed.filter((tool) => isAllowedByToolAllowlist(tool.name)),
+    };
     if (isReadonly && readonlyFilteredCustomTools.denied.length > 0) {
       piLog.warn(
         `[pi] readonly mode: dropped ${readonlyFilteredCustomTools.denied.length} denied custom tool(s): ${readonlyFilteredCustomTools.denied.join(", ")}`,
@@ -2187,7 +2225,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
     const toolChainStart: ToolDefinition[] = [
       ...(tools as ToolDefinition[]),
-      ...readonlyFilteredCustomTools.allowed,
+      ...allowlistFilteredCustomTools.allowed,
     ];
     const toolsWithRtkRewrite = wrapToolsWithRtkRewrite(toolChainStart);
     const toolsWithPermanentGating = wrapToolsWithPermanentAgentGating(
@@ -2222,7 +2260,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     if (options.beforeSpawnSession) {
       await options.beforeSpawnSession();
     }
-    const createSessionOptions: Parameters<typeof createAgentSession>[0] = {
+    const createSessionOptions: Parameters<typeof createAgentSession>[0] & { mcpServers?: ResolvedMcpServerDefinition[] } = {
       cwd: options.cwd,
       authStorage,
       modelRegistry,
@@ -2231,17 +2269,26 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       customTools: customToolList,
       sessionManager,
       settingsManager,
+      ...(forwardedMcpServers.length > 0 ? { mcpServers: forwardedMcpServers } : {}),
       ...(modelOverride ? { model: modelOverride } : {}),
     };
 
     if (options.builtinToolsAllowlist && options.builtinToolsAllowlist.length > 0) {
-      const safeBuiltinAllowlist = isReadonly
+      const safeBuiltinAllowlist = (isReadonly
         ? options.builtinToolsAllowlist.filter((name) => READONLY_ALLOWLIST.includes(name as (typeof READONLY_ALLOWLIST)[number]))
-        : options.builtinToolsAllowlist;
+        : options.builtinToolsAllowlist).filter(isAllowedByToolAllowlist);
       createSessionOptions.tools = [
         ...new Set([
           ...customToolList.map((tool) => tool.name),
           ...safeBuiltinAllowlist,
+        ]),
+      ].sort();
+    }
+    if (normalizedToolsAllowlist !== undefined) {
+      createSessionOptions.tools = [
+        ...new Set([
+          ...customToolList.map((tool) => tool.name),
+          ...options.toolsAllowlist!.map((name) => name.trim()).filter(Boolean),
         ]),
       ].sort();
     }
@@ -2357,14 +2404,15 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   };
 
   promptableSession.promptWithFallback = async (prompt: string, promptOptions?: unknown) => {
+    const effectivePromptOptions = withMcpPromptOptions(promptOptions, forwardedMcpServers);
     try {
-      await promptSessionAndCheck(activeSession, prompt, promptOptions);
+      await promptSessionAndCheck(activeSession, prompt, effectivePromptOptions);
       return;
     } catch (err: any) {
       const errorMessage = err?.message || "";
       if (isContextLimitError(errorMessage)) {
         // Context limit error — attempt auto-compaction and retry once
-        const promptMemoryRetry = await retryWithCompactedPromptMemory(activeSession, prompt, promptOptions);
+        const promptMemoryRetry = await retryWithCompactedPromptMemory(activeSession, prompt, effectivePromptOptions);
         if (promptMemoryRetry.recovered) {
           return;
         }
@@ -2375,7 +2423,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
           }
         }
 
-        const promptSectionRetry = await retryWithCompactedPromptSections(activeSession, prompt, promptOptions);
+        const promptSectionRetry = await retryWithCompactedPromptSections(activeSession, prompt, effectivePromptOptions);
         if (promptSectionRetry.recovered) {
           return;
         }
@@ -2392,7 +2440,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
         if (compactResult) {
           piLog.log(`promptWithFallback: compaction succeeded (${compactResult.tokensBefore} tokens) — retrying prompt`);
           try {
-            await promptSessionAndCheck(activeSession, prompt, promptOptions);
+            await promptSessionAndCheck(activeSession, prompt, effectivePromptOptions);
             return;
           } catch (retryErr: any) {
             const retryErrorMessage = retryErr?.message || "";
@@ -2410,7 +2458,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
         thinkingCompatibilityDisabled = true;
         piLog.warn(`Prompt failed with thinking/reasoning conflict; retrying without explicit thinking level: ${errorMessage}`);
         const recoveredSession = await swapPromptSession(selectedModel);
-        await promptSessionAndCheck(recoveredSession, prompt, promptOptions);
+        await promptSessionAndCheck(recoveredSession, prompt, effectivePromptOptions);
         return;
       }
 
@@ -2424,12 +2472,12 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
       // Retry with fallback model, also with auto-compaction support
       try {
-        await promptSessionAndCheck(fallbackSession, prompt, promptOptions);
+        await promptSessionAndCheck(fallbackSession, prompt, effectivePromptOptions);
         return;
       } catch (fallbackErr: any) {
         const fallbackErrorMessage = fallbackErr?.message || "";
         if (isContextLimitError(fallbackErrorMessage)) {
-          const promptMemoryRetry = await retryWithCompactedPromptMemory(fallbackSession, prompt, promptOptions);
+          const promptMemoryRetry = await retryWithCompactedPromptMemory(fallbackSession, prompt, effectivePromptOptions);
           if (promptMemoryRetry.recovered) {
             return;
           }
@@ -2440,7 +2488,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
             }
           }
 
-          const promptSectionRetry = await retryWithCompactedPromptSections(fallbackSession, prompt, promptOptions);
+          const promptSectionRetry = await retryWithCompactedPromptSections(fallbackSession, prompt, effectivePromptOptions);
           if (promptSectionRetry.recovered) {
             return;
           }
@@ -2457,7 +2505,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
           if (compactResult) {
             piLog.log(`promptWithFallback: fallback compaction succeeded (${compactResult.tokensBefore} tokens) — retrying`);
             try {
-              await promptSessionAndCheck(fallbackSession, prompt, promptOptions);
+              await promptSessionAndCheck(fallbackSession, prompt, effectivePromptOptions);
               return;
             } catch (retryErr: any) {
               const retryErrorMessage = retryErr?.message || "";

@@ -13,12 +13,13 @@ import * as nodeFs from "node:fs";
 import os from "node:os";
 import v8 from "node:v8";
 
-import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType } from "@fusion/core";
+import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, WorkflowStepTemplate, McpServerDefinition } from "@fusion/core";
 import {
   type Task,
   type PiExtensionEntry,
   type PiExtensionSettings,
   AutomationStore,
+  AUTOMATION_SELECTABLE_TOOLS,
   MemoryBackendError,
   RoutineStore,
   discoverPiExtensions,
@@ -31,9 +32,10 @@ import {
   readAgentMemoryFile,
   resolvePlanningSettingsModel,
   resolvePluginEntryPath,
-  resolveProjectDefaultModel,
+  resolveExecutionSettingsModel,
   resolveTitleSummarizerSettingsModel,
   writeAgentMemoryFile,
+  validateMcpServerDefinitionDetailed,
 } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { verifyWebhookSignature } from "./github-webhooks.js";
@@ -42,7 +44,7 @@ import { getSession as getPlanningSession, cleanupSession as cleanupPlanningSess
 import { getSubtaskSession, cleanupSubtaskSession } from "./subtask-breakdown.js";
 import { getMissionInterviewSession, cleanupMissionInterviewSession } from "./mission-interview.js";
 import { getTargetInterviewSession, cleanupTargetInterviewSession } from "./milestone-slice-interview.js";
-import { writeSSEEvent } from "./sse-buffer.js";
+import { SessionEventBuffer, writeSSEEvent } from "./sse-buffer.js";
 import {
   ApiError,
   badRequest,
@@ -362,7 +364,78 @@ import {
   promptWithFallback as enginePromptWithFallback,
   reloadExemptTools as engineReloadExemptTools,
   resolveIntegrationBranch,
+  resolveMcpServersForRuntime,
+  resolveMcpServersForStore,
+  validateMcpServer,
 } from "@fusion/engine";
+
+interface McpValidateRequestBody {
+  name?: unknown;
+  server?: unknown;
+  definition?: unknown;
+  timeoutMs?: unknown;
+}
+
+function parseMcpValidationTimeout(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw badRequest("timeoutMs must be a positive number when provided");
+  }
+  return Math.min(value, 30_000);
+}
+
+function parseMcpValidationBody(body: unknown): { name?: string; definition?: McpServerDefinition; timeoutMs?: number } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw badRequest("Request body must be an object");
+  }
+
+  const input = body as McpValidateRequestBody;
+  const name = typeof input.name === "string" ? input.name.trim() : undefined;
+  const rawDefinition = input.server ?? input.definition;
+  if (!name && rawDefinition === undefined) {
+    throw badRequest("Provide either name or server");
+  }
+  if (input.name !== undefined && !name) {
+    throw badRequest("name must be a non-empty string when provided");
+  }
+
+  let definition: McpServerDefinition | undefined;
+  if (rawDefinition !== undefined) {
+    const parsed = validateMcpServerDefinitionDetailed(rawDefinition, "server");
+    if (!parsed.value) {
+      throw badRequest("Invalid MCP server definition", { errors: parsed.errors.map((error) => error.message) });
+    }
+    definition = parsed.value;
+  }
+
+  return { name, definition, timeoutMs: parseMcpValidationTimeout(input.timeoutMs) };
+}
+
+async function resolveMcpServerForValidation(
+  scopedStore: TaskStore,
+  request: { name?: string; definition?: McpServerDefinition },
+) {
+  if (request.definition) {
+    const secrets = await scopedStore.getSecretsStore();
+    const resolved = await resolveMcpServersForRuntime({
+      globalSettings: { mcpServers: { enabled: true, servers: [request.definition] } },
+      projectSettings: undefined,
+      secrets,
+      reader: {},
+    });
+    if (resolved.errors.length > 0 || resolved.servers.length === 0) {
+      throw badRequest("Unable to resolve MCP server secrets", { errors: resolved.errors.map((error) => ({ serverName: error.serverName, path: error.path, message: error.message })) });
+    }
+    return resolved.servers[0];
+  }
+
+  const resolved = await resolveMcpServersForStore(scopedStore);
+  const server = resolved.servers.find((candidate) => candidate.name === request.name);
+  if (!server) {
+    throw badRequest("MCP server was not found or could not be resolved");
+  }
+  return server;
+}
 
 // Test-injectable override; defaults to the statically imported engine binding.
 let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | undefined = engineCreateFnAgentForRefine;
@@ -1225,6 +1298,22 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     } catch {
       const { store: scopedStore } = await getProjectContext(req);
       res.json({ maxConcurrent: options?.maxConcurrent ?? 2, maxTriageConcurrent: options?.maxConcurrent ?? 2, maxWorktrees: 4, rootDir: scopedStore.getRootDir() });
+    }
+  });
+
+  router.post("/mcp/validate", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = parseMcpValidationBody(req.body);
+      const server = await resolveMcpServerForValidation(scopedStore, request);
+      // FNXC:McpConfig 2026-06-25-23:38: The validation API materializes MCP secrets only for the bounded probe and returns only status metadata, never resolved env/header values.
+      const result = await validateMcpServer(server, {
+        timeoutMs: request.timeoutMs,
+        cwd: scopedStore.getRootDir(),
+      });
+      res.json(result);
+    } catch (error) {
+      rethrowAsApiError(error, "Failed to validate MCP server");
     }
   });
 
@@ -2247,6 +2336,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.post("/automations/:id/run", async (req: Request, res: Response) => {
     const scope = parseScopeParam(req);
     const automationStore = resolveAutomationStore(req, scope);
+    let liveRunId: string | undefined;
 
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -2257,21 +2347,105 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw notFound("Schedule not found");
       }
 
+      const liveRun = automationLiveRuns.start(schedule.id);
+      liveRunId = liveRun.runId;
+      const liveCallbacks = createAutomationLiveRunCallbacks(liveRun.runId);
       const startedAt = new Date().toISOString();
       const scopedStore = await getScopedStore(req);
       let result: import("@fusion/core").AutomationRunResult;
 
       if (schedule.steps && schedule.steps.length > 0) {
         // Multi-step execution
-        result = await executeScheduleSteps(schedule, startedAt, scopedStore);
+        result = await executeScheduleSteps(schedule, startedAt, scopedStore, liveCallbacks);
       } else {
         // Legacy single-command execution
+        liveCallbacks.onStep?.({ stepIndex: 0, stepId: "command", stepName: schedule.name, stepType: "command", status: "started" });
         result = await executeSingleCommand(schedule.command, schedule.timeoutMs, startedAt);
+        liveCallbacks.onStep?.({ stepIndex: 0, stepId: "command", stepName: schedule.name, stepType: "command", status: "completed", success: result.success, error: result.error });
+        if (result.output) liveCallbacks.onText?.(result.output);
       }
 
       // Record the result
       const updated = await automationStore.recordRun(schedule.id, result);
-      res.json({ schedule: updated, result });
+      automationLiveRuns.complete(liveRun.runId, result);
+      res.json({ schedule: updated, result, liveRunId: liveRun.runId });
+    } catch (err: unknown) {
+      if (liveRunId) {
+        automationLiveRuns.fail(liveRunId, err instanceof Error ? err.message : String(err));
+      }
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw notFound("Schedule not found");
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  // GET /automations/:id/run/stream — stream live manual-run output.
+  router.get("/automations/:id/run/stream", async (req: Request, res: Response) => {
+    const scope = parseScopeParam(req);
+    const automationStore = resolveAutomationStore(req, scope);
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    try {
+      const schedule = await automationStore.getSchedule(id);
+      if (scope && schedule.scope !== scope) {
+        throw notFound("Schedule not found");
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(": connected\n\n");
+
+      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : undefined;
+      const lastEventId = parseLastEventId(req);
+      let unsubscribeRun: (() => void) | undefined;
+      let unsubscribeStart: (() => void) | undefined;
+
+      const attachRun = (run: AutomationLiveRunRecord) => {
+        const buffered = automationLiveRuns.getBufferedEvents(run.runId, lastEventId ?? 0);
+        if (!replayBufferedSSE(res, buffered)) {
+          res.end();
+          return;
+        }
+        if (run.status !== "running") {
+          res.end();
+          return;
+        }
+        unsubscribeRun = automationLiveRuns.subscribe(run.runId, (event, eventId) => {
+          if (!writeSSEEvent(res, event.type, JSON.stringify(event.data ?? {}), eventId)) {
+            unsubscribeRun?.();
+            return;
+          }
+          if (event.type === "complete" || event.type === "error") {
+            unsubscribeRun?.();
+            res.end();
+          }
+        });
+      };
+
+      const existingRun = automationLiveRuns.get(requestedRunId, schedule.id);
+      if (existingRun) {
+        attachRun(existingRun);
+      } else if (requestedRunId) {
+        writeSSEEvent(res, "error", JSON.stringify({ message: "Live run not found or expired", runId: requestedRunId }));
+        res.end();
+      } else {
+        unsubscribeStart = automationLiveRuns.subscribeToScheduleStart(schedule.id, (run) => {
+          unsubscribeStart?.();
+          attachRun(run);
+        });
+      }
+
+      req.on("close", () => {
+        unsubscribeRun?.();
+        unsubscribeStart?.();
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -2630,10 +2804,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("Routine is disabled");
       }
 
-      // Execute via RoutineRunner (persistence handled by RoutineRunner.completeRoutineExecution)
-      const result = await routineRunner.triggerManual(id);
-      const updated = await routineStore.getRoutine(id);
-      res.json({ routine: updated, result });
+      const liveRun = automationLiveRuns.start(routine.id);
+      const liveCallbacks = createAutomationLiveRunCallbacks(liveRun.runId);
+      try {
+        // Execute via RoutineRunner (persistence handled by RoutineRunner.completeRoutineExecution)
+        const result = await routineRunner.triggerManual(id, liveCallbacks);
+        const updated = await routineStore.getRoutine(id);
+        automationLiveRuns.complete(liveRun.runId, result);
+        res.json({ routine: updated, result, liveRunId: liveRun.runId });
+      } catch (err) {
+        automationLiveRuns.fail(liveRun.runId, err instanceof Error ? err.message : String(err));
+        throw err;
+      }
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -2666,10 +2848,92 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("Routine is disabled");
       }
 
-      // Execute via RoutineRunner (persistence handled by RoutineRunner.completeRoutineExecution)
-      const result = await routineRunner.triggerManual(id);
-      const updated = await routineStore.getRoutine(id);
-      res.json({ routine: updated, result });
+      const liveRun = automationLiveRuns.start(routine.id);
+      const liveCallbacks = createAutomationLiveRunCallbacks(liveRun.runId);
+      try {
+        // Execute via RoutineRunner (persistence handled by RoutineRunner.completeRoutineExecution)
+        const result = await routineRunner.triggerManual(id, liveCallbacks);
+        const updated = await routineStore.getRoutine(id);
+        automationLiveRuns.complete(liveRun.runId, result);
+        res.json({ routine: updated, result, liveRunId: liveRun.runId });
+      } catch (err) {
+        automationLiveRuns.fail(liveRun.runId, err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw notFound("Routine not found");
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  // GET /routines/:id/run/stream — stream live manual routine output.
+  router.get("/routines/:id/run/stream", async (req: Request, res: Response) => {
+    const scope = parseScopeParam(req);
+    const routineStore = resolveRoutineStore(req, scope);
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+    try {
+      const routine = await routineStore.getRoutine(id);
+      if (scope && routine.scope !== scope) {
+        throw notFound("Routine not found");
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(": connected\n\n");
+
+      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : undefined;
+      const lastEventId = parseLastEventId(req);
+      let unsubscribeRun: (() => void) | undefined;
+      let unsubscribeStart: (() => void) | undefined;
+
+      const attachRun = (run: AutomationLiveRunRecord) => {
+        const buffered = automationLiveRuns.getBufferedEvents(run.runId, lastEventId ?? 0);
+        if (!replayBufferedSSE(res, buffered)) {
+          res.end();
+          return;
+        }
+        if (run.status !== "running") {
+          res.end();
+          return;
+        }
+        unsubscribeRun = automationLiveRuns.subscribe(run.runId, (event, eventId) => {
+          if (!writeSSEEvent(res, event.type, JSON.stringify(event.data ?? {}), eventId)) {
+            unsubscribeRun?.();
+            return;
+          }
+          if (event.type === "complete" || event.type === "error") {
+            unsubscribeRun?.();
+            res.end();
+          }
+        });
+      };
+
+      const existingRun = automationLiveRuns.get(requestedRunId, routine.id);
+      if (existingRun) {
+        attachRun(existingRun);
+      } else if (requestedRunId) {
+        writeSSEEvent(res, "error", JSON.stringify({ message: "Live run not found or expired", runId: requestedRunId }));
+        res.end();
+      } else {
+        unsubscribeStart = automationLiveRuns.subscribeToScheduleStart(routine.id, (run) => {
+          unsubscribeStart?.();
+          attachRun(run);
+        });
+      }
+
+      req.on("close", () => {
+        unsubscribeRun?.();
+        unsubscribeStart?.();
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -4048,7 +4312,8 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // Node-aware proxying: route to remote node if nodeId is provided and not local
       if (nodeId) {
         const { CentralCore } = await import("@fusion/core");
-        const central = new CentralCore(store.getFusionDir());
+        // FNXC:GlobalDirGuard 2026-06-25-22:40: Node-aware proxy lookup uses GLOBAL central state — use getGlobalSettingsDir(), never getFusionDir() (project .fusion/), which spawns a stray per-project central DB and resets global settings.
+        const central = new CentralCore(store.getGlobalSettingsDir());
         await central.init();
 
         const localNodes = await central.listNodes();
@@ -4588,6 +4853,17 @@ function validateAutomationSteps(steps: unknown[]): string | null {
       if (!step.prompt || typeof step.prompt !== "string" || !step.prompt.trim()) {
         return `Step ${i + 1}: prompt is required for ai-prompt steps`;
       }
+      if (step.allowedTools !== undefined) {
+        if (!Array.isArray(step.allowedTools)) {
+          return `Step ${i + 1}: allowedTools must be an array when provided`;
+        }
+        const selectableTools = new Set(AUTOMATION_SELECTABLE_TOOLS.map((tool) => tool.toLowerCase()));
+        for (const tool of step.allowedTools) {
+          if (typeof tool !== "string" || !selectableTools.has(tool.trim().toLowerCase())) {
+            return `Step ${i + 1}: allowedTools contains unknown tool "${String(tool)}"`;
+          }
+        }
+      }
     }
     if (step.type === "create-task") {
       if (!step.taskDescription || typeof step.taskDescription !== "string" || !step.taskDescription.trim()) {
@@ -4607,9 +4883,168 @@ function validateAutomationSteps(steps: unknown[]): string | null {
 const DEFAULT_AUTOMATION_TIMEOUT_MS = 5 * 60 * 1000;
 const AUTOMATION_MAX_BUFFER = 1024 * 1024;
 const AUTOMATION_MAX_OUTPUT = 10240;
+const AUTOMATION_LIVE_RUN_TTL_MS = 60 * 1000;
+const AUTOMATION_LIVE_EVENT_CAPACITY = 200;
+
+type AutomationLiveRunStatus = "running" | "complete" | "error";
+type AutomationLiveEvent = { type: string; data?: unknown };
+type AutomationLiveRunCallbacks = {
+  onStep?: (data: Record<string, unknown>) => void;
+  onText?: (delta: string) => void;
+  onToolStart?: (name: string, args?: Record<string, unknown>) => void;
+  onToolEnd?: (name: string, isError: boolean, result?: unknown) => void;
+};
+
+type AutomationLiveRunRecord = {
+  runId: string;
+  scheduleId: string;
+  status: AutomationLiveRunStatus;
+  buffer: SessionEventBuffer;
+  listeners: Set<(event: AutomationLiveEvent, eventId: number) => void>;
+  output: string;
+  cleanupTimer?: NodeJS.Timeout;
+};
+
+function createAutomationRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `automation-run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+function capAutomationLiveText(current: string, delta: string): { next: string; delta: string } {
+  if (!delta) return { next: current, delta: "" };
+  const remaining = AUTOMATION_MAX_OUTPUT - current.length;
+  if (remaining <= 0) return { next: current, delta: "" };
+  const marker = "\n[output truncated]";
+  const cappedDelta = delta.length > remaining
+    ? remaining > marker.length
+      ? `${delta.slice(0, remaining - marker.length)}${marker}`
+      : delta.slice(0, remaining)
+    : delta;
+  return { next: `${current}${cappedDelta}`, delta: cappedDelta };
+}
+
+function previewAutomationLiveValue(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  try {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    if (text.length <= 1000) return value;
+    return `${text.slice(0, 1000)}…`;
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+/*
+FNXC:AutomationLiveOutput 2026-06-26-00:00:
+Manual automation runs need replayable live output without changing the POST /run result contract. Keep events in memory by runId, let schedule streams wait for the next run, and expire completed buffers so missed EventSource clients do not leak registry entries.
+*/
+class AutomationLiveRunRegistry {
+  private readonly runs = new Map<string, AutomationLiveRunRecord>();
+  private readonly latestRunBySchedule = new Map<string, string>();
+  private readonly scheduleStartListeners = new Map<string, Set<(run: AutomationLiveRunRecord) => void>>();
+
+  start(scheduleId: string, runId = createAutomationRunId()): AutomationLiveRunRecord {
+    const run: AutomationLiveRunRecord = {
+      runId,
+      scheduleId,
+      status: "running",
+      buffer: new SessionEventBuffer(AUTOMATION_LIVE_EVENT_CAPACITY),
+      listeners: new Set(),
+      output: "",
+    };
+    this.runs.set(runId, run);
+    this.latestRunBySchedule.set(scheduleId, runId);
+    this.broadcast(runId, { type: "run", data: { runId, scheduleId, status: "running" } });
+    const starters = this.scheduleStartListeners.get(scheduleId);
+    if (starters) {
+      for (const listener of [...starters]) listener(run);
+    }
+    return run;
+  }
+
+  get(runId: string | undefined, scheduleId: string): AutomationLiveRunRecord | undefined {
+    if (runId) {
+      const run = this.runs.get(runId);
+      return run?.scheduleId === scheduleId ? run : undefined;
+    }
+    const latestRunId = this.latestRunBySchedule.get(scheduleId);
+    return latestRunId ? this.runs.get(latestRunId) : undefined;
+  }
+
+  getBufferedEvents(runId: string, lastEventId = 0) {
+    return this.runs.get(runId)?.buffer.getEventsSince(lastEventId) ?? [];
+  }
+
+  subscribe(runId: string, listener: (event: AutomationLiveEvent, eventId: number) => void): () => void {
+    const run = this.runs.get(runId);
+    if (!run) return () => {};
+    run.listeners.add(listener);
+    return () => run.listeners.delete(listener);
+  }
+
+  subscribeToScheduleStart(scheduleId: string, listener: (run: AutomationLiveRunRecord) => void): () => void {
+    let listeners = this.scheduleStartListeners.get(scheduleId);
+    if (!listeners) {
+      listeners = new Set();
+      this.scheduleStartListeners.set(scheduleId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners?.delete(listener);
+      if (listeners?.size === 0) this.scheduleStartListeners.delete(scheduleId);
+    };
+  }
+
+  broadcast(runId: string, event: AutomationLiveEvent): number | undefined {
+    const run = this.runs.get(runId);
+    if (!run) return undefined;
+    const eventId = run.buffer.push(event.type, JSON.stringify(event.data ?? {}));
+    for (const listener of [...run.listeners]) listener(event, eventId);
+    return eventId;
+  }
+
+  appendText(runId: string, delta: string): void {
+    const run = this.runs.get(runId);
+    if (!run) return;
+    const capped = capAutomationLiveText(run.output, delta);
+    run.output = capped.next;
+    if (capped.delta) this.broadcast(runId, { type: "output", data: { text: capped.delta } });
+  }
+
+  complete(runId: string, result: import("@fusion/core").AutomationRunResult): void {
+    const run = this.runs.get(runId);
+    if (!run) return;
+    run.status = result.success ? "complete" : "error";
+    this.broadcast(runId, { type: result.success ? "complete" : "error", data: result.success ? { runId, result } : { runId, result, message: result.error ?? "Automation run failed" } });
+    this.scheduleCleanup(run);
+  }
+
+  fail(runId: string, message: string): void {
+    const run = this.runs.get(runId);
+    if (!run) return;
+    run.status = "error";
+    this.broadcast(runId, { type: "error", data: { runId, message } });
+    this.scheduleCleanup(run);
+  }
+
+  private scheduleCleanup(run: AutomationLiveRunRecord): void {
+    if (run.cleanupTimer) clearTimeout(run.cleanupTimer);
+    run.cleanupTimer = setTimeout(() => {
+      this.runs.delete(run.runId);
+      if (this.latestRunBySchedule.get(run.scheduleId) === run.runId) {
+        this.latestRunBySchedule.delete(run.scheduleId);
+      }
+    }, AUTOMATION_LIVE_RUN_TTL_MS);
+    run.cleanupTimer.unref?.();
+  }
+}
+
+const automationLiveRuns = new AutomationLiveRunRegistry();
 const MANUAL_RUN_AI_SYSTEM_PROMPT = [
   "You are an AI automation agent executing a scheduled task.",
-  "You have read-only access to the project files.",
+  "You may use the coding tools selected for this automation step; follow any tool restrictions exactly.",
   "Execute the prompt precisely and return concise, structured results.",
   "When analyzing code or data, provide actionable summaries.",
 ].join("\n");
@@ -4624,6 +5059,21 @@ function truncateAutomationOutput(stdout: string, stderr: string): string {
     return output.slice(0, AUTOMATION_MAX_OUTPUT) + "\n[output truncated]";
   }
   return output;
+}
+
+function createAutomationLiveRunCallbacks(runId: string): AutomationLiveRunCallbacks {
+  return {
+    onStep: (data) => automationLiveRuns.broadcast(runId, { type: "step", data: { runId, ...data } }),
+    onText: (delta) => automationLiveRuns.appendText(runId, delta),
+    onToolStart: (name, args) => automationLiveRuns.broadcast(runId, {
+      type: "tool",
+      data: { runId, status: "started", name, args: previewAutomationLiveValue(args) },
+    }),
+    onToolEnd: (name, isError, result) => automationLiveRuns.broadcast(runId, {
+      type: "tool",
+      data: { runId, status: "completed", name, isError, result: previewAutomationLiveValue(result) },
+    }),
+  };
 }
 
 /**
@@ -4676,6 +5126,7 @@ async function executeAiPromptStep(
   timeoutMs: number,
   startedAt: string,
   taskStore: TaskStore,
+  liveCallbacks?: AutomationLiveRunCallbacks,
 ): Promise<import("@fusion/core").AutomationStepResult> {
   if (!step.prompt?.trim()) {
     return {
@@ -4706,7 +5157,9 @@ async function executeAiPromptStep(
   }
 
   const settings = await taskStore.getSettings();
-  const defaultModel = resolveProjectDefaultModel(settings);
+  // Resolve model: step override → project execution lane → global execution lane → project default override → global default
+  // FNXC:ModelResolution 2026-06-25-12:00: FN-7039 requires manual AI-prompt workflow runs to use execution-lane settings before default settings because these runs have no task/runtime model context.
+  const defaultModel = resolveExecutionSettingsModel(settings);
   const modelProvider = step.modelProvider?.trim() || defaultModel.provider;
   const modelId = step.modelId?.trim() || defaultModel.modelId;
   let responseText = "";
@@ -4714,12 +5167,16 @@ async function executeAiPromptStep(
   const { session } = await createFnAgent({
     cwd: process.cwd(),
     systemPrompt: MANUAL_RUN_AI_SYSTEM_PROMPT,
-    tools: "readonly",
+    tools: "coding",
+    toolsAllowlist: step.allowedTools,
     defaultProvider: modelProvider,
     defaultModelId: modelId,
     onText: (delta: string) => {
       responseText += delta;
+      liveCallbacks?.onText?.(delta);
     },
+    onToolStart: liveCallbacks?.onToolStart,
+    onToolEnd: liveCallbacks?.onToolEnd,
   });
 
   try {
@@ -4821,6 +5278,7 @@ async function executeScheduleSteps(
   schedule: import("@fusion/core").ScheduledTask,
   startedAt: string,
   taskStore: TaskStore,
+  liveCallbacks?: AutomationLiveRunCallbacks,
 ): Promise<import("@fusion/core").AutomationRunResult> {
   const steps = schedule.steps!;
   const stepResults: import("@fusion/core").AutomationStepResult[] = [];
@@ -4833,6 +5291,7 @@ async function executeScheduleSteps(
     const timeoutMs = step.timeoutMs ?? schedule.timeoutMs ?? DEFAULT_AUTOMATION_TIMEOUT_MS;
 
     let stepResult: import("@fusion/core").AutomationStepResult;
+    liveCallbacks?.onStep?.({ stepIndex: i, stepId: step.id, stepName: step.name, stepType: step.type, status: "started" });
 
     if (step.type === "command") {
       const cmdResult = await executeSingleCommand(step.command ?? "", timeoutMs, stepStartedAt);
@@ -4847,7 +5306,7 @@ async function executeScheduleSteps(
         completedAt: cmdResult.completedAt,
       };
     } else if (step.type === "ai-prompt") {
-      stepResult = await executeAiPromptStep(step, timeoutMs, stepStartedAt, taskStore);
+      stepResult = await executeAiPromptStep(step, timeoutMs, stepStartedAt, taskStore, liveCallbacks);
       stepResult.stepIndex = i;
     } else if (step.type === "create-task") {
       stepResult = await executeCreateTaskStep(step, stepStartedAt, taskStore);
@@ -4866,6 +5325,10 @@ async function executeScheduleSteps(
     }
 
     stepResults.push(stepResult);
+    liveCallbacks?.onStep?.({ stepIndex: i, stepId: step.id, stepName: step.name, stepType: step.type, status: "completed", success: stepResult.success, error: stepResult.error });
+    if (step.type !== "ai-prompt" && stepResult.output) {
+      liveCallbacks?.onText?.(stepResult.output);
+    }
 
     if (!stepResult.success) {
       overallSuccess = false;

@@ -25,6 +25,22 @@ At runtime, settings are merged. **Project settings override global settings** w
 
 ---
 
+## Signal connector environment variables
+
+Command Center signal connectors are configured with process environment variables read by the dashboard/API server. These values are secrets and are never returned by the connectors-status endpoint; `GET /api/command-center/signals/connectors` reports only per-provider `configured` booleans.
+
+| Environment variable | Connector | Used by | Notes |
+|---|---|---|---|
+| `FUSION_SIGNAL_WEBHOOK_SECRET` | Generic webhook | `POST /api/signals/webhook` | Verifies `X-Fusion-Signature` (`sha256=`-prefixed HMAC-SHA256 hex) plus `X-Fusion-Timestamp`. |
+| `FUSION_SIGNAL_SENTRY_SECRET` | Sentry | `POST /api/signals/sentry` | Verifies `Sentry-Hook-Signature` against Sentry issue webhook payloads. |
+| `FUSION_SIGNAL_DATADOG_SECRET` | Datadog | `POST /api/signals/datadog` | Verifies the custom `X-Datadog-Signature` HMAC header; optional `X-Datadog-Timestamp` bounds replay. |
+| `FUSION_SIGNAL_PAGERDUTY_SECRET` | PagerDuty | `POST /api/signals/pagerduty` | Verifies `X-PagerDuty-Signature` (`v1=<hex>`). |
+| `FUSION_MONITOR_INGEST_SECRET` | Monitor incidents API | `POST /api/monitor/incidents` | Separate bearer-token path for direct monitor ingestion; it is not used by `/api/signals/:provider`. |
+
+See [Signals Connectors](./signals-connectors.md) for setup, signing, payload, and open/resolved mapping details.
+
+---
+
 ## Global Settings
 
 Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
@@ -38,8 +54,8 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `dashboardFontScalePct` | `number` | `100` | Dashboard font scale percentage used by Appearance settings. Valid range: `85` to `125`; applied pre-hydration via document root font-size so board typography (column headers/counts, task cards, and quick-entry text) scales with the setting from first paint. |
 | `defaultProvider` | `string` | `undefined` | Default AI provider. |
 | `defaultModelId` | `string` | `undefined` | Default AI model ID. |
-| `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable in Settings → Global Models. |
-| `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing editor. |
+| `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable from Settings → Global Models → View pricing table. |
+| `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing summary. |
 | `modelPricingSource` | `string` | `undefined` | Source label/URL for the current pricing override set, currently the LiteLLM model pricing JSON when fetched through the dashboard. |
 | `fallbackProvider` | `string` | `undefined` | Fallback provider when the primary default model hits transient provider failures or model-compatibility/auth-tier rejections. |
 | `fallbackModelId` | `string` | `undefined` | Fallback model ID (must pair with `fallbackProvider`). |
@@ -122,7 +138,35 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `researchGlobalUserAgent` | `string` | `"FusionResearchBot/1.0"` | User-Agent header for HTTP requests made by research providers. |
 | `experimentalFeatures` | `Record<string, boolean>` | `{}` | Global-scoped experimental feature flags. Includes `experimentalFeatures.researchView`, which gates all Research surfaces and tools (dashboard view, engine task-session tools, and CLI `fn_research_*` tools), and `experimentalFeatures.evalsView`, which gates Evals surfaces (dashboard view, Settings → Scheduled Evals, and scheduled-eval cron execution). |
 | `remoteAccess` | `RemoteAccessSettings` | `{ activeProvider: null, providers: {...}, tokenStrategy: {...}, lifecycle: {...} }` | Global-scoped remote access provider + token strategy configuration used by Remote Access routes and tunnel lifecycle controls. |
+| `mcpServers` | `McpServersSettings` | `{ enabled: false, servers: [] }` | Global MCP server declarations shared across projects. Project `mcpServers` can enable/disable the effective set, override a same-named global server, or disable a global server with a same-named `enabled:false` entry. Sensitive env/header/token values must be `{ secretRef, scope }` references to Fusion-managed secrets, never plaintext. |
 | `worktrunk` | `WorktrunkSettings` | `{ enabled: false, binaryPath: undefined, installedBinaryPath: undefined, onFailure: "fail" }` | Global defaults for worktrunk integration. Merged field-by-field with project `worktrunk` values; project values override global values for matching fields. |
+
+### MCP server settings
+
+`mcpServers` is available in both global and project settings:
+
+```ts
+type McpServersSettings = {
+  enabled?: boolean;
+  servers?: McpServerDefinition[];
+};
+```
+
+Each server is named and uses one transport:
+
+- `stdio`: `{ name, enabled?, transport: "stdio", command, args?, env? }`
+- `sse`: `{ name, enabled?, transport: "sse", url, headers? }`
+- `streamable-http`: `{ name, enabled?, transport: "streamable-http", url, headers? }`
+
+Resolution uses project-over-global precedence by server name. The project-level `enabled` flag overrides the global flag when set; if the effective flag is false, no MCP servers are active. When enabled, global servers are loaded first, project servers with the same `name` replace them, and a project server with `enabled:false` removes the inherited server.
+
+Enabled MCP servers are trusted once configured. Fusion materializes the effective server set at AI session creation and forwards it to every MCP-capable AI lane, including chat/planning, executor, reviewer, validator, merger, workflow model nodes, summarization, evaluator, research, cron/automation, mission, and reflection paths. Runtime support is guarded: Claude/pi/ACP-compatible runtimes receive MCP servers, while mock or unsupported runtimes skip forwarding and emit only a structured count/provider/runtime log entry, never server definitions or secret values.
+
+Secret rule: `env` and `headers` maps are sensitive. Values must be Fusion secret references such as `{ "secretRef": "sec_...", "scope": "project" }` or `{ "secretRef": "sec_...", "scope": "global" }`. Write-boundary sanitizers and validators reject plaintext strings in these fields. Claude Desktop-style imports return `secretsToCreate` descriptors for plaintext env/header values and replace those values with secret refs in the imported definitions. At runtime, secret references are revealed through the scoped secrets store immediately before forwarding or validation, kept only in memory, and never echoed in API responses.
+
+`POST /api/mcp/validate` validates an MCP server definition or configured server name against the current project context. The route resolves and materializes the target server with the same secret rules, then performs a bounded reachability probe (`stdio` supervised spawn, `sse`/`streamable-http` bounded fetch) and returns only `{ status, message? }` without resolved env/header contents.
+
+See [MCP](./mcp.md) for the full configuration and usage guide, including dashboard, CLI, Claude Desktop import, Fusion export, and reachability procedures.
 
 ### Notification providers (pluggable)
 
@@ -324,6 +368,7 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `unavailableNodePolicy` | `"block" \| "fallback-local"` | `"block"` | Project routing policy used during scheduler dispatch when a task resolves to a remote node and node health is known. `"block"` keeps the task in `todo` if the node is unhealthy; `"fallback-local"` reroutes dispatch to local execution. See [Architecture → Task Routing Architecture](./architecture.md#task-routing-architecture). |
 | `secretsAccessPolicy` | `"auto" \| "prompt" \| "deny"` | `undefined` | Project-level default secret access policy (overrides global default when present). |
 | `secretsEnv` | `{ enabled?: boolean; filename?: string; overwritePolicy?: "skip" \| "merge" \| "replace"; keyPrefix?: string; requireGitignored?: boolean }` | `undefined` | Per-project secrets `.env` materialization configuration. When `enabled`, the engine writes `secretsEnv.filename` (default `.env`) into each acquired task worktree from secrets marked `env_exportable=true`. `overwritePolicy` controls merge/skip/replace against an existing file; `requireGitignored` (default `true`) refuses to write a non-gitignored path; `keyPrefix` filters which exported keys are included. See [Secrets](./secrets.md#env-auto-write-into-worktrees). |
+| `mcpServers` | `McpServersSettings` | `{ enabled: false, servers: [] }` | Project-scoped MCP server settings. Project entries override global entries by `name`; `enabled:false` on a same-named project entry disables the inherited global server. Sensitive env/header/token material must be Fusion secret references only. See [MCP server settings](#mcp-server-settings). |
 | `owningNodeHandoffPolicy` | `"block" \| "reassign-to-local" \| "reassign-any-healthy"` | `"reassign-to-local"` | Policy for tasks already checked out by an unavailable owning node. `"block"` parks, `"reassign-to-local"` takes over on local node, `"reassign-any-healthy"` makes takeover eligible on healthy peers. |
 
 | `groupOverlappingFiles` | `boolean` | `true` | Serialize execution when file scopes overlap. |
@@ -853,6 +898,8 @@ Z.ai's built-in provider uses the existing `zai` auth entry / `ZAI_API_KEY` envi
 5. Global `defaultProvider` + `defaultModelId`
 6. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no task/lane/default pair is configured
 7. Automatic provider/model resolution
+
+Workflow prompt steps and scheduled/manual AI-prompt automation steps use the same executor lane before falling back to project/global defaults; explicit step-level `modelProvider` + `modelId` values still take precedence for that individual step.
 
 ### Heartbeat model (durable agents)
 

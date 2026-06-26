@@ -1,7 +1,15 @@
+import { createElement } from "react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition, WorkflowIrNodeKind } from "@fusion/core";
-import { parseWorkflowIr, validateColumnTraits } from "@fusion/core";
-import type { Node as FlowNode } from "@xyflow/react";
+import {
+  BUILTIN_CODING_WORKFLOW_IR,
+  BUILTIN_STEPWISE_CODING_WORKFLOW_IR,
+  parseWorkflowIr,
+  validateColumnTraits,
+} from "@fusion/core";
+import type { Edge as FlowEdge, Node as FlowNode } from "@xyflow/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import {
   irToFlow,
   flowToIr,
@@ -34,20 +42,41 @@ import {
   FOREACH_CHILD_X,
   FOREACH_CHILD_Y,
 } from "../workflow-flow-mapping";
+import { workflowNodeTypes } from "../nodes/WorkflowNodeTypes";
 import type { WorkflowEditorNodeKind, WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
 import type { TraitCatalogEntry } from "../../api";
 
-function makeDef(ir: WorkflowDefinition["ir"]): WorkflowDefinition {
+function makeDef(ir: WorkflowDefinition["ir"], layout: WorkflowDefinition["layout"] = {}): WorkflowDefinition {
   return {
     id: "WF-001",
     kind: "workflow",
     name: ir.name,
     description: "",
     ir,
-    layout: {},
+    layout,
     createdAt: "2024-01-01T00:00:00.000Z",
     updatedAt: "2024-01-01T00:00:00.000Z",
   };
+}
+
+function nodeWidth(node: FlowNode<WorkflowFlowNodeData>): number {
+  const width = node.style?.width;
+  return typeof width === "number" ? width : WF_CARD_WIDTH;
+}
+
+function assertContainerHandles(kind: "optional-group" | "foreach" | "loop", data: WorkflowFlowNodeData): void {
+  const Component = workflowNodeTypes[kind];
+  const { container, unmount } = render(
+    createElement(ReactFlowProvider, null, createElement(Component, { data, id: `${kind}-handle-check` })),
+  );
+  try {
+    const root = container.querySelector(`[data-testid="wf-node-${kind}"]`);
+    expect(root).not.toBeNull();
+    expect(root?.querySelectorAll(".react-flow__handle.target")).toHaveLength(1);
+    expect(root?.querySelectorAll(".react-flow__handle.source")).toHaveLength(1);
+  } finally {
+    unmount();
+  }
 }
 
 describe("workflow-flow-mapping name preservation", () => {
@@ -827,6 +856,123 @@ describe("workflow-flow-mapping foreach + rework round-trip", () => {
     expect(template.edges).toEqual([{ from: "verify", to: "check", condition: "success" }]);
     // Top-level edges exclude the intra-template ones.
     expect(out.edges.map((e) => `${e.from}->${e.to}`)).toEqual(["start->opt", "opt->end"]);
+  });
+
+  /*
+   * FNXC:WorkflowContainerEdges 2026-06-26-07:30:
+   * Browser Verification is an optional-group container on the built-in workflow path. The mapping invariant is broader than that repro: optional-group/foreach/loop containers must keep top-level edges attached to the container id, layer routed edges above the group background, render exactly one target/source handle pair, and use width-aware fallback positions so adjacent nodes do not occlude those handles.
+   */
+  it("keeps container edges and handles connected across built-in workflow containers", () => {
+    const loopNode = {
+      id: "diagnostic-loop",
+      kind: "loop" as const,
+      column: "in-progress",
+      config: {
+        maxIterations: 2,
+        template: {
+          nodes: [{ id: "loop-check", kind: "prompt" as const, config: { prompt: "Check once" } }],
+          edges: [],
+        },
+      },
+    };
+    const codingWithLoop: WorkflowDefinition["ir"] = {
+      ...BUILTIN_CODING_WORKFLOW_IR,
+      name: "builtin-coding-with-loop-test",
+      nodes: BUILTIN_CODING_WORKFLOW_IR.nodes.flatMap((node) =>
+        node.id === "browser-verification" ? [loopNode, node] : [node],
+      ),
+      edges: [
+        ...BUILTIN_CODING_WORKFLOW_IR.edges.filter(
+          (edge) => !(edge.from === "execute" && edge.to === "browser-verification"),
+        ),
+        { from: "execute", to: "diagnostic-loop", condition: "success" },
+        { from: "diagnostic-loop", to: "browser-verification", condition: "success" },
+      ],
+    };
+    const stepwiseLoopNode = { ...loopNode, id: "post-steps-loop" };
+    const stepwiseWithLoop: WorkflowDefinition["ir"] = {
+      ...BUILTIN_STEPWISE_CODING_WORKFLOW_IR,
+      name: "builtin-stepwise-with-loop-test",
+      nodes: BUILTIN_STEPWISE_CODING_WORKFLOW_IR.nodes.flatMap((node) =>
+        node.id === "browser-verification" ? [stepwiseLoopNode, node] : [node],
+      ),
+      edges: [
+        ...BUILTIN_STEPWISE_CODING_WORKFLOW_IR.edges.filter(
+          (edge) => !(edge.from === "steps" && edge.to === "browser-verification"),
+        ),
+        { from: "steps", to: "post-steps-loop", condition: "success" },
+        { from: "post-steps-loop", to: "browser-verification", condition: "success" },
+      ],
+    };
+
+    const cases: Array<{
+      name: string;
+      ir: WorkflowDefinition["ir"];
+      id: string;
+      kind: "optional-group" | "foreach" | "loop";
+    }> = [
+      { name: "coding browser verification", ir: BUILTIN_CODING_WORKFLOW_IR, id: "browser-verification", kind: "optional-group" },
+      { name: "stepwise browser verification", ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR, id: "browser-verification", kind: "optional-group" },
+      { name: "stepwise foreach", ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR, id: "steps", kind: "foreach" },
+      { name: "coding inserted loop", ir: codingWithLoop, id: "diagnostic-loop", kind: "loop" },
+      { name: "stepwise inserted loop", ir: stepwiseWithLoop, id: "post-steps-loop", kind: "loop" },
+    ];
+
+    for (const testCase of cases) {
+      const { nodes, edges } = irToFlow(makeDef(testCase.ir));
+      const byId = new Map(nodes.map((node) => [node.id, node] as const));
+      const group = byId.get(testCase.id);
+      expect(group, testCase.name).toBeTruthy();
+      expect(group?.type, testCase.name).toBe(testCase.kind);
+      expect(group?.data.kind, testCase.name).toBe(testCase.kind);
+      expect(group?.style?.width, testCase.name).toBe(FOREACH_GROUP_WIDTH);
+      assertContainerHandles(testCase.kind, group!.data);
+
+      const connectedTopLevelEdges = edges.filter((edge) => edge.source === testCase.id || edge.target === testCase.id);
+      expect(connectedTopLevelEdges.length, testCase.name).toBeGreaterThan(0);
+      for (const edge of connectedTopLevelEdges) {
+        expect(edge.source.includes("::"), `${testCase.name} source should be top-level`).toBe(false);
+        expect(edge.target.includes("::"), `${testCase.name} target should be top-level`).toBe(false);
+        expect(edge.zIndex, `${testCase.name} edge should layer above group`).toBeGreaterThan(group!.zIndex ?? 0);
+        const source = byId.get(edge.source);
+        const target = byId.get(edge.target);
+        expect(source, `${testCase.name} source node ${edge.source}`).toBeTruthy();
+        expect(target, `${testCase.name} target node ${edge.target}`).toBeTruthy();
+        if (source && target) {
+          const sourceRight = source.position.x + nodeWidth(source);
+          const targetRight = target.position.x + nodeWidth(target);
+          if (source.position.x <= target.position.x) {
+            expect(sourceRight, `${testCase.name} ${edge.source}->${edge.target} should not overlap`).toBeLessThanOrEqual(target.position.x);
+          } else {
+            expect(targetRight, `${testCase.name} ${edge.source}->${edge.target} should not overlap`).toBeLessThanOrEqual(source.position.x);
+          }
+        }
+      }
+
+      const templateEdges = edges.filter((edge) => edge.source.includes("::") || edge.target.includes("::"));
+      expect(templateEdges.some((edge) => edge.source === testCase.id || edge.target === testCase.id), testCase.name).toBe(false);
+      expect(nodes.filter((node) => node.parentId === testCase.id).every((node) => node.zIndex! > group!.zIndex!), testCase.name).toBe(true);
+    }
+
+    const staleBuiltInLayout: WorkflowDefinition["layout"] = {
+      start: { x: 60, y: 160 },
+      execute: { x: 230, y: 160 },
+      review: { x: 400, y: 160 },
+      end: { x: 1420, y: 160 },
+    };
+    const { nodes: staleNodes, edges: staleEdges } = irToFlow(makeDef(BUILTIN_CODING_WORKFLOW_IR, staleBuiltInLayout));
+    const staleById = new Map(staleNodes.map((node) => [node.id, node] as const));
+    for (const edge of staleEdges.filter((candidate) => candidate.source === "browser-verification" || candidate.target === "browser-verification")) {
+      const source = staleById.get(edge.source)!;
+      const target = staleById.get(edge.target)!;
+      const sourceRight = source.position.x + nodeWidth(source);
+      const targetRight = target.position.x + nodeWidth(target);
+      if (source.position.x <= target.position.x) {
+        expect(sourceRight, `stale layout ${edge.source}->${edge.target} should not overlap`).toBeLessThanOrEqual(target.position.x);
+      } else {
+        expect(targetRight, `stale layout ${edge.source}->${edge.target} should not overlap`).toBeLessThanOrEqual(source.position.x);
+      }
+    }
   });
 
   // FNXC:WorkflowOptionalGroup 2026-06-21-11:30: Deleting an optional-group must

@@ -133,6 +133,7 @@ export function useTasks(options?: UseTasksOptions) {
   const droppedStaleEventsRef = useRef(0);
   const searchQueryRef = useRef(searchQuery);
   const refreshTasksRef = useRef<typeof refreshTasks>(null!);
+  const prevSseEnabledRef = useRef(sseEnabled);
   // Tracks when task data was last confirmed fresh by the server.
   // Used to prevent false positives in stuck detection when tab has been in background.
   const lastFetchTimeMs = useRef<number | undefined>(undefined);
@@ -192,6 +193,17 @@ export function useTasks(options?: UseTasksOptions) {
     }
   }, [projectId]);
   refreshTasksRef.current = refreshTasks;
+
+  // FNXC:DashboardLiveUpdates 2026-06-26-01:08:
+  // Task SSE is disabled outside Board/List, so task:created/moved/updated/deleted/merged events emitted off-view are never delivered. On the sseEnabled false→true re-entry, perform exactly one hook-owned catch-up refetch while excluding initial mount and the disabled state; visibilitychange and onReconnect keep their separate refetch ownership.
+  useEffect(() => {
+    const previous = prevSseEnabledRef.current;
+    prevSseEnabledRef.current = sseEnabled;
+
+    if (previous === false && sseEnabled === true) {
+      void refreshTasksRef.current();
+    }
+  }, [sseEnabled]);
 
   /** Lazy-load archived tasks. Called by the Board when the archived column is first expanded. */
   const loadArchivedTasks = useCallback(async () => {

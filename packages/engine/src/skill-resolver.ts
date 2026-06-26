@@ -190,6 +190,19 @@ function bareSkillName(name: string): string {
   return name.replace(/\/SKILL\.md$/i, "");
 }
 
+/**
+ * FNXC:SkillResolution 2026-06-26-00:00:
+ * Requested skills can arrive from chat and agent metadata as `gamma`, `review/pr`, `review/pr/SKILL.md`, or `source::skills/review/pr/SKILL.md` while discovered Skill.name entries are keyed by the bare token.
+ * Reduce only requested-name comparisons to the dashboard bareSkillName convention so slash/namespaced requests load without changing allow/exclude path matching, which still depends on bareSkillName plus filePath equality.
+ */
+function requestedSkillMatchKey(name: string): string {
+  if (!name) return "";
+  const withoutSkillMd = name.replace(/\/SKILL\.md$/i, "");
+  const lastPathSegment = withoutSkillMd.split("/").pop() ?? withoutSkillMd;
+  const afterNamespace = lastPathSegment.split(":").pop() ?? lastPathSegment;
+  return afterNamespace.toLowerCase();
+}
+
 // ── Main Resolution Logic ────────────────────────────────────────────────────
 
 /**
@@ -406,10 +419,10 @@ export function createSkillsOverrideFromSelection(
     };
 
     if (hasRequestedNames) {
-      // Filter by requested names (case-insensitive match, normalize away /SKILL.md suffix)
-      const requestedBareNamesLower = new Set(requestedSkillNames!.map((n) => bareSkillName(n).toLowerCase()));
+      // Filter by requested names using the chat/dashboard bare-token convention only for requested-name matching.
+      const requestedMatchKeys = new Set(requestedSkillNames!.map(requestedSkillMatchKey));
       filteredSkills = base.skills.filter(
-        (skill) => requestedBareNamesLower.has(bareSkillName(skill.name).toLowerCase()) && !isExcluded(skill)
+        (skill) => requestedMatchKeys.has(requestedSkillMatchKey(skill.name)) && !isExcluded(skill)
       );
     } else if (hasPatterns) {
       // Filter by pattern (allowed AND not excluded)
@@ -457,10 +470,10 @@ export function createSkillsOverrideFromSelection(
 
     // Check for requested names that don't match any discovered skill
     if (requestedSkillNames) {
-      const discoveredBareNamesLower = new Set(base.skills.map((s) => bareSkillName(s.name).toLowerCase()));
+      const discoveredRequestedMatchKeys = new Set(base.skills.map((s) => requestedSkillMatchKey(s.name)));
       for (const requestedName of requestedSkillNames) {
         if (
-          !discoveredBareNamesLower.has(bareSkillName(requestedName).toLowerCase())
+          !discoveredRequestedMatchKeys.has(requestedSkillMatchKey(requestedName))
           && !isBuiltInFallbackRequest(requestedName)
         ) {
           const purpose = sessionPurpose ? ` [${sessionPurpose}]` : "";

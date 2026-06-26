@@ -364,7 +364,7 @@ describe("useTasks", () => {
   });
 
   describe("view-transition refresh behavior", () => {
-    it("does not refetch just because sseEnabled flips from false to true, but refreshTasks fetches once and updates state", async () => {
+    it("refetches exactly once when sseEnabled flips from false to true and updates state", async () => {
       const initialTask = createMockTask({ id: "FN-001", title: "Before return" });
       const refreshedTask = createMockTask({ id: "FN-002", title: "After return" });
       mockFetchTasks
@@ -379,25 +379,54 @@ describe("useTasks", () => {
       await waitFor(() => {
         expect(result.current.tasks[0]?.id).toBe("FN-001");
       });
-
       expect(mockFetchTasks).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         rerender({ sseEnabled: true });
       });
 
-      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(mockFetchTasks).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-002");
+      });
+    });
 
-      await act(async () => {
-        await result.current.refreshTasks();
+    it("does not duplicate the initial fetch when mounting with sseEnabled true", async () => {
+      const initialTask = createMockTask({ id: "FN-INITIAL" });
+      mockFetchTasks.mockResolvedValueOnce([initialTask]);
+
+      const { result } = renderHook(() => useTasks({ sseEnabled: true }));
+
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-INITIAL");
+      });
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not catch up when sseEnabled stays false for the hook lifetime", async () => {
+      const initialTask = createMockTask({ id: "FN-DISABLED" });
+      mockFetchTasks.mockResolvedValueOnce([initialTask]);
+
+      const { result, rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled: boolean }) => useTasks({ sseEnabled }),
+        { initialProps: { sseEnabled: false } },
+      );
+
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-DISABLED");
       });
 
-      expect(mockFetchTasks).toHaveBeenCalledTimes(2);
-      expect(result.current.tasks[0]?.id).toBe("FN-002");
+      await act(async () => {
+        rerender({ sseEnabled: false });
+      });
+
+      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances).toHaveLength(0);
     });
 
     it("refreshTasks preserves active searchQuery when returning to task views", async () => {
-      vi.useFakeTimers();
       const filteredTask = createMockTask({ id: "FN-SEARCH", title: "match" });
       mockFetchTasks
         .mockResolvedValueOnce([])
@@ -406,18 +435,13 @@ describe("useTasks", () => {
       const { result, rerender } = renderHook(
         ({ searchQuery, sseEnabled }: { searchQuery?: string; sseEnabled: boolean }) =>
           useTasks({ searchQuery, sseEnabled }),
-        { initialProps: { searchQuery: undefined, sseEnabled: false } },
+        { initialProps: { searchQuery: "match", sseEnabled: false } },
       );
 
-      await act(async () => {
-        await flushPromises();
+      await waitFor(() => {
+        expect(mockFetchTasks).toHaveBeenCalledTimes(1);
       });
-
-      await act(async () => {
-        rerender({ searchQuery: "match", sseEnabled: false });
-        vi.advanceTimersByTime(300);
-        await flushPromises();
-      });
+      expect(mockFetchTasks).toHaveBeenLastCalledWith(undefined, undefined, undefined, "match", false);
 
       mockFetchTasks.mockClear();
 
@@ -425,13 +449,13 @@ describe("useTasks", () => {
         rerender({ searchQuery: "match", sseEnabled: true });
       });
 
-      await act(async () => {
-        await result.current.refreshTasks();
+      await waitFor(() => {
+        expect(mockFetchTasks).toHaveBeenCalledTimes(1);
       });
-
-      expect(mockFetchTasks).toHaveBeenCalledTimes(1);
       expect(mockFetchTasks).toHaveBeenLastCalledWith(undefined, undefined, undefined, "match", false);
-      expect(result.current.tasks[0]?.id).toBe("FN-SEARCH");
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-SEARCH");
+      });
     });
 
     it("does not refetch when toggling between already-live task views", async () => {
@@ -452,6 +476,52 @@ describe("useTasks", () => {
       });
 
       expect(mockFetchTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs one catch-up per false-to-true toggle without stacked EventSource instances", async () => {
+      const initialTask = createMockTask({ id: "FN-RAPID-0" });
+      const firstReturnTask = createMockTask({ id: "FN-RAPID-1" });
+      const secondReturnTask = createMockTask({ id: "FN-RAPID-2" });
+      mockFetchTasks
+        .mockResolvedValueOnce([initialTask])
+        .mockResolvedValueOnce([firstReturnTask])
+        .mockResolvedValueOnce([secondReturnTask]);
+
+      const { result, rerender } = renderHook(
+        ({ sseEnabled }: { sseEnabled: boolean }) => useTasks({ sseEnabled }),
+        { initialProps: { sseEnabled: false } },
+      );
+
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-RAPID-0");
+      });
+
+      await act(async () => {
+        rerender({ sseEnabled: true });
+      });
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-RAPID-1");
+      });
+      expect(mockFetchTasks).toHaveBeenCalledTimes(2);
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(MockEventSource.instances[0]?.readyState).toBe(1);
+
+      await act(async () => {
+        rerender({ sseEnabled: false });
+      });
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(MockEventSource.instances[0]?.readyState).toBe(MockEventSource.CLOSED);
+
+      await act(async () => {
+        rerender({ sseEnabled: true });
+      });
+      await waitFor(() => {
+        expect(result.current.tasks[0]?.id).toBe("FN-RAPID-2");
+      });
+
+      expect(mockFetchTasks).toHaveBeenCalledTimes(3);
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(MockEventSource.instances[1]?.readyState).toBe(1);
     });
   });
 

@@ -107,7 +107,7 @@ The merge gate is thin and trusted: CI blocks PRs on exactly Lint, Typecheck, Bu
 pnpm test          # gate suite + changed-only affected tests (bounded; never full-suite)
 pnpm test:gate     # the merge gate: curated engine-core suite + CI-shape test
 pnpm smoke:boot    # boot smoke: CLI --help + real serve /api/health
-pnpm verify:fast   # TEST-FREE verification: typecheck + build (scoped to changed packages) + boot smoke; recommended non-test verification/testCommand. Additive — changes no default
+pnpm verify:fast   # TEST-FREE verification: artifact bootstrap + scoped typecheck/build + CLI build + boot smoke; recommended non-test verification/testCommand. Additive — changes no default
 pnpm test:velocity # weekly report-only test velocity baseline; use -- --measure --write-report to refresh
 pnpm test:full     # full workspace suite — explicit opt-in only
 pnpm lint
@@ -115,7 +115,7 @@ pnpm build
 pnpm verify:workspace  # deep opt-in verification (lint -> test:full -> build); NOT the merge gate
 ```
 
-`pnpm verify:fast` is the recommended **test-free verification** path: typecheck + build scoped to the changed packages (it reuses `pnpm test`'s changed-package resolution) plus the boot smoke once, with **no test run**. It is deterministic and flake-free, suitable as a project `testCommand`/verification command when you want non-test verification; the full suite stays available and runs non-blocking. It is additive and does not change `pnpm test`, the gate, or CI. See `docs/testing.md`.
+`pnpm verify:fast` is the recommended **test-free verification** path: bootstrap missing/stale workspace dist artifacts, typecheck + build scoped to the changed packages (it reuses `pnpm test`'s changed-package resolution), an always-on `@runfusion/fusion` CLI build required by the source-checkout boot smoke, plus the boot smoke once, with **no test run**. It is deterministic and flake-free, suitable as a project `testCommand`/verification command when you want non-test verification; the full suite stays available and runs non-blocking. It is additive and does not change `pnpm test`, the gate, or CI. See `docs/testing.md`.
 
 ### Standing Rule: Flaky Tests Are Quarantined on Sight (Deletion Ratchet)
 
@@ -219,6 +219,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 
 ### Run Audit
 
+- FN-7011: self-healing emits `task:reconcile-engine-downtime-active-timing` when startup recovery shifts active task segment anchors to exclude proven engine-process downtime, and `task:reconcile-engine-downtime-active-timing-no-action` when no active task qualifies.
 - FN-5419: git run-audit now includes `pull:fast-forward` and `stash:pop-conflict`; dashboard git surfaces now include the extended `POST /api/git/pull` integration-worktree path plus companion `POST /api/git/stash-resolve`, `POST /api/git/stash-drop`, and `POST /api/git/stash-apply` routes.
 - FN-6292: self-healing emits `task:reconcile-dependency-blocking-lease` when it rebounds an in-progress holder whose stale file-scope lease blocks an unmet dependency, and `task:reconcile-dependency-blocking-lease-no-action` when triple-proof blocks that backward move.
 - FN-6736: self-healing emits `task:reclaim-phantom-executor-binding` when it proves an in-memory executor-active binding is stale, clears the binding, and requeues the in-progress task with worktree/progress preserved.
@@ -239,6 +240,7 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 - `./docs/PLUGIN_AUTHORING.md` — plugin authoring guide, lifecycle hooks, routes, tools, and dashboard-extension surfaces.
 - `./docs/agents.md` — pi extension scope, coordination tools, checkout leasing, runtime config.
 - `./docs/settings-reference.md` — model-selection hierarchy, mock provider mode, token budget precedence, presets.
+- `./docs/signals-connectors.md` — setup, HMAC auth, payload mapping, and security notes for Command Center external signal connectors.
 - `./docs/storage.md` — hybrid storage model details, including per-task `agent-log.jsonl` storage and retention semantics.
 - `./docs/multi-project.md` — central/per-project DB and isolation modes.
 - `./docs/missions.md` — mission/milestone/slice/feature model.

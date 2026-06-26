@@ -54,6 +54,11 @@ function isLayoutable(node: LayoutNode): boolean {
   return true;
 }
 
+function layoutNodeWidth(node: LayoutNode): number {
+  const width = node.style?.width;
+  return typeof width === "number" ? width : WF_CARD_MAX_WIDTH;
+}
+
 /**
  * Assign each layoutable node a layer index via longest-path layering from the
  * start node. Rework edges (data.kind === "rework") are ignored for layering.
@@ -150,6 +155,25 @@ export function autoLayout(
 
   const v2 = columns.length > 0;
 
+  /*
+   * FNXC:WorkflowContainerEdges 2026-06-26-08:05:
+   * Auto-layout must space graph layers by the widest rendered node in each prior layer. Container nodes render wider than cards, so fixed card-width layer spacing can place the next optional-group/foreach/loop on top of the previous container's source handle.
+   */
+  const layerMaxWidths = new Map<number, number>();
+  for (const [layerIndex, layerIds] of layers) {
+    layerMaxWidths.set(
+      layerIndex,
+      Math.max(...layerIds.map((id) => layoutNodeWidth(byId.get(id)!)), WF_CARD_MAX_WIDTH),
+    );
+  }
+  const sortedLayerIndexes = [...layers.keys()].sort((a, b) => a - b);
+  const layerXByIndex = new Map<number, number>();
+  let nextLayerX = ORIGIN_X;
+  for (const layerIndex of sortedLayerIndexes) {
+    layerXByIndex.set(layerIndex, nextLayerX);
+    nextLayerX += (layerMaxWidths.get(layerIndex) ?? WF_CARD_MAX_WIDTH) + WF_AUTO_LAYOUT_GAP_X;
+  }
+
   for (const [layerIndex, layerIds] of layers) {
     const sorted = [...layerIds].sort((a, b) => {
       const na = byId.get(a)!;
@@ -158,7 +182,7 @@ export function autoLayout(
       return a < b ? -1 : a > b ? 1 : 0;
     });
 
-    const layerX = ORIGIN_X + layerIndex * WF_AUTO_LAYOUT_SPACING;
+    const layerX = layerXByIndex.get(layerIndex) ?? ORIGIN_X;
 
     if (!v2) {
       // v1: free placement — within-layer index × row height.
@@ -203,7 +227,7 @@ export function autoLayout(
       const y = firstY + rowInBucket * ROW_HEIGHT;
       // Stagger x by half-spacing per overflow bucket so wrapped rows don't
       // collide with the un-staggered column while staying in the same band.
-      const x = layerX + staggerBucket * (WF_AUTO_LAYOUT_SPACING / 2);
+      const x = layerX + staggerBucket * ((layerMaxWidths.get(layerIndex) ?? WF_CARD_MAX_WIDTH) + WF_AUTO_LAYOUT_GAP_X) / 2;
 
       positions.set(id, { x, y });
       rowsPerColumn.set(colId ?? `__idx${safeColIndex}`, used + 1);

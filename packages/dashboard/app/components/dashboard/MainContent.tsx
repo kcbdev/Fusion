@@ -253,6 +253,17 @@ export function MainContent({
     const pluginContextTasks = isDependencyGraphView
       ? filterTasksByGraphWorkflowSelection(pluginTasks, currentProject?.id, graphWorkflowSelection)
       : pluginTasks;
+    /*
+    FNXC:GraphTaskPopout 2026-06-25-12:00:
+    Dependency-graph task opens must share the movable, resizable FloatingWindow pop-out used by Board/List pop-out and artifact cards. Keep non-graph plugin views on the fixed task-detail modal so plugin contracts outside the Graph view do not change.
+    */
+    const openPluginTaskDetail = (task: Task | TaskDetail, initialTab?: DetailTaskTab) => {
+      if (isDependencyGraphView) {
+        popOutTaskDetail(task);
+        return;
+      }
+      openDetailTask(task, initialTab);
+    };
     return (
       <PageErrorBoundary>
         {isDependencyGraphView ? (
@@ -270,13 +281,13 @@ export function MainContent({
             tasks: pluginContextTasks,
             workflowSteps,
             subscribePluginEvents,
-            openTaskDetail: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTask(task, initialTab),
+            openTaskDetail: openPluginTaskDetail,
             openFile: openFileInBrowser,
             renderTaskCard: (task: Task | TaskDetail) => (
               <TaskCard
                 task={task}
                 projectId={currentProject?.id}
-                onOpenDetail={(value: Task | TaskDetail) => openDetailTask(value)}
+                onOpenDetail={openPluginTaskDetail}
                 addToast={addToast}
                 disableDrag={true}
                 prAuthAvailable={prAuthAvailable}

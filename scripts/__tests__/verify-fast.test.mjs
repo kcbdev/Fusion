@@ -15,13 +15,16 @@ import {
   buildTypecheckStep,
   buildBuildStep,
   buildBootSmokeStep,
+  buildArtifactBootstrapStep,
   buildVerifyPlan,
   VERIFY_EXCLUDED_PACKAGES,
+  BOOT_SMOKE_REQUIRED_BUILD_PACKAGES,
 } from "../verify-fast.mjs";
 
 import { resolveAffectedPackages } from "../test-changed.mjs";
 
 const SMOKE = "/repo/scripts/boot-smoke.mjs";
+const BOOTSTRAP = "/repo/scripts/ensure-test-artifacts.mjs";
 const NODE = "/usr/bin/node";
 
 function stepIds(plan) {
@@ -53,7 +56,7 @@ test("buildTypecheckStep: defaults to the tsc fallback when meta omitted", () =>
 });
 
 // ---------------------------------------------------------------------------
-// buildBuildStep / buildBootSmokeStep
+// buildBuildStep / buildBootSmokeStep / buildArtifactBootstrapStep
 // ---------------------------------------------------------------------------
 
 test("buildBuildStep: scoped pnpm build for the package", () => {
@@ -69,14 +72,22 @@ test("buildBootSmokeStep: runs the boot-smoke script via node", () => {
   assert.equal(step.kind, "boot-smoke");
 });
 
+test("buildArtifactBootstrapStep: runs the artifact bootstrap script via node", () => {
+  const step = buildArtifactBootstrapStep(BOOTSTRAP, NODE);
+  assert.equal(step.command, NODE);
+  assert.deepEqual(step.args, [BOOTSTRAP]);
+  assert.equal(step.kind, "bootstrap-artifacts");
+});
+
 // ---------------------------------------------------------------------------
 // buildVerifyPlan
 // ---------------------------------------------------------------------------
 
-test("buildVerifyPlan: no packages -> boot smoke only", () => {
+test("buildVerifyPlan: no packages -> CLI prerequisite build then boot smoke", () => {
   const plan = buildVerifyPlan({ packages: [], bootSmokeScriptPath: SMOKE, nodeBin: NODE });
-  assert.deepEqual(stepIds(plan), ["boot-smoke"]);
+  assert.deepEqual(stepIds(plan), ["bootstrap-artifacts", "build:@runfusion/fusion", "boot-smoke"]);
   assert.deepEqual(plan.eligiblePackages, []);
+  assert.deepEqual(plan.requiredBootBuildPackages, ["@runfusion/fusion"]);
 });
 
 test("buildVerifyPlan: typecheck for all eligible, then builds, then boot smoke (ordered)", () => {
@@ -86,10 +97,12 @@ test("buildVerifyPlan: typecheck for all eligible, then builds, then boot smoke 
   ]);
   const plan = buildVerifyPlan({ packages: ["@fusion/engine", "@fusion/core"], packageMeta, bootSmokeScriptPath: SMOKE, nodeBin: NODE });
   assert.deepEqual(stepIds(plan), [
+    "bootstrap-artifacts",
     "typecheck:@fusion/engine",
     "typecheck:@fusion/core",
     "build:@fusion/engine",
     "build:@fusion/core",
+    "build:@runfusion/fusion",
     "boot-smoke",
   ]);
 });
@@ -101,9 +114,11 @@ test("buildVerifyPlan: a package without a build script gets a typecheck step bu
   ]);
   const plan = buildVerifyPlan({ packages: ["@fusion/engine", "@fusion/test-only"], packageMeta, bootSmokeScriptPath: SMOKE, nodeBin: NODE });
   assert.deepEqual(stepIds(plan), [
+    "bootstrap-artifacts",
     "typecheck:@fusion/engine",
     "typecheck:@fusion/test-only",
     "build:@fusion/engine",
+    "build:@runfusion/fusion",
     "boot-smoke",
   ]);
   // The test-only package's typecheck uses the tsc fallback (no typecheck script).
@@ -125,12 +140,16 @@ test("buildVerifyPlan: desktop/mobile are excluded from scoped steps but boot sm
   });
   assert.deepEqual(plan.eligiblePackages, ["@fusion/engine"]);
   assert.deepEqual(plan.excludedPackages.sort(), ["@fusion/desktop", "@fusion/mobile"]);
-  assert.deepEqual(stepIds(plan), ["typecheck:@fusion/engine", "build:@fusion/engine", "boot-smoke"]);
+  assert.deepEqual(stepIds(plan), ["bootstrap-artifacts", "typecheck:@fusion/engine", "build:@fusion/engine", "build:@runfusion/fusion", "boot-smoke"]);
 });
 
 test("VERIFY_EXCLUDED_PACKAGES mirrors the root build/typecheck exclusions", () => {
   assert.ok(VERIFY_EXCLUDED_PACKAGES.has("@fusion/desktop"));
   assert.ok(VERIFY_EXCLUDED_PACKAGES.has("@fusion/mobile"));
+});
+
+test("BOOT_SMOKE_REQUIRED_BUILD_PACKAGES includes the source-checkout CLI", () => {
+  assert.deepEqual(BOOT_SMOKE_REQUIRED_BUILD_PACKAGES, ["@runfusion/fusion"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -151,5 +170,5 @@ test("buildVerifyPlan: scopes to exactly the packages resolveAffectedPackages se
 
   const packageMeta = new Map([["@fusion/engine", { hasTypecheck: true, hasBuild: true }]]);
   const plan = buildVerifyPlan({ packages: affected, packageMeta, bootSmokeScriptPath: SMOKE, nodeBin: NODE });
-  assert.deepEqual(stepIds(plan), ["typecheck:@fusion/engine", "build:@fusion/engine", "boot-smoke"]);
+  assert.deepEqual(stepIds(plan), ["bootstrap-artifacts", "typecheck:@fusion/engine", "build:@fusion/engine", "build:@runfusion/fusion", "boot-smoke"]);
 });

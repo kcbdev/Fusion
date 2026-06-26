@@ -142,7 +142,7 @@ import { normalizeTaskPriority } from "./task-priority.js";
 import { validateBranchGroupBranchName, filterTasksByBranchGroup } from "./branch-assignment.js";
 import { allowsAutoMergeProcessing } from "./task-merge.js";
 import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
-import { GlobalSettingsStore } from "./global-settings.js";
+import { GlobalSettingsStore, resolveGlobalDir } from "./global-settings.js";
 import { Database, SCHEMA_VERSION, toJson, toJsonNullable, fromJson } from "./db.js";
 import { ArchiveDatabase } from "./archive-db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
@@ -279,6 +279,10 @@ interface TaskRow {
   columnMovedAt: string | null;
   firstExecutionAt: string | null;
   cumulativeActiveMs: number | null;
+  // FNXC:TaskTiming 2026-06-26-10:14: per-column dwell map (JSON text), populated by the
+  // column-transition seam in moveTaskInternal. Persisted alongside cumulativeActiveMs so
+  // per-stage wall-clock survives the SQLite round-trip getChangedTaskColumns/rowToTask use.
+  columnDwellMs: string | null;
   executionStartedAt: string | null;
   executionCompletedAt: string | null;
   dependencies: string | null;
@@ -438,6 +442,8 @@ const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("columnMovedAt", (task) => task.columnMovedAt ?? null),
   defineTaskColumn("firstExecutionAt", (task) => task.firstExecutionAt ?? null),
   defineTaskColumn("cumulativeActiveMs", (task) => task.cumulativeActiveMs ?? null),
+  // FNXC:TaskTiming 2026-06-26-10:14: serialize per-column dwell map as JSON text (same as mergeDetails/workspaceWorktrees).
+  defineTaskColumn("columnDwellMs", (task) => toJsonNullable(task.columnDwellMs)),
   defineTaskColumn("executionStartedAt", (task) => task.executionStartedAt ?? null),
   defineTaskColumn("executionCompletedAt", (task) => task.executionCompletedAt ?? null),
   defineTaskColumn("dependencies", (task) => toJson(task.dependencies || [])),
@@ -2080,6 +2086,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       columnMovedAt: row.columnMovedAt || undefined,
       firstExecutionAt: row.firstExecutionAt || undefined,
       cumulativeActiveMs: row.cumulativeActiveMs ?? undefined,
+      // FNXC:TaskTiming 2026-06-26-10:14: rehydrate per-column dwell map; drop empty maps to undefined like workspaceWorktrees.
+      columnDwellMs: (() => {
+        const d = fromJson<Record<string, number>>(row.columnDwellMs);
+        return d && Object.keys(d).length > 0 ? d : undefined;
+      })(),
       executionStartedAt: row.executionStartedAt || undefined,
       executionCompletedAt: row.executionCompletedAt || undefined,
       dependencies: fromJson<string[]>(row.dependencies) || [],
@@ -2262,6 +2273,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       columnMovedAt: entry.columnMovedAt,
       firstExecutionAt: entry.firstExecutionAt,
       cumulativeActiveMs: entry.cumulativeActiveMs,
+      columnDwellMs: entry.columnDwellMs,
       executionStartedAt: entry.executionStartedAt,
       executionCompletedAt: entry.executionCompletedAt,
       modelPresetId: entry.modelPresetId,
@@ -2398,6 +2410,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       columnMovedAt: task.columnMovedAt,
       firstExecutionAt: task.firstExecutionAt,
       cumulativeActiveMs: task.cumulativeActiveMs,
+      columnDwellMs: task.columnDwellMs,
       executionStartedAt: task.executionStartedAt,
       executionCompletedAt: task.executionCompletedAt,
       archivedAt,
@@ -2608,7 +2621,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "graphResumeRetryCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenUsageModelProvider", "tokenUsageModelId", "tokenUsagePerModel", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
-      "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
+      "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "columnDwellMs", "executionStartedAt", "executionCompletedAt",
       "dependencies", "steps", "customFields", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "sourceIssueClosedAt", "mergeDetails", "workspaceWorktrees",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
@@ -2657,7 +2670,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "mergeRetries", "workflowStepRetries", "stuckKillCount", "resumeLimboCount", "graphResumeRetryCount", "resumeLimboTipSha", "resumeLimboStepSignature", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "worktreeSessionRetryCount", "completionHandoffLimboRecoveryCount", "verificationFailureCount", "mergeConflictBounceCount", "mergeAuditBounceCount", "mergeTransientRetryCount", "branchConflictRecoveryCount", "reviewerContextRetryCount", "reviewerFallbackRetryCount", "nextRecoveryAt",
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenUsageModelProvider", "tokenUsageModelId", "tokenUsagePerModel", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
-      "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
+      "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "columnDwellMs", "executionStartedAt", "executionCompletedAt",
       "dependencies", "steps", "customFields", "attachments", "steeringComments",
       "comments", "review", "reviewState", "workflowStepResults", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "sourceIssueClosedAt", "mergeDetails", "workspaceWorktrees",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
@@ -5315,6 +5328,34 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     );
   }
 
+  async reconcileActiveTimingForEngineDowntime(now: Date = new Date()): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
+    const settings = await this.getSettings();
+    const heartbeatMs = Date.parse(settings.engineLastActiveAt ?? "");
+    const nowMs = now.getTime();
+    const thresholdMs = Math.max((settings.pollIntervalMs ?? 15_000) * 2, 60_000);
+    const downtimeMs = Number.isFinite(heartbeatMs) && Number.isFinite(nowMs) ? nowMs - heartbeatMs : 0;
+    if (!settings.engineLastActiveAt || downtimeMs <= thresholdMs) {
+      return { shiftedTaskIds: [], downtimeMs: Math.max(0, downtimeMs) };
+    }
+
+    const shiftedTaskIds: string[] = [];
+    const tasks = await this.listTasks({ column: "in-progress", includeArchived: false, slim: true });
+    for (const task of tasks) {
+      const startedMs = Date.parse(task.executionStartedAt ?? "");
+      if (!Number.isFinite(startedMs) || startedMs > heartbeatMs) continue;
+      const shiftedStartedMs = Math.min(nowMs, startedMs + downtimeMs);
+      if (shiftedStartedMs <= startedMs) continue;
+      /*
+      FNXC:TaskTiming 2026-06-25-00:00:
+      Engine-process downtime is proven only by a stale engineLastActiveAt heartbeat. Advance the current active segment anchor, but preserve firstExecutionAt and cumulativeActiveMs so wall-clock history and already-accrued active work remain intact.
+      */
+      await this.updateTask(task.id, { executionStartedAt: new Date(shiftedStartedMs).toISOString() });
+      shiftedTaskIds.push(task.id);
+    }
+
+    return { shiftedTaskIds, downtimeMs };
+  }
+
   // --- Unified PR entity (PR-lifecycle-as-workflow-nodes, U1) ---
 
   private rowToPrEntity(row: PrEntityRow): PrEntity {
@@ -7188,9 +7229,38 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     }
 
     const movedAt = internal.now ?? new Date().toISOString();
+    /*
+    FNXC:TaskTiming 2026-06-26-10:14:
+    Capture the previous column-entry timestamp BEFORE it is overwritten so we can record
+    per-stage dwell. `cumulativeActiveMs` only covers `in-progress`; this seam fills the gap
+    for todo / in-review / done so per-stage wall-clock is measurable going forward without
+    reconstructing it from agent logs.
+    */
+    const previousColumnMovedAt = task.columnMovedAt;
     task.column = toColumn;
     task.columnMovedAt = movedAt;
     task.updatedAt = movedAt;
+
+    /*
+    FNXC:TaskTiming 2026-06-26-10:14:
+    Accumulate dwell for the column being LEFT into `columnDwellMs[fromColumn]`, mirroring the
+    `cumulativeActiveMs` accumulation pattern. Flag-INDEPENDENT (runs for both the workflow-hook
+    and legacy-inline paths) because it keys off the generic columnMovedAt delta, not in-progress
+    execution timestamps. Skip when the previous timestamp is missing/unparseable (e.g. first move
+    or legacy rows), and clamp to >= 0 to defend against clock skew / out-of-order `internal.now`.
+    Multi-visit columns add to the existing bucket, never decrement.
+    */
+    {
+      const prevMs = Date.parse(previousColumnMovedAt ?? "");
+      const nowMs = Date.parse(movedAt);
+      if (Number.isFinite(prevMs) && Number.isFinite(nowMs)) {
+        const dwellMs = Math.max(0, nowMs - prevMs);
+        if (dwellMs > 0) {
+          const buckets = (task.columnDwellMs ??= {});
+          buckets[fromColumn] = Math.max(0, buckets[fromColumn] ?? 0) + dwellMs;
+        }
+      }
+    }
 
     if (useWorkflow) {
       // ── Flag-ON: route the legacy per-column side effects through the
@@ -15918,6 +15988,17 @@ ${stepsSection}`;
     return this.fusionDir;
   }
 
+  /*
+  FNXC:GlobalDirGuard 2026-06-25-22:12:
+  The resolved GLOBAL settings dir. Distinct from getFusionDir() which is this project's `.fusion/`. Any CentralCore/global-store construction MUST use this, never getFusionDir(); passing the project dir spins up a stray per-project central DB that shadows ~/.fusion and silently resets global settings.
+
+  FNXC:GlobalDirGuard 2026-06-25-22:50:
+  Returns a fully-RESOLVED absolute path (string), not the raw optional field. Resolving here (rather than leaking CentralCore's `undefined → ~/.fusion` default to every caller) makes the contract honest and fires the project-local `.fusion` guard at this call site instead of deferring it to CentralCore construction. Under VITEST `this.globalSettingsDir` is always set to a temp dir, so resolveGlobalDir returns it verbatim and never throws the no-explicit-dir test error.
+  */
+  getGlobalSettingsDir(): string {
+    return resolveGlobalDir(this.globalSettingsDir);
+  }
+
   getTasksDir(): string {
     return this.tasksDir;
   }
@@ -15940,14 +16021,16 @@ ${stepsSection}`;
       return this.secretsStore;
     }
 
-    const central = new CentralCore(this.getFusionDir());
+    // FNXC:GlobalDirGuard 2026-06-25-22:13: Secrets live in the GLOBAL central DB (~/.fusion), not this project's `.fusion/`. Use the resolved global dir; passing getFusionDir() created a stray per-project central DB and reset global settings.
+    const central = new CentralCore(this.getGlobalSettingsDir());
     await central.init();
     this.secretsCentralCore = central;
     const centralDb = (central as unknown as { db: import("./central-db.js").CentralDatabase | null }).db;
     if (!centralDb) {
       throw new Error("Central database unavailable for secrets store");
     }
-    const masterKeyManager = new MasterKeyManager();
+    // FNXC:GlobalDirGuard 2026-06-25-23:00: The master key is GLOBAL — pass the resolved global dir explicitly so it co-locates with the global central DB (matching prod ~/.fusion) and so getSecretsStore() is exercisable under tests (a bare new MasterKeyManager() throws under VITEST because resolveGlobalDir() requires an explicit dir there).
+    const masterKeyManager = new MasterKeyManager({ globalDir: this.getGlobalSettingsDir() });
     const masterKeyProvider = () => masterKeyManager.getOrCreateKey();
     this.secretsStore = new SecretsStore(this.db, centralDb, masterKeyProvider);
     return this.secretsStore;

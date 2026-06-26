@@ -8,6 +8,8 @@ import {
   bandTop,
   columnBandNodeId,
   COLUMN_BAND_HEIGHT,
+  FOREACH_GROUP_WIDTH,
+  WF_CARD_MAX_WIDTH,
 } from "../workflow-flow-mapping";
 
 type N = FlowNode<WorkflowFlowNodeData>;
@@ -156,6 +158,22 @@ describe("autoLayout — v1 (free placement)", () => {
 });
 
 describe("autoLayout — foreach / unreachable / cycles", () => {
+  it("spaces layers by container width so group handles do not overlap following nodes", () => {
+    const nodes: N[] = [
+      node("start", "start", 0, midBand(0), { column: "triage" }),
+      node("verify", "optional-group", 0, midBand(1), {
+        column: "in-progress",
+        style: { width: FOREACH_GROUP_WIDTH, height: 220 },
+      }),
+      node("review", "prompt", 0, midBand(1), { column: "in-progress" }),
+      node("end", "end", 0, midBand(2), { column: "done" }),
+    ];
+    const pos = autoLayout(nodes, [edge("start", "verify"), edge("verify", "review"), edge("review", "end")], COLUMNS_3);
+
+    expect(pos.get("verify")!.x).toBeGreaterThanOrEqual(pos.get("start")!.x + WF_CARD_MAX_WIDTH);
+    expect(pos.get("review")!.x).toBeGreaterThanOrEqual(pos.get("verify")!.x + FOREACH_GROUP_WIDTH);
+  });
+
   it("repositions a foreach group but leaves its parentId children untouched", () => {
     const childPos = { x: 30, y: 56 };
     const nodes: N[] = [

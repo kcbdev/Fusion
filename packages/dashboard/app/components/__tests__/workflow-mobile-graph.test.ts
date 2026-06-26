@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { BUILTIN_CODING_WORKFLOW_IR, BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "@fusion/core";
 import type { Edge as FlowEdge, Node as FlowNode } from "@xyflow/react";
 import { buildMobileWorkflowGraph, reorderWorkflowNode } from "../workflow-mobile-graph";
 import type { WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
-import { columnBandNodeId, foreachChildFlowId } from "../workflow-flow-mapping";
+import { columnBandNodeId, foreachChildFlowId, irToFlow } from "../workflow-flow-mapping";
 
 function node(
   id: string,
@@ -27,6 +28,19 @@ function edge(id: string, source: string, target: string, condition = "success")
     target,
     label: condition,
     data: { condition },
+  };
+}
+
+function workflowDef(ir: typeof BUILTIN_CODING_WORKFLOW_IR) {
+  return {
+    id: ir.name,
+    kind: "workflow" as const,
+    name: ir.name,
+    description: "",
+    ir,
+    layout: {},
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
   };
 }
 
@@ -117,6 +131,27 @@ describe("buildMobileWorkflowGraph", () => {
     expect(rows.map((row) => row.id)).toEqual(["start", "lint", "end"]);
     expect(rows[0].outgoing[0]).toMatchObject({ target: "lint", targetLabel: "Lint" });
     expect(rows[1].summary).toBe("Gate (blocks)");
+  });
+
+  it("summarizes Browser Verification container connections for built-in mobile outlines", () => {
+    for (const [name, ir, incoming] of [
+      ["coding", BUILTIN_CODING_WORKFLOW_IR, "execute"],
+      ["stepwise", BUILTIN_STEPWISE_CODING_WORKFLOW_IR, "steps"],
+    ] as const) {
+      const { nodes, edges } = irToFlow(workflowDef(ir));
+      const rows = buildMobileWorkflowGraph(nodes, edges, ir.version === "v2" ? ir.columns : []);
+      const browserVerification = rows.find((row) => row.id === "browser-verification");
+      const incomingRow = rows.find((row) => row.id === incoming);
+
+      expect(browserVerification?.kind, name).toBe("optional-group");
+      expect(incomingRow?.outgoing.some((out) => out.target === "browser-verification"), name).toBe(true);
+      expect(browserVerification?.outgoing.map((out) => [out.target, out.label]), name).toEqual(
+        expect.arrayContaining([
+          ["code-review", "success"],
+          ["end", "failure"],
+        ]),
+      );
+    }
   });
 
   it("preserves branch edges and column labels while ignoring column band nodes", () => {

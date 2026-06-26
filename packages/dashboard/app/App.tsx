@@ -357,10 +357,10 @@ function AppInner() {
     }
   }, [handleChangeTaskView, taskView, pushNav]);
 
-  // Tasks hook with project context and search query
-  // SSE is only enabled for board/list views to free connection slots for mission detail fetches
+  // FNXC:DashboardLiveUpdates 2026-06-26-01:08:
+  // SSE remains enabled only for board/list views to free connection slots for mission detail fetches. The false→true missed-event catch-up lives inside useTasks so App keeps the routing gate only and cannot double-fetch on task-view re-entry.
   const taskSseEnabled = taskView === "board" || taskView === "list";
-  const { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, refreshTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
+  const { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
     {
       ...(currentProject ? { projectId: currentProject.id } : {}),
       searchQuery: searchQuery || undefined,
@@ -383,22 +383,6 @@ function AppInner() {
   Open popped-out task-detail windows. Each entry is a task snapshot rendered inside its own movable, resizable, non-blocking FloatingWindow. Several can be open at once and coexist with the right-dock pop-out and terminal (all click-through overlays). Snapshots survive a tasks revalidation; rendering prefers the live row by id and falls back to the snapshot. Pop-out dedupes by task id — re-popping an already-open task is a no-op (its window stays; focus-to-front in FloatingWindow handles re-raising on click).
   */
   const { tasks: poppedOutTasks, popOut: popOutTaskDetail, close: closePoppedOutTask } = usePoppedOutTasks();
-
-  const previousTaskViewRef = useRef<TaskView>(taskView);
-
-  useEffect(() => {
-    const previousTaskView = previousTaskViewRef.current;
-    const wasTaskView = previousTaskView === "board" || previousTaskView === "list";
-    const isTaskView = taskView === "board" || taskView === "list";
-
-    // Task SSE is disabled off board/list. Refetch once when returning because
-    // in-app navigation does not trigger document.visibilitychange.
-    if (!wasTaskView && isTaskView) {
-      void refreshTasks();
-    }
-
-    previousTaskViewRef.current = taskView;
-  }, [taskView, refreshTasks]);
 
   const boardSourceTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks;
   const [graphWorkflowSelection, setGraphWorkflowSelection] = useState<GraphWorkflowSelection | null>(null);

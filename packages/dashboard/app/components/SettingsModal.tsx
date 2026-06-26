@@ -17,6 +17,7 @@ import { NotificationsSection } from "./settings/sections/NotificationsSection";
 import { GlobalGeneralSection } from "./settings/sections/GlobalGeneralSection";
 import { ResearchGlobalSection } from "./settings/sections/ResearchGlobalSection";
 import { RemoteSection } from "./settings/sections/RemoteSection";
+import { GlobalMcpSection } from "./settings/sections/GlobalMcpSection";
 import { GlobalModelsSection } from "./settings/sections/GlobalModelsSection";
 import { AuthenticationSection } from "./settings/sections/AuthenticationSection";
 import {
@@ -37,6 +38,7 @@ import { MergeSection } from "./settings/sections/MergeSection";
 import { AgentPermissionsSection } from "./settings/sections/AgentPermissionsSection";
 import { MemorySection } from "./settings/sections/MemorySection";
 import { ResearchProjectSection } from "./settings/sections/ResearchProjectSection";
+import { ProjectMcpSection } from "./settings/sections/ProjectMcpSection";
 import { BackupsSection } from "./settings/sections/BackupsSection";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { PluginsSection } from "./settings/sections/PluginsSection";
@@ -230,6 +232,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global" },
   { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
   { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global" },
+  { id: "global-mcp", label: "MCP Servers", labelKey: "settings.nav.globalMcp", scope: "global" },
   { id: "cli-agents", label: "CLI Agents", labelKey: "settings.nav.cliAgents", scope: "global" },
   { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
   { id: "remote", label: "Remote Access & Node Sync", labelKey: "settings.nav.remote", scope: "global" },
@@ -256,6 +259,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project" },
   { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project" },
   { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project" },
+  { id: "mcp", label: "MCP Servers", labelKey: "settings.nav.mcp", scope: "project" },
   { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project" },
   { id: "plugins", label: "Plugins", labelKey: "settings.nav.plugins", scope: "project" },
 ];
@@ -2740,6 +2744,27 @@ export function SettingsModal({
 
       case "secrets":
         return <SecretsSection scopeBanner={renderScopeBanner()} addToast={addToast} />;
+      case "global-mcp":
+        return (
+          <GlobalMcpSection
+            scopeBanner={renderScopeBanner()}
+            form={form}
+            setForm={setForm}
+            projectId={projectId}
+            addToast={addToast}
+          />
+        );
+      case "mcp":
+        return (
+          <ProjectMcpSection
+            scopeBanner={renderScopeBanner()}
+            form={form}
+            setForm={setForm}
+            globalSettings={scopedSettings?.global ?? null}
+            projectId={projectId}
+            addToast={addToast}
+          />
+        );
 
       case "project-models":
         return (

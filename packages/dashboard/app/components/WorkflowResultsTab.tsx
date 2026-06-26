@@ -11,8 +11,8 @@ import { Check, ChevronDown, ChevronRight, ChevronUp, Maximize2, Pencil, X } fro
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ReactFlow, ReactFlowProvider } from "@xyflow/react";
-import type { AgentLogEntry, Settings, Task, TaskDetail, WorkflowDefinition, WorkflowStep, WorkflowStepResult, ResolvedWorkflowOptionalStep } from "@fusion/core";
-import { getErrorMessage, resolveTaskExecutionModel, resolveTaskPlanningModel, resolveTaskValidatorModel } from "@fusion/core";
+import type { Agent, AgentLogEntry, Settings, Task, TaskDetail, WorkflowDefinition, WorkflowStep, WorkflowStepResult, ResolvedWorkflowOptionalStep } from "@fusion/core";
+import { getErrorMessage } from "@fusion/core";
 import { approveTaskWorkflowCli, fetchBoardWorkflows, fetchWorkflow, fetchWorkflows, fetchWorkflowSteps, fetchTaskWorkflow, fetchWorkflowOptionalSteps, selectTaskWorkflow, submitTaskWorkflowInput } from "../api";
 import { WorkflowSelector } from "./WorkflowSelector";
 import { phaseBadge } from "./workflow-phase-badge";
@@ -22,6 +22,7 @@ import { irToFlow } from "./workflow-flow-mapping";
 import { workflowNodeTypes } from "./nodes/WorkflowNodeTypes";
 import type { Components } from "react-markdown";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
+import { resolveEffectiveExecutor, resolveEffectivePlanning, resolveEffectiveValidator } from "./effective-model-resolution";
 
 // Markdown rendering components for workflow output
 const markdownComponents: Components = {
@@ -59,6 +60,8 @@ interface WorkflowResultsTabProps {
   taskStatus?: string;
   taskPausedReason?: string;
   settings?: Settings;
+  agentLogEntries?: AgentLogEntry[];
+  assignedAgent?: Agent | null;
   onEditWorkflow?: () => void;
   /** U5 (R20): called after a workflow switch affects board placement
    *  (any reconciliation result) so the board can refresh before the SSE
@@ -310,6 +313,8 @@ export function WorkflowResultsTab({
   taskStatus,
   taskPausedReason,
   settings,
+  agentLogEntries = [],
+  assignedAgent = null,
   onEditWorkflow,
   onWorkflowReconciled,
 }: WorkflowResultsTabProps) {
@@ -345,12 +350,17 @@ export function WorkflowResultsTab({
   // Load the task's current workflow selection (if any).
   useEffect(() => {
     let cancelled = false;
+    /*
+    FNXC:TaskWorkflowDetails 2026-06-26-01:31:
+    Task-detail hosts can keep WorkflowResultsTab mounted while switching tasks. Clear the previous explicit selection before the new task selection fetch resolves (or fails) so default-inherited tasks use boardWorkflowFallbackId for the summary, graph fetch, and configured step details instead of a stale custom workflow from the prior task.
+    */
+    setSelectedWorkflowId(null);
     fetchTaskWorkflow(taskId, projectId)
       .then((res) => {
         if (!cancelled) setSelectedWorkflowId(res.workflowId);
       })
       .catch(() => {
-        /* selection is optional; ignore load failures */
+        if (!cancelled) setSelectedWorkflowId(null);
       });
     return () => {
       cancelled = true;
@@ -413,7 +423,14 @@ export function WorkflowResultsTab({
   const graphCacheKey = effectiveWorkflowId ? `${projectId ?? ""}::${effectiveWorkflowId}` : null;
 
   useEffect(() => {
-    if (!graphExpanded || !effectiveWorkflowId || !graphCacheKey || workflowGraphCache[graphCacheKey]) return;
+    if (!graphExpanded || !effectiveWorkflowId || !graphCacheKey) {
+      setWorkflowGraphLoading(false);
+      return;
+    }
+    if (workflowGraphCache[graphCacheKey]) {
+      setWorkflowGraphLoading(false);
+      return;
+    }
     let cancelled = false;
     setWorkflowGraphLoading(true);
     fetchWorkflow(effectiveWorkflowId, projectId)
@@ -508,8 +525,21 @@ export function WorkflowResultsTab({
   }, [allWorkflowSteps, optionalWorkflowSteps]);
 
   const workflowStepLookup = useMemo(() => {
-    return new Map(workflowStepOptions.map((step) => [step.id, step]));
-  }, [workflowStepOptions]);
+    const lookup = new Map<string, WorkflowStepOption>();
+    for (const step of workflowStepOptions) {
+      lookup.set(step.id, step);
+    }
+    /*
+    FNXC:TaskWorkflowDetails 2026-06-26-01:37:
+    Some persisted tasks store optional-group template ids (for example `browser-verification`) while the global step resolver returns the materialized workflow-step id plus `templateId`. Alias both ids to the same definition so configured step/stage details populate instead of showing the missing-definition fallback.
+    */
+    for (const step of allWorkflowSteps) {
+      if (!step.templateId) continue;
+      const option = lookup.get(step.id);
+      if (option) lookup.set(step.templateId, option);
+    }
+    return lookup;
+  }, [allWorkflowSteps, workflowStepOptions]);
 
   const toggleOutput = (stepId: string) => {
     setExpandedOutputs((prev) => ({ ...prev, [stepId]: !prev[stepId] }));
@@ -590,13 +620,20 @@ export function WorkflowResultsTab({
     }
   }, [canEdit]);
 
+  /*
+  FNXC:WorkflowSettings 2026-06-25-16:20:
+  Optional-group steps such as Code Review and Browser Verification are valid configured workflow steps but intentionally carry an empty description from the resolver. Show "Step definition not found." only when the step id is genuinely absent from the lookup, never for a found step whose description is empty.
+  */
   const configuredSteps = useMemo(() => {
     return selectedWorkflowSteps.map((stepId) => {
       const stepInfo = workflowStepLookup.get(stepId);
+      const isMissingStepDefinition = stepInfo === undefined;
       return {
         id: stepId,
         name: stepInfo?.name || stepId,
-        description: stepInfo?.description || t("app:workflow.stepDefinitionNotFound", "Step definition not found."),
+        description: isMissingStepDefinition
+          ? t("app:workflow.stepDefinitionNotFound", "Step definition not found.")
+          : stepInfo.description,
         phase: stepInfo?.phase || "pre-merge",
       } as WorkflowStepOption;
     });
@@ -608,9 +645,9 @@ export function WorkflowResultsTab({
   const completedStepCount = useMemo(() => results.filter((result) => ["passed", "skipped", "failed", "advisory_failure"].includes(result.status)).length, [results]);
   const graphWorkflow = graphCacheKey ? workflowGraphCache[graphCacheKey] : undefined;
   const graphFlow = useMemo(() => (graphWorkflow ? irToFlow(graphWorkflow) : null), [graphWorkflow]);
-  const effectiveExecutor = useMemo(() => (task ? resolveTaskExecutionModel(task, settings) : undefined), [task, settings]);
-  const effectiveValidator = useMemo(() => (task ? resolveTaskValidatorModel(task, settings) : undefined), [task, settings]);
-  const effectivePlanning = useMemo(() => (task ? resolveTaskPlanningModel(task, settings) : undefined), [task, settings]);
+  const effectiveExecutor = useMemo(() => (task ? resolveEffectiveExecutor(task, agentLogEntries, assignedAgent, settings) : undefined), [agentLogEntries, assignedAgent, task, settings]);
+  const effectiveValidator = useMemo(() => (task ? resolveEffectiveValidator(task, agentLogEntries, assignedAgent, settings) : undefined), [agentLogEntries, assignedAgent, task, settings]);
+  const effectivePlanning = useMemo(() => (task ? resolveEffectivePlanning(task, agentLogEntries, settings) : undefined), [agentLogEntries, task, settings]);
 
   const renderEditor = () => {
     if (!canEdit || !isEditing || loading) {
@@ -1048,7 +1085,7 @@ export function WorkflowResultsTab({
                 <div className="workflow-results-spinner" />
                 <span>{t("app:workflow.loadingGraph", "Loading workflow graph…")}</span>
               </div>
-            ) : graphFlow ? (
+            ) : graphFlow && graphFlow.nodes.length > 0 ? (
               <div className="workflow-graph-preview" data-testid="workflow-graph-preview">
                 <ReactFlowProvider>
                   <ReactFlow

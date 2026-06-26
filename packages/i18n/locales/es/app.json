@@ -6118,7 +6118,9 @@
       "tooltip": {
         "global": "Compartido en todos los proyectos",
         "project": "Específico de este proyecto"
-      }
+      },
+      "globalMcp": "MCP Servers",
+      "mcp": "MCP Servers"
     },
     "nodeRouting": {
       "blockExecution": "",
@@ -6498,6 +6500,12 @@
     "fileBrowser": {
       "currentDirectory": "",
       "projectRoot": ""
+    },
+    "mcp": {
+      "globalTitle": "Global MCP servers",
+      "projectTitle": "Project MCP servers",
+      "globalDescription": "Configure MCP servers shared by all projects. Project settings may override or disable these servers by name.",
+      "projectDescription": "Configure project-specific MCP servers, overrides, and disabled inherited servers."
     }
   },
   "setup": {
@@ -7892,7 +7900,6 @@
     "promoteTask": "",
     "promoting": "",
     "queued": "En cola",
-    "quickEntryHint": "Enter para crear · Esc para cancelar",
     "refine": "Refinar",
     "refineAddDetails": "Añadir detalles",
     "refineAddDetailsDesc": "Añadir detalles de implementación y contexto",

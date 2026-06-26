@@ -5,12 +5,17 @@ import type { StalePausedReviewSignal } from "./stale-paused-review.js";
 import type { StalePausedTodoSignal } from "./stale-paused-todo.js";
 import type { StalledReviewSignal } from "./stalled-review-detector.js";
 import type { TaskAgeStalenessSignal } from "./task-age-staleness.js";
+import type { SecretScope } from "./secrets-store.js";
 
 export {
   computeCapacityRisk,
   DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
 } from "./capacity.js";
 export type { CapacityRiskSignal } from "./capacity.js";
+
+// FNXC:McpConfig 2026-06-26-02:10: The dashboard Vite build aliases @fusion/core to this browser-safe module, so the pure MCP config helpers are re-exported here for Settings UI import/export, validation, and project-over-global resolution without pulling Node-only stores into the client bundle.
+export { exportMcpServersJson, importMcpServersJson, resolveEffectiveMcpServers } from "./mcp-config.js";
+export { validateMcpServerDefinitionDetailed, validateMcpServerDefinitionsDetailed } from "./settings-validation.js";
 
 /**
  * Valid thinking effort levels for AI agent sessions, controlling the cost/quality tradeoff of reasoning.
@@ -2393,6 +2398,18 @@ export interface Task {
    *  Incremented whenever the task leaves `in-progress`; never decremented and
    *  never cleared by reopen flows. */
   cumulativeActiveMs?: number;
+  /*
+  FNXC:TaskTiming 2026-06-26-10:14:
+  Per-stage dwell-time instrumentation. `cumulativeActiveMs` only measures `in-progress`,
+  so "how long did a task sit in todo / in-review" was unrecoverable without reconstructing
+  it from agent logs. This map records cumulative wall-clock milliseconds spent in EACH
+  column (column name -> total ms), accumulated at the column-transition seam in store.ts
+  exactly like `cumulativeActiveMs`: on every transition we add the dwell of the column being
+  LEFT (newColumnMovedAt - previousColumnMovedAt, clamped >= 0). Multi-visit columns add to
+  the existing bucket; never decremented and never cleared by reopen flows. Directly queryable
+  per stage by consumers like productivity-analytics.ts.
+  */
+  columnDwellMs?: Record<string, number>;
   /** ISO-8601 wall-clock timestamp for the current execution attempt.
    *  Set when entering `in-progress`; may be cleared on reopen to
    *  todo/triage when resume state is not preserved. */
@@ -2826,6 +2843,58 @@ export interface WorktrunkSettings {
   installedBinaryPath?: string;
 }
 
+/**
+ * FNXC:McpConfig 2026-06-25-00:00:
+ * MCP servers are trusted once enabled because downstream runtime slices may launch local commands or connect to operator-provided URLs. Store only declarations here; sensitive env, header, and token material MUST be represented as Fusion-managed secret references, never inline plaintext.
+ */
+export interface McpSecretRef {
+  secretRef: string;
+  scope: SecretScope;
+}
+
+export function isMcpSecretRef(value: unknown): value is McpSecretRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.secretRef === "string" &&
+    candidate.secretRef.trim().length > 0 &&
+    (candidate.scope === "project" || candidate.scope === "global")
+  );
+}
+
+export type McpSensitiveValue = McpSecretRef | string;
+
+export interface McpStdioTransport {
+  transport: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, McpSensitiveValue>;
+}
+
+export interface McpSseTransport {
+  transport: "sse";
+  url: string;
+  headers?: Record<string, McpSensitiveValue>;
+}
+
+export interface McpStreamableHttpTransport {
+  transport: "streamable-http";
+  url: string;
+  headers?: Record<string, McpSensitiveValue>;
+}
+
+export type McpTransport = McpStdioTransport | McpSseTransport | McpStreamableHttpTransport;
+
+export type McpServerDefinition = {
+  name: string;
+  enabled?: boolean;
+} & McpTransport;
+
+export interface McpServersSettings {
+  enabled?: boolean;
+  servers?: McpServerDefinition[];
+}
+
 export interface GlobalSettings {
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
@@ -3218,6 +3287,10 @@ export interface GlobalSettings {
    *  Stores both provider configs, active provider selection, token strategy,
    *  and lifecycle restart metadata for remote tunnel orchestration. */
   remoteAccess?: RemoteAccessProjectSettings;
+  /** Global defaults for user-configurable MCP servers.
+   *  Project-level `mcpServers` entries override by server name and may disable
+   *  a global server without deleting the global declaration. */
+  mcpServers?: McpServersSettings;
   /** Global defaults for worktrunk integration.
    *  Merged with project-level `worktrunk` field-by-field in `getSettings()`/
    *  `getSettingsFast()` so partial project overrides inherit unspecified fields. */
@@ -3385,6 +3458,11 @@ export interface ProjectSettings {
    *  effect when {@link globalPause} is also true (hard stop already
    *  covers everything). */
   enginePaused?: boolean;
+  /**
+   * FNXC:TaskTiming 2026-06-25-00:00:
+   * Records the last time the engine process proved it was alive so startup recovery can exclude process-down wall-clock time from active task duration without changing firstExecutionAt.
+   */
+  engineLastActiveAt?: string;
   /** Maximum number of concurrent AI agents across all activity types
    *  (triage specification, task execution, and merge operations). */
   maxConcurrent: number;
@@ -3518,6 +3596,10 @@ export interface ProjectSettings {
   researchSettings?: ResearchProjectSettings;
   /** Optional per-project `.env` materialization settings for exportable secrets. */
   secretsEnv?: SecretsEnvSettings;
+  /** Project-scoped MCP server overrides.
+   *  Entries override global server declarations by name; `enabled: false` on a
+   *  same-named entry disables that server for this project. */
+  mcpServers?: McpServersSettings;
   /** Sandbox command-execution settings.
    *  When omitted, runtime behavior is preserved via native passthrough defaults. */
   sandbox?: SandboxProjectSettings;
@@ -4310,6 +4392,7 @@ export {
   resolvePersistAgentThinkingLog,
   sanitizeCliAgentSettings,
   sanitizeCliAgentsSettings,
+  sanitizeMcpServers,
   CLI_AGENT_ADAPTER_IDS,
   CLI_AGENT_AUTONOMY_MODES,
 } from "./settings-schema.js";
@@ -4570,6 +4653,9 @@ export interface ArchivedTaskEntry {
   firstExecutionAt?: string;
   /** Accumulated active runtime spent in `in-progress` across attempts. */
   cumulativeActiveMs?: number;
+  /** FNXC:TaskTiming 2026-06-26-10:14: per-column cumulative dwell (ms) carried through
+   *  archive/restore so per-stage wall-clock survives archival. See Task.columnDwellMs. */
+  columnDwellMs?: Record<string, number>;
   /** Current-attempt execution anchor; may be cleared on reopen. */
   executionStartedAt?: string;
   /** First-time completion anchor; may be cleared on reopen. */
@@ -5834,6 +5920,12 @@ export interface AgentHeartbeatEvent {
 
 /** What triggered a heartbeat run */
 export type HeartbeatInvocationSource = "on_demand" | "timer" | "assignment" | "automation" | "routine";
+
+/*
+FNXC:AutomationTools 2026-06-26-00:00:
+Dashboard source-checkout builds alias @fusion/core to this frontend-safe module, so mirror the automation AI-step tool catalog here as a runtime export for UI selectors.
+*/
+export const AUTOMATION_SELECTABLE_TOOLS = ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"] as const;
 
 /** Snapshot of the last blocked state for a task, used for dedup comparison. */
 export interface BlockedStateSnapshot {

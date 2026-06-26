@@ -103,14 +103,35 @@ The Automations toolbar should match Artifacts' controls row: a plain body row w
 
 /* === Automation (ScheduledTasksModal) === */
 .modal.automation-modal {
-  width: min(95vw, 720px);
-  max-width: 95vw;
-  min-width: 0;
-  height: 80vh;
-  min-height: calc(var(--space-2xl) * 15);
-  max-height: calc(100dvh - var(--overlay-padding-top, 10vh) - var(--space-lg));
   overflow: hidden;
-  resize: both;
+}
+
+/*
+FNXC:Automations 2026-06-26-00:00:
+FN-7036 hosts the Automations popup in FloatingWindow on desktop, so the inner modal fills the movable/resizable panel instead of owning fixed overlay dimensions or CSS resize. Mobile uses the same floating shell but forces a full-screen panel and hides resize handles; the embedded Automations view keeps its separate .automations-embedded path.
+*/
+.floating-window--automation .floating-window__body {
+  overflow: hidden;
+}
+
+.floating-window--automation .modal.automation-modal {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: inherit;
+  box-shadow: none;
+}
+
+.floating-window--automation .automation-modal__drag-handle {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.floating-window--automation .automation-modal__drag-handle:active {
+  cursor: grabbing;
 }
 
 .schedule-modal-content {
@@ -793,6 +814,41 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   flex: 1;
 }
 
+/*
+FNXC:AutomationTools 2026-06-26-00:00:
+Automation AI steps expose an explicit per-step tool allowlist. Keep the selector compact and token-based so the modal and embedded Automations surfaces share the same responsive layout.
+*/
+.automation-tool-selector {
+  border: solid var(--border);
+  border-width: thin;
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+}
+
+.automation-tool-selector legend {
+  padding: 0 var(--space-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.automation-tool-selector__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.automation-tool-selector__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.automation-tool-selector__option {
+  margin: 0;
+}
+
 /* Schedule form within modal */
 .schedule-form {
   padding: 0;
@@ -836,6 +892,10 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   .schedule-form {
     padding-left: var(--space-lg);
     padding-right: var(--space-lg);
+  }
+
+  .automation-tool-selector__grid {
+    grid-template-columns: 1fr;
   }
 
   .scheduling-toolbar {
@@ -1025,6 +1085,46 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   overflow: hidden;
 }
 
+/*
+FNXC:AutomationLiveOutput 2026-06-26-00:00:
+Live routine output must reuse the existing run-output typography and status-dot convention while the manual run is active, then give way to the persisted final result after refresh.
+*/
+.routine-live-output {
+  margin-top: var(--space-sm);
+  border: solid var(--border);
+  border-width: thin;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.routine-live-output.running {
+  border-color: var(--color-warning);
+}
+
+.routine-live-output.error {
+  border-color: var(--color-error);
+}
+
+.routine-live-output-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  border-bottom: solid var(--border);
+  border-bottom-width: thin;
+}
+
+.routine-live-output.running .status-dot {
+  background: var(--color-warning);
+}
+
+.routine-live-output.error .status-dot {
+  background: var(--color-error);
+}
+
 .routine-run-output.success {
   border-left: 3px solid var(--color-success);
   background: color-mix(in srgb, var(--color-success) 5%, transparent);
@@ -1210,8 +1310,8 @@ The activity-log embedded (.activity-log-embedded / .activity-log-modal--embedde
 
 /*
 FNXC:AutomationsEmbedded 2026-06-22-00:00:
-Automations can render inline in the main content area (presentation="embedded") instead of as a fixed modal overlay.
-The embedded root fills its host and sheds all modal chrome — no overlay, no card/shadow/border/radius — so the view
+Automations can render inline in the main content area (presentation="embedded") instead of as a floating modal popup.
+The embedded root fills its host and sheds all modal chrome — no FloatingWindow, overlay, card/shadow/border/radius — so the view
 blends into the main panel like Command Center. The view container carries --space-lg padding and a plain .cc-header
 title row (reused from Command Center). The body is a responsive two-pane layout (list + detail) via container query
 when supported, falling back to a min-width media breakpoint, that collapses to a single column below ~900px.
@@ -4302,32 +4402,25 @@ Refresh button pinned at the end of the section nav strip (replaces the removed 
     will-change: transform;
   }
 
-  /* Same treatment for the Automations modal — same min-width: 480px would
-     otherwise force it wider than narrow viewports.
-     FNXC:Automations 2026-06-22-16:00: scope the viewport-takeover to the
-     dialog presentation only. The embedded Automations view uses the distinct
-     .automations-embedded / .automations-embedded-view classes (it does NOT
-     carry .automation-modal), so it is unaffected here — but the guard keeps
-     this rule from ever leaking onto an embedded variant should the markup
-     share the base class later. The embedded view fills its pane and scrolls
-     via .automations-embedded-view (inline-size:100% + overflow-y:auto). */
-  .modal-overlay:has(.automation-modal:not(.automation-modal--embedded)) {
-    padding-top: 0;
-    align-items: stretch;
-    justify-content: stretch;
+  .floating-window--automation {
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    min-width: 100vw !important;
+    min-height: 100dvh !important;
+    max-width: 100vw !important;
+    max-height: 100dvh !important;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
-  .modal.automation-modal:not(.automation-modal--embedded) {
-    width: 100vw;
-    min-width: 0;
-    max-width: 100vw;
-    height: 100dvh;
-    min-height: 0;
-    max-height: 100dvh;
-    margin: 0;
-    border: none;
+  .floating-window--automation .floating-window__resize-handle {
+    display: none;
+  }
+
+  .floating-window--automation .modal.automation-modal {
     border-radius: 0;
-    resize: none;
   }
 
   .gm-layout {

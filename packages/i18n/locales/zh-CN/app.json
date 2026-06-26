@@ -6118,7 +6118,9 @@
       "tooltip": {
         "global": "在所有项目中共享",
         "project": "特定于此项目"
-      }
+      },
+      "globalMcp": "MCP Servers",
+      "mcp": "MCP Servers"
     },
     "nodeRouting": {
       "blockExecution": "",
@@ -6498,6 +6500,12 @@
     "fileBrowser": {
       "currentDirectory": "",
       "projectRoot": ""
+    },
+    "mcp": {
+      "globalTitle": "Global MCP servers",
+      "projectTitle": "Project MCP servers",
+      "globalDescription": "Configure MCP servers shared by all projects. Project settings may override or disable these servers by name.",
+      "projectDescription": "Configure project-specific MCP servers, overrides, and disabled inherited servers."
     }
   },
   "setup": {
@@ -7892,7 +7900,6 @@
     "promoteTask": "",
     "promoting": "",
     "queued": "排队中",
-    "quickEntryHint": "Enter 创建 · Esc 取消",
     "refine": "优化",
     "refineAddDetails": "添加细节",
     "refineAddDetailsDesc": "添加实现细节和上下文",

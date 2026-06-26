@@ -216,6 +216,48 @@ describe("agent skills flow - full integration", () => {
     expect(disabledWarnings).toHaveLength(0);
   });
 
+  it("flow with slash and namespaced requested names resolves through shared override", async () => {
+    const projectRootDir = createMockProjectDir({});
+    const mockAgent: Agent = {
+      id: "agent-001",
+      name: "Slash Skill Agent",
+      role: "executor",
+      state: "idle",
+      metadata: { skills: ["review/pr", "source::skills/gamma/SKILL.md"] },
+    } as unknown as Agent;
+    const mockAgentStore = {
+      getAgent: vi.fn().mockResolvedValue(mockAgent),
+    } as unknown as AgentStore;
+
+    const sessionResult = await buildSessionSkillContext({
+      agentStore: mockAgentStore,
+      task: { assignedAgentId: "agent-001" },
+      sessionPurpose: "executor",
+      projectRootDir,
+    });
+
+    expect(sessionResult.skillSource).toBe("assigned-agent");
+    expect(sessionResult.skillSelectionContext?.requestedSkillNames).toEqual(["review/pr", "gamma/SKILL.md"]);
+
+    const resolvedSkills = resolveSessionSkills(sessionResult.skillSelectionContext!);
+    const override = createSkillsOverrideFromSelection(resolvedSkills, {
+      requestedSkillNames: sessionResult.skillSelectionContext?.requestedSkillNames,
+      sessionPurpose: sessionResult.skillSelectionContext?.sessionPurpose,
+    });
+
+    const result = override({
+      skills: [
+        { name: "pr", filePath: "skills/review/pr/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        { name: "gamma", filePath: "skills/gamma/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        { name: "lint", filePath: "skills/lint/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+      ],
+      diagnostics: [],
+    });
+
+    expect(result.skills.map((skill) => skill.name)).toEqual(["pr", "gamma"]);
+    expect(result.diagnostics.some((diagnostic) => diagnostic.message.includes("not found"))).toBe(false);
+  });
+
   it("flow with role fallback when assigned agent has no skills", async () => {
     // Step 1: Set up mock filesystem
     const projectRootDir = createMockProjectDir({

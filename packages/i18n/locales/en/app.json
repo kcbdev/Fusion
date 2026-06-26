@@ -5220,6 +5220,8 @@
     "advancedMode": "Multi-Step",
     "advancedModeHelp": "Run multiple steps sequentially (commands and AI prompts)",
     "aiPromptType": "AI Prompt",
+    "allowedToolsHint": "AI prompt steps use all tools by default. Clear tools only when this automation should run without tool access.",
+    "allowedToolsLabel": "Allowed tools",
     "andMore_one": "…and {{count}} more",
     "andMore_other": "…and {{count}} more",
     "apiEndpointHint": "API endpoint path that triggers this routine",
@@ -5265,6 +5267,7 @@
     "cronPresetWeekly": "Every week (Monday)",
     "cronRequired": "Cron expression is required for custom schedules",
     "crontabGuru": "crontab.guru",
+    "clearTools": "Clear",
     "delete": "Delete",
     "deleteError": "Failed to delete routine",
     "deleteMessage": "Delete schedule {{name}}? This cannot be undone.",
@@ -5320,6 +5323,11 @@
     "globalScoped": "This schedule will be created at global scope.",
     "globalScopeTitle": "Global scope",
     "lastLabel": "Last:",
+    "liveOutput": "Live output",
+    "liveOutputRunning": "Live output — running",
+    "liveRunComplete": "Run complete",
+    "liveRunError": "Run failed",
+    "liveRunStarting": "Starting run…",
     "loadRoutinesError": "Failed to load routines",
     "manualTriggerInfo": "This routine will be triggered manually via the dashboard or API.",
     "modeAriaLabel": "Execution mode",
@@ -5386,6 +5394,7 @@
     "scopeLabel": "Scope",
     "scopeLocked": "Scope is locked to {{scope}} for existing schedules",
     "scopeLockedTitle": "Scope is locked to {{scope}} for existing routines",
+    "selectAllTools": "Select all",
     "selectProjectTitle": "Select a project to enable project scope",
     "simpleMode": "Simple",
     "simpleModeHelp": "Run a single shell command or AI prompt",
@@ -6128,7 +6137,9 @@
       "tooltip": {
         "global": "Shared across all projects",
         "project": "Specific to this project"
-      }
+      },
+      "globalMcp": "MCP Servers",
+      "mcp": "MCP Servers"
     },
     "nodeRouting": {
       "blockExecution": "Block execution",
@@ -6508,6 +6519,12 @@
     "fileBrowser": {
       "currentDirectory": "Current directory:",
       "projectRoot": "(project root)"
+    },
+    "mcp": {
+      "globalTitle": "Global MCP servers",
+      "projectTitle": "Project MCP servers",
+      "globalDescription": "Configure MCP servers shared by all projects. Project settings may override or disable these servers by name.",
+      "projectDescription": "Configure project-specific MCP servers, overrides, and disabled inherited servers."
     }
   },
   "setup": {
@@ -7902,7 +7919,6 @@
     "promoteTask": "Promote task",
     "promoting": "Promoting…",
     "queued": "Queued",
-    "quickEntryHint": "Enter to create · Esc to cancel",
     "refine": "Refine",
     "refineAddDetails": "Add details",
     "refineAddDetailsDesc": "Add implementation details and context",

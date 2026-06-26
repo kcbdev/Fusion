@@ -3,10 +3,18 @@
 FNXC:TestInfrastructure 2026-06-25-00:00:
 verify:fast is the opt-in, TEST-FREE verification command. It gives deterministic,
 flake-free signal in seconds without running the test suite, by doing exactly:
-  1. typecheck — scoped to the changed packages (their `typecheck` script, or
+  1. bootstrap — rebuild missing/stale workspace dist prerequisites used by package builds.
+  2. typecheck — scoped to the changed packages (their `typecheck` script, or
      `pnpm --filter <pkg> exec tsc --noEmit -p .` when none exists).
-  2. build — scoped to the changed packages (`pnpm --filter <pkg> build`).
-  3. boot smoke — once (scripts/boot-smoke.mjs: CLI --help + real serve /api/health).
+  3. build — scoped to the changed packages, plus the CLI package needed by boot smoke.
+  4. boot smoke — once (scripts/boot-smoke.mjs: CLI --help + real serve /api/health).
+
+FNXC:TestInfrastructure 2026-06-26-00:49:
+A fresh worktree can have no plugin runtime dist artifacts or `packages/cli/dist/bin.js`.
+Since package builds import those plugin artifacts and boot-smoke invokes the
+source-checkout CLI wrapper, verify:fast must bootstrap workspace dist artifacts
+and always build @runfusion/fusion before the smoke so the command proves a
+runnable checkout instead of failing on a missing prerequisite.
 
 Rationale: docs/testing.md observes the broad test gate "caught no recalled real
 bugs while consuming ~70% of shipping time in flake triage." typecheck+build+boot
@@ -42,6 +50,7 @@ import { deriveBudgetMs, runWithWatchdog } from "./lib/run-vitest-watchdog.mjs";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const bootSmokeScriptPath = path.join(scriptDir, "boot-smoke.mjs");
+const artifactBootstrapScriptPath = path.join(scriptDir, "ensure-test-artifacts.mjs");
 
 /*
 FNXC:TestInfrastructure 2026-06-25-00:00:
@@ -50,6 +59,7 @@ scripts (heavy native/electron + RN toolchains), so verify:fast mirrors that
 policy and skips them with a note rather than failing on an unbuildable filter.
 */
 export const VERIFY_EXCLUDED_PACKAGES = new Set(["@fusion/desktop", "@fusion/mobile"]);
+export const BOOT_SMOKE_REQUIRED_BUILD_PACKAGES = ["@runfusion/fusion"];
 
 /**
  * Build the scoped typecheck step for a package. Prefers the package's own
@@ -97,34 +107,72 @@ export function buildBootSmokeStep(smokeScriptPath, nodeBin = process.execPath) 
 }
 
 /**
+ * Build the prerequisite artifact bootstrap step. It is intentionally first so
+ * fresh worktrees have the bundled plugin/runtime dist outputs before scoped
+ * package builds (especially @runfusion/fusion) import them.
+ *
+ * @param {string} bootstrapScriptPath
+ * @param {string} [nodeBin]
+ */
+export function buildArtifactBootstrapStep(bootstrapScriptPath, nodeBin = process.execPath) {
+  return {
+    id: "bootstrap-artifacts",
+    kind: "bootstrap-artifacts",
+    pkg: null,
+    label: "bootstrap workspace dist artifacts",
+    command: nodeBin,
+    args: [bootstrapScriptPath],
+    klass: "changed",
+  };
+}
+
+/**
  * Pure planner: turn the affected package set into an ordered step list.
- * typecheck (all eligible) → build (eligible with a build script) → boot smoke.
- * With no eligible packages this is just the boot-smoke step, satisfying the
- * "no packages changed ⇒ boot smoke only" contract.
+ * bootstrap missing/stale dist artifacts → typecheck (all eligible) → build
+ * (eligible with a build script) → required boot-smoke build prerequisites →
+ * boot smoke. With no eligible packages this still builds the source-checkout
+ * CLI before the smoke so fresh worktrees have `packages/cli/dist/bin.js`.
  *
  * @param {object} opts
  * @param {string[]} [opts.packages]  affected package names
  * @param {Map<string, { dir?: string, hasTypecheck?: boolean, hasBuild?: boolean }>} [opts.packageMeta]
  * @param {string} opts.bootSmokeScriptPath
+ * @param {string} [opts.artifactBootstrapScriptPath]
  * @param {string} [opts.nodeBin]
- * @returns {{ eligiblePackages: string[], excludedPackages: string[], steps: object[] }}
+ * @returns {{ eligiblePackages: string[], excludedPackages: string[], requiredBootBuildPackages: string[], steps: object[] }}
  */
-export function buildVerifyPlan({ packages = [], packageMeta = new Map(), bootSmokeScriptPath: smokeScriptPath, nodeBin = process.execPath } = {}) {
+export function buildVerifyPlan({ packages = [], packageMeta = new Map(), bootSmokeScriptPath: smokeScriptPath, artifactBootstrapScriptPath: bootstrapScriptPath = artifactBootstrapScriptPath, nodeBin = process.execPath } = {}) {
   const eligiblePackages = packages.filter((pkg) => !VERIFY_EXCLUDED_PACKAGES.has(pkg));
   const excludedPackages = packages.filter((pkg) => VERIFY_EXCLUDED_PACKAGES.has(pkg));
 
-  const steps = [];
+  const steps = [buildArtifactBootstrapStep(bootstrapScriptPath, nodeBin)];
   for (const pkg of eligiblePackages) {
     steps.push(buildTypecheckStep(pkg, packageMeta.get(pkg) ?? {}));
   }
+
+  const builtPackages = new Set();
   for (const pkg of eligiblePackages) {
     const meta = packageMeta.get(pkg) ?? {};
     // Only build packages that declare a build script; pure test/config packages
     // have nothing to emit and a `pnpm --filter <pkg> build` would error.
-    if (meta.hasBuild !== false) steps.push(buildBuildStep(pkg));
+    if (meta.hasBuild !== false) {
+      steps.push(buildBuildStep(pkg));
+      builtPackages.add(pkg);
+    }
   }
+
+  const requiredBootBuildPackages = [];
+  for (const pkg of BOOT_SMOKE_REQUIRED_BUILD_PACKAGES) {
+    if (builtPackages.has(pkg) || VERIFY_EXCLUDED_PACKAGES.has(pkg)) continue;
+    const meta = packageMeta.get(pkg) ?? { hasBuild: true };
+    if (meta.hasBuild === false) continue;
+    requiredBootBuildPackages.push(pkg);
+    steps.push(buildBuildStep(pkg));
+    builtPackages.add(pkg);
+  }
+
   steps.push(buildBootSmokeStep(smokeScriptPath, nodeBin));
-  return { eligiblePackages, excludedPackages, steps };
+  return { eligiblePackages, excludedPackages, requiredBootBuildPackages, steps };
 }
 
 /**
@@ -173,21 +221,21 @@ export function resolveAffectedForVerify() {
   const packageDirByName = buildPackageDirByName(workspacePackages);
 
   if (!comparisonBase) {
-    return { packages: [], packageDirByName, note: `could not resolve merge-base with ${baseBranch}; running boot smoke only` };
+    return { packages: [], packageDirByName, note: `could not resolve merge-base with ${baseBranch}; running boot-smoke prerequisite build only` };
   }
   const changedFiles = changedFilesSince(comparisonBase);
   if (changedFiles === null) {
-    return { packages: [], packageDirByName, note: "failed to read git diff; running boot smoke only" };
+    return { packages: [], packageDirByName, note: "failed to read git diff; running boot-smoke prerequisite build only" };
   }
   if (changedFiles.length === 0) {
-    return { packages: [], packageDirByName, note: "no changes detected against base; running boot smoke only" };
+    return { packages: [], packageDirByName, note: "no changes detected against base; running boot-smoke prerequisite build only" };
   }
   const affected = resolveAffectedPackages(changedFiles, packageNameByDir);
   if (affected === null) {
-    return { packages: [], packageDirByName, note: "changed file did not map to a workspace package; running boot smoke only" };
+    return { packages: [], packageDirByName, note: "changed file did not map to a workspace package; running boot-smoke prerequisite build only" };
   }
   if (affected.length === 0) {
-    return { packages: [], packageDirByName, note: "no affected workspace package (root/docs-only changes); running boot smoke only" };
+    return { packages: [], packageDirByName, note: "no affected workspace package (root/docs-only changes); running boot-smoke prerequisite build only" };
   }
   return { packages: affected, packageDirByName, note: `affected packages: ${affected.join(", ")}` };
 }
@@ -224,25 +272,29 @@ export async function runStep(step, { spawnFn = spawn, log = console.log, errLog
 
 export async function main() {
   const overallStart = Date.now();
-  console.log("[verify:fast] test-free verification: typecheck + build (scoped to changed packages) + boot smoke.");
+  console.log("[verify:fast] test-free verification: scoped typecheck/build + CLI build + boot smoke.");
 
   const { packages, packageDirByName, note } = resolveAffectedForVerify();
   console.log(`[verify:fast] ${note}`);
 
-  const packageMeta = readPackageMeta(packages, packageDirByName);
-  const { eligiblePackages, excludedPackages, steps } = buildVerifyPlan({
+  const packageMeta = readPackageMeta([...new Set([...packages, ...BOOT_SMOKE_REQUIRED_BUILD_PACKAGES])], packageDirByName);
+  const { eligiblePackages, excludedPackages, requiredBootBuildPackages, steps } = buildVerifyPlan({
     packages,
     packageMeta,
     bootSmokeScriptPath,
+    artifactBootstrapScriptPath,
   });
 
   if (excludedPackages.length > 0) {
     console.log(`[verify:fast] skipping excluded packages (also excluded from root build/typecheck): ${excludedPackages.join(", ")}`);
   }
   if (eligiblePackages.length === 0) {
-    console.log("[verify:fast] no scoped packages to verify; running boot smoke only.");
+    console.log("[verify:fast] no scoped packages to verify; running boot-smoke prerequisite build and boot smoke only.");
   } else {
     console.log(`[verify:fast] scoped to: ${eligiblePackages.join(", ")}`);
+  }
+  if (requiredBootBuildPackages.length > 0) {
+    console.log(`[verify:fast] boot-smoke prerequisite build: ${requiredBootBuildPackages.join(", ")}`);
   }
   console.log(`[verify:fast] plan: ${steps.map((s) => s.id).join(" -> ")}`);
 

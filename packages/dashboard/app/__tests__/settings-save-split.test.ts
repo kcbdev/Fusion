@@ -214,6 +214,31 @@ describe("splitSettingsSave", () => {
     expect(projectPatch).toEqual({ maxConcurrent: 7 });
   });
 
+  it("routes shared mcpServers only to the active MCP scope", () => {
+    expect(isGlobalSettingsKey("mcpServers")).toBe(true);
+    expect(isProjectSettingsKey("mcpServers")).toBe(true);
+    const globalMcp = { enabled: true, servers: [{ name: "global-docs", transport: "stdio", command: "docs" }] };
+    const projectMcp = { enabled: true, servers: [{ name: "project-docs", transport: "stdio", command: "docs" }] };
+
+    const globalResult = splitSettingsSave({
+      payload: { mcpServers: globalMcp },
+      initialValues: null,
+      initialScopedValues: { global: { mcpServers: { enabled: false, servers: [] } }, project: { mcpServers: projectMcp } } as never,
+      activeSection: "global-mcp",
+    });
+    expect(globalResult.globalPatch).toEqual({ mcpServers: globalMcp });
+    expect(globalResult.projectPatch).toEqual({});
+
+    const projectResult = splitSettingsSave({
+      payload: { mcpServers: projectMcp },
+      initialValues: null,
+      initialScopedValues: { global: { mcpServers: globalMcp }, project: { mcpServers: { enabled: false, servers: [] } } } as never,
+      activeSection: "mcp",
+    });
+    expect(projectResult.globalPatch).toEqual({});
+    expect(projectResult.projectPatch).toEqual({ mcpServers: projectMcp });
+  });
+
   it("routes enabled built-in workflow ids as a changed project setting", () => {
     const { projectPatch } = splitSettingsSave({
       payload: { enabledBuiltinWorkflowIds: ["builtin:coding"] },

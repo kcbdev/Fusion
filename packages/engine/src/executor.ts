@@ -53,7 +53,6 @@ import {
   resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
   resolveEffectiveAgentPermissionPolicy,
-  resolveProjectDefaultModel,
   resolveAgentMemoryInclusionMode,
   loadWorkspaceConfig,
   type WorkspaceConfig,
@@ -77,6 +76,7 @@ import {
   resolveExecutorSessionModel,
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import { reviewStep, type ReviewVerdict, type ReviewResult } from "./reviewer.js";
 import { selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 import { resolveSandboxBackend } from "./sandbox/index.js";
@@ -2367,6 +2367,12 @@ export class TaskExecutor {
    * prevents new work dispatch — running sessions continue to completion.
    * Paused tasks are moved back to `todo` rather than marked as `failed`.
    */
+  private async resolveMcpServers(agentId?: string | null) {
+    // FNXC:McpConfig 2026-06-25-22:20:
+    // Executor-owned lanes (main execution, retry, workflow model nodes, self-fix, and spawned child sessions) resolve the same trusted MCP server set from the task store immediately before session creation so secret material is never persisted in task state.
+    return (await resolveMcpServersForStore(this.store, { agentId: agentId ?? undefined })).servers;
+  }
+
   constructor(
     private store: TaskStore,
     private rootDir: string,
@@ -7838,6 +7844,8 @@ export class TaskExecutor {
           effectiveAgentId: stepColumnAgent?.agent.id,
           actionGateContext: this.buildActionGateContext(task.id, stepIdentityAgent, settings.defaultAgentPermissionPolicy),
           permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, stepIdentityAgent, settings.defaultAgentPermissionPolicy),
+          // FNXC:McpConfig 2026-06-25-23:03: Per-step workflow sessions are an executor lane, so they inherit the task's resolved MCP set from the effective step identity agent and never re-read or log plaintext secret values.
+          mcpServers: await this.resolveMcpServers(stepIdentityAgent?.id),
           // Pass skill selection context from the main executor session
           skillSelection: skillContext.skillSelectionContext,
           // Pass agentStore and messageStore for delegation and messaging tools
@@ -8637,6 +8645,7 @@ export class TaskExecutor {
             settings,
             sessionManager,
             taskEnv,
+            mcpServers: await this.resolveMcpServers(identityAgent?.id),
             // Skill selection: use assigned agent skills if available, otherwise role fallback
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
             // Column-agent principal alignment (plan U5, R5): action gating is
@@ -9057,6 +9066,7 @@ export class TaskExecutor {
                   settings,
                   sessionManager: SessionManager.create(worktreePath),
                   taskEnv,
+                  mcpServers: await this.resolveMcpServers(identityAgent?.id),
                   // Skill selection: use assigned agent skills if available, otherwise role fallback
                   ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
                   // U5 (R5): retry session re-keys gating to the effective principal,
@@ -11934,6 +11944,7 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: extraEnv,
+        mcpServers: await this.resolveMcpServers(undefined),
         // FNXC:SessionRouting 2026-06-24-11:20:
         // #1675: propagate task id so verification-fix requests carry the same
         // X-Session-Id/X-Session-Affinity as the primary session.
@@ -12671,13 +12682,21 @@ You have access to the file system to review changes.${verdictBlock}`;
     });
 
     // Determine primary model and an explicit fallback. The workflow step's
-    // own override takes precedence; otherwise we use the project default
-    // override before falling through to the global default. The
-    // fallback is the per-step override's missing-counterpart settings, then
-    // the global validator/fallback pair, then the executor's `fallbackProvider`.
-    const defaultModel = resolveProjectDefaultModel(settings);
-    const primaryProvider = workflowStep.modelProvider || defaultModel.provider;
-    const primaryModelId = workflowStep.modelId || defaultModel.modelId;
+    // own override takes precedence; otherwise use the canonical executor
+    // hierarchy: task override → project execution lane → global execution lane
+    // → project default override → global default. The fallback is the per-step
+    // override's missing-counterpart settings, then the global validator/fallback
+    // pair, then the executor's `fallbackProvider`.
+    // FNXC:ModelResolution 2026-06-25-12:00: FN-7039 requires workflow steps to inherit project execution-lane model settings before default settings so configured Execution models reach step sessions unless the step itself overrides them.
+    const assignedRuntimeConfig = await this.getAssignedAgentRuntimeConfig(task.assignedAgentId);
+    const executorModel = resolveExecutorSessionModel(
+      task.modelProvider,
+      task.modelId,
+      settings,
+      assignedRuntimeConfig,
+    );
+    const primaryProvider = workflowStep.modelProvider || executorModel.provider;
+    const primaryModelId = workflowStep.modelId || executorModel.modelId;
     const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
 
     type ModelTuple = { provider?: string; modelId?: string };
@@ -12822,6 +12841,7 @@ You have access to the file system to review changes.${verdictBlock}`;
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: stepEnv,
+        mcpServers: await this.resolveMcpServers(undefined),
         // FNXC:SessionRouting 2026-06-24-11:20:
         // #1675: propagate task id so workflow-step requests carry the same
         // X-Session-Id/X-Session-Affinity as the primary session.
@@ -15565,6 +15585,7 @@ Child agent: ${agent.id} (${name})`;
             runAuditor: createRunAuditor(this.store, this.getRunContextFor(taskId)),
             settings,
             taskEnv,
+            mcpServers: await this.resolveMcpServers(agent.id),
             // FNXC:SessionRouting 2026-06-24-11:20:
             // #1675: propagate task id so child-agent requests carry the same
             // X-Session-Id/X-Session-Affinity as the parent task session.

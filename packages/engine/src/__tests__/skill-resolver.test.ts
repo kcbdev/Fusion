@@ -605,6 +605,107 @@ describe("createSkillsOverrideFromSelection", () => {
       expect(result.diagnostics[0].message).toContain("CustomSkill");
     });
 
+    it.each([
+      ["single token", "pr"],
+      ["slash form", "review/pr"],
+      ["skill file path form", "review/pr/SKILL.md"],
+      ["catalog id form", "source::skills/review/pr/SKILL.md"],
+    ])("loads requested skills by %s", (_label, requestedName) => {
+      const selection: SkillSelectionResult = {
+        allowedSkillPaths: new Set(),
+        excludedSkillPaths: new Set<string>(),
+        diagnostics: [],
+        filterActive: true,
+      };
+
+      const override = createSkillsOverrideFromSelection(selection, {
+        requestedSkillNames: [requestedName],
+        sessionPurpose: "test",
+      });
+
+      const result = override({
+        skills: [
+          { name: "pr", filePath: "/skills/review/pr/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+          { name: "gamma", filePath: "/skills/gamma/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        ],
+        diagnostics: [],
+      });
+
+      expect(result.skills.map((skill) => skill.name)).toEqual(["pr"]);
+      expect(result.diagnostics.some((diagnostic) => diagnostic.message.includes("not found"))).toBe(false);
+    });
+
+    it("emits the requested-skill-not-found diagnostic for genuinely absent requested names", () => {
+      const selection: SkillSelectionResult = {
+        allowedSkillPaths: new Set(),
+        excludedSkillPaths: new Set<string>(),
+        diagnostics: [],
+        filterActive: true,
+      };
+
+      const override = createSkillsOverrideFromSelection(selection, {
+        requestedSkillNames: ["review/absent"],
+        sessionPurpose: "chat",
+      });
+
+      const result = override({
+        skills: [
+          { name: "pr", filePath: "/skills/review/pr/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        ],
+        diagnostics: [],
+      });
+
+      expect(result.skills).toHaveLength(0);
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0].type).toBe("info");
+      expect(result.diagnostics[0].message).toContain("Requested skill 'review/absent' not found");
+    });
+
+    it("does not force-load requested skills disabled by execution settings", () => {
+      const selection: SkillSelectionResult = {
+        allowedSkillPaths: new Set(),
+        excludedSkillPaths: new Set<string>(["/skills/review/pr/SKILL.md"]),
+        diagnostics: [],
+        filterActive: true,
+      };
+
+      const override = createSkillsOverrideFromSelection(selection, {
+        requestedSkillNames: ["review/pr"],
+        sessionPurpose: "chat",
+      });
+
+      const result = override({
+        skills: [
+          { name: "pr", filePath: "/skills/review/pr/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        ],
+        diagnostics: [],
+      });
+
+      expect(result.skills).toHaveLength(0);
+      expect(result.diagnostics).toHaveLength(1);
+      expect(result.diagnostics[0].type).toBe("warning");
+      expect(result.diagnostics[0].message).toContain("disabled by project execution settings");
+      expect(result.diagnostics.some((diagnostic) => diagnostic.message.includes("not found"))).toBe(false);
+    });
+
+    it("leaves no-requested-names inactive filtering behavior unchanged", () => {
+      const selection: SkillSelectionResult = {
+        allowedSkillPaths: new Set(),
+        excludedSkillPaths: new Set<string>(),
+        diagnostics: [],
+        filterActive: false,
+      };
+      const base = {
+        skills: [
+          { name: "pr", filePath: "/skills/review/pr/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+          { name: "gamma", filePath: "/skills/gamma/SKILL.md", description: "", baseDir: "", sourceInfo: {} as any, disableModelInvocation: false },
+        ],
+        diagnostics: [],
+      };
+
+      expect(createSkillsOverrideFromSelection(selection)(base)).toBe(base);
+    });
+
     it("preserves base diagnostics alongside new diagnostics", () => {
       const selection: SkillSelectionResult = {
         allowedSkillPaths: new Set(["/path/foo"]),

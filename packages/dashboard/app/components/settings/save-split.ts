@@ -79,6 +79,7 @@ const GLOBAL_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
     "updateCheckFrequency",
     "autoReloadOnVersionChange",
   ]),
+  "global-mcp": new Set(["mcpServers"]),
   "global-models": new Set([
     "defaultProvider",
     "defaultModelId",
@@ -214,6 +215,9 @@ export function splitSettingsSave({
     if (key === "githubTrackingDefaultRepo" && activeSection !== "global-general") {
       continue;
     }
+    if (key === "mcpServers" && activeSection !== "global-mcp") {
+      continue;
+    }
     if (key === "persistAgentThinkingLog") {
       continue;
     }
@@ -267,6 +271,7 @@ export function splitSettingsSave({
     if (key === "githubTokenConfigured" || key === "prAuthAvailable") continue; // server-only
     if (key === "customProviders") continue; // persisted via dedicated routes, not save-split (see global branch above)
     if (key === "githubTrackingDefaultRepo" && activeSection === "global-general") continue;
+    if (key === "mcpServers" && activeSection === "global-mcp") continue;
     if (!isProjectSettingsKey(key)) continue;
 
     const initialProjectValue = initialScopedValues?.project?.[key as keyof Settings];

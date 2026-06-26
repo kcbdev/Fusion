@@ -167,7 +167,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 131;
+const SCHEMA_VERSION = 132;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -301,6 +301,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   columnMovedAt TEXT,
   firstExecutionAt TEXT,
   cumulativeActiveMs INTEGER,
+  -- FNXC:TaskTiming 2026-06-26-10:14: per-column dwell map (JSON text) accumulated at the
+  -- column-transition seam (store.ts moveTaskInternal). Fills the gap left by cumulativeActiveMs
+  -- (in-progress only) so todo/in-review/done wall-clock is queryable per stage. Source of truth
+  -- for getSchemaCompatibilityTableSchemas(); fresh DBs get it here, existing DBs are backfilled
+  -- by the version-130 migration / ensureSchemaCompatibility() at boot.
+  columnDwellMs TEXT,
   executionStartedAt TEXT,
   executionCompletedAt TEXT,
   -- JSON columns for nested arrays/objects
@@ -5340,7 +5346,18 @@ export class Database {
       });
     }
 
-    // Migration 130: post-merge graph-native cutover (U7b) — legacy enable-id normalization.
+    if (version < 130) {
+      // FNXC:TaskTiming 2026-06-26-10:14: add the columnDwellMs column so existing DBs durably
+      // persist per-stage dwell going forward. Backfill is also covered by ensureSchemaCompatibility()
+      // (SCHEMA_SQL is its source of truth); this versioned migration keeps migrated and
+      // fresh-from-SCHEMA_SQL DBs converged. No data backfill: pre-existing rows start with NULL
+      // (= undefined map) and accumulate from their next column transition.
+      this.applyMigration(130, () => {
+        this.addColumnIfMissing("tasks", "columnDwellMs", "TEXT");
+      });
+    }
+
+    // Migration 131: post-merge graph-native cutover (U7b) — legacy enable-id normalization.
     // FNXC:WorkflowPostMerge 2026-06-26-12:00:
     // Graph-native post-merge is now default-ON and the graph is the single post-merge owner.
     // A task's `enabledWorkflowSteps` must reference GRAPH node ids so the graph enables the
@@ -5351,8 +5368,8 @@ export class Database {
     // untouched. Data DML, so wrapped in a transaction; identity-stable + idempotent (a second
     // run finds node ids already in place and no WS-row left to rewrite). The `workflow_steps`
     // table is intentionally KEPT (dropped in U7c once all readers are gone).
-    if (version < 130) {
-      this.applyMigration(130, () => {
+    if (version < 131) {
+      this.applyMigration(131, () => {
         // FNXC:WorkflowPostMerge 2026-06-26-14:00: U7c removed `workflow_steps` from
         // SCHEMA_SQL, so a DB stamped between the table's creation migration and 130 can
         // legitimately lack the table (nothing to normalize). Guard the SELECT — absence
@@ -5416,17 +5433,17 @@ export class Database {
       });
     }
 
-    // Migration 131: drop the legacy `workflow_steps` table (U7c).
+    // Migration 132: drop the legacy `workflow_steps` table (U7c).
     // FNXC:WorkflowStepCRUD 2026-06-26-14:00:
     // Pre-merge and post-merge workflow steps run graph-native and record into
-    // `task.workflowStepResults`. Migration 130 already normalized legacy compiled-step
+    // `task.workflowStepResults`. Migration 131 already normalized legacy compiled-step
     // enable ids (WS-xxx) in `tasks.enabledWorkflowSteps` to their built-in optional-group
     // node ids, so the table holds nothing read at runtime. All store CRUD, the
     // workflow-compilation materializer, the merger post-merge path, and the executor
     // recovery table read have been removed. Drop the table. Idempotent
     // (`DROP TABLE IF EXISTS`); a fresh DB never created it (removed from SCHEMA_SQL).
-    if (version < 131) {
-      this.applyMigration(131, () => {
+    if (version < 132) {
+      this.applyMigration(132, () => {
         this.db.exec("DROP TABLE IF EXISTS workflow_steps");
       });
     }

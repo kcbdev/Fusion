@@ -12,13 +12,14 @@ import {
   updateRoutine,
   deleteRoutine,
   runRoutine,
+  streamRoutineRun,
 } from "../api";
+import type { RoutineRunStreamEvent } from "../api";
 import { RoutineCard } from "./RoutineCard";
 import { RoutineEditor } from "./RoutineEditor";
 import type { ToastType } from "../hooks/useToast";
-import { useModalResizePersist } from "../hooks/useModalResizePersist";
-import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
+import { FloatingWindow } from "./FloatingWindow";
 
 /** Polling interval for auto-refreshing the schedule/routine list (30 seconds). */
 const POLL_INTERVAL_MS = 30_000;
@@ -28,11 +29,11 @@ export type SchedulingScope = "global" | "project";
 
 /**
  * FNXC:AutomationsEmbedded 2026-06-22-00:00:
- * Automations can render either as a fixed modal overlay ("modal", the default and historical path) or inline
+ * Automations can render either as a draggable/resizable floating modal ("modal", the default path) or inline
  * as a main-content-area view ("embedded"). The embedded presentation fills the main panel like Command Center:
  * no overlay, no card/shadow/border chrome, a plain `.cc-header`-style title row, and a responsive two-pane
- * body (list + detail) that collapses to a single column below ~900px. The modal path is kept byte-identical;
- * modal-only behaviors (scroll lock via resize-persist, escape-to-close, overlay dismiss) are disabled when embedded.
+ * body (list + detail) that collapses to a single column below ~900px. Floating chrome and Escape-to-close are
+ * modal-only behaviors; the embedded presentation bypasses FloatingWindow entirely.
  */
 interface ScheduledTasksModalProps {
   onClose: () => void;
@@ -45,7 +46,7 @@ interface ScheduledTasksModalProps {
 
 export function ScheduledTasksModal({ onClose, addToast, projectId, presentation = "modal" }: ScheduledTasksModalProps) {
   const { t } = useTranslation("app");
-  const { isEmbedded, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
+  const { isEmbedded, escapeEnabled } = useEmbeddedPresentation(presentation);
   // Scope state: defaults to "project" when projectId exists, else "global"
   const [activeScope, setActiveScope] = useState<SchedulingScope>(() => projectId ? "project" : "global");
 
@@ -55,12 +56,10 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   const [editingRoutine, setEditingRoutine] = useState<Routine | undefined>();
   const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
   const [lastRunOutput, setLastRunOutput] = useState<Record<string, { output: string; error?: string; success: boolean }>>({});
+  const [liveRunOutput, setLiveRunOutput] = useState<Record<string, { output: string; status: "idle" | "running" | "complete" | "error" }>>({});
+  const liveRunStreamsRef = useRef<Record<string, { close: () => void }>>({});
   // FNXC:AutomationsEmbedded 2026-06-22-00:00: Two-pane embedded layout tracks the routine selected in the left list to render its detail on the right.
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
-
-  const modalRef = useRef<HTMLDivElement>(null);
-  // Resize-persist is a modal-only affordance; the embedded view fills its host and never resizes.
-  useModalResizePersist(modalRef, resizePersistEnabled, "fusion:automation-modal-size");
 
   // Build scope options for API calls
   const scopeOptions = useMemo(() => ({
@@ -124,7 +123,55 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose, routineView, escapeEnabled]);
 
-  const overlayDismissProps = useOverlayDismiss(onClose);
+  useEffect(() => {
+    return () => {
+      for (const stream of Object.values(liveRunStreamsRef.current)) stream.close();
+      liveRunStreamsRef.current = {};
+    };
+  }, []);
+
+  const appendLiveRunLine = useCallback((routineId: string, line: string, status: "running" | "complete" | "error" = "running") => {
+    setLiveRunOutput((previous) => {
+      const current = previous[routineId]?.output ?? "";
+      return {
+        ...previous,
+        [routineId]: {
+          output: current ? `${current}\n${line}` : line,
+          status,
+        },
+      };
+    });
+  }, []);
+
+  /*
+  FNXC:AutomationLiveOutput 2026-06-26-00:00:
+  The modal and embedded Automations view both render RoutineCard, so the run handler owns one SSE stream per routine and passes the accumulated live transcript down instead of duplicating stream logic per presentation.
+  */
+  const handleLiveRunEvent = useCallback((routineId: string, event: RoutineRunStreamEvent) => {
+    if (event.type === "output" && event.text) {
+      appendLiveRunLine(routineId, event.text);
+      return;
+    }
+    if (event.type === "tool" && event.name) {
+      appendLiveRunLine(routineId, event.status === "completed" ? `Tool ${event.name} finished${event.isError ? " with errors" : ""}` : `Tool ${event.name} started`);
+      return;
+    }
+    if (event.type === "step" && event.stepName) {
+      appendLiveRunLine(routineId, event.status === "completed" ? `Step ${Number(event.stepIndex ?? 0) + 1}: ${event.stepName} ${event.success ? "completed" : "failed"}` : `Step ${Number(event.stepIndex ?? 0) + 1}: ${event.stepName} started`);
+      return;
+    }
+    if (event.type === "complete") {
+      appendLiveRunLine(routineId, t("schedule.liveRunComplete", "Run complete"), "complete");
+      liveRunStreamsRef.current[routineId]?.close();
+      delete liveRunStreamsRef.current[routineId];
+      return;
+    }
+    if (event.type === "error") {
+      appendLiveRunLine(routineId, event.message ?? t("schedule.liveRunError", "Run failed"), "error");
+      liveRunStreamsRef.current[routineId]?.close();
+      delete liveRunStreamsRef.current[routineId];
+    }
+  }, [appendLiveRunLine, t]);
 
   // ── Routine CRUD handlers ───────────────────────────────────────────────
 
@@ -179,6 +226,15 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   const handleRunRoutine = useCallback(
     async (routine: Routine) => {
       setRunningRoutineId(routine.id);
+      setLiveRunOutput((previous) => ({
+        ...previous,
+        [routine.id]: { output: t("schedule.liveRunStarting", "Starting run…"), status: "running" },
+      }));
+      liveRunStreamsRef.current[routine.id]?.close();
+      liveRunStreamsRef.current[routine.id] = streamRoutineRun(routine.id, {
+        onEvent: (event) => handleLiveRunEvent(routine.id, event),
+        onFatalError: (message) => appendLiveRunLine(routine.id, message, "error"),
+      }, scopeOptions);
       try {
         const { result } = await runRoutine(routine.id, scopeOptions);
         setLastRunOutput((previous) => ({
@@ -198,10 +254,12 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
       } catch (err) {
         addToast(getErrorMessage(err) || t("schedule.runError", "Failed to run routine"), "error");
       } finally {
+        liveRunStreamsRef.current[routine.id]?.close();
+        delete liveRunStreamsRef.current[routine.id];
         setRunningRoutineId(null);
       }
     },
-    [addToast, loadRoutines, scopeOptions, t],
+    [addToast, appendLiveRunLine, handleLiveRunEvent, loadRoutines, scopeOptions, t],
   );
 
   const handleToggleRoutine = useCallback(
@@ -228,6 +286,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   useEffect(() => {
     if (routineView !== "list") {
       setLastRunOutput({});
+      setLiveRunOutput({});
     }
   }, [routineView]);
 
@@ -302,6 +361,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
             onToggle={handleToggleRoutine}
             running={runningRoutineId === r.id}
             lastRunOutput={lastRunOutput[r.id] ?? null}
+            liveRunOutput={liveRunOutput[r.id] ?? null}
           />
         ))}
       </div>
@@ -418,6 +478,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
                       onToggle={handleToggleRoutine}
                       running={runningRoutineId === selectedRoutine.id}
                       lastRunOutput={lastRunOutput[selectedRoutine.id] ?? null}
+                      liveRunOutput={liveRunOutput[selectedRoutine.id] ?? null}
                     />
                   </div>
                 ) : (
@@ -440,11 +501,25 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
     );
   }
 
-  // ── Modal (fixed overlay) presentation ──────────────────────────────────
+  // ── Modal (floating window) presentation ────────────────────────────────
   return (
-    <div className="modal-overlay open" {...overlayDismissProps}>
-      <div ref={modalRef} className="modal modal-lg automation-modal" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
-        <div className="modal-header">
+    <FloatingWindow
+      windowKey="automation"
+      title={t("schedule.title", "Automations")}
+      onClose={onClose}
+      hideHeader
+      dragHandleSelector=".automation-modal__drag-handle"
+      className="floating-window--automation"
+      defaultSize={{ width: 720, height: 640 }}
+      minSize={{ width: 420, height: 360 }}
+      persistGeometryKey="floating-window:automation"
+    >
+      {/**
+       * FNXC:Automations 2026-06-26-00:00:
+       * FN-7036 moves the desktop Automations popup into the shared FloatingWindow shell so it matches Plan Mission and Workflow editor drag, resize, stack, clamp, and geometry-persistence behavior. Mobile remains full-screen through the ScriptsModal.css floating-window contract, while the embedded main-content presentation above bypasses all FloatingWindow chrome.
+       */}
+      <div className="modal modal-lg automation-modal" role="dialog" aria-modal="true" aria-labelledby="schedules-modal-title">
+        <div className="modal-header automation-modal__drag-handle">
           <div className="detail-title-row">
             <Zap size={20} className="icon-triage" />
             <h3 id="schedules-modal-title">{t("schedule.title", "Automations")}</h3>
@@ -460,6 +535,6 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
           {renderContent()}
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
