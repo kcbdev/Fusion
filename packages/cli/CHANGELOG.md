@@ -1,5 +1,211 @@
 # @runfusion/fusion
 
+## 0.49.0
+
+### Minor Changes
+
+- 7772ab3: summary: Add a default-on, toggleable pre-merge Code Review step to the built-in coding workflows.
+  category: feature
+  dev: New `code-review` optional-group node (defaultOn:true, toolMode readonly, gateMode advisory, phase pre-merge) on the pre-merge success path (execute → browser-verification → code-review → review) of both the built-in coding and stepwise coding workflows. Runs for every coding task by default (seeded into enabledWorkflowSteps via resolveDefaultOnOptionalGroupIds) but is toggleable off per task; advisory so it does not change merge outcomes (operators can promote it to a blocking gate). Also fixes default-workflow task creation to seed default-on optional groups for interpreter-deferred built-ins (previously dropped). Reuses the shared prompt-gate verdict machinery (no engine verification code). The `code-review` WORKFLOW_STEP_TEMPLATE is also available in the editor palette.
+- 744aa2c: summary: Verification now runs only the tests affected by a task's changed files, so merge/step checks finish in seconds.
+  category: feature
+  dev: New deriveFileScopedPnpmTestCommand maps changed test files (and co-located tests of changed source) to a per-package `pnpm --filter <pkg> exec vitest run <files>` command; inferDefaultTestCommand uses it (overriding even an explicit testCommand) when the new project setting scopeVerificationToChangedFiles (default true) is on and git context is available, falling back to the configured command when no tests resolve. The thin merge-gate suite remains the cross-cutting safety net.
+- 98a5052: summary: Record signed signal connectors in Command Center incident metrics.
+  category: feature
+  dev: Adds connector incident ingestion and /api/command-center/signals/connectors configuration status.
+- e46ea00: summary: Add an engine-disconnected dashboard banner with one-click Start engine.
+  category: feature
+  dev: Adds project-scoped engine status/start API routes and dashboard-only guidance for UI-only launches.
+- 9a2709d: summary: Show provider icons next to Command Center model names.
+  category: feature
+  dev: Infers provider icons from model ids for Command Center model tables and bar charts; pie charts remain text-only.
+- 4cc9c2f: summary: Preview images, videos, audio, and PDFs directly in the Files modal.
+  category: feature
+  dev: Adds browser-native previews backed by workspace-safe file download URLs.
+- 541f1f6: summary: Add optional workflow-step quick dropdowns to task creation surfaces.
+  category: feature
+  dev: Surfaces active workflow optional steps in QuickEntryBox and NewTaskModal create payloads.
+- 79c602d: summary: Add core MCP server settings model with project/global precedence and secret references.
+  category: feature
+  dev: New @fusion/core MCP config types, validators, resolveEffectiveMcpServers, secret-resolver seam, and Claude Desktop import/export. Secret material stored only as Fusion-managed secret references.
+- 6c94ee0: summary: Forward configured MCP servers to all AI lanes and add reachability validation.
+  category: feature
+  dev: Adds runtime MCP support gating, materialized MCP forwarding, and POST /api/mcp/validate.
+- 429143e: summary: Add `fn mcp` CLI to manage MCP servers, import Claude Desktop config, and export Fusion MCP JSON.
+  category: feature
+  dev: New `packages/cli/src/commands/mcp.ts`; reuses @fusion/core resolveEffectiveMcpServers, validation, and import/export; sensitive fields stored as secret references via SecretsStore, never plaintext.
+- 301f25d: summary: Add MCP server management UI in Settings with global/project scopes, validation, and import/export.
+  category: feature
+  dev: New SettingsModal sections global-mcp/mcp + McpServersCard; consumes @fusion/core MCP foundation and POST /api/mcp/validate; sensitive fields bind to secret references only.
+- 2ce208e: summary: Automations popup is now movable and resizable like other Fusion pop-outs.
+  category: feature
+  dev: ScheduledTasksModal modal presentation now renders inside the shared FloatingWindow (windowKey "automation", persistGeometryKey "floating-window:automation"); embedded presentation unchanged. Mobile stays full-screen by CSS.
+- 8131d54: summary: Automation AI steps now run with all tools by default, with a per-step tool selector and live run output.
+  category: feature
+  dev: Adds AutomationStep.allowedTools + AUTOMATION_SELECTABLE_TOOLS (core); toolsAllowlist on createFnAgent (engine); SSE GET /automations/:id/run/stream and /routines/:id/run/stream (dashboard).
+- dd1b960: summary: Enabled optional workflow steps now run and show in task progress reliably.
+  category: feature
+  dev: Fixes FN-7039. `Store.optionalGroupIdSet` falls back to `builtin:coding` (matching the executor's unselected-task resolution) so a toggled built-in group id (e.g. `browser-verification`) is no longer materialized into a legacy `WS-xxx` step row the graph never matches. Create-time optional-step controls (QuickEntryBox, TaskForm) resolve `builtin:coding` when no project default workflow is set, so the toggles appear. First unit of the broader graph-native workflow-step refactor.
+- 2442032: summary: Make Remote Access settings visible without enabling an experimental flag.
+  category: feature
+  dev: Graduates the Settings UI section while leaving remoteAccess provider/token gating unchanged.
+- f685518: summary: Auto-discover MCP servers from Claude/Cursor/Windsurf/VS Code and opt-in to enable them in Settings.
+  category: feature
+  dev: New @fusion/core mcp-discovery source resolution + parser, @fusion/engine discoverMcpServers fs reader, GET /api/mcp/discovered route, and a discovered region in McpServersCard. Read-only/opt-in; discovered secrets become Fusion secret references, never plaintext.
+- 1d860ec: summary: Adjust the global concurrency cap from the footer and dashboard; settings grouped by global vs project scope.
+  category: feature
+  dev: Added a Global Max Concurrent slider (wired to fetch/updateGlobalConcurrency) to EngineControlMenu (footer) and the dashboard CommandCenterControls Concurrency card, with debounced saves matching the existing project sliders. SchedulingSection now groups fields under labeled "Global — all projects" and "This project" subheadings with scope badges so the global cap is not mistaken for a per-project setting (clearer on mobile).
+
+### Patch Changes
+
+- c7cbae1: summary: Keep task-detail Chat and Workflow tabs aligned on displayed model names.
+  category: fix
+  dev: Extracts dashboard effective model display resolution for shared Chat, Agent Log, and Workflow tab use.
+- 50a9471: summary: Fix random fusion crashes when multiple dashboards/CLIs run on one host.
+  category: fix
+  dev: Central DB (~/.fusion/fusion-central.db) now uses journal_mode=DELETE instead of WAL. WAL coordinates concurrent processes via a memory-mapped `-shm` wal-index that SIGBUSes a reader (walIndexReadHdr / `cluster_pagein past EOF`) on macOS/APFS when another process resizes it mid-checkpoint, killing the node process with no JS stack. DELETE mode removes the `-shm` mmap surface and coordinates via POSIX locks (busy_timeout absorbs the added writer serialization). Per-project DBs (db.ts) are unchanged. See central-db.ts open() and central-db.test.ts regression.
+- b293525: summary: Fix unreadable info-toast contrast and dashboard CSS token regressions.
+  category: fix
+  dev: Tokenized raw rgba/undefined CSS vars across ~15 dashboard component stylesheets, defined missing --border-strong / right-dock width tokens, enrolled the shadcn-custom light theme in the dark-text toast correction (WCAG AA). Also repairs ~19 stale dashboard tests that trailed intentional product changes (workflowColumns graduation, onboarding flow, theme relabels, header divider removal).
+- c20c4b7: summary: Fix global settings (including the global concurrency cap) intermittently resetting to defaults.
+  category: fix
+  dev: Several production call sites built `new CentralCore(store.getFusionDir())`, pointing the central/global DB at the project's `.fusion/` instead of `~/.fusion/` and spawning stray per-project central DBs seeded with default global settings that shadowed real global state. Added `TaskStore.getGlobalSettingsDir()`, routed the secrets store plus the secrets/proxy/node/secrets-sync/settings-sync dashboard routes through it, and added a `resolveGlobalDir()` guard that throws on a project-local `.fusion/` dir (parent is a git repo) so the regression can't silently recur. Existing stray DBs were operator-quarantined.
+- d08e8db: summary: Restore dashboard Settings helper copy and TaskChat tool-call labels.
+  category: fix
+  dev: Repairs changed-only dashboard assertions for navigation, pause routes, TaskChat, and theme selector parity.
+- 6df4043: summary: Preserve the selected workflow when Missions creates tasks.
+  category: fix
+  dev: Missions now shares the header workflow selector with Planning and passes workflowId through mission triage APIs.
+- f5e1b96: summary: Add a Worktrees setting for copying repository files into new task worktrees.
+  category: feature
+  dev: Adds project setting `worktreeCopyFiles`; release with the standard changeset workflow, not manual versioning.
+- 0744ab3: summary: Restore animated loading spinners across the Fusion dashboard.
+  category: fix
+  dev: Dashboard spinner utilities now use a collision-proof keyframe and tests guard component CSS chunks.
+- 9fabc9d: summary: Ignore hidden dot paths in overlap scheduling by default with a Settings toggle.
+  category: fix
+  dev: Adds project setting `ignoreHiddenOverlapPaths` and keeps `overlapIgnorePaths` as an additional explicit filter.
+- 0049fb9: summary: Make browser and Android Back close dashboard task detail before leaving the current view.
+  category: fix
+  dev: Updates dashboard task-detail history entries for full-panel and modal detail flows.
+- 4880a0f: summary: Fix Command Center token usage updating live without manual refresh.
+  category: fix
+  dev: Analytics polling now revalidates in the background when prior data exists so token cards, charts, and model rows stay mounted during live refresh.
+- 419d58f: summary: Prevent Planning Mode summary buttons from overlapping on tablet screens.
+  category: fix
+  dev: Adds a tablet responsive CSS contract for Planning Mode summary action wrapping.
+- a0954c7: summary: Make Plan Mission with AI desktop modal movable and recover cleanly from stream failures.
+  category: fix
+  dev: Dashboard mission interview now uses floating desktop geometry and normalizes terminal SSE errors into one retry state.
+- 575e211: summary: Prevent Planning Mode from crashing on malformed AI summary arrays.
+  category: fix
+  dev: Normalizes planning summaries, question options, subtasks, and dependency arrays at UI/API boundaries.
+- f1b3bd8: summary: Allow Planning Mode generations to continue while meaningful AI output is progressing.
+  category: fix
+  dev: Replaces the fixed Planning Mode generation cap with inactivity and repeated-output detection.
+- 7e7b0c6: summary: Recover mission AI planning from transient stream interruptions.
+  category: fix
+  dev: MissionInterviewModal refetches active session state before showing permanent stream errors.
+- 0c53f46: summary: Stop showing branch reattachment warnings in Task Detail.
+  category: fix
+  dev: Removes stale TaskDetailModal rebind-banner CSS/mocks and covers missing-branch workspace shapes.
+- d984fce: summary: Fix discarding mission interview drafts from the Missions view.
+  category: fix
+  dev: Preserves project and owning-tab scope for mission interview draft discard requests.
+- ef6e459: summary: Fix excessive spacing in the embedded Automations pane.
+  category: fix
+  dev: Top-pack embedded Automations grid rows and add regression coverage for the list/detail layout.
+- 2d2dd50: summary: Fix mobile Missions back navigation from mission detail tabs.
+  category: fix
+  dev: Tracks mission detail visibility for mobile history entries instead of selected mission IDs.
+- 3513d5f: summary: Keep New Task mobile dialog controls tappable while the keyboard is open.
+  category: fix
+  dev: Restores hit testing for the NewTaskModal sheet and bounds mobile picker dropdowns.
+- 4dab2b6: summary: Exclude engine-down time from task duration badge and stats.
+  category: fix
+  dev: Adds engineLastActiveAt heartbeat and startup reconcile-engine-downtime-active-timing recovery.
+- 977000c: summary: Restore horizontal scrolling for mobile task detail tabs.
+  category: fix
+  dev: Keeps the task-detail tab strip scrollable across Board modal and List embedded surfaces.
+- 3f66e55: summary: Fix workflow editor so the Browser Verification block shows connected edges.
+  category: fix
+  dev: optional-group/foreach/loop container nodes now render connectable handles without adjacent layer overlap in WorkflowNodeEditor.
+- f5b588c: summary: Retry transient ntfy publish failures so one-shot task notifications are less likely to be lost.
+  category: fix
+  dev: Adds bounded ntfy fetch retries for network, timeout, 5xx, and 429 failures with a per-attempt timeout.
+- 45727f1: summary: Command Center date-range presets now correctly filter charts.
+  category: fix
+  dev: Honors open-ended Command Center analytics bounds and serializes All time explicitly.
+- 775a1f8: summary: Make the AI session needs-input banner compact and hide it on Missions or Planning.
+  category: fix
+  dev: Shrinks SessionNotificationBanner CSS and tests the DashboardBanners visibility guard.
+- ea3cfee: summary: Prevent long Skills list rows from overflowing the left pane.
+  category: fix
+  dev: Constrains SkillsView discovered-skill name, path, and source rows with ellipsis truncation.
+- 0ae4499: summary: Open dependency Graph tasks in the shared movable task pop-out.
+  category: fix
+  dev: Routes graph plugin task-open callbacks through MainContent popOutTaskDetail while preserving non-graph plugin modal behavior.
+- f3f20ac: summary: Preview image, video, audio, and PDF files natively in the right-dock Files viewer.
+  category: fix
+  dev: Reuses the shared file-preview classification and download route in DockFilesView.
+- 6415eed: summary: Match the optional steps dropdown trigger to shared task creation buttons.
+  category: fix
+  dev: Reuses the dashboard `.btn .btn-sm` trigger styling for WorkflowOptionalStepsDropdown.
+- b6b5583: summary: Workflow and automation steps now use the configured project Execution model instead of the default.
+  category: fix
+  dev: Workflow/AI-prompt step model resolution now consults the execution lane (resolveExecutorSessionModel / resolveExecutionSettingsModel) instead of resolveProjectDefaultModel, fixing executeWorkflowStep (executor.ts), cron-runner.ts, and dashboard routes.ts. FN-7039.
+- 2c46cdc: summary: Fix task Workflow tab showing "Step definition not found." for Code Review and other optional steps.
+  category: fix
+  dev: WorkflowResultsTab configuredSteps now shows the not-found message only when a step id is absent from the step lookup, not when a found optional-group step has an empty description.
+- ea5e12e: summary: Quick task input no longer refocuses itself after you add a task.
+  category: fix
+  dev: Removed QuickEntryBox post-submit focus restoration (FNXC:QuickEntryFocus); supersedes FN-6217/FN-6219.
+- 07209a4: summary: Capitalize the built-in Code Review step name consistently.
+  category: fix
+  dev: Updates the compound-engineering built-in workflow node display name and regression coverage.
+- da69e03: summary: Remove the quick-entry keyboard hint from the task creation surface.
+  category: internal
+  dev: Removes the retired quickEntryHint locale key and QuickEntryBox hint shell/CSS.
+- 93da87d: summary: Restore mobile swipe scrolling when touching task-detail tab buttons.
+  category: fix
+  dev: Adds detail-tab touch-action pan-x coverage to override the global mobile pan-y lock.
+- c0d5353: summary: Restore horizontal swiping on Agent Detail tabs on mobile touch devices.
+  category: fix
+  dev: Adds `.agent-detail-tab` touch-action pan-x coverage because the global mobile pan-y lock is non-inherited.
+- 59fc94b: summary: Fix slash/namespaced skill commands not loading in chat and agent sessions.
+  category: fix
+  dev: skill-resolver requested-name matching now reduces a/b, a/b/SKILL.md, and source::a/b forms to the bare token like the dashboard bareSkillName, scoped to requested-name matching (allow/exclude path matching unchanged).
+- afa33b7: summary: Fix task-detail Workflow tabs so inherited workflow graphs and step details populate.
+  category: fix
+  dev: Resets stale task workflow selection/results on task switches and aliases optional step template IDs.
+- d03d6c2: summary: Keep Graph tasks visible when cached workflow assignments reference deleted workflows.
+  category: fix
+  dev: Treat stale Graph `taskWorkflowIds` entries as default-workflow assignments during workflow filtering.
+- 42f46a1: summary: Fix npm install failure caused by bundled plugins referencing private @fusion packages.
+  category: fix
+  dev: Sanitizes copied plugin and vendored extension manifests in tsup.config.ts before publishing.
+- 7a3a9a9: summary: Rename the Remote Access settings section (drops the stale "& Node Sync" suffix).
+  category: fix
+  dev: The standalone Node Sync settings section is unchanged.
+- e48c75c: summary: Mobile: hide the executor footer and remove the empty gap above the keyboard while typing.
+  category: fix
+  dev: computeMobileBarKeyboardFlags no longer iOS-gates footerHidden, so Android keyboard-open now hides ExecutorStatusBar and drops the reserved footer+nav padding-bottom (composer sits flush above the keyboard). footerKeyboardOpen stays iOS-only. Supersedes FN-5707's Android gate.
+- c202053: summary: Fix Planning Mode not scrolling on mobile so action buttons stay reachable.
+  category: fix
+  dev: The global mobile `.modal-lg`/`.modal:not(.confirm-dialog)` 100dvh rule was matching the embedded Planning shell (`.planning-modal--embedded`) and stretching it past its bounded `.planning-view` pane, clipping the footer under `overflow:hidden`. Mobile rule now qualifies as `.planning-view.open .planning-modal--embedded` (specificity 0,3,0) and re-pins `max-height:100%` so the inner flex scroll chain works.
+- efa5d9b: summary: Verification (merge/step gate) timeout now scales with command scope instead of a flat 10 minutes.
+  category: fix
+  dev: verification-utils runVerificationCommand derives its default from the command — package-scoped (pnpm --filter/-F) gets 300s, workspace-scoped gets 900s — matching fn_run_verification (DEFAULT_TIMEOUT_PACKAGE_SEC/WORKSPACE_SEC). Project verificationCommandTimeoutMs still overrides; the 1800s hard cap still applies. Fixes workspace-scoped suites being killed as a 10-min infra timeout during merge/step verification.
+- 7cd660f: summary: Fix stale overlap-blocker repair edge cases and dashboard display synchronization.
+  category: fix
+  dev: Adds effective write-scope repair handling for scheduler/file-scope lease consistency.
+- 9a2e8a7: summary: Post-merge workflow steps now run once via the workflow graph instead of the merger.
+  category: internal
+  dev: Flips `experimentalFeatures.graphNativePostMerge` DEFAULT-ON so the graph is the sole post-merge owner; the legacy merger post-merge path (`runPostMergeWorkflowSteps`/`hasEnabledPostMergeWorkflowSteps`) is inert under the flag (kept until U7c). DB migration 130 rewrites legacy compiled `workflow_steps` enable ids (templateId ∈ built-in optional-group ids: browser-verification, code-review) to the graph node ids in tasks' `enabledWorkflowSteps` (idempotent, de-duped). `workflow_steps` table is retained.
+- 347842f: summary: Retire the legacy workflow-steps store; workflow steps now run entirely graph-native.
+  category: internal
+  dev: U7c removes the last readers/writers of the legacy `workflow_steps` table and drops it via migration 131 (SCHEMA_VERSION 130→131, idempotent DROP). Removed: store CRUD (`create`/`update`/`delete`/`getWorkflowStep`), the workflow-compilation materializer (`materializeWorkflowSteps`), `migrateLegacyWorkflowSteps` + its `POST /api/workflows/migrate-legacy-steps` route and the editor's on-open migration notice, and the merger legacy post-merge execution path (worktree + prompt/script step run). Pre/post-merge steps record into `task.workflowStepResults`; `selectTaskWorkflow` now seeds `enabledWorkflowSteps` with default-on optional-group node ids only (the graph runs the workflow IR directly). `listWorkflowSteps()` returns only the in-memory plugin palette. Executor revive sources gate-ness from the recorded result status, not the table.
+
 ## 0.48.0
 
 ### Minor Changes

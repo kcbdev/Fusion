@@ -1,5 +1,11 @@
 # @fusion-plugin-examples/openclaw-runtime
 
+## 0.2.62
+
+### Patch Changes
+
+- @fusion/plugin-sdk@0.49.0
+
 ## 0.2.61
 
 ### Patch Changes

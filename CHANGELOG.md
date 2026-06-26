@@ -2,27 +2,192 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
-## 0.48.0
+## 0.49.0
 
 ### New
 
-- Add a workflow dropdown to filter tasks in the dependency Graph view.
-- Add a New Task dialog picker that seeds prompts from current-remote GitHub issues and PRs.
+- Add a default-on, toggleable pre-merge Code Review step to the built-in coding workflows.
+- Verification now runs only the tests affected by a task's changed files, so merge/step checks finish in seconds.
+- Record signed signal connectors in Command Center incident metrics.
+- Add an engine-disconnected dashboard banner with one-click Start engine.
+- Add a Worktrees setting for copying repository files into new task worktrees.
+- Show provider icons next to Command Center model names.
+- Preview images, videos, audio, and PDFs directly in the Files modal.
+- Add optional workflow-step quick dropdowns to task creation surfaces.
+- Add core MCP server settings model with project/global precedence and secret references.
+- Forward configured MCP servers to all AI lanes and add reachability validation.
+- Add `fn mcp` CLI to manage MCP servers, import Claude Desktop config, and export Fusion MCP JSON.
+- Add MCP server management UI in Settings with global/project scopes, validation, and import/export.
+- Automations popup is now movable and resizable like other Fusion pop-outs.
+- Automation AI steps now run with all tools by default, with a per-step tool selector and live run output.
+- Enabled optional workflow steps now run and show in task progress reliably.
+- Make Remote Access settings visible without enabling an experimental flag.
+- Auto-discover MCP servers from Claude/Cursor/Windsurf/VS Code and opt-in to enable them in Settings.
+- Adjust the global concurrency cap from the footer and dashboard; settings grouped by global vs project scope.
 
 ### Fixed
 
-- Fix release pipeline so binaries and desktop installers publish again.
-- Let quick-entry text use the full entry box width instead of wrapping early.
-- Match Quick Chat and Terminal typography in the dashboard footer.
-- Prevent Create PR metadata generation from hanging and provide editable fallback content.
-- Widen tablet Chat View agent response bubbles for easier reading.
-- Retire dual-observe as a workflow-authoritative cutover prerequisite.
-- Keep Planning Mode malformed AI responses retryable instead of stranding sessions.
-- Keep Git Manager tabs reachable in mobile and docked layouts.
-- Remove helper guidance above the task chat composer.
-- Open Mission Manager mission-delete confirmations in the standard modal dialog.
-- Make the task Changes tab inline diff panel wider on narrow screens.
-- Equalize mobile bottom navigation side spacing.
+- Keep task-detail Chat and Workflow tabs aligned on displayed model names.
+- Fix random fusion crashes when multiple dashboards/CLIs run on one host.
+- Fix unreadable info-toast contrast and dashboard CSS token regressions.
+- Fix global settings (including the global concurrency cap) intermittently resetting to defaults.
+- Restore dashboard Settings helper copy and TaskChat tool-call labels.
+- Preserve the selected workflow when Missions creates tasks.
+- Restore animated loading spinners across the Fusion dashboard.
+- Ignore hidden dot paths in overlap scheduling by default with a Settings toggle.
+- Make browser and Android Back close dashboard task detail before leaving the current view.
+- Fix Command Center token usage updating live without manual refresh.
+- Prevent Planning Mode summary buttons from overlapping on tablet screens.
+- Make Plan Mission with AI desktop modal movable and recover cleanly from stream failures.
+- Prevent Planning Mode from crashing on malformed AI summary arrays.
+- Allow Planning Mode generations to continue while meaningful AI output is progressing.
+- Recover mission AI planning from transient stream interruptions.
+- Stop showing branch reattachment warnings in Task Detail.
+- Fix discarding mission interview drafts from the Missions view.
+- Fix excessive spacing in the embedded Automations pane.
+- Fix mobile Missions back navigation from mission detail tabs.
+- Keep New Task mobile dialog controls tappable while the keyboard is open.
+- Exclude engine-down time from task duration badge and stats.
+- Restore horizontal scrolling for mobile task detail tabs.
+- Fix workflow editor so the Browser Verification block shows connected edges.
+- Retry transient ntfy publish failures so one-shot task notifications are less likely to be lost.
+- Command Center date-range presets now correctly filter charts.
+- Make the AI session needs-input banner compact and hide it on Missions or Planning.
+- Prevent long Skills list rows from overflowing the left pane.
+- Open dependency Graph tasks in the shared movable task pop-out.
+- Preview image, video, audio, and PDF files natively in the right-dock Files viewer.
+- Match the optional steps dropdown trigger to shared task creation buttons.
+- Workflow and automation steps now use the configured project Execution model instead of the default.
+- Fix task Workflow tab showing "Step definition not found." for Code Review and other optional steps.
+- Quick task input no longer refocuses itself after you add a task.
+- Capitalize the built-in Code Review step name consistently.
+- Restore mobile swipe scrolling when touching task-detail tab buttons.
+- Restore horizontal swiping on Agent Detail tabs on mobile touch devices.
+- Fix slash/namespaced skill commands not loading in chat and agent sessions.
+- Fix task-detail Workflow tabs so inherited workflow graphs and step details populate.
+- Keep Graph tasks visible when cached workflow assignments reference deleted workflows.
+- Fix npm install failure caused by bundled plugins referencing private @fusion packages.
+- Rename the Remote Access settings section (drops the stale "& Node Sync" suffix).
+- Mobile: hide the executor footer and remove the empty gap above the keyboard while typing.
+- Fix Planning Mode not scrolling on mobile so action buttons stay reachable.
+- Verification (merge/step gate) timeout now scales with command scope instead of a flat 10 minutes.
+- Fix stale overlap-blocker repair edge cases and dashboard display synchronization.
+
+### Internal
+
+- Remove the quick-entry keyboard hint from the task creation surface.
+- Post-merge workflow steps now run once via the workflow graph instead of the merger.
+- Retire the legacy workflow-steps store; workflow steps now run entirely graph-native.
+
+## 0.48.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.48.0
+- @fusion/engine@0.48.0
+- @fusion/i18n@0.39.11
+- @fusion-plugin-examples/cli-printing-press@0.1.28
+- @fusion-plugin-examples/compound-engineering@0.1.11
+- @fusion-plugin-examples/dependency-graph@0.1.42
+- @fusion-plugin-examples/roadmap@0.1.30
+- @fusion-plugin-examples/cursor-runtime@0.1.30
+- @fusion-plugin-examples/droid-runtime@0.1.37
+- @fusion-plugin-examples/hermes-runtime@0.2.61
+- @fusion-plugin-examples/openclaw-runtime@0.2.61
+- @fusion-plugin-examples/paperclip-runtime@0.2.61
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.48.0
+- @fusion/dashboard@0.48.0
+- @fusion/engine@0.48.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.48.0
+- @fusion/pi-claude-cli@0.48.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.48.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- d7f3c70: summary: Add a workflow dropdown to filter tasks in the dependency Graph view.
+  category: feature
+  dev: Scopes plugin-hosted graph tasks through the dashboard workflow assignment payload.
+
+#### Patch Changes
+
+- a20235b: summary: Fix release pipeline so binaries and desktop installers publish again.
+  category: fix
+  dev: github-release job sparse-checks-out CHANGELOG.md (was missing a checkout, so the release-notes step threw ENOENT and published 0 assets on v0.47.0); desktop esbuild build externalizes @fusion/engine so it no longer tries to bundle node-pty's native .node binaries.
+- 214a60c: summary: Let quick-entry text use the full entry box width instead of wrapping early.
+  category: fix
+  dev: Adds a QuickEntryBox-specific textarea padding override and CSS cascade regression coverage.
+- 5a192ec: summary: Add a New Task dialog picker that seeds prompts from current-remote GitHub issues and PRs.
+  category: feature
+  dev: Reuses existing GitHub remote, issue, and pull list endpoints; PR prompts direct agents to address review comments.
+- a554ceb: summary: Match Quick Chat and Terminal typography in the dashboard footer.
+  category: fix
+  dev: Footer launcher CSS now shares inherited font and color contracts between Quick Chat and Terminal.
+- d359306: summary: Prevent Create PR metadata generation from hanging and provide editable fallback content.
+  category: fix
+  dev: Bounds PR metadata generation and validates non-empty PR bodies before GitHub PR creation.
+- 29530b5: summary: Widen tablet Chat View agent response bubbles for easier reading.
+  category: fix
+  dev: Uses ChatView container queries to target assistant, streaming, and failure bubbles without widening user or Quick Chat bubbles.
+- eb3833a: summary: Retire dual-observe as a workflow-authoritative cutover prerequisite.
+  category: fix
+  dev: Cutover readiness now uses the authoritative flag plus clean populated parity summaries; stale dual-observe settings remain inert.
+- 3ae053e: summary: Keep Planning Mode malformed AI responses retryable instead of stranding sessions.
+  category: fix
+  dev: Hardens planning JSON candidate selection and persists bounded parse failures as retryable AI-session errors.
+- f918896: summary: Keep Git Manager tabs reachable in mobile and docked layouts.
+  category: fix
+  dev: Makes the shared Git Manager tablist a non-wrapping horizontal touch scroller in mobile and embedded narrow containers.
+- bd5a779: summary: Remove helper guidance above the task chat composer.
+  category: fix
+  dev: Task chat placeholders now carry active/idle/done composer guidance without an extra status shell.
+- 7a00811: summary: Open Mission Manager mission-delete confirmations in the standard modal dialog.
+  category: fix
+  dev: Routes mission list and detail delete affordances through ConfirmDialogProvider with regression coverage.
+- e473ba6: summary: Make the task Changes tab inline diff panel wider on narrow screens.
+  category: fix
+  dev: Reclaims task-detail body padding for compact inline diff lists with mobile CSS contract coverage.
+- e702185: summary: Equalize mobile bottom navigation side spacing.
+  category: fix
+  dev: Adds tokenized MobileNavBar horizontal padding while preserving ICB and safe-area behavior.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [a20235b]
+- Updated dependencies [d7f3c70]
+- Updated dependencies [214a60c]
+- Updated dependencies [5a192ec]
+- Updated dependencies [a554ceb]
+- Updated dependencies [d359306]
+- Updated dependencies [29530b5]
+- Updated dependencies [eb3833a]
+- Updated dependencies [3ae053e]
+- Updated dependencies [f918896]
+- Updated dependencies [bd5a779]
+- Updated dependencies [7a00811]
+- Updated dependencies [e473ba6]
+- Updated dependencies [e702185]
+  - @runfusion/fusion@0.48.0
 
 ## 0.47.0
 
@@ -9897,6 +10062,14 @@ for reference.
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
 
+## 0.39.12
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.49.0
+
 ## 0.39.11
 
 ### @fusion/i18n
@@ -9986,6 +10159,14 @@ for reference.
 #### Patch Changes
 
 - @fusion/core@0.40.0
+
+## 0.11.38
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.38
 
 ## 0.11.37
 
