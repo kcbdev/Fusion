@@ -4,7 +4,6 @@ import {
   applyFrontendUxCriteria,
   matchesFrontendUxPath,
 } from "../frontend-ux-policy.js";
-import { WORKFLOW_STEP_TEMPLATES } from "../types.js";
 
 const EXACT_FRONTEND_UX_CRITERIA = `## Frontend UX Criteria
 
@@ -103,14 +102,12 @@ Implement dashboard UI.
     expect(injected.match(/## Frontend UX Criteria/g)).toHaveLength(1);
   });
 
-  it("keeps checklist tokens aligned with the frontend UX design persona", () => {
-    const persona = WORKFLOW_STEP_TEMPLATES.find((template) => template.id === "frontend-ux-design");
-    expect(persona?.name).toBe("Frontend UX Design");
-    expect(persona?.prompt).toContain("design tokens");
-    expect(persona?.prompt).toContain("Component Reuse");
-    expect(persona?.prompt).toContain("Responsive Behavior");
-    expect(persona?.prompt).toContain("Visual Hierarchy");
-
+  // FNXC:WorkflowStepTemplate 2026-06-25-00:00: the `frontend-ux-design`
+  // WORKFLOW_STEP_TEMPLATES persona was deleted in U6 (the built-in catalog is gone;
+  // only browser-verification + code-review survive, inlined into their group builders).
+  // The criteria-section token assertions that did not depend on the deleted persona are
+  // kept below.
+  it("keeps checklist tokens aligned with the injected frontend UX criteria section", () => {
     expect(FRONTEND_UX_CRITERIA_SECTION).toContain("Design tokens only");
     expect(FRONTEND_UX_CRITERIA_SECTION).toContain("Component reuse");
     expect(FRONTEND_UX_CRITERIA_SECTION).toContain("Responsive scaffolding");

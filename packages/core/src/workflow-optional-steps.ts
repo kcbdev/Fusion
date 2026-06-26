@@ -80,7 +80,7 @@ export function resolveDefaultOnOptionalGroupIds(ir: WorkflowIr): string[] {
 
 /*
 FNXC:WorkflowOptionalGroup 2026-06-21-16:30:
-Every optional-group node id in a workflow, regardless of `defaultOn`. These ids are executor toggle keys (the per-task `enabledWorkflowSteps` set), NOT legacy `WorkflowStep` template ids. A built-in group id can deliberately equal a `WORKFLOW_STEP_TEMPLATES` id (e.g. "browser-verification"), so the store must pass these through `resolveEnabledWorkflowSteps` untouched instead of materializing them into a step row whose id the executor would never match.
+Every optional-group node id in a workflow, regardless of `defaultOn`. These ids are executor toggle keys (the per-task `enabledWorkflowSteps` set), NOT legacy `WorkflowStep` template ids. A built-in group id (e.g. "browser-verification") is passed through `resolveEnabledWorkflowSteps` untouched. (Historically it could collide with an id in the now-deleted built-in step-template catalog, which would wrongly materialize it into a step row the executor never matched; U6 removed that catalog + the materializer, so resolution is a pure identity-stable pass-through.)
 */
 export function resolveAllOptionalGroupIds(ir: WorkflowIr): string[] {
   return resolveWorkflowOptionalSteps(ir).map((step) => step.templateId);

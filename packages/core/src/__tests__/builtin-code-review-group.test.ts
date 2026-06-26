@@ -6,7 +6,6 @@ import {
 } from "../builtin-code-review-group.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "../builtin-stepwise-coding-workflow-ir.js";
-import { WORKFLOW_STEP_TEMPLATES } from "../types.js";
 import { parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
 import {
   resolveDefaultOnOptionalGroupIds,
@@ -15,37 +14,33 @@ import {
 
 /*
 FNXC:CodeReviewStep 2026-06-25-15:00:
-Coverage for the DEFAULT-ON but TOGGLEABLE "Code Review" pre-merge step: the catalog
-template fields, the `optional-group` node (defaultOn:true) built from it, and its wiring
-into the coding + stepwise built-ins as a default-on optional group. Code review is a
-WORKFLOW prompt-gate (shared verdict machinery), not engine verification code.
+Coverage for the DEFAULT-ON but TOGGLEABLE "Code Review" pre-merge step: the
+`optional-group` node (defaultOn:true) and its wiring into the coding + stepwise
+built-ins as a default-on optional group. Code review is a WORKFLOW prompt-gate (shared
+verdict machinery), not engine verification code.
+
+FNXC:WorkflowStepTemplate 2026-06-25-00:00:
+U6 deleted the `WORKFLOW_STEP_TEMPLATES` catalog. The former "code-review catalog
+fields" assertions are gone; the inlined literal values (name/toolMode/gateMode/prompt
+verdict convention) are now asserted directly on the built group node below, which is the
+parity oracle.
 */
 
-describe("code-review WORKFLOW_STEP_TEMPLATE", () => {
-  const template = WORKFLOW_STEP_TEMPLATES.find((t) => t.id === "code-review");
-
-  it("exists with the expected catalog fields", () => {
-    expect(template).toBeTruthy();
-    expect(template!.name).toBe("Code Review");
-    expect(template!.toolMode).toBe("readonly");
-    // Advisory → non-blocking by default (like the existing review); operators can promote.
-    expect(template!.gateMode).toBe("advisory");
-    expect(template!.phase).toBe("pre-merge");
-    expect(template!.description.length).toBeGreaterThan(0);
-  });
-
-  it("ends with the shared trailing verdict convention and reads the diff", () => {
-    const prompt = template!.prompt;
+describe("codeReviewOptionalGroupNode", () => {
+  it("carries the inlined catalog literals (name/toolMode/gateMode/prompt)", () => {
+    const node = codeReviewOptionalGroupNode("in-progress");
+    expect(node.config?.name).toBe("Code Review");
+    const inner = (node.config?.template as { nodes: { config?: Record<string, unknown> }[] }).nodes[0];
+    expect(inner.config?.toolMode).toBe("readonly");
+    expect(inner.config?.gateMode).toBe("advisory");
+    const prompt = String(inner.config?.prompt);
     expect(prompt).toMatch(/"verdict":"APPROVE\|APPROVE_WITH_NOTES\|REVISE"/);
     expect(prompt).not.toContain('"verdict":"PASS"');
     expect(prompt).not.toContain('"verdict":"FAIL"');
-    // Focused on the value tests miss + reads the diff against the base.
     expect(prompt).toMatch(/git diff/);
     expect(prompt).toMatch(/out of scope/i);
   });
-});
 
-describe("codeReviewOptionalGroupNode", () => {
   it("builds a DEFAULT-ON optional-group with the stable group id and distinct inner id", () => {
     const node = codeReviewOptionalGroupNode("in-progress");
     expect(node.id).toBe(CODE_REVIEW_GROUP_ID);

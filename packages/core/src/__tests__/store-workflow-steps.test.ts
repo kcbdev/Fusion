@@ -302,7 +302,7 @@ describe("TaskStore Workflow Steps", () => {
       expect(task.enabledWorkflowSteps).toEqual(["plugin:my-plugin:disabled-step"]);
     });
 
-    it("should keep plugin workflow IDs unchanged while materializing built-in templates", async () => {
+    it("keeps plugin and former-built-in workflow ids unchanged (all pass through)", async () => {
       store.setPluginWorkflowStepTemplates([
         {
           pluginId: "my-plugin",
@@ -318,16 +318,19 @@ describe("TaskStore Workflow Steps", () => {
         },
       ]);
 
-      // frontend-ux-design is a built-in WORKFLOW_STEP_TEMPLATE that is NOT a
-      // builtin:coding optional-group node, so it still materializes into a WS row.
-      // (browser-verification can no longer be used here — it is a builtin:coding
-      // optional-group id that now passes through untouched; see FN-7039 regression.)
+      // FNXC:WorkflowStepTemplate 2026-06-25-00:00: U6 deleted the built-in catalog +
+      // template materializer, so resolveEnabledWorkflowSteps is a pure pass-through. Both
+      // the plugin id AND a former built-in template id (frontend-ux-design) are kept
+      // verbatim — nothing materializes into a WS row.
       const task = await store.createTask({
         description: "Task with mixed workflow steps",
         enabledWorkflowSteps: ["plugin:my-plugin:my-step", "frontend-ux-design"],
       });
 
-      expect(task.enabledWorkflowSteps).toEqual(["plugin:my-plugin:my-step", "WS-001"]);
+      expect(task.enabledWorkflowSteps).toEqual(["plugin:my-plugin:my-step", "frontend-ux-design"]);
+
+      const steps = await store.listWorkflowSteps();
+      expect(steps.filter((step) => step.templateId === "frontend-ux-design")).toHaveLength(0);
     });
 
     it("should update a workflow step", async () => {
@@ -491,22 +494,21 @@ describe("TaskStore Workflow Steps", () => {
       expect(task.enabledWorkflowSteps).toEqual([ws1.id, ws2.id]);
     });
 
-    it("should materialize built-in workflow templates when creating a task", async () => {
-      // frontend-ux-design is a plain built-in template (not a builtin:coding
-      // optional-group), so it materializes into a WS row.
+    // FNXC:WorkflowStepTemplate 2026-06-25-00:00: U6 deleted the built-in
+    // WORKFLOW_STEP_TEMPLATES catalog + the template materializer, so
+    // resolveEnabledWorkflowSteps is now a pure identity-stable pass-through. A former
+    // built-in template id (frontend-ux-design) no longer materializes into a WS row — it
+    // passes through verbatim, exactly like any other enable id.
+    it("passes a former built-in template id (frontend-ux-design) through untouched without materializing", async () => {
       const task = await store.createTask({
         description: "Task with frontend ux design",
         enabledWorkflowSteps: ["frontend-ux-design"],
       });
 
-      expect(task.enabledWorkflowSteps).toEqual(["WS-001"]);
+      expect(task.enabledWorkflowSteps).toEqual(["frontend-ux-design"]);
 
-      const step = await store.getWorkflowStep("WS-001");
-      expect(step).toMatchObject({
-        id: "WS-001",
-        templateId: "frontend-ux-design",
-        name: "Frontend UX Design",
-      });
+      const steps = await store.listWorkflowSteps();
+      expect(steps.filter((step) => step.templateId === "frontend-ux-design")).toHaveLength(0);
     });
 
     /*
@@ -542,7 +544,10 @@ describe("TaskStore Workflow Steps", () => {
       expect(task.enabledWorkflowSteps).toEqual(["code-review"]);
     });
 
-    it("should reuse an existing materialized built-in workflow step", async () => {
+    // FNXC:WorkflowStepTemplate 2026-06-25-00:00: with pass-through resolution, the same
+    // former-built-in id used across two tasks stays identical and creates no rows (the
+    // old "reuse the materialized row" semantics no longer apply — nothing is materialized).
+    it("keeps a former built-in template id identical across tasks without materializing any row", async () => {
       const first = await store.createTask({
         description: "First frontend ux design task",
         enabledWorkflowSteps: ["frontend-ux-design"],
@@ -552,28 +557,11 @@ describe("TaskStore Workflow Steps", () => {
         enabledWorkflowSteps: ["frontend-ux-design"],
       });
 
-      expect(first.enabledWorkflowSteps).toEqual(["WS-001"]);
-      expect(second.enabledWorkflowSteps).toEqual(["WS-001"]);
+      expect(first.enabledWorkflowSteps).toEqual(["frontend-ux-design"]);
+      expect(second.enabledWorkflowSteps).toEqual(["frontend-ux-design"]);
 
       const steps = await store.listWorkflowSteps();
-      expect(steps.filter((step) => step.templateId === "frontend-ux-design")).toHaveLength(1);
-    });
-
-    it("should materialize frontend-ux-design built-in template when creating a task", async () => {
-      const task = await store.createTask({
-        description: "Task with frontend UX design review",
-        enabledWorkflowSteps: ["frontend-ux-design"],
-      });
-
-      expect(task.enabledWorkflowSteps).toEqual(["WS-001"]);
-
-      const step = await store.getWorkflowStep("WS-001");
-      expect(step).toMatchObject({
-        id: "WS-001",
-        templateId: "frontend-ux-design",
-        name: "Frontend UX Design",
-        toolMode: "readonly",
-      });
+      expect(steps.filter((step) => step.templateId === "frontend-ux-design")).toHaveLength(0);
     });
 
     it("should not set enabledWorkflowSteps when empty array provided", async () => {
@@ -833,17 +821,23 @@ describe("TaskStore Workflow Steps", () => {
       }
     });
 
-    it("should update task workflow steps and materialize built-in templates", async () => {
+    // FNXC:WorkflowStepTemplate 2026-06-25-00:00: U6 made resolveEnabledWorkflowSteps a
+    // pure pass-through on the update path too — a former built-in template id is kept
+    // verbatim and never materialized into a WS row.
+    it("passes a former built-in template id through updateTask untouched (no materialization)", async () => {
       const task = await store.createTask({ description: "Editable task" });
 
       const updated = await store.updateTask(task.id, {
         enabledWorkflowSteps: ["frontend-ux-design"],
       });
 
-      expect(updated.enabledWorkflowSteps).toEqual(["WS-001"]);
+      expect(updated.enabledWorkflowSteps).toEqual(["frontend-ux-design"]);
 
       const persisted = await store.getTask(task.id);
-      expect(persisted.enabledWorkflowSteps).toEqual(["WS-001"]);
+      expect(persisted.enabledWorkflowSteps).toEqual(["frontend-ux-design"]);
+
+      const steps = await store.listWorkflowSteps();
+      expect(steps.filter((step) => step.templateId === "frontend-ux-design")).toHaveLength(0);
     });
 
     // FNXC:WorkflowOptionalGroup 2026-06-26-04:30: FN-7039 update-path surface — a
@@ -865,30 +859,14 @@ describe("TaskStore Workflow Steps", () => {
       expect(steps.filter((step) => step.templateId === "browser-verification")).toHaveLength(0);
     });
 
-    it("should resolve built-in workflow templates from getWorkflowStep", async () => {
-      const step = await store.getWorkflowStep("browser-verification");
-
-      expect(step).toMatchObject({
-        id: "browser-verification",
-        templateId: "browser-verification",
-        name: "Browser Verification",
-        mode: "prompt",
-        phase: "pre-merge",
-        toolMode: "coding",
-      });
-    });
-
-    it("should resolve frontend-ux-design built-in template from getWorkflowStep", async () => {
-      const step = await store.getWorkflowStep("frontend-ux-design");
-
-      expect(step).toMatchObject({
-        id: "frontend-ux-design",
-        templateId: "frontend-ux-design",
-        name: "Frontend UX Design",
-        mode: "prompt",
-        phase: "pre-merge",
-        toolMode: "readonly",
-      });
+    // FNXC:WorkflowStepTemplate 2026-06-25-00:00: U6 deleted the built-in
+    // WORKFLOW_STEP_TEMPLATES catalog and the getWorkflowStep built-in-synthesis
+    // fallback. Built-in quality gates (browser-verification, code-review) are now graph
+    // optional-group nodes, not synthesized WorkflowStep rows — so getWorkflowStep returns
+    // undefined for a built-in id that has no stored row.
+    it("returns undefined for built-in optional-group ids (no longer synthesized)", async () => {
+      expect(await store.getWorkflowStep("browser-verification")).toBeUndefined();
+      expect(await store.getWorkflowStep("frontend-ux-design")).toBeUndefined();
     });
 
     // ── Workflow Step Phase ──────────────────────────────────────────────

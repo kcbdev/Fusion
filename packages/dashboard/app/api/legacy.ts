@@ -5215,38 +5215,22 @@ export function clearActivityLog(projectId?: string): Promise<{ success: boolean
 
 // ── Workflow Steps ─────────────────────────────────────────────────────
 
-/** Fetch all workflow step definitions */
-export function fetchWorkflowSteps(projectId?: string): Promise<WorkflowStep[]> {
-  const path = withProjectId("/workflow-steps", projectId);
-  return dedupe(path, () => api<WorkflowStep[]>(path));
-}
-
-/** Create a new workflow step */
-export function createWorkflowStep(input: WorkflowStepInput, projectId?: string): Promise<WorkflowStep> {
-  return api<WorkflowStep>(withProjectId("/workflow-steps", projectId), {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-/** Update a workflow step */
-export function updateWorkflowStep(id: string, updates: Partial<WorkflowStepInput>, projectId?: string): Promise<WorkflowStep> {
-  return api<WorkflowStep>(withProjectId(`/workflow-steps/${id}`, projectId), {
-    method: "PATCH",
-    body: JSON.stringify(updates),
-  });
-}
-
-/** Delete a workflow step */
-export function deleteWorkflowStep(id: string, projectId?: string): Promise<void> {
-  return api<void>(withProjectId(`/workflow-steps/${id}`, projectId), { method: "DELETE" });
-}
-
-/** Refine a workflow step's prompt using AI */
-export function refineWorkflowStepPrompt(id: string, projectId?: string): Promise<{ prompt: string; workflowStep: WorkflowStep }> {
-  return api<{ prompt: string; workflowStep: WorkflowStep }>(withProjectId(`/workflow-steps/${id}/refine`, projectId), {
-    method: "POST",
-  });
+/*
+FNXC:WorkflowStepCRUD 2026-06-25-00:00:
+U5 removed the legacy `/workflow-steps` CRUD/REST surface (GET list, POST create,
+PATCH update, DELETE, refine) along with its Settings management UI. The client
+mutation helpers (`createWorkflowStep`/`updateWorkflowStep`/`deleteWorkflowStep`/
+`refineWorkflowStepPrompt`/`createWorkflowStepFromTemplate`) had no remaining callers
+and were deleted. `fetchWorkflowSteps` is retained as a stable, no-network shim
+returning `[]`: its only remaining consumers are the plugin dashboard context's
+`workflowSteps` field and the WorkflowResultsTab option list, both of which now source
+step state from the graph (optional-group nodes) — the legacy definition list no longer
+exists. Removing the field outright is graph-native U3 plumbing work, out of scope here.
+*/
+/** Legacy workflow-step definition list (removed in U5). Resolves to an empty list:
+ *  built-in/custom step definitions are now graph optional-group nodes, not DB rows. */
+export function fetchWorkflowSteps(_projectId?: string): Promise<WorkflowStep[]> {
+  return Promise.resolve([]);
 }
 
 /** Fetch workflow step results for a task */
@@ -5594,7 +5578,9 @@ export function setProjectDefaultWorkflow(
 /** Re-export WorkflowStepTemplate type from core */
 export type { WorkflowStepTemplate } from "@fusion/core";
 
-/** Fetch all built-in workflow step templates */
+/** Fetch the workflow step templates that feed the editor palette. The built-in
+ *  built-in step-template catalog was deleted in U6, so this now returns only
+ *  plugin-contributed templates. */
 export function fetchWorkflowStepTemplates(): Promise<{ templates: import("@fusion/core").WorkflowStepTemplate[] }> {
   return api<{ templates: import("@fusion/core").WorkflowStepTemplate[] }>("/workflow-step-templates");
 }
@@ -5606,13 +5592,6 @@ export function fetchPluginWorkflowStepTemplates(): Promise<{
   return api<{
     templates: Array<{ pluginId: string; template: import("@fusion/core").WorkflowStepTemplate }>;
   }>("/plugin-workflow-step-templates");
-}
-
-/** Create a workflow step from a built-in or plugin template */
-export function createWorkflowStepFromTemplate(templateId: string, projectId?: string): Promise<WorkflowStep> {
-  return api<WorkflowStep>(withProjectId(`/workflow-step-templates/${encodeURIComponent(templateId)}/create`, projectId), {
-    method: "POST",
-  });
 }
 
 // ── Scripts API ────────────────────────────────────────────────────────

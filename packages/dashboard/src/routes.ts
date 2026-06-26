@@ -13,7 +13,7 @@ import * as nodeFs from "node:fs";
 import os from "node:os";
 import v8 from "node:v8";
 
-import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, WorkflowStepTemplate } from "@fusion/core";
+import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType } from "@fusion/core";
 import {
   type Task,
   type PiExtensionEntry,
@@ -247,17 +247,6 @@ export interface AuthStorageLike {
   get?(providerId: string): { type?: string; key?: string; access?: string; refresh?: string; expires?: number; [key: string]: unknown } | null | undefined;
 }
 
-/**
- * Extended session interface for workflow step refinement.
- * The AgentSession from @earendil-works/pi-coding-agent has on() and prompt() methods
- * but the local AgentSession type is minimal.
- */
-interface RefineAgentSession {
-  on(event: "text", listener: (delta: string) => void): void;
-  prompt(text: string): Promise<void>;
-  dispose(): void;
-}
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
@@ -382,43 +371,6 @@ let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | unde
 export function __setCreateFnAgentForRefine(mock: typeof createFnAgentForRefine): void {
   createFnAgentForRefine = mock;
 }
-
-// Default system prompt for workflow step refinement (fallback when overrides unavailable)
-
-let resolveWorkflowStepRefinePrompt: (key: string, overrides?: Record<string, string | null>) => string = () => DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
-let promptOverridesReady = false;
-
-async function initPromptOverrides() {
-  if (promptOverridesReady) return;
-  try {
-    const core = await import("@fusion/core");
-    resolveWorkflowStepRefinePrompt = (key: string, overrides?: Record<string, string | null>) =>
-      core.resolvePrompt(key as keyof typeof core.PROMPT_KEY_CATALOG, overrides);
-    promptOverridesReady = true;
-  } catch {
-    resolveWorkflowStepRefinePrompt = () => DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
-    promptOverridesReady = true;
-  }
-}
-
-// Initialize on module load
-initPromptOverrides();
-
-/** Default system prompt for workflow step refinement */
-const DEFAULT_WORKFLOW_STEP_REFINE_PROMPT = `You are an expert at creating detailed agent prompts for workflow steps.
-
-A workflow step is a quality gate that runs after a task is implemented but before it's marked complete.
-
-Given a rough description, create a detailed prompt that an AI agent can follow to execute this workflow step.
-
-The prompt should:
-1. Define the purpose clearly
-2. Specify what files/context to examine
-3. List specific criteria to check
-4. Describe what "success" looks like
-5. Include guidance on handling common edge cases
-
-Output ONLY the prompt text (no markdown, no explanations).`;
 
 function validateOptionalModelField(value: unknown, name: string): string | undefined {
   if (value === undefined || value === null) return undefined;
@@ -2886,396 +2838,29 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
-  // ── Workflow Step Routes ──────────────────────────────────────────────
+  // ── Workflow Step Templates (palette) ────────────────────────────────
 
-  /**
-   * GET /api/workflow-steps
-   * List all workflow step definitions.
-   * Returns: WorkflowStep[]
-   */
-  router.get("/workflow-steps", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const steps = await scopedStore.listWorkflowSteps();
-      res.json(steps);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      rethrowAsApiError(err);
-    }
-  });
-
-  /**
-   * POST /api/workflow-steps
-   * Create a new workflow step.
-   * Body: { name: string, description: string, mode?: "prompt"|"script", prompt?: string, scriptName?: string, enabled?: boolean, modelProvider?: string, modelId?: string }
-   * Returns: WorkflowStep
-   */
-  router.post("/workflow-steps", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const { name, description, mode, phase, prompt, gateMode, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
-
-      if (!name || typeof name !== "string" || !name.trim()) {
-        throw badRequest("name is required");
-      }
-      if (!description || typeof description !== "string" || !description.trim()) {
-        throw badRequest("description is required");
-      }
-
-      // Validate mode
-      const resolvedMode: "prompt" | "script" = mode || "prompt";
-      if (resolvedMode !== "prompt" && resolvedMode !== "script") {
-        throw badRequest("mode must be 'prompt' or 'script'");
-      }
-
-      // Validate phase
-      if (phase !== undefined && phase !== "pre-merge" && phase !== "post-merge") {
-        throw badRequest("phase must be 'pre-merge' or 'post-merge'");
-      }
-
-      if (prompt !== undefined && typeof prompt !== "string") {
-        throw badRequest("prompt must be a string");
-      }
-      if (gateMode !== undefined && gateMode !== "gate" && gateMode !== "advisory") {
-        throw badRequest("gateMode must be 'gate' or 'advisory'");
-      }
-      if (toolMode !== undefined && toolMode !== "readonly" && toolMode !== "coding") {
-        throw badRequest("toolMode must be 'readonly' or 'coding'");
-      }
-      if (scriptName !== undefined && typeof scriptName !== "string") {
-        throw badRequest("scriptName must be a string");
-      }
-      if (enabled !== undefined && typeof enabled !== "boolean") {
-        throw badRequest("enabled must be a boolean");
-      }
-      if (defaultOn !== undefined && typeof defaultOn !== "boolean") {
-        throw badRequest("defaultOn must be a boolean");
-      }
-
-      // Validate script mode: scriptName must reference a named script in settings
-      if (resolvedMode === "script") {
-        if (!scriptName?.trim()) {
-          throw badRequest("scriptName is required when mode is 'script'");
-        }
-        const settings = await scopedStore.getSettings();
-        const scripts = settings.scripts || {};
-        if (!(scriptName.trim() in scripts)) {
-          throw badRequest(`Script '${scriptName.trim()}' not found in project settings. Available scripts: ${Object.keys(scripts).join(", ") || "none"}`);
-        }
-      }
-
-      // Validate model override pair (only relevant for prompt mode)
-      const modelPair = assertConsistentOptionalPair(modelProvider, modelId, "workflow step model");
-
-      // Check for name conflicts
-      const existing = await scopedStore.listWorkflowSteps();
-      if (existing.some((ws) => ws.name.toLowerCase() === name.trim().toLowerCase())) {
-        throw conflict(`A workflow step named '${name.trim()}' already exists`);
-      }
-
-      const step = await scopedStore.createWorkflowStep({
-        name: name.trim(),
-        description: description.trim(),
-        mode: resolvedMode,
-        phase,
-        prompt: prompt?.trim(),
-        gateMode,
-        toolMode,
-        scriptName: scriptName?.trim(),
-        enabled,
-        defaultOn: defaultOn === true,
-        modelProvider: modelPair.provider,
-        modelId: modelPair.modelId,
-      });
-      res.status(201).json(step);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      const status = typeof (err instanceof Error ? err.message : String(err)) === "string" && ((err instanceof Error ? err.message : String(err)).includes("must include both provider and modelId") || (err instanceof Error ? err.message : String(err)).includes("Script mode requires")) ? 400 : 500;
-      throw new ApiError(status, err instanceof Error ? err.message : String(err));
-    }
-  });
-
-  /**
-   * PATCH /api/workflow-steps/:id
-   * Update a workflow step.
-   * Body: Partial<{ name, description, mode, prompt, scriptName, enabled, modelProvider, modelId }>
-   * Returns: WorkflowStep
-   */
-  router.patch("/workflow-steps/:id", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const { name, description, mode, phase, prompt, gateMode, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
-
-      const updates: Record<string, unknown> = {};
-      if (name !== undefined) {
-        if (typeof name !== "string" || !name.trim()) {
-          throw badRequest("name must be a non-empty string");
-        }
-        updates.name = name.trim();
-      }
-      if (description !== undefined) {
-        if (typeof description !== "string" || !description.trim()) {
-          throw badRequest("description must be a non-empty string");
-        }
-        updates.description = description.trim();
-      }
-      if (mode !== undefined) {
-        if (mode !== "prompt" && mode !== "script") {
-          throw badRequest("mode must be 'prompt' or 'script'");
-        }
-        updates.mode = mode;
-      }
-      if (phase !== undefined) {
-        if (phase !== "pre-merge" && phase !== "post-merge") {
-          throw badRequest("phase must be 'pre-merge' or 'post-merge'");
-        }
-        updates.phase = phase;
-      }
-      if (prompt !== undefined) {
-        if (typeof prompt !== "string") {
-          throw badRequest("prompt must be a string");
-        }
-        updates.prompt = prompt;
-      }
-      if (gateMode !== undefined) {
-        if (gateMode !== "gate" && gateMode !== "advisory") {
-          throw badRequest("gateMode must be 'gate' or 'advisory'");
-        }
-        updates.gateMode = gateMode;
-      }
-      if (toolMode !== undefined) {
-        if (toolMode !== "readonly" && toolMode !== "coding") {
-          throw badRequest("toolMode must be 'readonly' or 'coding'");
-        }
-        updates.toolMode = toolMode;
-      }
-      if (scriptName !== undefined) {
-        if (typeof scriptName !== "string") {
-          throw badRequest("scriptName must be a string");
-        }
-        updates.scriptName = scriptName;
-      }
-      if (enabled !== undefined) {
-        if (typeof enabled !== "boolean") {
-          throw badRequest("enabled must be a boolean");
-        }
-        updates.enabled = enabled;
-      }
-      if (defaultOn !== undefined) {
-        if (typeof defaultOn !== "boolean") {
-          throw badRequest("defaultOn must be a boolean");
-        }
-        updates.defaultOn = defaultOn;
-      }
-
-      // Validate script-mode requirements against the resulting state (existing + updates)
-      // This catches cases where an existing script-mode step has its scriptName updated
-      // without the mode field being explicitly sent.
-      const existingStep = await scopedStore.getWorkflowStep(req.params.id);
-      const resultingMode: string | undefined = updates.mode !== undefined ? (updates.mode as string) : existingStep?.mode;
-      const resultingScriptName: string | undefined = updates.scriptName !== undefined ? (updates.scriptName as string) : existingStep?.scriptName;
-
-      if (resultingMode === "script") {
-        if (!resultingScriptName?.trim()) {
-          throw badRequest("scriptName is required when mode is 'script'");
-        }
-        const settings = await scopedStore.getSettings();
-        const scripts = settings.scripts || {};
-        if (!(resultingScriptName.trim() in scripts)) {
-          throw badRequest(`Script '${resultingScriptName.trim()}' not found in project settings. Available scripts: ${Object.keys(scripts).join(", ") || "none"}`);
-        }
-      }
-
-      // Validate and apply model override pair
-      if (modelProvider !== undefined || modelId !== undefined) {
-        const modelPair = assertConsistentOptionalPair(modelProvider, modelId, "workflow step model");
-        updates.modelProvider = modelPair.provider;
-        updates.modelId = modelPair.modelId;
-      }
-
-      const step = await scopedStore.updateWorkflowStep(req.params.id, updates);
-      res.json(step);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
-        throw notFound(err instanceof Error ? err.message : String(err));
-      } else {
-        const status = typeof (err instanceof Error ? err.message : String(err)) === "string" && ((err instanceof Error ? err.message : String(err)).includes("must include both provider and modelId") || (err instanceof Error ? err.message : String(err)).includes("Script mode requires")) ? 400 : 500;
-        throw new ApiError(status, err instanceof Error ? err.message : String(err));
-      }
-    }
-  });
-
-  /**
-   * DELETE /api/workflow-steps/:id
-   * Delete a workflow step.
-   * Returns: 204 No Content
-   */
-  router.delete("/workflow-steps/:id", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      await scopedStore.deleteWorkflowStep(req.params.id);
-      res.status(204).send();
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      if ((err instanceof Error ? err.message : String(err)).includes("not found")) {
-        throw notFound(err instanceof Error ? err.message : String(err));
-      } else {
-        rethrowAsApiError(err);
-      }
-    }
-  });
-
-  /**
-   * POST /api/workflow-steps/:id/refine
-   * Use AI to refine the workflow step's description into a detailed agent prompt.
-   * Only available for prompt-mode steps.
-   * Returns: { prompt: string, workflowStep: WorkflowStep }
-   */
-  router.post("/workflow-steps/:id/refine", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const step = await scopedStore.getWorkflowStep(req.params.id);
-      if (!step) {
-        throw notFound(`Workflow step '${req.params.id}' not found`);
-      }
-
-      if (step.mode === "script") {
-        throw badRequest("Cannot refine prompt for script-mode workflow steps");
-      }
-
-      if (!step.description?.trim()) {
-        throw badRequest("Workflow step has no description to refine");
-      }
-
-      // Use AI to refine the description into a detailed agent prompt
-      let refinedPrompt: string;
-      try {
-        const createFnAgent = createFnAgentForRefine;
-
-        const settings = await scopedStore.getSettings();
-
-        // Resolve the system prompt using prompt overrides (with fallback to default)
-        const systemPrompt = resolveWorkflowStepRefinePrompt(
-          "workflow-step-refine",
-          settings.promptOverrides
-        ) || DEFAULT_WORKFLOW_STEP_REFINE_PROMPT;
-
-        if (!createFnAgent) {
-          throw new Error("createFnAgent is not available");
-        }
-        const planningModel = resolvePlanningSettingsModel(settings);
-        const { session } = await createFnAgent({
-          cwd: scopedStore.getRootDir(),
-          systemPrompt,
-          tools: "readonly",
-          // Resolve planning model using canonical lane hierarchy:
-          // 1. Project planning lane
-          // 2. Global planning lane
-          // 3. Project default override
-          // 4. Global default
-          defaultProvider: planningModel.provider,
-          defaultModelId: planningModel.modelId,
-          defaultThinkingLevel: settings.defaultThinkingLevel,
-        });
-
-        const refineSession = session as unknown as RefineAgentSession;
-        let output = "";
-        refineSession.on("text", (delta: string) => {
-          output += delta;
-        });
-
-        await refineSession.prompt(
-          `Refine this workflow step description into a detailed agent prompt:\n\nName: ${step.name}\nDescription: ${step.description}`
-        );
-        refineSession.dispose();
-
-        refinedPrompt = output.trim();
-      } catch {
-        // Fallback: return the description as-is if AI is unavailable
-        refinedPrompt = step.description;
-      }
-
-      // Update the workflow step with the refined prompt
-      const updated = await scopedStore.updateWorkflowStep(step.id, { prompt: refinedPrompt });
-      res.json({ prompt: refinedPrompt, workflowStep: updated });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      rethrowAsApiError(err);
-    }
-  });
-
-  // ── Workflow Step Templates ───────────────────────────────────────────
+  /*
+  FNXC:WorkflowStepCRUD 2026-06-25-00:00:
+  U5/U6 removed the legacy workflow-step management surface: the
+  GET/POST/PATCH/DELETE `/workflow-steps` CRUD routes, the `/workflow-steps/:id/refine`
+  route, and the `/workflow-step-templates/:id/create` route are gone (their Settings
+  manager UI and the built-in step-template catalog were deleted). Workflow
+  quality gates now live as graph optional-group nodes, authored in the workflow editor.
+  Only the plugin-contributed step-template palette survives below.
+  */
 
   /**
    * GET /api/workflow-step-templates
-   * List all built-in workflow step templates.
+   * List the plugin-contributed workflow step templates that feed the workflow
+   * editor's optional-group palette. The built-in step-template catalog
+   * was deleted in U6, so only plugin templates remain.
    * Returns: { templates: WorkflowStepTemplate[] }
    */
-  router.get("/workflow-step-templates", async (_req, res) => {
+  router.get("/workflow-step-templates", (_req, res) => {
     try {
-      const { WORKFLOW_STEP_TEMPLATES } = await import("@fusion/core");
       const pluginTemplates = options?.pluginRunner?.getPluginWorkflowStepTemplates?.() ?? [];
-      res.json({
-        templates: [
-          ...WORKFLOW_STEP_TEMPLATES,
-          ...pluginTemplates.map(({ template }) => template),
-        ],
-      });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      rethrowAsApiError(err);
-    }
-  });
-
-  /**
-   * POST /api/workflow-step-templates/:id/create
-   * Create a workflow step from a built-in template.
-   * Returns: WorkflowStep
-   */
-  router.post("/workflow-step-templates/:id/create", async (req, res) => {
-    try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const { WORKFLOW_STEP_TEMPLATES } = await import("@fusion/core");
-      let template: WorkflowStepTemplate | undefined = WORKFLOW_STEP_TEMPLATES.find((t) => t.id === req.params.id);
-
-      if (!template) {
-        const pluginTemplates = options?.pluginRunner?.getPluginWorkflowStepTemplates?.() ?? [];
-        template = pluginTemplates.find(({ template: pluginTemplate }) => pluginTemplate.id === req.params.id)?.template;
-      }
-
-      if (!template) {
-        throw notFound(`Template '${req.params.id}' not found`);
-      }
-
-      // Check for name conflicts with existing workflow steps
-      const existing = await scopedStore.listWorkflowSteps();
-      if (existing.some((ws) => ws.name.toLowerCase() === template.name.toLowerCase())) {
-        throw conflict(`A workflow step named '${template.name}' already exists`);
-      }
-
-      const step = await scopedStore.createWorkflowStep({
-        templateId: template.id,
-        name: template.name,
-        description: template.description,
-        prompt: template.prompt,
-        toolMode: template.toolMode,
-        enabled: true,
-      });
-
-      res.status(201).json(step);
+      res.json({ templates: pluginTemplates.map(({ template }) => template) });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

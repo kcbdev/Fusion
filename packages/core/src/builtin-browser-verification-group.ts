@@ -1,5 +1,4 @@
 import type { WorkflowIrNode } from "./workflow-ir-types.js";
-import { WORKFLOW_STEP_TEMPLATES } from "./types.js";
 
 /*
 FNXC:WorkflowOptionalGroup 2026-06-21-15:10:
@@ -18,22 +17,14 @@ keeping it identical to the prior `optionalSteps` templateId preserves any persi
 (`browser-verification-step`) because a template node id may not collide with the
 group/top-level node id (U1 validation).
 
-The inner node mirrors the dashboard's `stepTemplateToNode` projection of the
-canonical `browser-verification` WORKFLOW_STEP_TEMPLATE: a `prompt` node carrying the
-template's prompt, `toolMode` (coding), and `gateMode` (advisory default). Sourcing
-prompt/toolMode from the catalog keeps the built-in byte-identical to the template a
-human would insert from the palette (KTD-5).
+FNXC:WorkflowOptionalGroup 2026-06-25-00:00:
+U6 deleted the built-in step-template catalog; the inner node's literal
+name/description/prompt/toolMode/gateMode are now inlined here directly (byte-identical
+to the former `browser-verification` catalog entry). These built-ins are the parity
+oracle, so the produced node bytes must NOT change. Plugin-contributed templates still
+use the `WorkflowStepTemplate` shape via the editor palette, but built-ins no longer
+read from a shared array.
 */
-
-function resolveBrowserVerificationTemplate() {
-  const tpl = WORKFLOW_STEP_TEMPLATES.find((t) => t.id === "browser-verification");
-  if (!tpl) {
-    throw new Error("browser-verification WORKFLOW_STEP_TEMPLATE is missing");
-  }
-  return tpl;
-}
-
-const BROWSER_VERIFICATION_TEMPLATE = resolveBrowserVerificationTemplate();
 
 /** Stable per-task enable key + group node id (preserved from the prior templateId). */
 export const BROWSER_VERIFICATION_GROUP_ID = "browser-verification";
@@ -41,22 +32,62 @@ export const BROWSER_VERIFICATION_GROUP_ID = "browser-verification";
 /** Inner template node id — distinct from the group id (template-node-id collision rule, U1). */
 export const BROWSER_VERIFICATION_STEP_NODE_ID = "browser-verification-step";
 
+/** Display name (inlined from the former `browser-verification` catalog template). */
+const BROWSER_VERIFICATION_NAME = "Browser Verification";
+
+/** Short description (inlined from the former catalog template). */
+const BROWSER_VERIFICATION_DESCRIPTION = "Verify web application functionality using browser automation";
+
+/** Agent prompt (inlined verbatim from the former catalog template — parity oracle). */
+const BROWSER_VERIFICATION_PROMPT = `You are a browser verification specialist. Verify web application functionality after task implementation using the agent-browser CLI tool.
+
+## Prerequisites
+First, determine the URL to verify. Check the task PROMPT.md for any URLs mentioned, or look at the code changes to identify the local development server URL (typically http://localhost:3000, http://localhost:5173, http://localhost:8080, etc.).
+
+## Verification Commands
+Use these agent-browser commands for verification:
+- \`agent-browser open <url>\` — Navigate to the page
+- \`agent-browser snapshot -i\` — Get interactive elements with refs (@e1, @e2, etc.)
+- \`agent-browser click @e1\` — Click an element
+- \`agent-browser fill @e1 "text"\` — Fill an input field
+- \`agent-browser get text @e1\` — Get element text content
+- \`agent-browser screenshot\` — Capture screenshot to file
+- \`agent-browser wait --load networkidle\` — Wait for page to fully load
+
+## Verification Checklist
+1. Page loads without JavaScript errors or blank screens
+2. Navigation between pages/sections works
+3. Forms accept input and submit correctly
+4. Interactive elements (buttons, links) respond to clicks
+5. Error states are handled gracefully
+6. Screenshots capture expected content
+
+## Output Requirements
+- Fast-bail: if Diff Scope contains no browser-verification-relevant UI files, output {"verdict":"APPROVE","notes":"out of scope: browser verification"} immediately.
+- APPROVE: verification succeeds.
+- APPROVE_WITH_NOTES: verification succeeds with non-blocking advisory findings; include evidence references in notes.
+- REVISE: verification failures or regressions require changes; include failing behavior and actionable file paths in notes.
+- Screenshots/artifacts referenced in notes are evidence only; verdict must be conveyed by the final JSON line.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}
+
+Note: Refs (@e1, @e2) are invalidated after page navigation. Re-snapshot after clicking links or form submissions.`;
+
 /**
  * Build the `browser-verification` optional-group node placed on a workflow's
  * pre-merge path. `column` matches where the legacy `workflow-step` seam sat
  * (in-progress) so the editor renders the group in the implementation column.
  *
  * Mirrors `stepTemplateToNode(browser-verification)`: a single `prompt` node whose
- * config carries the catalog prompt + `toolMode: "coding"` + `gateMode: "advisory"`.
+ * config carries the inlined prompt + `toolMode: "coding"` + `gateMode: "advisory"`.
  */
 export function browserVerificationOptionalGroupNode(column: string): WorkflowIrNode {
-  const tpl = BROWSER_VERIFICATION_TEMPLATE;
   return {
     id: BROWSER_VERIFICATION_GROUP_ID,
     kind: "optional-group",
     column,
     config: {
-      name: tpl.name,
+      name: BROWSER_VERIFICATION_NAME,
       defaultOn: false,
       template: {
         nodes: [
@@ -64,11 +95,11 @@ export function browserVerificationOptionalGroupNode(column: string): WorkflowIr
             id: BROWSER_VERIFICATION_STEP_NODE_ID,
             kind: "prompt",
             config: {
-              name: tpl.name,
-              description: tpl.description,
-              prompt: tpl.prompt ?? "",
-              toolMode: tpl.toolMode === "coding" ? "coding" : "readonly",
-              gateMode: tpl.gateMode ?? "advisory",
+              name: BROWSER_VERIFICATION_NAME,
+              description: BROWSER_VERIFICATION_DESCRIPTION,
+              prompt: BROWSER_VERIFICATION_PROMPT,
+              toolMode: "coding",
+              gateMode: "advisory",
             },
           },
         ],
