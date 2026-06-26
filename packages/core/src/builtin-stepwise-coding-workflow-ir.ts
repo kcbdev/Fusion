@@ -3,7 +3,7 @@ import { parseWorkflowIr } from "./workflow-ir.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 import { builtinPromptConfig } from "./builtin-workflow-prompts.js";
 import { browserVerificationOptionalGroupNode } from "./builtin-browser-verification-group.js";
-import { codeReviewStepNode } from "./builtin-code-review-node.js";
+import { codeReviewOptionalGroupNode } from "./builtin-code-review-group.js";
 
 /**
  * The built-in **stepwise** coding workflow (KTD-9) — the demonstration of step
@@ -135,13 +135,14 @@ const RAW_BUILTIN_STEPWISE_CODING_WORKFLOW_IR: WorkflowIr = {
     // disabled the group passes through inert. Both the normal foreach-success path
     // and the rework-exhausted manual-release path flow through this node.
     browserVerificationOptionalGroupNode("in-progress"),
-    // FNXC:CodeReviewStep 2026-06-25-13:30:
-    // STANDARD always-on pre-merge Code Review prompt node (advisory), on the post-foreach
+    // FNXC:CodeReviewStep 2026-06-25-15:00:
+    // Pre-merge Code Review as a DEFAULT-ON optional-group (advisory), on the post-foreach
     // success path between browser-verification and review (steps → browser-verification →
     // code-review → review). It sits after the foreach so it runs EXACTLY ONCE pre-merge
     // (never per step-instance); both the foreach-success and rework-exhausted manual-
-    // release paths flow through it. Runs for every task by default — no enable toggle.
-    codeReviewStepNode("in-progress"),
+    // release paths flow through it. Runs for every task by default (defaultOn:true) but is
+    // toggleable off per task; disabled → byte-inert pass-through.
+    codeReviewOptionalGroupNode("in-progress"),
     { id: "review", kind: "prompt", column: "in-review", config: builtinPromptConfig("review", "Review") },
     { id: "merge-gate", kind: "merge-gate", column: "in-review", config: { gate: "auto-merge" } },
     { id: "merge-retry", kind: "retry-backoff", column: "in-review", config: { policy: "merge", maxAttempts: 3 } },

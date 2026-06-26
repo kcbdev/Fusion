@@ -3,7 +3,7 @@ import { parseWorkflowIr } from "./workflow-ir.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 import { builtinPromptConfig } from "./builtin-workflow-prompts.js";
 import { browserVerificationOptionalGroupNode } from "./builtin-browser-verification-group.js";
-import { codeReviewStepNode } from "./builtin-code-review-node.js";
+import { codeReviewOptionalGroupNode } from "./builtin-code-review-group.js";
 
 /**
  * The built-in default workflow as a v2 IR. Its six columns have ids that are
@@ -76,11 +76,12 @@ const RAW_BUILTIN_CODING_WORKFLOW_IR: WorkflowIr = {
     },
     // Pre-merge optional browser-verification (optional-group, default OFF).
     browserVerificationOptionalGroupNode("in-progress"),
-    // FNXC:CodeReviewStep 2026-06-25-13:30:
-    // STANDARD always-on pre-merge Code Review prompt node (advisory), on the success
-    // path between browser-verification and review (execute → browser-verification →
-    // code-review → review). Runs for every coding task by default — no enable toggle.
-    codeReviewStepNode("in-progress"),
+    // FNXC:CodeReviewStep 2026-06-25-15:00:
+    // Pre-merge Code Review as a DEFAULT-ON optional-group (advisory), on the success path
+    // between browser-verification and review (execute → browser-verification →
+    // code-review → review). Runs for every coding task by default (defaultOn:true) but is
+    // toggleable off per task; disabled → byte-inert pass-through.
+    codeReviewOptionalGroupNode("in-progress"),
     { id: "review", kind: "prompt", column: "in-review", config: builtinPromptConfig("review", "Review") },
     { id: "merge-gate", kind: "merge-gate", column: "in-review", config: { gate: "auto-merge" } },
     { id: "merge-retry", kind: "retry-backoff", column: "in-review", config: { policy: "merge", maxAttempts: 3 } },
