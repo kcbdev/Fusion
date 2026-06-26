@@ -13919,6 +13919,9 @@ You have access to the file system to review changes.${verdictBlock}`;
           commitMsgHookEnabled: settings.commitMsgHookEnabled,
           taskPrefix: settings.taskPrefix,
           taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+          commitAuthorEnabled: settings.commitAuthorEnabled,
+          commitAuthorName: settings.commitAuthorName,
+          commitAuthorEmail: settings.commitAuthorEmail,
         });
       } catch (error) {
         try {
@@ -15698,6 +15701,7 @@ export function buildExecutionPrompt(
   // Build co-author trailer arg for git commits based on settings. The user's
   // configured git identity remains the primary author; Fusion is appended as
   // a `Co-authored-by` trailer for shared credit (recognized by GitHub).
+  // FNXC:CommitAttribution 2026-06-26-12:48: this prompt hint is best-effort for humans/agents reading commit examples; the worktree commit-msg hook is the authoritative deterministic source for the co-author trailer.
   const authorArg = settings?.commitAuthorEnabled !== false
     ? ` -m "Co-authored-by: ${settings?.commitAuthorName || "Fusion"} <${settings?.commitAuthorEmail || "noreply@runfusion.ai"}>"`
     : "";

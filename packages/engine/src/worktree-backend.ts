@@ -339,7 +339,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
   constructor(
     private readonly deps: {
       logger?: { log: (m: string) => void; warn: (m: string) => void };
-      settings?: Partial<Pick<Settings, "worktreesDir" | "commitMsgHookEnabled" | "taskPrefix" | "taskAttributionTrailerNames">>;
+      settings?: Partial<Pick<Settings, "worktreesDir" | "commitMsgHookEnabled" | "taskPrefix" | "taskAttributionTrailerNames" | "commitAuthorEnabled" | "commitAuthorName" | "commitAuthorEmail">>;
       audit?: Pick<RunAuditor, "git">;
     } = {},
   ) {}
@@ -354,6 +354,9 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           commitMsgHookEnabled: this.deps.settings?.commitMsgHookEnabled,
           taskPrefix: this.deps.settings?.taskPrefix,
           taskAttributionTrailerName: this.deps.settings?.taskAttributionTrailerNames?.[0],
+          commitAuthorEnabled: this.deps.settings?.commitAuthorEnabled,
+          commitAuthorName: this.deps.settings?.commitAuthorName,
+          commitAuthorEmail: this.deps.settings?.commitAuthorEmail,
         });
       } catch (error) {
         await rm(worktreePath, { recursive: true, force: true }).catch(() => undefined);
@@ -637,6 +640,7 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
       binaryPath: string | (() => Promise<string | null>) | null;
       logger?: { log: (m: string) => void; warn: (m: string) => void };
       audit?: Pick<RunAuditor, "git">;
+      settings?: Partial<Pick<Settings, "commitMsgHookEnabled" | "taskPrefix" | "taskAttributionTrailerNames" | "commitAuthorEnabled" | "commitAuthorName" | "commitAuthorEmail">>;
     },
   ) {}
 
@@ -744,6 +748,12 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
       await installTaskWorktreeIdentityGuard({
         worktreePath: resolvedPath,
         taskId: input.taskId,
+        commitMsgHookEnabled: this.deps.settings?.commitMsgHookEnabled,
+        taskPrefix: this.deps.settings?.taskPrefix,
+        taskAttributionTrailerName: this.deps.settings?.taskAttributionTrailerNames?.[0],
+        commitAuthorEnabled: this.deps.settings?.commitAuthorEnabled,
+        commitAuthorName: this.deps.settings?.commitAuthorName,
+        commitAuthorEmail: this.deps.settings?.commitAuthorEmail,
       });
     } catch (error) {
       await rm(resolvedPath, { recursive: true, force: true }).catch(() => undefined);
@@ -1090,6 +1100,7 @@ export function resolveWorktreeBackend(
     return new WorktrunkWorktreeBackend({
       binaryPath,
       logger: deps.logger,
+      settings,
     });
   }
 

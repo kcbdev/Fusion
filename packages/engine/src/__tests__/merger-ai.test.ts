@@ -246,6 +246,7 @@ describe("runAiMerge", () => {
     // "squash: feature" without either — ensureCommitTaskMetadata adds both.
     const landedMsg = git(dir, "log -1 --pretty=%B main");
     expect(landedMsg).toContain("Fusion-Task-Id: FN-1");
+    expect((landedMsg.match(/Co-authored-by:\s*Fusion <noreply@runfusion\.ai>/g) ?? []).length).toBe(1);
     expect(git(dir, "log -1 --pretty=%s main")).toMatch(/^FN-1: /);
     // Task marked merge-backed before moving to done, then event emitted.
     expect(store.updateTask).toHaveBeenCalledWith(
@@ -257,6 +258,48 @@ describe("runAiMerge", () => {
     );
     expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done", expect.objectContaining({ moveSource: "engine", preserveProgress: true }));
     expect(emitted.some((e) => e.event === "task:merged")).toBe(true);
+  });
+
+  it("backfills custom AI-merge co-author trailer and respects commitAuthorEnabled false", async () => {
+    const customRepo = initRepoWithBranch({ branch: "fusion/fn-1" });
+    const custom = makeStore(customRepo.dir, {}, { commitAuthorName: "Fusion Bot", commitAuthorEmail: "bot@example.com" });
+
+    await runAiMerge(custom.store, customRepo.dir, "FN-1", { manual: true }, {
+      mergeAgent: realMergeAgent("fusion/fn-1"),
+      reviewAgent: vi.fn(async () => "REVIEW_VERDICT: approve"),
+    });
+
+    const customMsg = git(customRepo.dir, "log -1 --pretty=%B main");
+    expect((customMsg.match(/Co-authored-by:\s*Fusion Bot <bot@example\.com>/g) ?? []).length).toBe(1);
+
+    const disabledRepo = initRepoWithBranch({ branch: "fusion/fn-1" });
+    const disabled = makeStore(disabledRepo.dir, {}, { commitAuthorEnabled: false });
+
+    await runAiMerge(disabled.store, disabledRepo.dir, "FN-1", { manual: true }, {
+      mergeAgent: realMergeAgent("fusion/fn-1"),
+      reviewAgent: vi.fn(async () => "REVIEW_VERDICT: approve"),
+    });
+
+    const disabledMsg = git(disabledRepo.dir, "log -1 --pretty=%B main");
+    expect(disabledMsg).toContain("Fusion-Task-Id: FN-1");
+    expect(disabledMsg).not.toContain("Co-authored-by:");
+  });
+
+  it("does not duplicate an identical AI-merge co-author trailer from the agent", async () => {
+    const { dir } = initRepoWithBranch({ branch: "fusion/fn-1" });
+    const { store } = makeStore(dir);
+
+    await runAiMerge(store, dir, "FN-1", { manual: true }, {
+      mergeAgent: vi.fn(async (cwd: string) => {
+        execSync("git merge --squash fusion/fn-1", { cwd, stdio: "pipe" });
+        execSync("git add -A", { cwd, stdio: "pipe" });
+        execSync('git commit -q -m "squash: feature" -m "Co-authored-by: Fusion <noreply@runfusion.ai>"', { cwd, stdio: "pipe" });
+      }),
+      reviewAgent: vi.fn(async () => "REVIEW_VERDICT: approve"),
+    });
+
+    const msg = git(dir, "log -1 --pretty=%B main");
+    expect((msg.match(/Co-authored-by:\s*Fusion <noreply@runfusion\.ai>/g) ?? []).length).toBe(1);
   });
 
   it("persists AI merge agent text/thinking/tool output to agent logs", async () => {

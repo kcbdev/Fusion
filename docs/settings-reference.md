@@ -467,9 +467,9 @@ Default notes:
 
 | `taskPrefix` | `string` | `"FN"` | Prefix used for newly generated task IDs. |
 | `includeTaskIdInCommit` | `boolean` | `true` | Include task ID as commit scope in generated commits. |
-| `commitAuthorEnabled` | `boolean` | `true` | Apply explicit `--author` attribution on Fusion commits. |
-| `commitAuthorName` | `string` | `"Fusion"` | Commit author name when `commitAuthorEnabled` is true. |
-| `commitAuthorEmail` | `string` | `"noreply@runfusion.ai"` | Commit author email when `commitAuthorEnabled` is true. |
+| `commitAuthorEnabled` | `boolean` | `true` | Add deterministic `Co-authored-by` attribution on Fusion commits. |
+| `commitAuthorName` | `string` | `"Fusion"` | Co-author trailer name when `commitAuthorEnabled` is true. |
+| `commitAuthorEmail` | `string` | `"noreply@runfusion.ai"` | Co-author trailer email when `commitAuthorEnabled` is true. |
 | `planningProvider` | `string` | `undefined` | Provider for planning agents. |
 | `planningModelId` | `string` | `undefined` | Model ID for planning agents. |
 | `planningFallbackProvider` | `string` | `undefined` | Fallback provider for planning. |

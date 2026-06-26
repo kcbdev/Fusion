@@ -59,7 +59,22 @@ describe("worktree-hooks", () => {
     expect(hook).toContain("--in-place");
     expect(hook).toContain("--if-exists doNothing");
     expect(hook).toContain("--trailer \"$TRAILER_NAME: $TASK_ID\"");
+    expect(hook).toContain("--if-exists addIfDifferent");
+    expect(hook).toContain('CO_AUTHOR_TRAILER="Co-authored-by: Fusion <noreply@runfusion.ai>"');
     expect(hook).toContain("s/^FN-//i");
+  });
+
+  it("parameterizes commit-msg co-author trailer and omits it when disabled", () => {
+    const customHook = buildCommitMsgTrailerHook("FN-42", {
+      commitAuthorName: "Fusion Bot",
+      commitAuthorEmail: "bot@example.com",
+    });
+    expect(customHook).toContain('CO_AUTHOR_TRAILER="Co-authored-by: Fusion Bot <bot@example.com>"');
+    expect(customHook).toContain("--if-exists addIfDifferent");
+
+    const disabledHook = buildCommitMsgTrailerHook("FN-42", { commitAuthorEnabled: false });
+    expect(disabledHook).not.toContain("Co-authored-by:");
+    expect(disabledHook).not.toContain("addIfDifferent");
   });
 
   it("parameterizes commit-msg hook for custom prefix and trailer name", () => {

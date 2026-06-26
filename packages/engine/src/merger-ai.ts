@@ -68,6 +68,7 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createRunAuditor, generateSyntheticRunId, type RunAuditor } from "./run-audit.js";
 import { createLogger } from "./logger.js";
 import { captureSingleCommitLandedMetadata, type MergerOptions } from "./merger.js";
+import { DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME } from "./worktree-hooks.js";
 import { installWorktreeDependencies } from "./merge-dependency-sync.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { resolveMcpServersForStore } from "./mcp-resolution.js";
@@ -136,9 +137,22 @@ export {
 /** Trailers that associate the squash commit with its board task: the
  *  `Fusion-Task-Id` trailer plus the canonical lineage trailer when available.
  *  These are what the board's commit→task association parses. */
-function taskTrailers(taskId: string, lineageId?: string | null): string[] {
+function taskTrailers(
+  taskId: string,
+  lineageId?: string | null,
+  settings?: Pick<Settings, "commitAuthorEnabled" | "commitAuthorName" | "commitAuthorEmail">,
+): string[] {
   const trailers = [`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`];
   if (lineageId) trailers.push(buildTaskLineageTrailer(lineageId));
+  if (settings?.commitAuthorEnabled !== false) {
+    const name = (settings?.commitAuthorName ?? DEFAULT_COMMIT_AUTHOR_NAME).trim() || DEFAULT_COMMIT_AUTHOR_NAME;
+    const email = (settings?.commitAuthorEmail ?? DEFAULT_COMMIT_AUTHOR_EMAIL).trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;
+    /*
+    FNXC:CommitAttribution 2026-06-26-13:02:
+    AI-merge squash commits must receive the same deterministic co-author trailer as executor commits. The backfill amends only missing/different trailers, so an agent-supplied identical Co-authored-by line is not duplicated.
+    */
+    trailers.push(`Co-authored-by: ${name} <${email}>`);
+  }
   return trailers;
 }
 
@@ -841,8 +855,8 @@ export async function runAiMerge(
   const reviewAgent = deps.reviewAgent ?? makeReviewAgent(store, settings, taskId, options, audit);
   const stashResolveAgent = deps.stashResolveAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildStashResolveSystemPrompt());
   const includeTaskId = settings.includeTaskIdInCommit !== false;
-  // Trailers that link the squash commit to the board task (FN-id + lineage).
-  const trailers = taskTrailers(taskId, task.lineageId);
+  // Trailers that link the squash commit to the board task (FN-id + lineage) and deterministic co-author attribution.
+  const trailers = taskTrailers(taskId, task.lineageId, settings);
   const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
 
   await setStatus("merging");
@@ -1093,7 +1107,7 @@ export async function landWorkspaceTask(
   const reviewAgent = deps.reviewAgent ?? makeReviewAgent(store, settings, taskId, options, audit);
   const stashResolveAgent = deps.stashResolveAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildStashResolveSystemPrompt());
   const includeTaskId = settings.includeTaskIdInCommit !== false;
-  const trailers = taskTrailers(taskId, task.lineageId);
+  const trailers = taskTrailers(taskId, task.lineageId, settings);
   const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
 
   const workspaceWorktrees = task.workspaceWorktrees ?? {};

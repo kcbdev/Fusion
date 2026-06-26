@@ -894,6 +894,9 @@ export async function acquireWorkspaceRepoWorktree(
         commitMsgHookEnabled: settings.commitMsgHookEnabled,
         taskPrefix: settings.taskPrefix,
         taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+        commitAuthorEnabled: settings.commitAuthorEnabled,
+        commitAuthorName: settings.commitAuthorName,
+        commitAuthorEmail: settings.commitAuthorEmail,
       });
     } catch (guardErr) {
       // FNXC:Workspace 2026-06-21-22:30: F3 — identity-guard install is non-fatal; worktree is usable without it.

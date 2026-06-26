@@ -15,6 +15,8 @@ export const DEFAULT_ALLOWED_BRANCH_PATTERNS = ["^fusion/step-\\d+-[a-z0-9-]+$"]
 export const IDENTITY_GUARD_BYPASS_ENV = "FUSION_MERGER_BYPASS_IDENTITY_GUARD";
 const COMMIT_MSG_HOOK_MARKER = "# fusion-managed-commit-msg-hook";
 const PREPARE_COMMIT_MSG_HOOK_MARKER = "# fusion-managed-prepare-commit-msg-hook";
+export const DEFAULT_COMMIT_AUTHOR_NAME = "Fusion";
+export const DEFAULT_COMMIT_AUTHOR_EMAIL = "noreply@runfusion.ai";
 
 function toShellCasePattern(pattern: string): string {
   return pattern
@@ -200,10 +202,27 @@ export function buildCommitMsgTrailerHook(
   options: {
     taskPrefix?: string;
     trailerName?: string;
+    commitAuthorEnabled?: boolean;
+    commitAuthorName?: string;
+    commitAuthorEmail?: string;
   } = {}
 ): string {
   const taskPrefix = (options.taskPrefix ?? "FN").trim() || "FN";
   const trailerName = (options.trailerName ?? "Fusion-Task-Id").trim() || "Fusion-Task-Id";
+  const commitAuthorName = (options.commitAuthorName ?? DEFAULT_COMMIT_AUTHOR_NAME).trim() || DEFAULT_COMMIT_AUTHOR_NAME;
+  const commitAuthorEmail = (options.commitAuthorEmail ?? DEFAULT_COMMIT_AUTHOR_EMAIL).trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;
+  const coAuthorInjection = options.commitAuthorEnabled === false
+    ? ""
+    : `
+
+# FNXC:CommitAttribution 2026-06-26-12:40:
+# Co-author attribution must be deterministic in the worktree hook, not dependent on an AI agent remembering a prompt-supplied git commit -m flag. addIfDifferent keeps an identical agent-added trailer from duplicating while preserving distinct human-provided co-authors.
+CO_AUTHOR_TRAILER=${JSON.stringify(`Co-authored-by: ${commitAuthorName} <${commitAuthorEmail}>`)}
+git interpret-trailers \\
+  --in-place \\
+  --if-exists addIfDifferent \\
+  --trailer "$CO_AUTHOR_TRAILER" \\
+  "$1"`;
 
   return `#!/bin/sh
 set -eu
@@ -227,7 +246,7 @@ git interpret-trailers \
   --in-place \
   --if-exists doNothing \
   --trailer "$TRAILER_NAME: $TASK_ID" \
-  "$1"
+  "$1"${coAuthorInjection}
 `;
 }
 
@@ -246,6 +265,9 @@ async function installCommitMsgHook(input: {
   taskId: string;
   taskPrefix: string;
   trailerName: string;
+  commitAuthorEnabled?: boolean;
+  commitAuthorName?: string;
+  commitAuthorEmail?: string;
 }): Promise<void> {
   const hookPath = await resolveGitPath(input.worktreePath, "hooks/commit-msg");
   const existing = await fs.readFile(hookPath, "utf-8").catch(() => null);
@@ -259,6 +281,9 @@ async function installCommitMsgHook(input: {
   const hook = buildCommitMsgTrailerHook(input.taskId, {
     taskPrefix: input.taskPrefix,
     trailerName: input.trailerName,
+    commitAuthorEnabled: input.commitAuthorEnabled,
+    commitAuthorName: input.commitAuthorName,
+    commitAuthorEmail: input.commitAuthorEmail,
   });
   await writeFileAtomic(hookPath, hook, 0o755);
 }
@@ -287,6 +312,9 @@ export async function installTaskWorktreeIdentityGuard(input: {
   commitMsgHookEnabled?: boolean;
   taskPrefix?: string;
   taskAttributionTrailerName?: string;
+  commitAuthorEnabled?: boolean;
+  commitAuthorName?: string;
+  commitAuthorEmail?: string;
 }): Promise<void> {
   const hook = buildIdentityGuardHook(input.taskId, input.allowedBranchPatterns ?? DEFAULT_ALLOWED_BRANCH_PATTERNS);
   const metadataPath = await resolveGitPath(input.worktreePath, "fusion-task-id");
@@ -301,6 +329,9 @@ export async function installTaskWorktreeIdentityGuard(input: {
       taskId: input.taskId,
       taskPrefix: input.taskPrefix ?? "FN",
       trailerName: input.taskAttributionTrailerName ?? "Fusion-Task-Id",
+      commitAuthorEnabled: input.commitAuthorEnabled,
+      commitAuthorName: input.commitAuthorName,
+      commitAuthorEmail: input.commitAuthorEmail,
     });
   }
 

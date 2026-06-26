@@ -1485,6 +1485,9 @@ Follow instructions precisely and avoid unrelated changes.`,
         commitMsgHookEnabled: settings.commitMsgHookEnabled,
         taskPrefix: settings.taskPrefix,
         taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
+        commitAuthorEnabled: settings.commitAuthorEnabled,
+        commitAuthorName: settings.commitAuthorName,
+        commitAuthorEmail: settings.commitAuthorEmail,
       });
     } catch (err) {
       try {
