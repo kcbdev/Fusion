@@ -745,6 +745,42 @@ describe("WorkflowResultsTab", () => {
     expect(screen.getByText("Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")).toBeInTheDocument();
   });
 
+  it("shows found optional-group steps with empty descriptions without the missing-definition fallback", async () => {
+    mockedFetchWorkflowOptionalSteps.mockResolvedValueOnce([
+      {
+        templateId: "code-review",
+        name: "Code Review",
+        description: "",
+        phase: "pre-merge",
+        defaultOn: true,
+      },
+    ]);
+
+    render(
+      <WorkflowResultsTab
+        taskId="FN-001"
+        results={[]}
+        canEdit
+        enabledWorkflowSteps={["WS-101", "code-review"]}
+      />,
+    );
+
+    const configuredStep = await screen.findByTestId("workflow-configured-step-code-review");
+    await waitFor(() => expect(configuredStep).toHaveTextContent("Code Review"));
+    expect(screen.getByTestId("workflow-configured-phase-code-review")).toHaveTextContent("Pre-merge");
+    expect(within(configuredStep).queryByText("Step definition not found.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("workflow-steps-edit-toggle"));
+
+    const checkboxStep = await screen.findByTestId("workflow-step-checkbox-code-review");
+    expect(checkboxStep).toHaveTextContent("Code Review");
+    expect(within(checkboxStep).queryByText("Step definition not found.")).not.toBeInTheDocument();
+
+    const orderStep = screen.getByTestId("workflow-step-order-item-code-review");
+    expect(orderStep).toHaveTextContent("Code Review");
+    expect(within(orderStep).queryByText("Step definition not found.")).not.toBeInTheDocument();
+  });
+
   it("falls back to step ID and default description when definition is missing", () => {
     render(
       <WorkflowResultsTab

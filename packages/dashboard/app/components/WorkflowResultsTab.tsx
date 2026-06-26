@@ -595,13 +595,20 @@ export function WorkflowResultsTab({
     }
   }, [canEdit]);
 
+  /*
+  FNXC:WorkflowSettings 2026-06-25-16:20:
+  Optional-group steps such as Code Review and Browser Verification are valid configured workflow steps but intentionally carry an empty description from the resolver. Show "Step definition not found." only when the step id is genuinely absent from the lookup, never for a found step whose description is empty.
+  */
   const configuredSteps = useMemo(() => {
     return selectedWorkflowSteps.map((stepId) => {
       const stepInfo = workflowStepLookup.get(stepId);
+      const isMissingStepDefinition = stepInfo === undefined;
       return {
         id: stepId,
         name: stepInfo?.name || stepId,
-        description: stepInfo?.description || t("app:workflow.stepDefinitionNotFound", "Step definition not found."),
+        description: isMissingStepDefinition
+          ? t("app:workflow.stepDefinitionNotFound", "Step definition not found.")
+          : stepInfo.description,
         phase: stepInfo?.phase || "pre-merge",
       } as WorkflowStepOption;
     });
