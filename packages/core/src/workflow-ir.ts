@@ -633,6 +633,11 @@ function validateOptionalGroup(
   if (cfg.name !== undefined && typeof cfg.name !== "string") {
     throw new WorkflowIrError(`optional-group node '${node.id}' name must be a string`);
   }
+  // FNXC:WorkflowPostMerge 2026-06-26-09:00: `phase` is optional and defaults to
+  // "pre-merge"; only "pre-merge" | "post-merge" are valid when present.
+  if (cfg.phase !== undefined && cfg.phase !== "pre-merge" && cfg.phase !== "post-merge") {
+    throw new WorkflowIrError(`optional-group node '${node.id}' phase must be 'pre-merge' or 'post-merge'`);
+  }
 
   const templateNodes = template.nodes;
   const templateIds = new Set(templateNodes.map((n) => n.id));

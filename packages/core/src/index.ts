@@ -1665,7 +1665,9 @@ export type {
   ResearchCancellationState,
 } from "./research-types.js";
 
-export { isExperimentalFeatureEnabled } from "./experimental-features.js";
+export { isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG } from "./experimental-features.js";
+export { postMergeOptionalGroupNode } from "./builtin-post-merge-group.js";
+export type { PostMergeOptionalGroupSpec } from "./builtin-post-merge-group.js";
 export {
   WORKFLOW_COMPARABLE_AUDIT_MUTATIONS,
   WORKFLOW_PARITY_OBSERVED_MUTATION,

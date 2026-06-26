@@ -179,6 +179,15 @@ export interface WorkflowOptionalGroupConfig {
   defaultOn?: boolean;
   /** Display name for the group (editor + per-task toggle surfaces). */
   name?: string;
+  /*
+  FNXC:WorkflowPostMerge 2026-06-26-09:00:
+  Execution phase of the optional-group step. Defaults to "pre-merge" (the prior, only
+  behavior) when absent, so existing built-in/custom optional groups are byte-identical.
+  "post-merge" marks a group that the graph executor runs AFTER a successful merge
+  (gated by the `graphNativePostMerge` experimental flag); the recorded
+  `WorkflowStepResult.phase` and `[post-merge]` logs follow this value.
+  */
+  phase?: "pre-merge" | "post-merge";
   template: {
     nodes: WorkflowIrNode[];
     edges: WorkflowIrEdge[];
