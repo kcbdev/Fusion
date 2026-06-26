@@ -1337,6 +1337,19 @@ export const SCOPED_AFFECTED_MEMORY_ENVELOPES = Object.freeze({
   }),
 });
 
+/*
+FNXC:TestInfrastructure 2026-06-26-09:15:
+Which heavy memory-envelope packages the merge gate (`pnpm test:gate`) genuinely
+re-covers when the wide-fan-out guard delegates their cross-cutting coverage.
+The gate runs `@fusion/engine test:core` (a curated engine-core allow-list) plus
+the CI-shape test — it runs NO `@fusion/dashboard` tests. So a delegated engine
+lane still gets a real (curated subset) safety net, but a delegated dashboard
+lane gets ZERO gate coverage and would be a silent false-green. Treat dashboard
+delegation as a loud "not covered by the gate; CI full-suite.yml is the backstop"
+warning instead of a reassuring "delegated to the gate" message.
+*/
+export const GATE_COVERED_MEMORY_ENVELOPE_PACKAGES = Object.freeze(new Set([ENGINE_SCOPED_AFFECTED_PACKAGE]));
+
 export function prependNodeOption(currentOptions, option) {
   return [option, currentOptions || ""].join(" ").trim();
 }
@@ -1397,6 +1410,35 @@ export function partitionScopedAffectedPackages(packages) {
  */
 export function isTestFilePath(file) {
   return /\.(test|spec)\.[cm]?[jt]sx?$/.test(file);
+}
+
+/*
+FNXC:TestInfrastructure 2026-06-26-09:15:
+`changedFiles` comes from `git diff --name-only`, which lists DELETED and
+renamed-away `.test`/`.spec` paths alongside live ones. Those paths no longer
+exist on disk, but the wide-fan-out guard passes its picks positionally to
+`vitest run <file>` (via `path.relative`). A removed test path reaching Vitest
+makes the bounded changed lane fail on a file that is gone instead of treating
+the deletion as the no-test-left case. Filter the directly-changed test files
+to paths that still EXIST on disk; if every changed test in the package was a
+deletion the result is empty, and the caller must then take the same
+delegate-to-the-gate path as the "no changed test files" case rather than
+handing Vitest an empty/garbage positional set.
+*/
+/**
+ * Directly-changed, still-on-disk test files inside a package directory.
+ * @param {string[]|null|undefined} changedFiles  repo-relative diff paths
+ * @param {string} pkgDir  repo-relative package dir (e.g. "packages/engine")
+ * @param {{ projectRoot?: string }} [opts]
+ * @returns {string[]}
+ */
+export function existingChangedTestFilesInPackage(changedFiles, pkgDir, { projectRoot = rootDir } = {}) {
+  return (changedFiles ?? []).filter(
+    (file) =>
+      isTestFilePath(file) &&
+      (file === pkgDir || file.startsWith(`${pkgDir}/`)) &&
+      existsSync(path.join(projectRoot, file)),
+  );
 }
 
 /*
@@ -1692,21 +1734,38 @@ export async function main(argv = process.argv.slice(2)) {
       });
       if (wideSource.length > 0) {
         const pkgDir = packageDirByName.get(pkg) ?? `packages/${pkg.replace(/^@[^/]+\//, "")}`;
-        explicitChangedTestFiles = (changedFiles ?? []).filter(
-          (file) => isTestFilePath(file) && (file === pkgDir || file.startsWith(`${pkgDir}/`)),
-        );
+        // Filter to test files that still EXIST on disk: `git diff --name-only`
+        // includes deleted/renamed-away `.test` paths, and a removed path passed
+        // positionally to `vitest run` (line ~1720) would fail the bounded lane
+        // on a file that no longer exists. An all-deletions diff yields an empty
+        // list, which falls into the same delegate-to-gate `continue` below as
+        // the no-changed-tests case (FNXC:TestInfrastructure 2026-06-26-09:15).
+        explicitChangedTestFiles = existingChangedTestFilesInPackage(changedFiles, pkgDir);
         notFullyTestedPackages.add(pkg);
+        // FNXC:TestInfrastructure 2026-06-26-09:15: the gate re-covers a delegated
+        // engine lane (curated engine-core subset) but runs NO dashboard tests, so
+        // a delegated dashboard lane is uncovered. Don't claim "delegated to the
+        // gate" for packages the gate doesn't run — warn loudly and name the real
+        // backstop (CI full-suite.yml / `pnpm test:full`) so the gap is visible.
+        const gateCovered = GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(pkg);
+        const wideSourceDesc = `${wideSource[0]}${wideSource.length > 1 ? `, +${wideSource.length - 1} more` : ""}`;
+        const delegationNote = gateCovered
+          ? "delegating wider `vitest --changed` coverage to the merge-gate suite (curated engine-core subset ran above)."
+          : `the merge gate does NOT run ${pkg} tests, so this wider coverage is NOT re-run here; ` +
+            "CI full-suite.yml (non-blocking, on push to main) is the backstop. Run `pnpm test:full` for the full sweep.";
         if (explicitChangedTestFiles.length === 0) {
-          console.log(
-            `[test-changed] ${pkg}: a changed non-test source file (${wideSource[0]}${wideSource.length > 1 ? `, +${wideSource.length - 1} more` : ""}) ` +
+          const log = gateCovered ? console.log : console.warn;
+          log(
+            `[test-changed] ${pkg}: a changed non-test source file (${wideSourceDesc}) ` +
               "would fan `vitest --changed` out to ~the full suite at this heavy 1-worker lane; " +
-              "delegating cross-cutting coverage to the merge-gate suite (ran above). Run `pnpm test:full` for the full sweep.",
+              `no directly-changed ${pkg} test file to run, so ${delegationNote}`,
           );
           continue;
         }
-        console.log(
-          `[test-changed] ${pkg}: changed non-test source detected; running ONLY the ${explicitChangedTestFiles.length} directly-changed test file(s) ` +
-            "and delegating wider `vitest --changed` coverage to the merge-gate suite (ran above).",
+        const log = gateCovered ? console.log : console.warn;
+        log(
+          `[test-changed] ${pkg}: changed non-test source detected; running ONLY the ${explicitChangedTestFiles.length} directly-changed test file(s); ` +
+            delegationNote,
         );
       }
     }

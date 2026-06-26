@@ -45,6 +45,8 @@ import {
   partitionScopedAffectedPackages,
   isTestFilePath,
   changedSourceFilesAffectingPackage,
+  existingChangedTestFilesInPackage,
+  GATE_COVERED_MEMORY_ENVELOPE_PACKAGES,
 } from "../test-changed.mjs";
 
 import { deriveBudgetMs } from "../lib/run-vitest-watchdog.mjs";
@@ -1866,4 +1868,69 @@ test("changedSourceFilesAffectingPackage: out-of-graph and irrelevant paths stay
     ),
     [],
   );
+});
+
+// FNXC:TestInfrastructure 2026-06-26-09:15: `git diff --name-only` lists deleted /
+// renamed-away `.test` paths; those must NOT reach the positional `vitest run <file>`
+// call (they would fail the bounded lane on a missing file). Regression for the P2
+// deletion case: filter the directly-changed test files to ones still on disk, and
+// an all-deletions diff must yield [] so the caller delegates to the gate.
+test("existingChangedTestFilesInPackage: keeps live in-package test files, drops deleted ones", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    const liveRel = "packages/engine/src/__tests__/live.test.ts";
+    const deletedRel = "packages/engine/src/__tests__/deleted.test.ts";
+    mkdirSync(path.join(tmp, "packages/engine/src/__tests__"), { recursive: true });
+    writeFileSync(path.join(tmp, liveRel), "// live\n");
+    // deletedRel intentionally NOT written to disk (simulates a removed test)
+    assert.deepEqual(
+      existingChangedTestFilesInPackage([deletedRel, liveRel], "packages/engine", { projectRoot: tmp }),
+      [liveRel],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("existingChangedTestFilesInPackage: all-deletions diff yields empty (delegate-to-gate path)", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    // No test files written: every changed test path was a deletion.
+    assert.deepEqual(
+      existingChangedTestFilesInPackage(
+        ["packages/engine/src/__tests__/gone-a.test.ts", "packages/engine/src/__tests__/gone-b.test.ts"],
+        "packages/engine",
+        { projectRoot: tmp },
+      ),
+      [],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("existingChangedTestFilesInPackage: excludes non-test and out-of-package paths", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    const inPkgSource = "packages/engine/src/self-healing.ts";
+    const otherPkgTest = "packages/dashboard/src/__tests__/x.test.ts";
+    mkdirSync(path.join(tmp, "packages/engine/src"), { recursive: true });
+    mkdirSync(path.join(tmp, "packages/dashboard/src/__tests__"), { recursive: true });
+    writeFileSync(path.join(tmp, inPkgSource), "// src\n");
+    writeFileSync(path.join(tmp, otherPkgTest), "// other\n");
+    assert.deepEqual(
+      existingChangedTestFilesInPackage([inPkgSource, otherPkgTest], "packages/engine", { projectRoot: tmp }),
+      [],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// FNXC:TestInfrastructure 2026-06-26-09:15: the merge gate re-covers a delegated
+// engine lane (curated engine-core subset) but runs NO dashboard tests. Lock that
+// asymmetry so the delegation messaging never overclaims dashboard gate coverage.
+test("GATE_COVERED_MEMORY_ENVELOPE_PACKAGES: engine covered, dashboard not", () => {
+  assert.equal(GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(ENGINE_SCOPED_AFFECTED_PACKAGE), true);
+  assert.equal(GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(DASHBOARD_SCOPED_AFFECTED_PACKAGE), false);
 });
