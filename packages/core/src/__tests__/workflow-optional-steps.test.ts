@@ -108,22 +108,16 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     ]);
   });
 
-  it("resolves the built-in coding/stepwise browser-verification + code-review optional-groups", () => {
-    // U6 migrated both built-ins: `browser-verification` is an optional-group node
-    // (default OFF). The pre-merge `code-review` optional-group (also default OFF) sits
-    // next to it on the same success path, so the resolver advertises exactly these two
-    // toggle entries per built-in, in node order (browser-verification → code-review).
+  it("resolves the built-in coding/stepwise browser-verification optional-group (U6)", () => {
+    // U6 migrated both built-ins: `browser-verification` is now an optional-group
+    // node (default OFF), so the resolver advertises exactly one toggle entry per
+    // built-in, keyed by the group node id `browser-verification`. The standard
+    // always-on `code-review` prompt node is NOT an optional-group, so it never
+    // surfaces as a toggle entry here.
     const expected = [
       {
         templateId: "browser-verification",
         name: "Browser Verification",
-        description: "",
-        phase: "pre-merge" as const,
-        defaultOn: false,
-      },
-      {
-        templateId: "code-review",
-        name: "Code Review",
         description: "",
         phase: "pre-merge" as const,
         defaultOn: false,
