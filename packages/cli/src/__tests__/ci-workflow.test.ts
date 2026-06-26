@@ -414,8 +414,21 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(workflow.permissions.contents).toBe("write");
   });
 
-  it("has github-release job that depends on build-binaries", () => {
+  it("has github-release job that depends on binary and Android builds", () => {
     expect(workflow.jobs["github-release"].needs).toContain("build-binaries");
+    expect(workflow.jobs["github-release"].needs).toContain("build-android");
+  });
+
+  it("wires signed Android AAB artifacts into release aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const collectStep = workflow.jobs["github-release"].steps.find((step: any) => step.name === "Collect release files");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(collectStep.run).toContain('-name "*.apk"');
+    expect(collectStep.run).toContain('-name "*.aab"');
+    expect(collectStep.run).toContain('-name "*.sha256"');
   });
 });
 
@@ -478,10 +491,23 @@ describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
     expect(content).toContain("actions/upload-artifact");
   });
 
-  it("has a collect job that combines artifacts", () => {
+  it("has a collect job that combines binary and Android artifacts", () => {
     expect(workflow.jobs.collect).toBeDefined();
     expect(workflow.jobs.collect.needs).toContain("build-binaries");
+    expect(workflow.jobs.collect.needs).toContain("build-android");
     expect(content).toContain("all-binaries");
+  });
+
+  it("wires signed Android AAB artifacts into rehearsal aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const combineStep = workflow.jobs.collect.steps.find((step: any) => step.name === "Combine artifacts");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(combineStep.run).toContain('-name "*.apk"');
+    expect(combineStep.run).toContain('-name "*.aab"');
+    expect(combineStep.run).toContain('-name "*.sha256"');
   });
 });
 

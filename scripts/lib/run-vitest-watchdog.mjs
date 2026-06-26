@@ -53,20 +53,19 @@ export const CLASS_BUDGET_BANDS = {
   */
   shard: { floor: 15 * MINUTE, ceiling: 30 * MINUTE },
   /*
-  FNXC:TestInfrastructure 2026-06-26-12:40:
-  The `changed` ceiling MUST sit below the engine's per-task verification kill
-  (`VERIFICATION_TIMEOUT_WORKSPACE_MS = 900_000` = 15min, verification-utils.ts).
-  This band is the bound for a local changed-file affected-lane invocation
-  (`pnpm test` in changed mode). When the timings snapshot is stale (the common
-  case), deriveBudgetMs returns this ceiling. At the old 20min ceiling the script
-  watchdog NEVER fired before the engine's 15min kill, so a runaway lane was
-  SIGKILLed by the engine and the whole task RESTARTED (stacked 15-min timeouts)
-  instead of failing the lane cleanly here (exit 124, no restart). 13min leaves
-  margin under the 15min kill so the script fails the lane itself first. Lowering
-  a ceiling is a tightening, not a timeout-widening appeasement.
+  FNXC:TestInfrastructure 2026-06-26-14:10:
+  The `changed` ceiling stays 20min (general bound). The narrower requirement —
+  that a per-task scoped-affected lane fails BEFORE the engine's 15min workspace
+  verification kill (VERIFICATION_TIMEOUT_WORKSPACE_MS=900_000) so the engine
+  doesn't SIGKILL + restart the task — is handled surgically in
+  `deriveScopedAffectedBudgetMs` (test-changed.mjs), which caps the scoped lane at
+  SCOPED_AFFECTED_BUDGET_CEILING_MS (14min) via Math.min. That keeps the global
+  changed band generous for other callers while bounding only the lane that was
+  timing out. (An earlier revision lowered this whole band to 13min; superseded by
+  the scoped cap merged from main.)
   */
   // One local changed-file package invocation.
-  changed: { floor: 2 * MINUTE, ceiling: 13 * MINUTE },
+  changed: { floor: 2 * MINUTE, ceiling: 20 * MINUTE },
   // One dashboard quality lane (heap-managed). Matches the historical 15min.
   "dashboard-lane": { floor: 15 * MINUTE, ceiling: 30 * MINUTE },
 };

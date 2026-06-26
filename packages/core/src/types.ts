@@ -5,6 +5,7 @@ import type { StalePausedReviewSignal } from "./stale-paused-review.js";
 import type { StalePausedTodoSignal } from "./stale-paused-todo.js";
 import type { StalledReviewSignal } from "./stalled-review-detector.js";
 import type { TaskAgeStalenessSignal } from "./task-age-staleness.js";
+import type { SecretScope } from "./secrets-store.js";
 
 export {
   computeCapacityRisk,
@@ -1102,6 +1103,51 @@ Use these agent-browser commands for verification:
 {"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}
 
 Note: Refs (@e1, @e2) are invalidated after page navigation. Re-snapshot after clicking links or form submissions.`,
+  },
+  {
+    /*
+    FNXC:CodeReviewStep 2026-06-25-12:00:
+    Built-in "Code Review" catalog template: a configurable pre-merge prompt-gate that
+    diff-reviews the task's changes for the correctness value automated tests miss
+    (logic bugs, broken edge cases, intent-vs-implementation drift, regressions in
+    touched paths, error handling, contract/signature breaks). This is the WORKFLOW-layer
+    code review — it reuses the shared prompt-gate verdict machinery, NOT engine
+    verification code. gateMode defaults to "advisory" (non-blocking) exactly like
+    browser-verification, so it is opt-in/non-blocking until an operator promotes it to a
+    blocking gate. phase "pre-merge" places it before merge. toolMode "readonly": review
+    reads the diff/files, it does not mutate the worktree.
+    */
+    id: "code-review",
+    name: "Code Review",
+    description: "Diff-review the task's changes for correctness bugs, regressions, and intent mismatches that tests miss",
+    category: "Quality",
+    icon: "git-pull-request",
+    toolMode: "readonly",
+    gateMode: "advisory",
+    phase: "pre-merge",
+    prompt: `You are a senior code reviewer. Review the task's diff for the correctness value automated tests do NOT catch.
+
+## Step 1: Read the change
+1. Read the full diff against the base branch: \`git diff <base>...HEAD\` (or \`git diff <base>\`). Determine the base from the task context / merge target.
+2. Read the changed files in full where the diff is non-trivial, so you see the surrounding code paths the change touches — not just the hunks.
+
+## Step 2: Review focus (the value tests miss)
+1. **Correctness / logic bugs** — wrong conditions, inverted boolean/comparison logic, off-by-one, incorrect operator precedence, mishandled return values.
+2. **Broken edge cases** — empty/undefined/null inputs, zero/duplicate/boundary values, concurrency and ordering assumptions.
+3. **Intent vs implementation** — does the code actually do what the task/PROMPT.md describes? Flag silent scope drift or partial implementations.
+4. **Regressions in touched code paths** — does the change break or weaken an existing behavior in the files it edits or their callers?
+5. **Error handling** — swallowed errors, unhandled rejections/exceptions, missing validation at trust boundaries, misleading error messages.
+6. **Contract / signature changes** — changed function/exported-type signatures, API request/response shapes, or serialization that breaks existing callers.
+
+Be specific: cite \`file:line\` for every finding and explain the concrete failure it causes.
+
+## Output Requirements
+- Fast-bail: if the diff is trivial, generated, or out-of-scope for code review (e.g. pure docs/config/formatting with no logic), output {"verdict":"APPROVE","notes":"out of scope: code review"} immediately and stop.
+- APPROVE: no correctness concerns; use empty or brief notes.
+- APPROVE_WITH_NOTES: shippable, but include non-blocking advisories (with file:line) in notes.
+- REVISE: a correctness bug, regression, or contract break requires changes; include file:line and the concrete failure plus remediation in notes.
+- Final output: output exactly one trailing JSON object on the final line (no markdown fences, no surrounding prose):
+{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}`,
   },
   {
     id: "frontend-ux-design",
@@ -2622,6 +2668,18 @@ export interface Task {
    *  Incremented whenever the task leaves `in-progress`; never decremented and
    *  never cleared by reopen flows. */
   cumulativeActiveMs?: number;
+  /*
+  FNXC:TaskTiming 2026-06-26-10:14:
+  Per-stage dwell-time instrumentation. `cumulativeActiveMs` only measures `in-progress`,
+  so "how long did a task sit in todo / in-review" was unrecoverable without reconstructing
+  it from agent logs. This map records cumulative wall-clock milliseconds spent in EACH
+  column (column name -> total ms), accumulated at the column-transition seam in store.ts
+  exactly like `cumulativeActiveMs`: on every transition we add the dwell of the column being
+  LEFT (newColumnMovedAt - previousColumnMovedAt, clamped >= 0). Multi-visit columns add to
+  the existing bucket; never decremented and never cleared by reopen flows. Directly queryable
+  per stage by consumers like productivity-analytics.ts.
+  */
+  columnDwellMs?: Record<string, number>;
   /** ISO-8601 wall-clock timestamp for the current execution attempt.
    *  Set when entering `in-progress`; may be cleared on reopen to
    *  todo/triage when resume state is not preserved. */
@@ -3055,6 +3113,58 @@ export interface WorktrunkSettings {
   installedBinaryPath?: string;
 }
 
+/**
+ * FNXC:McpConfig 2026-06-25-00:00:
+ * MCP servers are trusted once enabled because downstream runtime slices may launch local commands or connect to operator-provided URLs. Store only declarations here; sensitive env, header, and token material MUST be represented as Fusion-managed secret references, never inline plaintext.
+ */
+export interface McpSecretRef {
+  secretRef: string;
+  scope: SecretScope;
+}
+
+export function isMcpSecretRef(value: unknown): value is McpSecretRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.secretRef === "string" &&
+    candidate.secretRef.trim().length > 0 &&
+    (candidate.scope === "project" || candidate.scope === "global")
+  );
+}
+
+export type McpSensitiveValue = McpSecretRef | string;
+
+export interface McpStdioTransport {
+  transport: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, McpSensitiveValue>;
+}
+
+export interface McpSseTransport {
+  transport: "sse";
+  url: string;
+  headers?: Record<string, McpSensitiveValue>;
+}
+
+export interface McpStreamableHttpTransport {
+  transport: "streamable-http";
+  url: string;
+  headers?: Record<string, McpSensitiveValue>;
+}
+
+export type McpTransport = McpStdioTransport | McpSseTransport | McpStreamableHttpTransport;
+
+export type McpServerDefinition = {
+  name: string;
+  enabled?: boolean;
+} & McpTransport;
+
+export interface McpServersSettings {
+  enabled?: boolean;
+  servers?: McpServerDefinition[];
+}
+
 export interface GlobalSettings {
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
@@ -3447,6 +3557,10 @@ export interface GlobalSettings {
    *  Stores both provider configs, active provider selection, token strategy,
    *  and lifecycle restart metadata for remote tunnel orchestration. */
   remoteAccess?: RemoteAccessProjectSettings;
+  /** Global defaults for user-configurable MCP servers.
+   *  Project-level `mcpServers` entries override by server name and may disable
+   *  a global server without deleting the global declaration. */
+  mcpServers?: McpServersSettings;
   /** Global defaults for worktrunk integration.
    *  Merged with project-level `worktrunk` field-by-field in `getSettings()`/
    *  `getSettingsFast()` so partial project overrides inherit unspecified fields. */
@@ -3747,6 +3861,10 @@ export interface ProjectSettings {
   researchSettings?: ResearchProjectSettings;
   /** Optional per-project `.env` materialization settings for exportable secrets. */
   secretsEnv?: SecretsEnvSettings;
+  /** Project-scoped MCP server overrides.
+   *  Entries override global server declarations by name; `enabled: false` on a
+   *  same-named entry disables that server for this project. */
+  mcpServers?: McpServersSettings;
   /** Sandbox command-execution settings.
    *  When omitted, runtime behavior is preserved via native passthrough defaults. */
   sandbox?: SandboxProjectSettings;
@@ -4539,6 +4657,7 @@ export {
   resolvePersistAgentThinkingLog,
   sanitizeCliAgentSettings,
   sanitizeCliAgentsSettings,
+  sanitizeMcpServers,
   CLI_AGENT_ADAPTER_IDS,
   CLI_AGENT_AUTONOMY_MODES,
 } from "./settings-schema.js";
@@ -4799,6 +4918,9 @@ export interface ArchivedTaskEntry {
   firstExecutionAt?: string;
   /** Accumulated active runtime spent in `in-progress` across attempts. */
   cumulativeActiveMs?: number;
+  /** FNXC:TaskTiming 2026-06-26-10:14: per-column cumulative dwell (ms) carried through
+   *  archive/restore so per-stage wall-clock survives archival. See Task.columnDwellMs. */
+  columnDwellMs?: Record<string, number>;
   /** Current-attempt execution anchor; may be cleared on reopen. */
   executionStartedAt?: string;
   /** First-time completion anchor; may be cleared on reopen. */
