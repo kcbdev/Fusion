@@ -2293,7 +2293,15 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       ].sort();
     }
 
-    return createAgentSession(createSessionOptions);
+    const result = await createAgentSession(createSessionOptions);
+    /*
+     * FNXC:TokenAnalytics 2026-06-26-13:58:
+     * Token analytics depends on every resolved lane model being visible on `session.model` after session creation. Some pi providers accept the explicit model override but do not mirror it back onto the session, so backfill the snapshot here before shared token accounting reads it.
+     */
+    if (modelOverride && !(result.session as AgentSession & { model?: unknown }).model) {
+      (result.session as AgentSession & { model?: typeof modelOverride }).model = modelOverride;
+    }
+    return result;
   };
 
   const emitFallbackUsed = async (triggerPoint: "session-creation" | "prompt-time"): Promise<void> => {

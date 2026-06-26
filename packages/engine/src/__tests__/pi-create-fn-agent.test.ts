@@ -1547,6 +1547,34 @@ describe("createFnAgent", () => {
     });
   });
 
+  it("backfills the resolved model onto sessions that do not mirror it", async () => {
+    const session = {
+      prompt: vi.fn(),
+      subscribe: vi.fn(),
+      dispose: vi.fn(),
+      setThinkingLevel: vi.fn(),
+    };
+    createAgentSessionMock.mockResolvedValueOnce({ session });
+
+    const { createFnAgent } = await import("../pi.js");
+    const result = await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+    });
+
+    expect(createAgentSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+    }));
+    expect(result.session).toBe(session);
+    expect((result.session as { model?: unknown }).model).toEqual({
+      provider: "anthropic",
+      id: "claude-sonnet-4-5",
+    });
+  });
+
   it("keeps caller customTools in readonly sessions", async () => {
     createReadOnlyToolsMock.mockReturnValueOnce([{ name: "read" }] as any);
     const delegationTool = {

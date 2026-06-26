@@ -101,5 +101,10 @@ describe("TokensArea provider model icons", () => {
     expect(gptBarLabel?.firstElementChild).toHaveAttribute("data-testid", "provider-icon-openai");
     expect(unknownBarLabel?.firstElementChild).toHaveAttribute("data-testid", "provider-icon-");
     expect(table.querySelectorAll(".provider-icon").length).toBeGreaterThanOrEqual(3);
+
+    // FNXC:TokenAnalytics 2026-06-26-14:05: The Command Center must render every model bucket returned by analytics across bars, pies, and table rows; missing Claude labels recreate the production one-model breakdown.
+    expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("claude-sonnet-4-5");
+    expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("gpt-4o-mini");
+    expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("(unknown)");
   });
 });

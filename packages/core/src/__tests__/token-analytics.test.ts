@@ -151,7 +151,10 @@ describe("token-analytics", () => {
       { provider: "openai", model: "gpt-5" },
     ));
     expect(modelGroups.size).toBe(2);
+    expect([...modelGroups.values()].reduce((sum, group) => sum + group.totalTokens, 0)).toBe(byModel.totals.totalTokens);
+    // FNXC:TokenAnalytics 2026-06-26-14:03: A multi-model task contributes once to grand totals but once per consumed model to grouped rows, so group nTasks may exceed the grand nTasks without double-counting total task volume.
     expect([...modelGroups.values()].reduce((sum, group) => sum + group.nTasks, 0)).toBe(2);
+    expect(byModel.totals.nTasks).toBe(1);
 
     const expectedTaskCost = costFor(
       { inputTokens: 950, outputTokens: 450, cachedTokens: 0, cacheWriteTokens: 0 },
@@ -164,6 +167,8 @@ describe("token-analytics", () => {
     expect(new Map(byProvider.groups.map((group) => [group.key, group.totalTokens]))).toEqual(
       new Map([["anthropic", 1000], ["openai", 400]]),
     );
+    expect(byProvider.groups.reduce((sum, group) => sum + group.totalTokens, 0)).toBe(byProvider.totals.totalTokens);
+    expect(byProvider.totals.nTasks).toBe(1);
   });
 
   it("marks unpriced per-model buckets as cost unavailable instead of zero", () => {
