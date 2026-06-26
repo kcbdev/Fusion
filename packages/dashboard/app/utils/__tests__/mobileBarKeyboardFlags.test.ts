@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { computeMobileBarKeyboardFlags } from "../mobileBarKeyboardFlags";
 
 describe("computeMobileBarKeyboardFlags", () => {
-  it("keeps footer rendered and uncollapsed on Android when keyboard is open", () => {
+  it("hides the footer on Android when keyboard is open, but does not apply the iOS bottom:0 collapse class", () => {
+    // FNXC:MobileChatKeyboardLayout 2026-06-26-09:04:
+    // Android now matches iOS: the keyboard-open footer is hidden (and its
+    // reserved padding dropped) so the composer sits flush above the keyboard
+    // with no dead band. `footerKeyboardOpen` stays iOS-only.
     const flags = computeMobileBarKeyboardFlags({
       isMobile: true,
       keyboardOpen: true,
@@ -11,9 +15,9 @@ describe("computeMobileBarKeyboardFlags", () => {
       isIOS: false,
     });
 
-    expect(flags.footerKeyboardOpen).toBe(false);
-    expect(flags.footerHidden).toBe(false);
+    expect(flags.footerHidden).toBe(true);
     expect(flags.navKeyboardOpen).toBe(true);
+    expect(flags.footerKeyboardOpen).toBe(false);
   });
 
   it("hides and collapses footer on iOS when keyboard is open and no overlay is open", () => {

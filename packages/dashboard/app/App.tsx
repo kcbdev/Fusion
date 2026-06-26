@@ -440,18 +440,16 @@ function AppInner() {
   // viewport. Without this guard, modal keyboard state leaks into the app-level
   // layout, causing stale bottom-padding offsets after the keyboard closes.
   //
-  // Android-gated: with `interactive-widget=resizes-content` the layout
-  // viewport itself shrinks with the soft keyboard, so we DON'T want to
-  // also hide the nav bar / strip its padding — that produces a layout
-  // jump while the focused input is settling, which Android Chrome treats
-  // as the focus target moving and dismisses the keyboard immediately.
-  // iOS doesn't shrink the layout viewport, so the iOS path keeps the
-  // hide-nav-on-keyboard behavior intact.
-  //
-  // FN-5707: keep nav pinning cross-platform, but only apply the footer
-  // keyboard-collapse class on iOS. On Android, collapsing the footer to
-  // `bottom: 0` overlaps it with the nav bar because the layout viewport
-  // already shrinks and the stacked footer position is already correct.
+  // FNXC:MobileChatKeyboardLayout 2026-06-26-09:04:
+  // When the keyboard is up on mobile we now hide the executor footer and
+  // drop the reserved footer+nav padding on BOTH platforms (see
+  // computeMobileBarKeyboardFlags) so the composer sits flush above the
+  // keyboard with no empty gap. This supersedes the earlier Android gate
+  // (FN-5707), which kept the footer visible and left a ~80px dead band
+  // where the off-screen nav bar's padding remained reserved.
+  // `footerKeyboardOpen` (the footer `bottom: 0` collapse class) stays
+  // iOS-only: it only matters when the footer is still rendered (e.g. over
+  // a modal), where Android's resizes-content already stacks it correctly.
   const { footerHidden, navKeyboardOpen, footerKeyboardOpen } = computeMobileBarKeyboardFlags({
     isMobile,
     keyboardOpen,
