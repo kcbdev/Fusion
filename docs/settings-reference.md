@@ -877,6 +877,8 @@ Z.ai's built-in provider uses the existing `zai` auth entry / `ZAI_API_KEY` envi
 6. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no task/lane/default pair is configured
 7. Automatic provider/model resolution
 
+Workflow prompt steps and scheduled/manual AI-prompt automation steps use the same executor lane before falling back to project/global defaults; explicit step-level `modelProvider` + `modelId` values still take precedence for that individual step.
+
 ### Heartbeat model (durable agents)
 
 Heartbeat sessions for durable agents use this order:
