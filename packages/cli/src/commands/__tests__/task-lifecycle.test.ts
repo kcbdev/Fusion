@@ -36,6 +36,7 @@ vi.mock("@fusion/core", async () => {
   };
 });
 
+import { getCurrentRepo } from "@fusion/core";
 import { activeSessionRegistry } from "@fusion/engine";
 import {
   cleanupMergedTaskArtifacts,
@@ -153,6 +154,7 @@ describe("processPullRequestMergeTask", () => {
   beforeEach(() => {
     execMock.mockReset();
     execFileCalls.length = 0;
+    vi.mocked(getCurrentRepo).mockReturnValue({ owner: "owner", repo: "repo" });
   });
 
   it("pushes the per-task branch to origin before creating a new PR", async () => {
@@ -421,12 +423,44 @@ describe("processPullRequestMergeTask", () => {
     await processPullRequestMergeTask(store as never, "/repo", task.id, github as never, () => undefined);
 
     expect(github.createPr).not.toHaveBeenCalled();
-    expect(github.getPrMergeStatus).toHaveBeenCalledWith("main", "fusion/groups/p-2", 22);
+    expect(github.getPrMergeStatus).toHaveBeenCalledWith("owner", "repo", 22);
     expect(store.updateBranchGroup).toHaveBeenCalledWith("BG-2", expect.objectContaining({
       prNumber: 22,
       prUrl: "https://github.com/x/y/pull/22",
       prState: "open",
     }));
+  });
+
+  it("rejects before PR status checks when the project repository cannot be resolved", async () => {
+    vi.mocked(getCurrentRepo).mockReturnValueOnce(null);
+    const task: MockTask = {
+      id: "FN-7133",
+      title: "test",
+      description: "desc",
+      column: "in-review",
+      prInfo: {
+        number: 7133,
+        url: "https://github.com/x/y/pull/7133",
+        status: "open",
+        headBranch: "fusion/fn-7133",
+        baseBranch: "main",
+      },
+    };
+    const store = makeStore(task);
+    const github = {
+      findPrForBranch: vi.fn(),
+      createPr: vi.fn(),
+      getPrMergeStatus: vi.fn(),
+      mergePr: vi.fn(),
+    };
+
+    await expect(
+      processPullRequestMergeTask(store as never, "/repo", task.id, github as never, () => undefined),
+    ).rejects.toThrow("processPullRequestMergeTask: could not determine repository");
+
+    expect(github.getPrMergeStatus).not.toHaveBeenCalled();
+    expect(github.findPrForBranch).not.toHaveBeenCalled();
+    expect(github.createPr).not.toHaveBeenCalled();
   });
 
   it("finalizes branch group and member tasks when shared group PR is already merged", async () => {
@@ -594,6 +628,7 @@ describe("processPullRequestMergeTask", () => {
     expect(github.createPr).toHaveBeenCalledWith(expect.objectContaining({
       base: "main",
     }));
+    expect(github.getPrMergeStatus).toHaveBeenCalledWith("owner", "repo", 7);
   });
 
   it("skips the push when an existing PR already covers the branch", async () => {
@@ -966,6 +1001,8 @@ describe("processPullRequestMergeTask", () => {
     expect(result).toBe("merged");
     expect(github.mergePr).toHaveBeenCalledWith({ number: 124, method: "squash" });
     expect(github.getPrMergeStatus).toHaveBeenCalledTimes(2);
+    expect(github.getPrMergeStatus).toHaveBeenNthCalledWith(1, "owner", "repo", 124);
+    expect(github.getPrMergeStatus).toHaveBeenNthCalledWith(2, "owner", "repo", 124);
     expect(store.updatePrInfo).toHaveBeenLastCalledWith("FN-9104", expect.objectContaining({ status: "merged" }));
     expect(store.updateTask).toHaveBeenCalledWith("FN-9104", { status: null, mergeRetries: 0 });
     expect(store.moveTask).toHaveBeenCalledWith("FN-9104", "done");

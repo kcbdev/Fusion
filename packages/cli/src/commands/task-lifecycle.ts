@@ -43,7 +43,7 @@ import type {
 interface GitHubOperations {
   findPrForBranch(params: { head: string; state?: "open" | "closed" | "all" }): Promise<PrInfo | null>;
   createPr(params: { title: string; body: string; head: string; base?: string }): Promise<PrInfo>;
-  getPrMergeStatus(base?: string, head?: string, number?: number): Promise<{
+  getPrMergeStatus(owner?: string, repo?: string, number?: number): Promise<{
     prInfo: PrInfo;
     reviewDecision: string | null;
     checks: Array<{ name: string; required: boolean; state: string }>;
@@ -667,6 +667,15 @@ export async function processPullRequestMergeTask(
     return "skipped";
   }
 
+  /*
+   * FNXC:PrMergeAutoMerge 2026-06-27-13:14:
+   * FN-7133 requires PR-mode merge status to resolve owner/repo from the project cwd because multi-project daemons cannot rely on process cwd. Never pass branch names into gh pr view --repo; getPrMergeStatus forwards its first two args as the repository slug.
+   */
+  const prRepo = getCurrentRepo(cwd);
+  if (!prRepo) {
+    throw new Error("processPullRequestMergeTask: could not determine repository");
+  }
+
   const branch = getTaskBranchName(task.id);
   const settings = await store.getSettings();
   // `requirePrApproval` MOVED to workflow settings (U4): resolve the task's
@@ -756,7 +765,7 @@ export async function processPullRequestMergeTask(
       prState: toBranchGroupPrState(groupPrInfo),
     });
 
-    const mergeStatus = await github.getPrMergeStatus(projectDefaultBranch, branchGroup.branchName, groupPrInfo.number);
+    const mergeStatus = await github.getPrMergeStatus(prRepo.owner, prRepo.repo, groupPrInfo.number);
     const refreshedPrInfo: PrInfo = {
       ...groupPrInfo,
       ...mergeStatus.prInfo,
@@ -858,7 +867,7 @@ export async function processPullRequestMergeTask(
     throw new Error(`Failed to create or resolve pull request for ${task.id}`);
   }
 
-  const mergeStatus = await github.getPrMergeStatus(mergeTarget.branch, branch, prInfo.number);
+  const mergeStatus = await github.getPrMergeStatus(prRepo.owner, prRepo.repo, prInfo.number);
   const refreshedPrInfo: PrInfo = {
     ...prInfo,
     ...mergeStatus.prInfo,
@@ -904,7 +913,7 @@ export async function processPullRequestMergeTask(
   } catch (err: unknown) {
     let refreshedStatus: Awaited<ReturnType<GitHubOperations["getPrMergeStatus"]>>;
     try {
-      refreshedStatus = await github.getPrMergeStatus(mergeTarget.branch, branch, prInfo.number);
+      refreshedStatus = await github.getPrMergeStatus(prRepo.owner, prRepo.repo, prInfo.number);
     } catch {
       throw err;
     }
