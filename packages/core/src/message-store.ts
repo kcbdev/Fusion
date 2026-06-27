@@ -13,7 +13,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import type { Database } from "./db.js";
-import { fromJson, toJsonNullable } from "./db.js";
+import { fromJson, isSqliteCorruptionError, toJsonNullable } from "./db.js";
 import { createLogger } from "./logger.js";
 import { DASHBOARD_USER_ID, normalizeMessageParticipant, validateMessageMetadata, type Message, type MessageCreateInput, type MessageFilter, type MessageType, type Mailbox, type ParticipantType } from "./types.js";
 
@@ -151,6 +151,57 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
       updatedAt: now,
     };
 
+    this.runInsertWithMessagesIndexRecovery(message);
+
+    this.db.bumpLastModified();
+    messageStoreLog.log(`MessageStore emitting message:sent id=${message.id} type=${message.type} fromId=${message.fromId} toId=${message.toId}`);
+    this.emit("message:sent", message);
+    this.emit("message:received", message);
+
+    if (message.toType === "agent" && this.onMessageToAgent) {
+      this.onMessageToAgent(message);
+    }
+
+    return message;
+  }
+
+  /**
+   * Insert a message, repairing messages-table indexes once when SQLite reports corruption.
+   *
+   * FNXC:Messaging 2026-06-26-00:00:
+   * Sending a message must not leak a bare `database disk image is malformed` when only the `messages` lookup indexes are corrupt. The send path runs one scoped `REINDEX messages` repair and one retry, then distinguishes repair failure from post-repair table/database corruption so operator remediation targets the right store and database path.
+   */
+  private runInsertWithMessagesIndexRecovery(message: Message): void {
+    try {
+      this.runInsert(message);
+      return;
+    } catch (error) {
+      if (!isSqliteCorruptionError(error)) {
+        throw error;
+      }
+
+      try {
+        this.db.reindexMessages();
+      } catch (reindexError) {
+        if (isSqliteCorruptionError(reindexError)) {
+          throw this.createMessagesReindexFailureError(reindexError, error);
+        }
+        throw reindexError;
+      }
+
+      try {
+        this.runInsert(message);
+        return;
+      } catch (retryError) {
+        if (isSqliteCorruptionError(retryError)) {
+          throw this.createMessagesPostReindexCorruptionError(retryError, error);
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  private runInsert(message: Message): void {
     this.stmtInsert.run(
       message.id,
       message.fromId,
@@ -164,17 +215,22 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
       message.createdAt,
       message.updatedAt,
     );
+  }
 
-    this.db.bumpLastModified();
-    messageStoreLog.log(`MessageStore emitting message:sent id=${message.id} type=${message.type} fromId=${message.fromId} toId=${message.toId}`);
-    this.emit("message:sent", message);
-    this.emit("message:received", message);
+  private createMessagesReindexFailureError(error: unknown, originalError: unknown): Error {
+    const detail = error instanceof Error ? error.message : String(error);
+    const original = originalError instanceof Error ? originalError.message : String(originalError);
+    return new Error(
+      `Messages store index repair failed (table=messages, db=${this.db.getPath()}) — REINDEX messages could not complete; run "fn db --vacuum" and inspect with "PRAGMA integrity_check" before retrying (original insert: ${original}; reindex: ${detail})`,
+    );
+  }
 
-    if (message.toType === "agent" && this.onMessageToAgent) {
-      this.onMessageToAgent(message);
-    }
-
-    return message;
+  private createMessagesPostReindexCorruptionError(error: unknown, originalError: unknown): Error {
+    const detail = error instanceof Error ? error.message : String(error);
+    const original = originalError instanceof Error ? originalError.message : String(originalError);
+    return new Error(
+      `Messages store table/database corruption after REINDEX (table=messages, db=${this.db.getPath()}) — REINDEX messages completed but sending still failed; run "fn db --vacuum" and inspect with "PRAGMA integrity_check" for messages table or database-file damage (original insert: ${original}; retry: ${detail})`,
+    );
   }
 
   /**
@@ -280,6 +336,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     if (existing.read) return existing;
 
     const now = new Date().toISOString();
+    // Deferral: markAsRead updates idxMessagesTo but is not the reported fn_send_message failure path; the reusable recovery helper keeps this path ready for a follow-up without expanding this focused fix.
     this.stmtUpdateRead.run(now, messageId);
     this.db.bumpLastModified();
 
@@ -310,7 +367,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     `).get(...participantIds, ownerType) as { count: number } | undefined;
     const count = unreadRow?.count ?? 0;
 
-    // Mark all as read
+    // Deferral: markAllAsRead updates idxMessagesTo, but sendMessage is the operator-blocking repro; leave bulk read-state recovery for a dedicated follow-up if observed.
     this.db.prepare(`
       UPDATE messages SET read = 1, updatedAt = ? WHERE ${toIdPredicate} AND toType = ? AND read = 0
     `).run(now, ...participantIds, ownerType);
@@ -331,6 +388,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
       throw new Error(`Message ${id} not found`);
     }
 
+    // Deferral: deleteMessage mutates messages indexes but is not on the fn_send_message delivery path; avoid adding extra retry semantics outside the scoped send repair.
     this.stmtDelete.run(id);
     this.db.bumpLastModified();
     this.emit("message:deleted", id);
@@ -349,6 +407,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
 
     const deletedIds = this.db.transaction(() => {
+      // Deferral: cleanupOldMessages deletes through messages indexes in retention maintenance, not interactive messaging send; keep recovery limited to the reported INSERT path.
       const rows = this.db.prepare(`
         DELETE FROM messages
         WHERE updatedAt < ?

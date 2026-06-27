@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } 
 import {
   Database,
   createDatabase,
+  isSqliteCorruptionError,
   quickCheckSqliteFile,
   integrityCheckSqliteFileAsync,
   toJson,
@@ -253,6 +254,43 @@ describe("Database", () => {
       // already closed
     }
     await cleanupTmpDirsAsync();
+  });
+
+  describe("SQLite corruption recovery helpers", () => {
+    it("classifies SQLite corruption errors without matching ordinary SQLite errors", () => {
+      const corruptByCode = Object.assign(new Error("constraint failed"), { code: "SQLITE_CORRUPT" });
+
+      expect(isSqliteCorruptionError(corruptByCode)).toBe(true);
+      expect(isSqliteCorruptionError(new Error("database disk image is malformed"))).toBe(true);
+      expect(isSqliteCorruptionError(new Error("corruption found reading blob from fts5 table"))).toBe(true);
+      expect(isSqliteCorruptionError(new Error("fts5 segment is corrupt"))).toBe(true);
+      expect(isSqliteCorruptionError(Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }))).toBe(false);
+      expect(isSqliteCorruptionError(new Error("plain application failure"))).toBe(false);
+    });
+
+    it("reindexes messages indexes for populated disk and in-memory databases", () => {
+      db.prepare(`
+        INSERT INTO messages (id, fromId, fromType, toId, toType, content, type, read, metadata, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run("msg-disk", "agent-1", "agent", "user-1", "user", "hello", "agent-to-user", 0, null, "2026-06-26T00:00:00.000Z", "2026-06-26T00:00:00.000Z");
+
+      expect(() => db.reindexMessages()).not.toThrow();
+
+      const memDb = new Database(fusionDir, { inMemory: true });
+      try {
+        memDb.init();
+        memDb.prepare(`
+          INSERT INTO messages (id, fromId, fromType, toId, toType, content, type, read, metadata, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run("msg-memory", "agent-1", "agent", "user-1", "user", "hello", "agent-to-user", 0, null, "2026-06-26T00:00:00.000Z", "2026-06-26T00:00:00.000Z");
+
+        expect(() => memDb.reindexMessages()).not.toThrow();
+        memDb.close();
+        expect(() => memDb.reindexMessages()).not.toThrow();
+      } finally {
+        memDb.close();
+      }
+    });
   });
 
   describe("initialization", () => {

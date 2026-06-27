@@ -7,6 +7,10 @@ import { MessageStore } from "../message-store.js";
 import { DASHBOARD_USER_ID } from "../types.js";
 import type { Message, Mailbox } from "../types.js";
 
+function makeSqliteCorruptError(): Error & { code: string } {
+  return Object.assign(new Error("database disk image is malformed"), { code: "SQLITE_CORRUPT" });
+}
+
 describe("MessageStore", () => {
   let store: MessageStore;
   let db: Database;
@@ -21,6 +25,7 @@ describe("MessageStore", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     db.close();
     try {
       rmSync(tempDir, { recursive: true, force: true });
@@ -148,6 +153,101 @@ describe("MessageStore", () => {
           metadata: { replyTo: { messageId: "" } },
         });
       }).toThrow("metadata.replyTo.messageId must be a non-empty string");
+    });
+
+    it("reindexes messages indexes once and retries when an insert reports SQLite corruption", () => {
+      const privateStore = store as unknown as { stmtInsert: { run: (...args: unknown[]) => unknown } };
+      const originalInsertRun = privateStore.stmtInsert.run.bind(privateStore.stmtInsert);
+      let attempts = 0;
+      privateStore.stmtInsert = {
+        run: vi.fn((...args: unknown[]) => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw makeSqliteCorruptError();
+          }
+          return originalInsertRun(...args);
+        }),
+      };
+      const reindexMessages = vi.spyOn(db, "reindexMessages");
+
+      const message = store.sendMessage({
+        fromId: "agent-1",
+        fromType: "agent",
+        toId: "user-1",
+        toType: "user",
+        content: "Recovered send",
+        type: "agent-to-user",
+      });
+
+      expect(reindexMessages).toHaveBeenCalledTimes(1);
+      expect(attempts).toBe(2);
+      expect(message.id).toMatch(/^msg-/);
+      expect(store.getMessage(message.id)).toEqual(message);
+    });
+
+    it("throws a repair-specific remediation error when REINDEX itself reports corruption", () => {
+      const privateStore = store as unknown as { stmtInsert: { run: (...args: unknown[]) => unknown } };
+      privateStore.stmtInsert = {
+        run: vi.fn(() => {
+          throw makeSqliteCorruptError();
+        }),
+      };
+      const reindexMessages = vi.spyOn(db, "reindexMessages").mockImplementation(() => {
+        throw makeSqliteCorruptError();
+      });
+
+      let thrown: unknown;
+      try {
+        store.sendMessage({
+          fromId: "agent-1",
+          fromType: "agent",
+          toId: "user-1",
+          toType: "user",
+          content: "Reindex fails",
+          type: "agent-to-user",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(reindexMessages).toHaveBeenCalledTimes(1);
+      expect(thrown).toBeInstanceOf(Error);
+      const message = (thrown as Error).message;
+      expect(message).toContain("Messages store index repair failed (table=messages, db=:memory:)");
+      expect(message).toContain('run "fn db --vacuum" and inspect with "PRAGMA integrity_check"');
+      expect(message).not.toBe("database disk image is malformed");
+    });
+
+    it("throws a table/database remediation error when corruption persists after successful reindex", () => {
+      const privateStore = store as unknown as { stmtInsert: { run: (...args: unknown[]) => unknown } };
+      privateStore.stmtInsert = {
+        run: vi.fn(() => {
+          throw makeSqliteCorruptError();
+        }),
+      };
+      const reindexMessages = vi.spyOn(db, "reindexMessages");
+
+      let thrown: unknown;
+      try {
+        store.sendMessage({
+          fromId: "agent-1",
+          fromType: "agent",
+          toId: "user-1",
+          toType: "user",
+          content: "Still corrupt",
+          type: "agent-to-user",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(reindexMessages).toHaveBeenCalledTimes(1);
+      expect(thrown).toBeInstanceOf(Error);
+      const message = (thrown as Error).message;
+      expect(message).toContain("Messages store table/database corruption after REINDEX (table=messages, db=:memory:)");
+      expect(message).toContain('run "fn db --vacuum" and inspect with "PRAGMA integrity_check"');
+      expect(message).not.toContain('run "REINDEX messages" or "fn db --vacuum" to repair');
+      expect(message).not.toBe("database disk image is malformed");
     });
 
     it("returns null for non-existent message", () => {

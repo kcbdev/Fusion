@@ -152,17 +152,33 @@ export function probeFts5(db: DatabaseSync): boolean {
   }
 }
 
+function getSqliteErrorText(error: unknown): string {
+  const err = error as { message?: unknown; code?: unknown; name?: unknown } | null | undefined;
+  return [err?.code, err?.name, err?.message, error]
+    .map((part) => (typeof part === "string" ? part : ""))
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/**
+ * Check whether an error appears to be a SQLite corruption/integrity failure.
+ */
+export function isSqliteCorruptionError(error: unknown): boolean {
+  const text = getSqliteErrorText(error);
+  return (
+    text.includes("sqlite_corrupt") ||
+    text.includes("database disk image is malformed") ||
+    text.includes("corruption found reading blob") ||
+    (text.includes("fts5") && text.includes("corrupt"))
+  );
+}
+
 /**
  * Check whether an error appears to be an FTS5 corruption/integrity failure.
  */
 export function isFts5CorruptionError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("corruption found reading blob") ||
-    lower.includes("database disk image is malformed") ||
-    (lower.includes("fts5") && lower.includes("corrupt"))
-  );
+  return isSqliteCorruptionError(error);
 }
 
 // ── Schema Definition ────────────────────────────────────────────────
@@ -5544,6 +5560,19 @@ export class Database {
    */
   isFts5CorruptionError(error: unknown): boolean {
     return isFts5CorruptionError(error);
+  }
+
+  /**
+   * Rebuild every SQLite index attached to the messages table.
+   *
+   * FNXC:Database 2026-06-26-00:00:
+   * `PRAGMA quick_check` can report ok while a messages-table index is out of sync with its table; INSERT/UPDATE/DELETE then fail because SQLite must maintain idxMessagesTo, idxMessagesFrom, and idxMessagesCreatedAt. A scoped `REINDEX messages` repairs only the messaging lookup indexes without invoking whole-file recovery from the send path.
+   */
+  reindexMessages(): void {
+    if (this.closed) {
+      return;
+    }
+    this.db.exec("REINDEX messages");
   }
 
   /**
