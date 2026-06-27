@@ -6204,6 +6204,7 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
   file_write_delete: ["write", "edit", "fn_task_attach"],
   command_execution: ["bash (non-git)", "fn_run_verification", "fn_acquire_repo_worktree", "read", "find", "grep", "ls"],
   network_api: ["fn_research_run (web/research)", "fn_research_cancel", "fn_web_fetch", "worktrunk_install"],
+  /* FNXC:ToolGovernance 2026-06-27-16:51: Dashboard policy examples must mirror action-gate mutation exports. Identity reflection is exempt heartbeat coordination, so it is intentionally not advertised as task_agent_mutation. */
   task_agent_mutation: [
     "fn_task_create",
     "fn_delegate_task",
@@ -6211,7 +6212,6 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
     "fn_task_import_github_issue",
     "fn_spawn_agent",
     "fn_update_agent_config",
-    "fn_update_identity",
     "fn_task_update",
     "fn_workflow_create",
     "fn_workflow_update",

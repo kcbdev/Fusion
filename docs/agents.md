@@ -163,7 +163,7 @@ Unknown/unclassified tool fallback:
 
 - In permanent-agent sessions, unknown tools default to `require-approval` (fail-safe).
 - Category `none` only yields `allow` when the tool is positively recognized as read-only.
-- Internal Fusion runtime coordination tools (heartbeat completion, logs, documents, task creation/delegation, messaging, evaluations, identity reflection, memory bookkeeping) are exempt by design and always allowed so permanent-agent heartbeats can complete. Task field/status mutation via `fn_task_update` is not exempt; it is governed as `task_agent_mutation`.
+- Internal Fusion runtime coordination tools (heartbeat completion, logs, documents, messaging, evaluations, identity reflection, memory bookkeeping, and read-only discovery) are exempt by design and always allowed so permanent-agent heartbeats can complete. Task creation/delegation/import are governed as `task_agent_mutation` in action-gate evaluation because they mutate the task board, while the permanent-agent classifier still treats them as positively recognized `none` coordination primitives. Task field/status mutation via `fn_task_update` is also governed as `task_agent_mutation`.
 - Operators can reload the in-memory exempt-tool registry at runtime via `POST /api/action-gate/reload` (optional body `{ "tools": string[] }`) to apply exemption-list updates without restarting the engine process.
 - Canonical tool classification/exemption sets live in `packages/engine/src/gating-classifications.ts` and are shared by both action-gate paths.
 

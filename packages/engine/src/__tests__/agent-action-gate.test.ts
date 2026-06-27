@@ -11,14 +11,12 @@ import type { AgentPermissionPolicy } from "@fusion/core";
 
 const FN_3548_COORDINATION_TOOLS = [
   "fn_heartbeat_done",
-  "fn_task_create",
   "fn_task_log",
   "fn_task_document_write",
   "fn_task_document_read",
   "fn_artifact_register",
   "fn_artifact_list",
   "fn_artifact_view",
-  "fn_delegate_task",
   "fn_list_agents",
   "fn_agent_show",
   "fn_agent_org_chart",
@@ -115,9 +113,9 @@ describe("agent-action-gate", () => {
 
   it("classifies explicit network and management tools", () => {
     expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_research_run", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("network_api");
-    expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_create", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("exempt");
+    expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_create", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
     expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_add_dep", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
-    expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_delegate_task", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("exempt");
+    expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_delegate_task", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
     expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_update_agent_config", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
     expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_import_github", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
     expect(evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_import_github_issue", args: {}, permissionPolicy: unrestrictedPolicy }).category).toBe("task_agent_mutation");
@@ -217,6 +215,24 @@ describe("agent-action-gate", () => {
     expect(createApprovalRequest).toHaveBeenCalledTimes(1);
     expect(pauseForApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "fn_task_create",
+    "fn_delegate_task",
+    "fn_task_import_github",
+    "fn_task_import_github_issue",
+  ] as const)("governs task creation/import tool %s as task_agent_mutation", (toolName) => {
+    for (const args of [{}, undefined]) {
+      expect(evaluateAgentActionGate({ agentId: "a1", toolName, args, permissionPolicy: approvalPolicy })).toMatchObject({
+        category: "task_agent_mutation",
+        disposition: "require-approval",
+      });
+      expect(evaluateAgentActionGate({ agentId: "a1", toolName, args, permissionPolicy: lockedDownPolicy })).toMatchObject({
+        category: "task_agent_mutation",
+        disposition: "block",
+      });
+    }
   });
 
   it.each(FN_3548_COORDINATION_TOOLS)("always allows newly exempt internal tool %s under locked-down policies", (toolName) => {

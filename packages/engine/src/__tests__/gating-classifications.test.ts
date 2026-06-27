@@ -94,6 +94,8 @@ const gitCases = [
 ] as const;
 
 const ACTION_MUTATION_PERMANENT_READONLY_TOOLS = new Set([
+  "fn_task_create",
+  "fn_delegate_task",
   "fn_task_import_github",
   "fn_task_import_github_issue",
 ]);
@@ -108,7 +110,6 @@ describe("gating-classifications parity", () => {
         "fn_artifact_list",
         "fn_artifact_register",
         "fn_artifact_view",
-        "fn_delegate_task",
         "fn_goal_list",
         "fn_goal_show",
         "fn_heartbeat_done",
@@ -121,7 +122,6 @@ describe("gating-classifications parity", () => {
         "fn_read_messages",
         "fn_reflect_on_performance",
         "fn_send_message",
-        "fn_task_create",
         "fn_task_document_read",
         "fn_task_document_write",
         "fn_task_done",
@@ -150,6 +150,18 @@ describe("gating-classifications parity", () => {
       expect(decision.disposition).toBe("allow");
       expect(decision.category).toBe("none");
     }
+  });
+
+  it.each([...ACTION_MUTATION_PERMANENT_READONLY_TOOLS])("keeps action-mutating tool %s readonly in permanent gating", (toolName) => {
+    expect(evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: blockedPolicy })).toMatchObject({
+      category: "task_agent_mutation",
+      disposition: "block",
+    });
+    expect(resolvePermanentAgentToolDecision({ toolName, args: {}, gating: { permissionPolicy: blockedPolicy } })).toMatchObject({
+      category: "none",
+      disposition: "allow",
+      recognized: true,
+    });
   });
 
   it("includes goal retrieval tools on readonly path only", () => {

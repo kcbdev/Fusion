@@ -34,12 +34,18 @@ export const COMMAND_EXECUTION_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_acquire_repo_worktree",
 ]);
 
+/**
+ * FNXC:ToolGovernance 2026-06-27-11:24:
+ * FN-7126 classifies task creation/delegation/import as task_agent_mutation in the action gate because they mutate the board and must honor operator approval/block policy. Keep the same tools in READONLY_FN_TOOLS for the permanent-agent gate, where they remain recognized `none` coordination primitives.
+ *
+ * FNXC:ToolGovernance 2026-06-27-16:51:
+ * Identity reflection stays out of this action-gate mutation-only list because it is heartbeat-critical coordination, not a task-board mutation. Keep it in COORDINATION_EXEMPT_TOOLS and READONLY_FN_TOOLS so exported mutation sets do not contradict action-gate exemption semantics.
+ */
 const ACTION_GATE_TASK_AGENT_ONLY_TOOLS = [
   "fn_task_create",
   "fn_delegate_task",
   "fn_task_import_github",
   "fn_task_import_github_issue",
-  "fn_update_identity",
 ] as const;
 const ACTION_GATE_SHARED_TASK_AGENT_TOOLS = SHARED_TASK_AGENT_TOOLS.filter(
   (tool) => !(PROVISIONING_TOOLS as readonly string[]).includes(tool),
@@ -176,8 +182,6 @@ export const COORDINATION_EXEMPT_TOOLS = [
   "fn_memory_get",
   "fn_read_messages",
   "fn_heartbeat_done",
-  "fn_task_create",
-  "fn_delegate_task",
   "fn_goal_list",
   "fn_goal_show",
   "fn_list_agents",
