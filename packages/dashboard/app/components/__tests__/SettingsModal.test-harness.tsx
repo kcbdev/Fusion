@@ -14,6 +14,11 @@ files (general / models-auth / scheduling-merge / remote-notifications) so the d
 component shard parallelizes them across workers instead of running one ~61s sequential
 file (FN-5048 feedback-loop velocity). vi.mock factories stay in each test file (they only
 apply per test module) and delegate to the mock fns + env setup exported here.
+
+FNXC:DashboardTests 2026-06-26-19:05:
+SettingsModal's split files still pay full render and sidebar-navigation cost per case.
+Use section-targeted harness rendering for tests that do not exercise navigation, preserving
+all assertions while avoiding inactive-section setup and real-timer polling in the hot path.
 */
 
 export const settingsModalCss = fs.readFileSync(path.resolve(__dirname, "../SettingsModal.css"), "utf8");
@@ -133,6 +138,17 @@ export function renderModal(props: Partial<ComponentProps<typeof SettingsModal>>
 export async function waitForSettingsModalReady() {
   await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
   expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+}
+
+export async function renderModalSection(
+  initialSection: ComponentProps<typeof SettingsModal>["initialSection"],
+  headingName: string | RegExp,
+  props: Partial<ComponentProps<typeof SettingsModal>> = {},
+) {
+  const result = renderModal({ initialSection, ...props });
+  await waitForSettingsModalReady();
+  expect(screen.getByRole("heading", { name: headingName })).toBeInTheDocument();
+  return result;
 }
 
 /*
