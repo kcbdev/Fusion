@@ -377,11 +377,17 @@ describe("settings key parity", () => {
   it("only intentional shared keys appear in both global and project scopes", () => {
     const projectKeySet = new Set(PROJECT_SETTINGS_KEYS as readonly string[]);
     const overlap = (GLOBAL_SETTINGS_KEYS as readonly string[]).filter((key) => projectKeySet.has(key));
+    // FNXC:SettingsScopeParity 2026-06-26-17:35:
+    // mcpServers is intentionally dual-scoped (FN-7077, "inject configured MCP servers across
+    // agent surfaces"): a global default applies to every project while a project override
+    // tailors the MCP server set per project. Keep it on the intentional shared-keys allow-list
+    // in GLOBAL_SETTINGS_KEYS order so this parity guard does not flag the deliberate overlap.
     expect(overlap).toEqual([
       "testMode",
       "mergeRequestContractShadowEnabled",
       "taskTokenBudget",
       "githubTrackingDefaultRepo",
+      "mcpServers",
       "worktrunk",
       "owningNodeHandoffPolicy",
     ]);
