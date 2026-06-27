@@ -1501,6 +1501,11 @@ function makeChainRepo(dir) {
   writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   writeFileSync(path.join(dir, "tsconfig.base.json"), "{}\n");
   writeFileSync(path.join(dir, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
+  mkdirSync(path.join(dir, ".changeset"), { recursive: true });
+  writeFileSync(
+    path.join(dir, ".changeset", "config.json"),
+    JSON.stringify({ baseBranch: "main" }, null, 2),
+  );
   // Shared __test-utils__ tree consumed by every package.
   mkdirSync(path.join(dir, "packages", "core", "src", "__test-utils__"), { recursive: true });
   writeFileSync(path.join(dir, "packages", "core", "src", "__test-utils__", "vitest-setup.ts"), "export const setup = 1;\n");
@@ -1544,6 +1549,31 @@ function runInRepo(repoDir, snippet) {
   return JSON.parse(lastLine);
 }
 
+function runPrintModeInRepo(repoDir, { args = [], env = {} } = {}) {
+  const subprocessEnv = {
+    ...process.env,
+    FUSION_PROJECT_DIR: repoDir,
+    FUSION_TEST_FULL: "",
+    ...env,
+  };
+  const r = spawnSync(process.execPath, [scriptModulePath, "--print-mode", ...args], {
+    cwd: repoDir,
+    encoding: "utf8",
+    env: subprocessEnv,
+  });
+  if (r.status !== 0) {
+    throw new Error(`--print-mode subprocess failed: ${r.stderr}\n${r.stdout}`);
+  }
+  const modeLine = r.stdout.split("\n").find((line) => line.startsWith("[test-changed] mode="));
+  assert.ok(
+    modeLine,
+    `expected --print-mode to emit a mode line; stdout:\n${r.stdout}\nstderr:\n${r.stderr}`,
+  );
+  const match = modeLine.match(/\bmode=([^\s]+)/);
+  assert.ok(match, `expected mode line to include mode=<value>: ${modeLine}`);
+  return { mode: match[1], stdout: r.stdout, stderr: r.stderr };
+}
+
 const packageHashSnippet = (pkgName) => `(mod) => {
   const infos = mod.listWorkspacePackageInfos();
   const dirByName = mod.buildPackageDirByName(infos);
@@ -1554,6 +1584,30 @@ const packageHashSnippet = (pkgName) => `(mod) => {
     packageDirByName: dirByName,
   }) };
 }`;
+
+/*
+FNXC:TestInfrastructure 2026-06-27-03:46:
+CI no longer routes through scripts/test-changed.mjs for the merge gate, so CI=true must not force mode=full. Keep paired full-trigger assertions here so this regression guard proves the --print-mode harness can still observe legitimate full-suite opt-ins.
+*/
+test("integration: CI=true does not force the full suite (only --full / FUSION_TEST_FULL do)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tc-print-mode-"));
+  try {
+    makeChainRepo(dir);
+
+    const ciOnly = runPrintModeInRepo(dir, { env: { CI: "true", FUSION_TEST_FULL: "" } });
+    assert.notEqual(ciOnly.mode, "full", "CI=true alone must not force the full suite");
+    assert.ok(
+      ciOnly.mode === "gate" || ciOnly.mode === "changed",
+      `CI=true alone should choose gate or changed mode, got ${ciOnly.mode}`,
+    );
+
+    assert.equal(runPrintModeInRepo(dir, { args: ["--full"] }).mode, "full");
+    assert.equal(runPrintModeInRepo(dir, { env: { FUSION_TEST_FULL: "1" } }).mode, "full");
+    assert.equal(runPrintModeInRepo(dir, { args: ["--full"], env: { CI: "true" } }).mode, "full");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("integration: mutating core (a) changes transitive dependents b,c but not unrelated d", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "tc-chain-"));
