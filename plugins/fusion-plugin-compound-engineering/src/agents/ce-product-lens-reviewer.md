@@ -89,4 +89,4 @@ Use the shared anchored rubric (see `subagent-template.md` — Confidence rubric
 
 - Implementation details, technical architecture, measurement methodology
 - Style/formatting, security (security-lens), design (design-lens)
-- Scope sizing (scope-guardian), internal consistency (ce-coherence-reviewer)
+- Scope sizing (scope-guardian), internal consistency (coherence-reviewer)

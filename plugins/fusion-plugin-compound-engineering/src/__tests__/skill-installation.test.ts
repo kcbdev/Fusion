@@ -33,18 +33,33 @@ describe("compound engineering bundled skill install", () => {
     }
   });
 
-  it("is idempotent: a second run with the target present is a skip-if-exists no-op", () => {
+  it("is idempotent when the plugin-local install provenance is current", () => {
     const targetRoot = join(tmp, ".fusion-ce-skills");
     const first = installBundledCeSkills({ targetRoot });
     expect(first.results.every((r) => r.outcome === "installed")).toBe(true);
 
-    // Tamper with an installed file; skip-if-exists must NOT overwrite it.
+    // Tamper with an installed file; a current provenance marker means this is
+    // the operator's active plugin-local copy and should not be overwritten.
     const sentinelPath = join(targetRoot, "ce-plan", "SKILL.md");
     writeFileSync(sentinelPath, "SENTINEL");
 
     const second = installBundledCeSkills({ targetRoot });
     expect(second.results.every((r) => r.outcome === "skipped")).toBe(true);
     expect(readFileSync(sentinelPath, "utf-8")).toBe("SENTINEL");
+  });
+
+  it("refreshes stale plugin-local installs without a current provenance marker", () => {
+    const targetRoot = join(tmp, ".fusion-ce-skills");
+    const first = installBundledCeSkills({ targetRoot });
+    expect(first.results.every((r) => r.outcome === "installed")).toBe(true);
+
+    const sentinelPath = join(targetRoot, "ce-plan", "SKILL.md");
+    writeFileSync(sentinelPath, "SENTINEL");
+    rmSync(join(targetRoot, ".fusion-ce-upstream-provenance.json"), { force: true });
+
+    const second = installBundledCeSkills({ targetRoot });
+    expect(second.results.every((r) => r.outcome === "refreshed")).toBe(true);
+    expect(readFileSync(sentinelPath, "utf-8")).not.toBe("SENTINEL");
   });
 
   // ── AE2: isolation — a global compound-engineering install is untouched ──

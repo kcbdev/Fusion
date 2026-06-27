@@ -2,6 +2,14 @@
 
 This file is loaded when ce-brainstorm detects a non-software task (Phase 0). It replaces the software-specific brainstorming phases (Phases 0.2 through 4) with facilitation principles for any domain. The Core Principles and **Interaction Rules** in the parent `ce-brainstorm/SKILL.md` still apply unchanged — including one-question-per-turn and the default to the platform's blocking question tool. This file extends those rules with universal-domain facilitation guidance; it does not relax them.
 
+This route is intentionally outside the software unified-plan artifact contract.
+Do not write `artifact_contract: ce-unified-plan/v1`,
+`artifact_readiness: requirements-only`, or a requirements-only plan under
+`docs/plans/` from this route. If the user wants a durable next artifact, hand
+the synthesis to `ce-plan`, which can create an appropriate universal or
+knowledge-work plan without pretending it is an implementation-ready code
+artifact.
+
 ---
 
 ## Your role
@@ -53,11 +61,11 @@ When the conversation has enough material to narrow — reflect back what you've
 
 **Always synthesize a summary in the chat.** Before offering any next steps, reflect back what emerged: key decisions, the direction chosen, open threads, and any assumptions made. This is the primary output of the brainstorm — the user should be able to read the summary and know what they landed on.
 
-**Then offer next steps** using the platform's blocking question tool: `AskUserQuestion` in Claude Code (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded), `request_user_input` in Codex, `ask_user` in Gemini, `ask_user` in Pi (requires the `pi-ask-user` extension). Fall back to numbered options in chat only when no blocking tool exists in the harness or the call errors (e.g., Codex edit modes) — not because a schema load is required. Never silently skip the question.
+**Then offer next steps** using the platform's blocking question tool: `AskUserQuestion` in Claude Code (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded), `request_user_input` in Codex, `ask_question` in Antigravity CLI (`agy`), `ask_user` in Pi (requires the `pi-ask-user` extension). Fall back to numbered options in chat only when no blocking tool exists in the harness or the call errors (e.g., Codex edit modes) — not because a schema load is required. Never silently skip the question.
 
 **Question:** "Brainstorm wrapped. What would you like to do next?"
 
-- **Create a plan** → hand off to `/ce-plan` with the decided goal and constraints
+- **Create a plan** → hand off to `/ce-plan` with the decided goal and constraints; let `ce-plan` choose the universal/knowledge-work artifact shape, not the software unified-plan contract
 - **Save summary to disk** → write the summary as a markdown file in the current working directory
-- **Open in Proof (web app) — review and comment to iterate with the agent** → load the `ce-proof` skill to open the doc in Every's Proof editor, iterate with the agent via comments, or copy a link to share with others
+- **Publish to Proof — shareable link** → load the `ce-proof` skill to publish the doc to Every's Proof editor and get a shareable link to read, comment on, or share with others (one-way; the local summary stays canonical)
 - **Done** → the conversation was the value, no artifact needed

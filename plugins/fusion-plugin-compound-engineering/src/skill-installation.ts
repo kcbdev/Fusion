@@ -1,7 +1,8 @@
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
+import { CE_UPSTREAM_PROVENANCE } from "./upstream-provenance.js";
 
 /**
  * Physical install of the bundled Compound Engineering skills.
@@ -15,15 +16,18 @@ import { COMPOUND_ENGINEERING_SKILLS } from "./skills.js";
  * resolves to nothing. Therefore a physical install into a discoverable,
  * PLUGIN-LOCAL skills directory is required.
  *
- * This mirrors the cpSync + skip-if-exists pattern of
- * `installBundledFusionSkill` (packages/cli) but the target is ALWAYS
- * plugin-local — it MUST NOT be a global `<home>/.claude/skills` path (R12/AE2).
+ * This mirrors the cpSync install posture of `installBundledFusionSkill`
+ * (packages/cli) but the target is ALWAYS plugin-local — it MUST NOT be a
+ * global `<home>/.claude/skills` path (R12/AE2). Existing plugin-local installs
+ * are preserved only when their provenance marker matches the current bundled
+ * upstream release; stale or unmarked installs are refreshed so users actually
+ * receive vendored prompt updates.
  * The installed directory is intended to be wired into a session via
  * `additionalSkillPaths` (engine-side, in later units), keeping discovery
  * scoped to the plugin and never clobbering a user's global install.
  */
 
-export type CeSkillInstallOutcome = "installed" | "skipped" | "error";
+export type CeSkillInstallOutcome = "installed" | "refreshed" | "skipped" | "error";
 
 export interface CeSkillInstallResult {
   skillId: string;
@@ -112,9 +116,49 @@ export interface InstallBundledCeSkillsOptions {
   sourceRoot?: string;
 }
 
+const SKILL_INSTALL_PROVENANCE_FILE = ".fusion-ce-upstream-provenance.json";
+
+function installProvenancePath(targetRoot: string): string {
+  return join(targetRoot, SKILL_INSTALL_PROVENANCE_FILE);
+}
+
+function isCurrentInstalledProvenance(targetRoot: string): boolean {
+  try {
+    const marker = JSON.parse(readFileSync(installProvenancePath(targetRoot), "utf-8")) as Partial<
+      typeof CE_UPSTREAM_PROVENANCE
+    >;
+    return (
+      marker.releaseTag === CE_UPSTREAM_PROVENANCE.releaseTag &&
+      marker.tarballSha256 === CE_UPSTREAM_PROVENANCE.tarballSha256
+    );
+  } catch {
+    return false;
+  }
+}
+
+function writeInstalledProvenance(targetRoot: string): void {
+  mkdirSync(targetRoot, { recursive: true });
+  writeFileSync(
+    installProvenancePath(targetRoot),
+    `${JSON.stringify(
+      {
+        repo: CE_UPSTREAM_PROVENANCE.repo,
+        releaseTag: CE_UPSTREAM_PROVENANCE.releaseTag,
+        commit: CE_UPSTREAM_PROVENANCE.commit,
+        tarballSha256: CE_UPSTREAM_PROVENANCE.tarballSha256,
+        installedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 /**
  * Copy each bundled CE skill directory into the plugin-local install target.
- * Idempotent: existing per-skill target dirs are preserved (skip-if-exists).
+ *
+ * FNXC:CompoundEngineering 2026-06-26-23:55:
+ * Upstream v3.15.0 refreshes must reach existing enabled plugins, not only fresh installs. Refresh stale or unmarked plugin-local copies using a provenance marker while keeping current-version installs idempotent and never touching global client skill dirs.
  */
 export function installBundledCeSkills(
   options: InstallBundledCeSkillsOptions = {},
@@ -125,6 +169,7 @@ export function installBundledCeSkills(
   assertPluginLocalTarget(targetRoot);
 
   const sourceRoot = options.sourceRoot ? resolve(options.sourceRoot) : resolveBundledSkillsRoot();
+  const installIsCurrent = isCurrentInstalledProvenance(targetRoot);
 
   const results = COMPOUND_ENGINEERING_SKILLS.map<CeSkillInstallResult>((skill) => {
     const sourceDir = join(sourceRoot, skill.skillId);
@@ -133,7 +178,13 @@ export function installBundledCeSkills(
       assertValidSkillSource(skill.skillId, sourceDir);
 
       if (existsSync(targetDir)) {
-        return { skillId: skill.skillId, sourceDir, targetDir, outcome: "skipped", reason: "existing install preserved" };
+        if (installIsCurrent) {
+          return { skillId: skill.skillId, sourceDir, targetDir, outcome: "skipped", reason: "current install preserved" };
+        }
+        rmSync(targetDir, { recursive: true, force: true });
+        mkdirSync(targetRoot, { recursive: true });
+        cpSync(sourceDir, targetDir, { recursive: true });
+        return { skillId: skill.skillId, sourceDir, targetDir, outcome: "refreshed", reason: "stale install refreshed" };
       }
 
       mkdirSync(targetRoot, { recursive: true });
@@ -149,6 +200,10 @@ export function installBundledCeSkills(
       };
     }
   });
+
+  if (results.every((result) => result.outcome !== "error")) {
+    writeInstalledProvenance(targetRoot);
+  }
 
   return { targetRoot, results };
 }

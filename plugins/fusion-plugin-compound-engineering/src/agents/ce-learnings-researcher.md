@@ -18,6 +18,10 @@ Past learnings span multiple shapes:
 
 Treat all of these as candidates. Do not privilege bug-shaped learnings over the others; the caller's context determines which shape matters.
 
+## Invocation Contract
+
+For code-review invocations, search the full learning corpus described below, then convert relevant findings into review context: known risks against this diff, modules or patterns that failed before, regression traps, missing-test patterns, related solution docs, and possible "Known Pattern" notes for the final review. Repo lessons absolutely apply here. Distinguish documented historical risk from defects directly observed in the diff; do not invent review findings that the current code does not support.
+
 ## Step 0: Ground in CONCEPTS.md (if present)
 
 Before searching `docs/solutions/`, check whether `CONCEPTS.md` exists at the repo root. If it does, read it as grounding — it defines the project's shared vocabulary (domain entities, named processes, status concepts) and the canonical names for things the caller may be asking about. Use those definitions to ground keyword extraction (Step 1) and to distill findings using the project's actual terminology rather than synonyms.
@@ -216,7 +220,7 @@ Structure findings as follows:
 - [Past mis-steps worth avoiding, where applicable]
 ```
 
-When no relevant learnings are found, say so explicitly, include the search context so the caller can see what was looked for, and note that the caller's work may be worth capturing with `/ce-compound` after it lands — the absence is itself useful signal.
+When no relevant learnings are found, say so explicitly, include the search context so the caller can see what was looked for, and note that the caller's work may be worth capturing as a durable learning after it lands — the absence is itself useful signal.
 
 ## Efficiency Guidelines
 
@@ -245,12 +249,6 @@ When no relevant learnings are found, say so explicitly, include the search cont
 - Discard a candidate because it lacks bug-shaped fields like `symptoms` or `root_cause` — non-bug entries legitimately omit them
 - Assume `docs/solutions/patterns/critical-patterns.md` exists — read it only when present
 
-## Integration Points
+## Consumption Contract
 
-This agent is invoked by:
-
-- `/ce-plan` — to inform planning with institutional knowledge and add depth during confidence checking
-- `/ce-code-review`, `/ce-optimize`, `/ce-ideate` — to surface prior learnings relevant to the change, optimization target, or ideation topic
-- Standalone invocation before starting work in a documented area
-
-Output is consumed as prose — no downstream caller parses specific field labels out of it — so prioritize distilled, actionable takeaways over structural rigor.
+Output is consumed as prose. No downstream caller parses specific field labels out of it, so prioritize distilled, actionable takeaways over structural rigor. Shape recommendations around the invocation purpose supplied by the caller: planning, review, optimization, ideation, or another documented-work context.

@@ -202,11 +202,6 @@ Every theme MUST include ALL of the following fields. Do not skip fields, merge 
 - Use native content-search/grep tools (e.g., `Grep` in Claude Code) for searching file contents
 - Do not use shell commands for tasks that have native tool equivalents (no `find`, `cat`, `rg` through shell)
 
-## Integration Points
+## Consumption Contract
 
-This agent is designed to be invoked by:
-- `ce-ideate` — as a third parallel Phase 1 scan when issue-tracker intent is detected
-- Direct user dispatch — for standalone issue landscape analysis
-- Other skills or workflows — any context where understanding issue patterns is valuable
-
-The output is self-contained and not coupled to any specific caller's context.
+This prompt is designed for issue landscape analysis whenever the caller detects issue-tracker intent. The output is self-contained and should be shaped around the caller's supplied purpose, such as ideation, planning, prioritization, or standalone issue analysis.

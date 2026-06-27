@@ -38,7 +38,7 @@ describe("compound engineering bundled agent-persona install", () => {
     }
   });
 
-  it("is idempotent: a second run with the target present is a skip-if-exists no-op", () => {
+  it("is idempotent when the plugin-local install provenance is current", () => {
     const targetRoot = join(tmp, ".fusion-ce-agents");
     const first = installBundledCeAgents({ targetRoot });
     expect(first.results.every((r) => r.outcome === "installed")).toBe(true);
@@ -49,6 +49,20 @@ describe("compound engineering bundled agent-persona install", () => {
     const second = installBundledCeAgents({ targetRoot });
     expect(second.results.every((r) => r.outcome === "skipped")).toBe(true);
     expect(readFileSync(sentinelPath, "utf-8")).toBe("SENTINEL");
+  });
+
+  it("refreshes stale plugin-local agent installs without a current provenance marker", () => {
+    const targetRoot = join(tmp, ".fusion-ce-agents");
+    const first = installBundledCeAgents({ targetRoot });
+    expect(first.results.every((r) => r.outcome === "installed")).toBe(true);
+
+    const sentinelPath = join(targetRoot, "ce-correctness-reviewer.md");
+    writeFileSync(sentinelPath, "SENTINEL");
+    rmSync(join(targetRoot, ".fusion-ce-upstream-provenance.json"), { force: true });
+
+    const second = installBundledCeAgents({ targetRoot });
+    expect(second.results.every((r) => r.outcome === "refreshed")).toBe(true);
+    expect(readFileSync(sentinelPath, "utf-8")).not.toBe("SENTINEL");
   });
 
   it("refuses to install into a global client agents directory", () => {

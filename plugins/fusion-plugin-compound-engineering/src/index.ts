@@ -118,12 +118,14 @@ const plugin = definePlugin({
     // Install the bundled, pinned ce-* SKILL.md files into a plugin-local,
     // discoverable directory on load. The engine ingests
     // PluginSkillContribution only as a name; physical discovery requires the
-    // files to exist on a path it scans (U2 finding). Install is idempotent
-    // (skip-if-exists) and guarded to never touch a global ~/.claude/skills.
+    // files to exist on a path it scans (U2 finding). Install is provenance-aware:
+    // current plugin-local copies are skipped, stale/unmarked copies are refreshed,
+    // and global ~/.claude/skills is never touched.
     onLoad: async (ctx) => {
       try {
         const { targetRoot, results } = installBundledCeSkills();
         const installed = results.filter((r) => r.outcome === "installed").length;
+        const refreshed = results.filter((r) => r.outcome === "refreshed").length;
         const errored = results.filter((r) => r.outcome === "error");
         if (errored.length > 0) {
           ctx.logger.warn(
@@ -133,7 +135,7 @@ const plugin = definePlugin({
           );
         }
         ctx.logger.info(
-          `Compound Engineering skills ready — installed=${installed} target=${targetRoot}`,
+          `Compound Engineering skills ready — installed=${installed} refreshed=${refreshed} target=${targetRoot}`,
         );
         ctx.emitEvent("compound-engineering:skills-installed", { targetRoot, results });
       } catch (error) {
@@ -142,11 +144,12 @@ const plugin = definePlugin({
       }
 
       // Install the bundled ce-* persona definitions (same posture as skills:
-      // pinned, plugin-local, idempotent, never a global ~/.claude/agents). The
-      // CE skills read these and pass them to fn_spawn_agent.systemPromptOverride.
+      // pinned, plugin-local, provenance-refreshed, never a global ~/.claude/agents).
+      // The CE skills read these and pass them to fn_spawn_agent.systemPromptOverride.
       try {
         const { targetRoot, results } = installBundledCeAgents();
         const installed = results.filter((r) => r.outcome === "installed").length;
+        const refreshed = results.filter((r) => r.outcome === "refreshed").length;
         const errored = results.filter((r) => r.outcome === "error");
         if (errored.length > 0) {
           ctx.logger.warn(
@@ -156,7 +159,7 @@ const plugin = definePlugin({
           );
         }
         ctx.logger.info(
-          `Compound Engineering agent personas ready — installed=${installed} target=${targetRoot}`,
+          `Compound Engineering agent personas ready — installed=${installed} refreshed=${refreshed} target=${targetRoot}`,
         );
         ctx.emitEvent("compound-engineering:agents-installed", { targetRoot, results });
       } catch (error) {

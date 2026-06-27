@@ -174,10 +174,26 @@ board task — the two writers never contend over the same cell.
 The `ce-*` skills are **bundled and pinned** inside the plugin
 (`src/skills/<skillId>/SKILL.md`), declared via `PluginSkillContribution` with
 plugin-root-relative `skillFiles`. On load they are physically installed
-(`cpSync`, idempotent skip-if-exists) into a **plugin-local, discoverable**
+(`cpSync`, provenance-aware refresh) into a **plugin-local, discoverable**
 directory so an agent session can resolve them. The install is guarded to **never
 touch a global `~/.claude/skills` path** an operator's own compound-engineering
 install owns — registering the bundled copy can never clobber a global install.
+Existing plugin-local installs with no marker or an older upstream marker are
+refreshed from the bundled source so enabled plugins actually run the pinned
+release after an upgrade; installs whose marker already matches are left alone.
+
+### Vendored from upstream
+
+The bundled `ce-*` skills and `src/agents/ce-*.md` personas are reconciled from
+[`EveryInc/compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin),
+pinned at [`compound-engineering-v3.15.0`](https://github.com/EveryInc/compound-engineering-plugin/releases/tag/compound-engineering-v3.15.0)
+(commit `2bbdbfb1d4287db95af407808b53266988ada974`; tarball SHA-256
+`fce13e71bd709f8f572bf167c6af3753fc3fde0309c8f878498c78cb391c0b14`, also
+recorded in `src/upstream-provenance.ts`). Refreshes are
+**reconcile-not-overwrite**: pull
+upstream prompt/reference improvements, but preserve Fusion-local adaptations
+such as stage separation, plugin-local install paths, Fusion await-input
+handling, and `fn_spawn_agent` persona dispatch.
 
 ## Settings
 
