@@ -4371,23 +4371,76 @@ function InnerEditor({
 
               {/* FNXC:WorkflowOptionalGroup 2026-06-21-11:30: The optional-group inspector exposes the workflow-author `defaultOn` default (whether new tasks enable the group). The group name reuses the shared Name field above; the body is authored by dropping nodes inside, identical to foreach/loop. */}
               {selectedNode.data.kind === "optional-group" ? (
-                <>
-                  <label className="wf-field wf-field--checkbox">
-                    <input
-                      type="checkbox"
-                      data-testid="wf-optional-group-default-on"
-                      checked={Boolean(selectedNode.data.config?.defaultOn)}
-                      onChange={(e) => updateSelectedData({ config: { defaultOn: e.target.checked } })}
-                    />
-                    <span>{t("workflowNodes.optionalGroupDefaultOn", "Enabled by default for new tasks")}</span>
-                  </label>
-                  <p className="wf-inspector-note wf-inspector-note--info">
-                    {t(
-                      "workflowNodes.optionalGroupNote",
-                      "Runs the steps inside this group once when the task enables it (seeded from this default), and skips them when disabled. Drop the optional steps into the region.",
-                    )}
-                  </p>
-                </>
+                (() => {
+                  const maxRevisions = selectedNode.data.config?.maxRevisions;
+                  const isUnbounded = maxRevisions === "unbounded";
+                  return (
+                    <>
+                      <label className="wf-field wf-field--checkbox">
+                        <input
+                          type="checkbox"
+                          data-testid="wf-optional-group-default-on"
+                          checked={Boolean(selectedNode.data.config?.defaultOn)}
+                          onChange={(e) => updateSelectedData({ config: { defaultOn: e.target.checked } })}
+                        />
+                        <span>{t("workflowNodes.optionalGroupDefaultOn", "Enabled by default for new tasks")}</span>
+                      </label>
+
+                      {/* FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:47: Optional-group authors need a per-step revision budget control that round-trips as `config.maxRevisions`; clearing deletes the key so existing workflows keep the global `maxPostReviewFixes` fallback, while Unbounded disables the numeric input and persists the explicit `"unbounded"` mode. */}
+                      <label className="wf-field">
+                        <span>{t("workflowNodes.optionalGroupMaxRevisions", "Max revisions")}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder={t("workflowNodes.optionalGroupMaxRevisionsPlaceholder", "Use global setting")}
+                          data-testid="wf-optional-group-max-revisions"
+                          disabled={isUnbounded}
+                          value={typeof maxRevisions === "number" ? String(maxRevisions) : ""}
+                          onChange={(e) => {
+                            const val = e.target.value.trim();
+                            updateSelectedData({
+                              config: (prev) => {
+                                const next = { ...prev };
+                                if (val === "") delete next.maxRevisions;
+                                else {
+                                  const num = parseInt(val, 10);
+                                  if (!isNaN(num) && num >= 0) next.maxRevisions = num;
+                                }
+                                return next;
+                              },
+                            });
+                          }}
+                        />
+                      </label>
+
+                      <label className="wf-field wf-field--checkbox">
+                        <input
+                          type="checkbox"
+                          data-testid="wf-optional-group-max-revisions-unbounded"
+                          checked={isUnbounded}
+                          onChange={(e) => {
+                            updateSelectedData({
+                              config: (prev) => {
+                                const next = { ...prev };
+                                if (e.target.checked) next.maxRevisions = "unbounded";
+                                else if (next.maxRevisions === "unbounded") delete next.maxRevisions;
+                                return next;
+                              },
+                            });
+                          }}
+                        />
+                        <span>{t("workflowNodes.optionalGroupMaxRevisionsUnbounded", "Unbounded")}</span>
+                      </label>
+
+                      <p className="wf-inspector-note wf-inspector-note--info">
+                        {t(
+                          "workflowNodes.optionalGroupNote",
+                          "Runs the steps inside this group once when the task enables it (seeded from this default), and skips them when disabled. Drop the optional steps into the region.",
+                        )}
+                      </p>
+                    </>
+                  );
+                })()
               ) : null}
 
               {selectedNode.data.kind === "step-review" ? (

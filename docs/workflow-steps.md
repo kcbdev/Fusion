@@ -267,9 +267,10 @@ FN-7039 retired the declaration-based optional-steps model (`WorkflowOptionalSte
 
 Optional quality gates are authored directly in the workflow graph as `optional-group` **nodes**. An `optional-group` node is a container (mirroring `foreach`/`loop`) whose `template` subgraph the executor runs **once** when the group is enabled for the task, and passes through (skips) when disabled. There is no iteration and no rework budget — a single pass — and rework edges inside the template are rejected by `validateOptionalGroup`.
 
-Node config (`WorkflowOptionalGroupConfig`): `{ name?, defaultOn?, phase?: "pre-merge" | "post-merge", template: { nodes, edges } }`.
+Node config (`WorkflowOptionalGroupConfig`): `{ name?, defaultOn?, maxRevisions?: number | "unbounded", phase?: "pre-merge" | "post-merge", template: { nodes, edges } }`.
 
 - `defaultOn` seeds the per-task enable set at task creation; operators can still toggle it.
+- `maxRevisions` optionally overrides the workflow/project `maxPostReviewFixes` budget for this one optional group's pre-merge fix → re-review loop. Use a non-negative integer for a bounded number of automatic fix passes, `0` to disable automatic fixes for that step, or `"unbounded"` to keep cycling until the step returns `APPROVE` / `APPROVE_WITH_NOTES`. When omitted, the step keeps the global `maxPostReviewFixes` behavior.
 - `phase` defaults to `"pre-merge"` (the prior, only behavior). `"post-merge"` marks a group the executor runs after a successful merge (see [Execution Phases](#execution-phases)).
 - Enable state lives on the per-task `enabledWorkflowSteps` array, keyed by the **group node id** (for example `browser-verification`, `code-review`). The graph executor runs an optional-group node only when its id is present in `enabledWorkflowSteps`.
 
@@ -573,9 +574,14 @@ If a task is found in `in-review` with failed pre-merge workflow results and no 
 <!--
 FNXC:WorkflowOptionalStepFix 2026-06-26-17:05:
 Enabled PRE-merge optional-group REVISE findings should be acted on before review/merge when the executor is still in the graph run. The inline path consumes the same `postReviewFixCount` / `maxPostReviewFixes` budget before scheduling `sendTaskBackForFix`; exhausted budgets preserve the older advisory/gate behavior so optional advisory gates remain ultimately non-blocking.
+
+FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:55:
+Workflow authors can override the global optional-step remediation budget per optional-group via `maxRevisions`, including `"unbounded"` for loops that should continue until the step approves. Document both inline executor and self-healing semantics because they must resolve the same budget for parked review recovery.
 -->
 
-During a live graph run, an enabled **pre-merge** optional step that returns `REVISE` (including the built-in **Code Review** / `code-review` and **Browser Verification** / `browser-verification` groups) sends the task back to the executor for a bounded fix pass before the graph continues to review or merge. The workflow graph restarts on the next executor pass, so the optional step re-runs against the fixed diff; the cycle repeats until the step returns `APPROVE` / `APPROVE_WITH_NOTES` or the shared `postReviewFixCount` / `maxPostReviewFixes` budget is exhausted. The built-in default budget is 3 fix passes, matching other bounded rework defaults; FN-7129 tracks future per-step configurable or unbounded budgets. When the budget is exhausted or disabled (`maxPostReviewFixes <= 0`), behavior falls through to the prior semantics: advisory results remain non-blocking and gate failures remain failed/parked.
+During a live graph run, an enabled **pre-merge** optional step that returns `REVISE` (including the built-in **Code Review** / `code-review` and **Browser Verification** / `browser-verification` groups) sends the task back to the executor for a fix pass before the graph continues to review or merge. The workflow graph restarts on the next executor pass, so the optional step re-runs against the fixed diff; the cycle repeats until the step returns `APPROVE` / `APPROVE_WITH_NOTES` or the resolved revision budget is exhausted. By default, each step uses the workflow/project `maxPostReviewFixes` value (built-in default: 3 fix passes). A workflow author can override that for a specific `optional-group` with `config.maxRevisions`: a non-negative integer sets that step's ceiling, `0` disables automatic fixes for that step, and `"unbounded"` removes the ceiling check. The counter remains the task's shared `postReviewFixCount`; per-step counters are not maintained.
+
+The same resolved per-step budget is used by self-healing when it revives an `in-review` task that is parked with a failed pre-merge workflow result. If the failed step's IR cannot be resolved, self-healing falls back to `maxPostReviewFixes` so existing behavior is preserved. `"unbounded"` relies on the optional step eventually approving; a step that always returns `REVISE` will continue cycling until a human intervenes or another guard (pause, worktree/lease, auto-merge policy, dependency blocker) stops recovery. When the budget is exhausted or disabled, behavior falls through to the prior semantics: advisory results remain non-blocking and gate failures remain failed/parked.
 
 Post-merge optional groups never trigger this send-back path because merge has already happened; their failures are recorded/logged as non-blocking post-merge results.
 

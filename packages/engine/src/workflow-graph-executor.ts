@@ -168,7 +168,7 @@ export interface WorkflowGraphExecutorDeps {
   recordWorkflowStepResult?: (taskId: string, result: WorkflowStepResult) => void | Promise<void>;
   /*
    * FNXC:WorkflowOptionalStepFix 2026-06-26-16:20:
-   * Enabled PRE-merge optional workflow steps that return REVISE must offer the executor one bounded remediation path before normal advisory/gate fall-through. This seam returns true only when the caller already consumed the `maxPostReviewFixes` budget and scheduled `sendTaskBackForFix`; the graph must then stop before review/merge. Absent or false preserves prior byte-inert behavior for in-memory tests and exhausted budgets.
+   * Enabled PRE-merge optional workflow steps that return REVISE must offer the executor one remediation path before normal advisory/gate fall-through. The graph forwards the optional-group node id and per-step `maxRevisions` override so the executor can resolve the budget against `maxPostReviewFixes` or honor `"unbounded"`; absent or false preserves prior byte-inert behavior for in-memory tests and exhausted budgets.
    */
   requestPreMergeOptionalStepFix?: (taskId: string, info: {
     stepName: string;
@@ -176,6 +176,8 @@ export interface WorkflowGraphExecutorDeps {
     phase: WorkflowStepResult["phase"];
     status: WorkflowStepResult["status"];
     verdict?: string;
+    nodeId?: string;
+    maxRevisions?: unknown;
   }) => Promise<boolean> | boolean;
   /** Project node-published task metadata onto the task row for dispatcher/UI. */
   publishTaskProjection?: (taskId: string, patch: WorkflowTaskProjection, source: { nodeId: string; nodeKind: WorkflowIrNode["kind"] }) => void | Promise<void>;
@@ -672,6 +674,8 @@ export class WorkflowGraphExecutor {
               phase: stepPhase,
               status: stepStatus,
               verdict,
+              nodeId: node.id,
+              maxRevisions: node.config?.maxRevisions,
             });
             if (fixScheduled) {
               context[`node:${node.id}:fixScheduled`] = true;

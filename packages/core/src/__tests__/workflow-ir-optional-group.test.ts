@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
+import { WorkflowIrError, parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
+import { resolveOptionalStepRevisionBudget } from "../workflow-ir-types.js";
 import type { WorkflowIrEdge, WorkflowIrNode, WorkflowIrV2 } from "../workflow-ir-types.js";
 
 /*
@@ -64,6 +65,32 @@ describe("optional-group validation", () => {
     expect(() => parseWorkflowIr(groupIr({ defaultOn: "yes" as unknown as boolean }))).toThrow(
       /defaultOn must be a boolean/,
     );
+  });
+
+  it("accepts and round-trips per-step maxRevisions budgets", () => {
+    for (const maxRevisions of [2, "unbounded"] as const) {
+      const parsed = parseWorkflowIr(groupIr({ maxRevisions })) as WorkflowIrV2;
+      const group = parsed.nodes.find((n) => n.id === "browser-verification");
+      expect(group?.config?.maxRevisions).toBe(maxRevisions);
+      expect(parseWorkflowIr(serializeWorkflowIr(parsed))).toEqual(parsed);
+    }
+  });
+
+  it("rejects invalid per-step maxRevisions budgets", () => {
+    for (const maxRevisions of [-1, 1.5, "sometimes"] as const) {
+      expect(() => parseWorkflowIr(groupIr({ maxRevisions }))).toThrow(WorkflowIrError);
+      expect(() => parseWorkflowIr(groupIr({ maxRevisions }))).toThrow(
+        /maxRevisions must be a non-negative integer or "unbounded"/,
+      );
+    }
+  });
+
+  it("resolves optional-step revision budgets from numeric, unbounded, and fallback states", () => {
+    expect(resolveOptionalStepRevisionBudget(2, 3)).toEqual({ unbounded: false, max: 2 });
+    expect(resolveOptionalStepRevisionBudget(0, 3)).toEqual({ unbounded: false, max: 0 });
+    expect(resolveOptionalStepRevisionBudget("unbounded", 3)).toEqual({ unbounded: true, max: Number.POSITIVE_INFINITY });
+    expect(resolveOptionalStepRevisionBudget(undefined, 3)).toEqual({ unbounded: false, max: 3 });
+    expect(resolveOptionalStepRevisionBudget("sometimes", 3)).toEqual({ unbounded: false, max: 3 });
   });
 
   it("rejects an empty template", () => {

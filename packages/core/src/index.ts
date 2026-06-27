@@ -116,6 +116,7 @@ export type {
   WorkflowLoopConfig,
   WorkflowLoopExitCondition,
   WorkflowOptionalGroupConfig,
+  OptionalStepRevisionBudget,
   WorkflowIrArtifact,
   WorkflowFieldDefinition,
   WorkflowFieldType,
@@ -134,6 +135,7 @@ export {
   DEFAULT_MAX_REWORK_CYCLES,
   MAX_REWORK_CYCLES_CAP,
   resolveMaxReworkCycles,
+  resolveOptionalStepRevisionBudget,
 } from "./workflow-ir-types.js";
 export {
   instanceNodeId,

@@ -668,6 +668,21 @@ function validateOptionalGroup(
   if (cfg.phase !== undefined && cfg.phase !== "pre-merge" && cfg.phase !== "post-merge") {
     throw new WorkflowIrError(`optional-group node '${node.id}' phase must be 'pre-merge' or 'post-merge'`);
   }
+  /*
+   * FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:22:
+   * Parse-time validation accepts only an explicit non-negative integer budget or `"unbounded"`; absent remains byte-inert and resolves through the global `maxPostReviewFixes` fallback at execution time.
+   */
+  if (cfg.maxRevisions !== undefined) {
+    const maxRevisions = cfg.maxRevisions;
+    if (
+      maxRevisions !== "unbounded" &&
+      (typeof maxRevisions !== "number" || !Number.isInteger(maxRevisions) || maxRevisions < 0)
+    ) {
+      throw new WorkflowIrError(
+        `optional-group node '${node.id}' maxRevisions must be a non-negative integer or "unbounded"`,
+      );
+    }
+  }
 
   const templateNodes = template.nodes;
   const templateIds = new Set(templateNodes.map((n) => n.id));

@@ -101,6 +101,59 @@ describe("TaskExecutor pre-merge optional-step fix seam", () => {
     expect(sendBackCalls).toEqual([0, 1, 2]);
   });
 
+  it("lets per-step maxRevisions override the global budget", async () => {
+    for (const count of [1, 2]) {
+      const store = createMockStore();
+      const liveTask = task({ postReviewFixCount: count });
+      store.getTask.mockResolvedValue(liveTask);
+      store.getSettings.mockResolvedValue({ maxPostReviewFixes: 9 });
+      const executor = new TaskExecutor(store, "/tmp/test");
+      const sendBack = vi.spyOn(executor as any, "sendTaskBackForFix").mockResolvedValue(undefined);
+
+      const scheduled = await (executor as any).requestPreMergeOptionalStepFix(liveTask.id, liveTask, {
+        ...reviseInfo,
+        maxRevisions: 2,
+      });
+
+      expect(scheduled).toBe(count < 2);
+      if (count < 2) {
+        expect(store.logEntry).toHaveBeenCalledWith("FN-7066", expect.stringContaining("attempt 2/2"), expect.any(String), undefined);
+        expect(sendBack).toHaveBeenCalledOnce();
+      } else {
+        expect(sendBack).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("honors unbounded and zero per-step maxRevisions states", async () => {
+    const unboundedStore = createMockStore();
+    const exhaustedTask = task({ postReviewFixCount: 99 });
+    unboundedStore.getTask.mockResolvedValue(exhaustedTask);
+    unboundedStore.getSettings.mockResolvedValue({ maxPostReviewFixes: 1 });
+    const unboundedExecutor = new TaskExecutor(unboundedStore, "/tmp/test");
+    const unboundedSendBack = vi.spyOn(unboundedExecutor as any, "sendTaskBackForFix").mockResolvedValue(undefined);
+
+    await expect((unboundedExecutor as any).requestPreMergeOptionalStepFix(exhaustedTask.id, exhaustedTask, {
+      ...reviseInfo,
+      maxRevisions: "unbounded",
+    })).resolves.toBe(true);
+    expect(unboundedStore.logEntry).toHaveBeenCalledWith("FN-7066", expect.stringContaining("attempt 100/unbounded"), expect.any(String), undefined);
+    expect(unboundedSendBack).toHaveBeenCalledOnce();
+
+    const zeroStore = createMockStore();
+    const liveTask = task({ postReviewFixCount: 0 });
+    zeroStore.getTask.mockResolvedValue(liveTask);
+    zeroStore.getSettings.mockResolvedValue({ maxPostReviewFixes: 9 });
+    const zeroExecutor = new TaskExecutor(zeroStore, "/tmp/test");
+    const zeroSendBack = vi.spyOn(zeroExecutor as any, "sendTaskBackForFix").mockResolvedValue(undefined);
+
+    await expect((zeroExecutor as any).requestPreMergeOptionalStepFix(liveTask.id, liveTask, {
+      ...reviseInfo,
+      maxRevisions: 0,
+    })).resolves.toBe(false);
+    expect(zeroSendBack).not.toHaveBeenCalled();
+  });
+
   it("declines without sending back when maxPostReviewFixes disables or exhausts the budget", async () => {
     for (const { settingsMax, count } of [
       { settingsMax: 0, count: 0 },

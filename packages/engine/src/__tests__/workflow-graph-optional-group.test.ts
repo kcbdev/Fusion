@@ -88,7 +88,7 @@ function taskWith(enabled: string[] | undefined): TaskDetail {
   return { id: "FN-OG", enabledWorkflowSteps: enabled } as TaskDetail;
 }
 
-function reviseGroupIr(options: { phase?: "pre-merge" | "post-merge"; gateMode?: "advisory" | "gate" } = {}): WorkflowIr {
+function reviseGroupIr(options: { phase?: "pre-merge" | "post-merge"; gateMode?: "advisory" | "gate"; maxRevisions?: number | "unbounded" } = {}): WorkflowIr {
   return {
     version: "v2",
     name: "optional-group-revise-test",
@@ -102,6 +102,7 @@ function reviseGroupIr(options: { phase?: "pre-merge" | "post-merge"; gateMode?:
           name: options.phase === "post-merge" ? "Post-merge verification" : "Code Review",
           defaultOn: true,
           phase: options.phase,
+          maxRevisions: options.maxRevisions,
           template: {
             nodes: [{ id: "review", kind: options.gateMode === "gate" ? "gate" : "prompt", config: { prompt: "review" } }],
             edges: [],
@@ -280,12 +281,33 @@ describe("WorkflowGraphExecutor optional-group", () => {
       phase: "pre-merge",
       status: "advisory_failure",
       verdict: "REVISE",
+      nodeId: "group",
+      maxRevisions: undefined,
     });
     expect(calls).not.toContain("after");
     expect(result.context["node:group:fixScheduled"]).toBe(true);
     expect(records).toEqual(expect.arrayContaining([
       expect.objectContaining({ workflowStepId: "group", status: "advisory_failure", verdict: "REVISE", output: "Fix the review finding" }),
     ]));
+  });
+
+  it("threads optional-group maxRevisions into the pre-merge fix seam", async () => {
+    const requestFix = vi.fn(async () => true);
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => node.id === "review"
+          ? { outcome: "success", value: "REVISE", contextPatch: { output: "custom finding" } }
+          : { outcome: "success" },
+      },
+      requestPreMergeOptionalStepFix: requestFix,
+    });
+
+    await executor.run(taskWith(["group"]), settingsOn(), reviseGroupIr({ maxRevisions: "unbounded" }));
+
+    expect(requestFix).toHaveBeenCalledWith("FN-OG", expect.objectContaining({
+      nodeId: "group",
+      maxRevisions: "unbounded",
+    }));
   });
 
   it("falls through unchanged when the pre-merge fix seam is absent or declines", async () => {
@@ -344,7 +366,7 @@ describe("WorkflowGraphExecutor optional-group", () => {
       },
       requestPreMergeOptionalStepFix: requestFix,
     });
-    await approveExecutor.run(taskWith(["group"]), settingsOn(), reviseGroupIr());
+    await approveExecutor.run(taskWith(["group"]), settingsOn(), reviseGroupIr({ maxRevisions: "unbounded" }));
     expect(requestFix).not.toHaveBeenCalled();
 
     const fastExecutor = new WorkflowGraphExecutor({
@@ -452,6 +474,8 @@ describe("WorkflowGraphExecutor optional-group", () => {
       expect(requestFix).toHaveBeenCalledWith(`FN-${groupId}`, expect.objectContaining({
         stepName: groupId === "code-review" ? "Code Review" : "Browser Verification",
         feedback: `${groupId} finding`,
+        nodeId: groupId,
+        maxRevisions: undefined,
       }));
       expect(calls).not.toContain("review");
       expect(result.context[`node:${groupId}:fixScheduled`]).toBe(true);
@@ -494,6 +518,8 @@ describe("WorkflowGraphExecutor optional-group", () => {
       expect(stepwiseRequestFix).toHaveBeenCalledWith(`FN-stepwise-${groupId}`, expect.objectContaining({
         stepName: groupId === "code-review" ? "Code Review" : "Browser Verification",
         feedback: `stepwise ${groupId} finding`,
+        nodeId: groupId,
+        maxRevisions: undefined,
       }));
       expect(stepwiseResult.context[`node:${groupId}:fixScheduled`]).toBe(true);
     }

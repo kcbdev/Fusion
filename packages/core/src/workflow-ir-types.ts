@@ -63,6 +63,33 @@ export function resolveMaxReworkCycles(raw: unknown): number {
   return Math.max(1, Math.min(MAX_REWORK_CYCLES_CAP, Math.floor(n)));
 }
 
+export interface OptionalStepRevisionBudget {
+  unbounded: boolean;
+  max: number;
+}
+
+/*
+FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:15:
+Optional-group steps can override the global `maxPostReviewFixes` cycle budget with a per-step non-negative integer or `"unbounded"`. The resolver keeps absent/invalid raw values byte-inert by falling back to the effective global budget, while `"unbounded"` explicitly removes the ceiling so Code Review, Browser Verification, or custom optional gates can cycle until they approve.
+*/
+export function resolveOptionalStepRevisionBudget(
+  rawMaxRevisions: unknown,
+  fallback: number,
+): OptionalStepRevisionBudget {
+  if (rawMaxRevisions === "unbounded") {
+    return { unbounded: true, max: Number.POSITIVE_INFINITY };
+  }
+  if (
+    typeof rawMaxRevisions === "number" &&
+    Number.isFinite(rawMaxRevisions) &&
+    Number.isInteger(rawMaxRevisions) &&
+    rawMaxRevisions >= 0
+  ) {
+    return { unbounded: false, max: rawMaxRevisions };
+  }
+  return { unbounded: false, max: fallback };
+}
+
 /**
  * Executor kinds selectable on a prompt/execute node's `config.executor` (CLI
  * Agent Executor, U7). The engine reads `config.executor` as an open string; this
@@ -170,6 +197,9 @@ FNXC:WorkflowOptionalGroup 2026-06-21-11:00:
 An `optional-group` node is a container (mirroring `foreach`/`loop`) whose `template` subgraph the executor runs ONCE when the group is enabled for the task and passes through (skips) when disabled.
 Enable state reuses the per-task `enabledWorkflowSteps` facet keyed by the group node id, seeded from `defaultOn` at task creation — this replaces the execution-inert declaration-based optional-steps model (`WorkflowOptionalStep`/`optionalSteps`).
 Single pass only: no iteration, no rework budget. Rework edges are forbidden inside the template so the single-pass guarantee is unambiguous (validated in `validateOptionalGroup`).
+
+FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:15:
+Optional-group remediation still runs the template once per graph pass, but workflow authors can now set a per-step `maxRevisions` override for the PRE-merge fix→re-review cycle. A non-negative integer caps that optional step against the shared task `postReviewFixCount`, `"unbounded"` removes the ceiling, and absence preserves the effective global `maxPostReviewFixes` behavior.
 */
 /** Config for an `optional-group` container node. `defaultOn` seeds the per-task
  *  enable set at creation; the `template` is the subgraph run once when enabled.
@@ -179,6 +209,13 @@ export interface WorkflowOptionalGroupConfig {
   defaultOn?: boolean;
   /** Display name for the group (editor + per-task toggle surfaces). */
   name?: string;
+  /**
+   * Per-step override for the global `maxPostReviewFixes` budget used by this
+   * optional step's PRE-merge fix→re-review cycle. A non-negative integer caps
+   * revisions for this step; `"unbounded"` keeps cycling until the step returns
+   * APPROVE/APPROVE_WITH_NOTES; absence falls back to effective settings.
+   */
+  maxRevisions?: number | "unbounded";
   /*
   FNXC:WorkflowPostMerge 2026-06-26-09:00:
   Execution phase of the optional-group step. Defaults to "pre-merge" (the prior, only

@@ -10,7 +10,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -3710,7 +3710,7 @@ export class TaskExecutor {
 
   /*
    * FNXC:WorkflowOptionalStepFix 2026-06-26-16:35:
-   * Inline graph optional-step remediation consumes `postReviewFixCount` BEFORE calling `sendTaskBackForFix`, matching self-healing's budget-first ordering. This prevents a persistent Code Review / Browser Verification REVISE from ping-ponging forever: when `postReviewFixCount >= maxPostReviewFixes` (or max <= 0), the seam declines and graph execution falls through to the prior advisory/gate behavior.
+   * Inline graph optional-step remediation consumes `postReviewFixCount` BEFORE calling `sendTaskBackForFix`, matching self-healing's budget-first ordering. Persistent Code Review / Browser Verification REVISE loops are bounded by the optional-group `maxRevisions` override when present, otherwise by `maxPostReviewFixes`; `"unbounded"` intentionally skips the ceiling check so the step cycles until it returns APPROVE/APPROVE_WITH_NOTES or a human intervenes.
    */
   private async requestPreMergeOptionalStepFix(
     taskId: string,
@@ -3721,6 +3721,8 @@ export class TaskExecutor {
       phase: CoreWorkflowStepResult["phase"];
       status: CoreWorkflowStepResult["status"];
       verdict?: string;
+      nodeId?: string;
+      maxRevisions?: unknown;
     },
   ): Promise<boolean> {
     if (info.phase !== "pre-merge") return false;
@@ -3729,17 +3731,18 @@ export class TaskExecutor {
 
     const liveTask = await this.store.getTask(taskId).catch(() => fallbackTask);
     const settings = await mergeEffectiveSettings(this.store, liveTask, await this.store.getSettings());
-    const maxFixes = settings.maxPostReviewFixes ?? 3;
-    if (!Number.isFinite(maxFixes) || maxFixes <= 0) return false;
+    const budget = resolveOptionalStepRevisionBudget(info.maxRevisions, settings.maxPostReviewFixes ?? 3);
+    if (!budget.unbounded && (!Number.isFinite(budget.max) || budget.max <= 0)) return false;
 
     const currentCount = liveTask.postReviewFixCount ?? 0;
-    if (currentCount >= maxFixes) return false;
+    if (!budget.unbounded && currentCount >= budget.max) return false;
 
     const nextCount = currentCount + 1;
+    const budgetLabel = budget.unbounded ? "unbounded" : String(budget.max);
     await this.store.updateTask(taskId, { postReviewFixCount: nextCount }, this.getRunContextFor(taskId));
     await this.store.logEntry(
       taskId,
-      `Pre-merge optional workflow step requested executor fixes (attempt ${nextCount}/${maxFixes})`,
+      `Pre-merge optional workflow step requested executor fixes (attempt ${nextCount}/${budgetLabel})`,
       `Step: ${info.stepName}\nStatus: ${info.status}\nFeedback:\n${info.feedback}`,
       this.getRunContextFor(taskId),
     );

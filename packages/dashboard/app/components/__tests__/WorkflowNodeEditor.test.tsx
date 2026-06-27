@@ -1903,6 +1903,101 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
     expect(template.nodes).toHaveLength(1);
   });
 
+  it("edits optional-group maxRevisions and unbounded revision mode", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([optionalGroupDef()]);
+    vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({ ...optionalGroupDef(), ...(updates as object) }));
+    vi.mocked(compileWorkflow).mockResolvedValue({ steps: [] });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-optional-group"));
+
+    const maxInput = await screen.findByTestId("wf-optional-group-max-revisions") as HTMLInputElement;
+    const unbounded = await screen.findByTestId("wf-optional-group-max-revisions-unbounded") as HTMLInputElement;
+    expect(maxInput.disabled).toBe(false);
+    expect(unbounded.checked).toBe(false);
+
+    fireEvent.change(maxInput, { target: { value: "2" } });
+    fireEvent.click(screen.getByText("Save").closest("button")!);
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalledTimes(1));
+    let [, updates] = vi.mocked(updateWorkflow).mock.calls[0];
+    let ir = (updates as { ir: { nodes: { kind: string; config?: Record<string, unknown> }[] } }).ir;
+    let opt = ir.nodes.find((n) => n.kind === "optional-group");
+    expect(opt!.config!.maxRevisions).toBe(2);
+  });
+
+  it("persists optional-group unbounded maxRevisions mode", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([optionalGroupDef()]);
+    vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({ ...optionalGroupDef(), ...(updates as object) }));
+    vi.mocked(compileWorkflow).mockResolvedValue({ steps: [] });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-optional-group"));
+
+    const unbounded = await screen.findByTestId("wf-optional-group-max-revisions-unbounded") as HTMLInputElement;
+    fireEvent.click(unbounded);
+    expect(unbounded.checked).toBe(true);
+    await waitFor(() => expect((screen.getByTestId("wf-optional-group-max-revisions") as HTMLInputElement).disabled).toBe(true));
+    fireEvent.click(screen.getByText("Save").closest("button")!);
+
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalledTimes(1));
+    const [, updates] = vi.mocked(updateWorkflow).mock.calls[0];
+    const ir = (updates as { ir: { nodes: { kind: string; config?: Record<string, unknown> }[] } }).ir;
+    const opt = ir.nodes.find((n) => n.kind === "optional-group");
+    expect(opt!.config!.maxRevisions).toBe("unbounded");
+  });
+
+  it("clears optional-group maxRevisions by deleting the config key", async () => {
+    const def = optionalGroupDef();
+    const opt = def.ir.nodes.find((node) => node.kind === "optional-group")!;
+    opt.config = { ...opt.config, maxRevisions: 2 };
+    vi.mocked(fetchWorkflows).mockResolvedValue([def]);
+    vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({ ...def, ...(updates as object) }));
+    vi.mocked(compileWorkflow).mockResolvedValue({ steps: [] });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-optional-group"));
+
+    const maxInput = await screen.findByTestId("wf-optional-group-max-revisions") as HTMLInputElement;
+    expect(maxInput.value).toBe("2");
+    fireEvent.change(maxInput, { target: { value: "" } });
+    fireEvent.click(screen.getByText("Save").closest("button")!);
+
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalledTimes(1));
+    const [, updates] = vi.mocked(updateWorkflow).mock.calls[0];
+    const ir = (updates as { ir: { nodes: { kind: string; config?: Record<string, unknown> }[] } }).ir;
+    const saved = ir.nodes.find((node) => node.kind === "optional-group")!;
+    expect(saved.config!).not.toHaveProperty("maxRevisions");
+  });
+
+  it("renders optional-group maxRevisions controls in the mobile inspector", async () => {
+    mockWorkflowEditorViewport("mobile");
+    vi.mocked(fetchWorkflows).mockResolvedValue([optionalGroupDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Optional" }));
+    const optRow = await screen.findByTestId("mobile-wf-node-opt");
+    fireEvent.click(within(optRow).getAllByRole("button")[0]);
+
+    expect(await screen.findByTestId("wf-optional-group-max-revisions")).toBeInTheDocument();
+    expect(await screen.findByTestId("wf-optional-group-max-revisions-unbounded")).toBeInTheDocument();
+  });
+
+  it("does not render optional-group maxRevisions controls for non-optional nodes", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([optionalGroupDef()]);
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await screen.findByText("Save");
+    const promptNode = await waitFor(() => {
+      const node = document.querySelector(`.react-flow__node[data-id="${foreachChildFlowId("opt", "verify")}"]`);
+      expect(node).toBeInTheDocument();
+      return node as HTMLElement;
+    });
+    fireEvent.click(promptNode);
+    expect(screen.queryByTestId("wf-optional-group-max-revisions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wf-optional-group-max-revisions-unbounded")).not.toBeInTheDocument();
+  });
+
   it("toggles optional-group defaultOn, marks the editor dirty, and persists on save", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([optionalGroupDef()]);
     vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({ ...optionalGroupDef(), ...(updates as object) }));

@@ -30,7 +30,7 @@ import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isWorkspaceTask, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, type Agent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isWorkspaceTask, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveWorkflowIrForTask, type Agent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult, type WorkflowStepResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -6079,15 +6079,48 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
 
-      // Resolve the per-task effective `maxPostReviewFixes` (U3, KTD-3) — this is a
-      // cross-task recovery sweep, so the budget is resolved per task rather than
-      // from a single global read. Behavior-inert when nothing is customized.
-      const maxFixesByTask = new Map<string, number>();
+      const latestFailedPreMergeStep = (task: Pick<Task, "workflowStepResults">): WorkflowStepResult | undefined => {
+        return (task.workflowStepResults ?? [])
+          .filter((r) => (r.phase || "pre-merge") === "pre-merge" && r.status === "failed")
+          .sort((a, b) => {
+            const aTs = Date.parse(a.completedAt || a.startedAt || "");
+            const bTs = Date.parse(b.completedAt || b.startedAt || "");
+            return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
+          })[0];
+      };
+
+      /*
+       * FNXC:WorkflowOptionalStepRevisionBudget 2026-06-27-12:34:
+       * Self-healing pre-computes the same optional-step budget the live graph seam uses before the synchronous candidate filter runs. The target step is the latest blocking pre-merge failure, matching `recoverFailedPreMergeWorkflowStep`; IR lookup failures fall back to the effective global `maxPostReviewFixes` so older tasks remain recoverable.
+       */
+      const revisionBudgetByTask = new Map<string, { unbounded: boolean; max: number; label: string }>();
+      const irCache = new Map<string, Awaited<ReturnType<typeof resolveWorkflowIrForTask>>>();
       for (const task of tasks) {
         const eff = await mergeEffectiveSettings(this.store, task, settings);
-        maxFixesByTask.set(task.id, eff.maxPostReviewFixes ?? 3);
+        const fallback = eff.maxPostReviewFixes ?? 3;
+        let rawMaxRevisions: unknown;
+        const target = latestFailedPreMergeStep(task);
+        if (target?.workflowStepId) {
+          try {
+            const ir = await resolveWorkflowIrForTask(this.store, task.id, irCache);
+            if (ir.version === "v2") {
+              const node = ir.nodes.find((candidate) => candidate.id === target.workflowStepId && candidate.kind === "optional-group");
+              rawMaxRevisions = node?.config?.maxRevisions;
+            }
+          } catch {
+            rawMaxRevisions = undefined;
+          }
+        }
+        const budget = resolveOptionalStepRevisionBudget(rawMaxRevisions, fallback);
+        revisionBudgetByTask.set(task.id, {
+          ...budget,
+          label: budget.unbounded ? "unbounded" : String(budget.max),
+        });
       }
-      const maxFixesFor = (taskId: string): number => maxFixesByTask.get(taskId) ?? 3;
+      const revisionBudgetFor = (taskId: string): { unbounded: boolean; max: number; label: string } => {
+        const budget = revisionBudgetByTask.get(taskId) ?? resolveOptionalStepRevisionBudget(undefined, 3);
+        return { ...budget, label: budget.unbounded ? "unbounded" : String(budget.max) };
+      };
 
       const candidates = tasks.filter((task) => {
         if (task.column !== "in-review") return false;
@@ -6097,15 +6130,12 @@ export class SelfHealingManager {
         // merging, etc.). Only revive tasks that are otherwise idle.
         if (task.status) return false;
         if (executingIds.has(task.id)) return false;
-        const maxFixes = maxFixesFor(task.id);
-        if (!Number.isFinite(maxFixes) || maxFixes <= 0) return false;
-        if ((task.postReviewFixCount ?? 0) >= maxFixes) return false;
+        const budget = revisionBudgetFor(task.id);
+        if (!budget.unbounded && (!Number.isFinite(budget.max) || budget.max <= 0)) return false;
+        if (!budget.unbounded && (task.postReviewFixCount ?? 0) >= budget.max) return false;
 
         // Must have at least one failed pre-merge workflow step result.
-        const hasFailedPreMerge = (task.workflowStepResults ?? []).some(
-          (r) => (r.phase || "pre-merge") === "pre-merge" && r.status === "failed",
-        );
-        if (!hasFailedPreMerge) return false;
+        if (!latestFailedPreMergeStep(task)) return false;
 
         // Merge must be blocked *specifically* by the failed pre-merge step —
         // not by an unrelated condition (incomplete steps, etc.) that is
@@ -6128,7 +6158,7 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         const nextCount = (task.postReviewFixCount ?? 0) + 1;
-        const maxFixes = maxFixesFor(task.id);
+        const budget = revisionBudgetFor(task.id);
         try {
           // Increment the counter BEFORE delegating so that even if the
           // executor path crashes or races, the budget is still consumed and
@@ -6136,11 +6166,11 @@ export class SelfHealingManager {
           await this.store.updateTask(task.id, { postReviewFixCount: nextCount });
           await this.store.logEntry(
             task.id,
-            `Auto-reviving in-review task with failed pre-merge workflow step (attempt ${nextCount}/${maxFixes})`,
+            `Auto-reviving in-review task with failed pre-merge workflow step (attempt ${nextCount}/${budget.label})`,
           );
           const sentBack = await recoverFn(task);
           if (sentBack) {
-            log.log(`Revived ${task.id}: sent back for fix (${nextCount}/${maxFixes})`);
+            log.log(`Revived ${task.id}: sent back for fix (${nextCount}/${budget.label})`);
             recovered++;
           } else {
             log.warn(`Revival of ${task.id} was skipped by executor — budget already consumed`);
