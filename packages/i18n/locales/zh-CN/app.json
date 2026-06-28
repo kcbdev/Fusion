@@ -4827,7 +4827,7 @@
   "projectCard": {
     "activeTasks": "活跃任务",
     "agents": "代理",
-    "cannotPauseWhileInitializing": "初始化时无法暂停",
+    "cannotPauseWhileInitializing": "",
     "completed": "已完成",
     "confirm": "确认",
     "confirmRemove": "确认删除",
@@ -4847,11 +4847,11 @@
     "noHealthData": "没有可用的健康数据",
     "open": "打开",
     "openProject": "打开项目",
-    "pause": "暂停",
-    "pauseProject": "暂停项目",
+    "pause": "",
+    "pauseProject": "",
     "removeProject": "删除项目",
-    "resume": "恢复",
-    "resumeProject": "恢复项目"
+    "resume": "",
+    "resumeProject": ""
   },
   "projectDetection": {
     "editName": "编辑名称",

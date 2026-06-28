@@ -4827,7 +4827,7 @@
   "projectCard": {
     "activeTasks": "활성 작업",
     "agents": "에이전트",
-    "cannotPauseWhileInitializing": "초기화 중에는 일시 중지할 수 없습니다",
+    "cannotPauseWhileInitializing": "",
     "completed": "완료됨",
     "confirm": "확인",
     "confirmRemove": "제거 확인",
@@ -4847,11 +4847,11 @@
     "noHealthData": "사용 가능한 상태 데이터가 없습니다",
     "open": "열기",
     "openProject": "프로젝트 열기",
-    "pause": "일시 중지",
-    "pauseProject": "프로젝트 일시 중지",
+    "pause": "",
+    "pauseProject": "",
     "removeProject": "프로젝트 제거",
-    "resume": "재개",
-    "resumeProject": "프로젝트 재개"
+    "resume": "",
+    "resumeProject": ""
   },
   "projectDetection": {
     "editName": "이름 편집",

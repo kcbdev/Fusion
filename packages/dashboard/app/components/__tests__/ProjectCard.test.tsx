@@ -6,7 +6,8 @@ import type { RegisteredProject, ProjectHealth, ProjectStatus } from "@fusion/co
 // Mock lucide-react to avoid SVG rendering issues in test env
 vi.mock("lucide-react", () => ({
   Play: () => <span data-testid="play-icon">▶</span>,
-  Pause: () => <span data-testid="pause-icon">⏸</span>,
+  Pause: () => <span data-testid="status-pause-icon">⏸</span>,
+  Square: () => <span data-testid="stop-icon">■</span>,
   AlertCircle: () => <span data-testid="alert-icon">⚠</span>,
   Loader2: () => <span data-testid="loader-icon">⟳</span>,
   MoreHorizontal: () => null,
@@ -366,7 +367,7 @@ describe("ProjectCard", () => {
     expect(onSelect).toHaveBeenCalledWith(project);
   });
 
-  it("calls onPause when pause button is clicked", () => {
+  it("calls onPause when stop-engine button is clicked", () => {
     const onPause = vi.fn();
     const project = makeProject({ status: "active" });
 
@@ -381,11 +382,11 @@ describe("ProjectCard", () => {
       />
     );
 
-    fireEvent.click(screen.getByLabelText("Pause project"));
+    fireEvent.click(screen.getByLabelText("Stop engine"));
     expect(onPause).toHaveBeenCalledWith(project);
   });
 
-  it("calls onResume when resume button is clicked", () => {
+  it("calls onResume when start-engine button is clicked", () => {
     const onResume = vi.fn();
     const project = makeProject({ status: "paused" });
 
@@ -400,8 +401,86 @@ describe("ProjectCard", () => {
       />
     );
 
-    fireEvent.click(screen.getByLabelText("Resume project"));
+    fireEvent.click(screen.getByLabelText("Start engine"));
     expect(onResume).toHaveBeenCalledWith(project);
+  });
+
+  it("labels engine lifecycle controls across active, errored, paused, and initializing states", () => {
+    const activePause = vi.fn();
+    const activeProject = makeProject({ status: "active" });
+    const activeRender = render(
+      <ProjectCard
+        project={activeProject}
+        health={makeHealth({ status: "active" })}
+        onSelect={noop}
+        onPause={activePause}
+        onResume={noop}
+        onRemove={noop}
+      />
+    );
+
+    const activeStop = screen.getByRole("button", { name: "Stop engine" });
+    expect(activeStop).toHaveAttribute("title", "Stop engine");
+    expect(screen.getByTestId("stop-icon")).toBeDefined();
+    const stalePauseLabel = ["Pause", "project"].join(" ");
+    const staleResumeLabel = ["Resume", "project"].join(" ");
+    expect(screen.queryByLabelText(stalePauseLabel)).toBeNull();
+    expect(screen.queryByLabelText(staleResumeLabel)).toBeNull();
+    fireEvent.click(activeStop);
+    expect(activePause).toHaveBeenCalledWith(activeProject);
+    activeRender.unmount();
+
+    const erroredPause = vi.fn();
+    const erroredProject = makeProject({ status: "errored" });
+    const erroredRender = render(
+      <ProjectCard
+        project={erroredProject}
+        health={makeHealth({ status: "errored" })}
+        onSelect={noop}
+        onPause={erroredPause}
+        onResume={noop}
+        onRemove={noop}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop engine" }));
+    expect(erroredPause).toHaveBeenCalledWith(erroredProject);
+    erroredRender.unmount();
+
+    const pausedResume = vi.fn();
+    const pausedProject = makeProject({ status: "paused" });
+    const pausedRender = render(
+      <ProjectCard
+        project={pausedProject}
+        health={makeHealth({ status: "paused" })}
+        onSelect={noop}
+        onPause={noop}
+        onResume={pausedResume}
+        onRemove={noop}
+      />
+    );
+
+    const pausedStart = screen.getByRole("button", { name: "Start engine" });
+    expect(pausedStart).toHaveAttribute("title", "Start engine");
+    expect(screen.getByTestId("play-icon")).toBeDefined();
+    fireEvent.click(pausedStart);
+    expect(pausedResume).toHaveBeenCalledWith(pausedProject);
+    pausedRender.unmount();
+
+    render(
+      <ProjectCard
+        project={makeProject({ status: "initializing" })}
+        health={makeHealth({ status: "initializing" })}
+        onSelect={noop}
+        onPause={noop}
+        onResume={noop}
+        onRemove={noop}
+      />
+    );
+
+    const initializingStop = screen.getByRole("button", { name: "Stop engine" });
+    expect(initializingStop).toBeDisabled();
+    expect(initializingStop).toHaveAttribute("title", "Cannot stop engine while initializing");
   });
 
   it("calls onRemove when remove button is clicked", () => {
@@ -454,7 +533,7 @@ describe("ProjectCard", () => {
     expect(container.querySelector(".is-armed")).not.toBeNull();
   });
 
-  it("disables pause button when initializing", () => {
+  it("disables stop-engine button when initializing", () => {
     const { container } = render(
       <ProjectCard
         project={makeProject({ status: "initializing" })}
@@ -466,10 +545,10 @@ describe("ProjectCard", () => {
       />
     );
 
-    // Find the pause button by its title attribute
-    const pauseButton = container.querySelector('button[title="Cannot pause while initializing"]');
-    expect(pauseButton).not.toBeNull();
-    expect(pauseButton).toBeDisabled();
+    // Find the stop-engine button by its title attribute
+    const stopEngineButton = container.querySelector('button[title="Cannot stop engine while initializing"]');
+    expect(stopEngineButton).not.toBeNull();
+    expect(stopEngineButton).toBeDisabled();
   });
 
   it("disables all buttons when isLoading is true", () => {
@@ -485,7 +564,7 @@ describe("ProjectCard", () => {
       />
     );
 
-    expect(screen.getByLabelText("Pause project")).toBeDisabled();
+    expect(screen.getByLabelText("Stop engine")).toBeDisabled();
     expect(screen.getByLabelText("Open project")).toBeDisabled();
     expect(screen.getByLabelText("Remove project")).toBeDisabled();
   });
@@ -536,7 +615,7 @@ describe("ProjectCard", () => {
       />
     );
 
-    fireEvent.click(screen.getByLabelText("Pause project"));
+    fireEvent.click(screen.getByLabelText("Stop engine"));
     expect(onPause).toHaveBeenCalled();
     expect(onSelect).not.toHaveBeenCalled();
   });

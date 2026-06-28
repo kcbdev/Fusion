@@ -4827,7 +4827,7 @@
   "projectCard": {
     "activeTasks": "活躍任務",
     "agents": "代理",
-    "cannotPauseWhileInitializing": "初始化時無法暫停",
+    "cannotPauseWhileInitializing": "",
     "completed": "已完成",
     "confirm": "確認",
     "confirmRemove": "確認移除",
@@ -4847,11 +4847,11 @@
     "noHealthData": "沒有可用的健康資料",
     "open": "打開",
     "openProject": "打開專案",
-    "pause": "暫停",
-    "pauseProject": "暫停專案",
+    "pause": "",
+    "pauseProject": "",
     "removeProject": "移除專案",
-    "resume": "恢復",
-    "resumeProject": "恢復專案"
+    "resume": "",
+    "resumeProject": ""
   },
   "projectDetection": {
     "editName": "編輯名稱",

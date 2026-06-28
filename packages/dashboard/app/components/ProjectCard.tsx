@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { Play, Pause, Trash2, Folder, ArrowRight } from "lucide-react";
+import { Play, Square, Trash2, Folder, ArrowRight } from "lucide-react";
 import "./ProjectCard.css";
 import type { RegisteredProject, ProjectHealth } from "@fusion/core";
 import type { ProjectNodeAvailability } from "../api";
@@ -219,27 +219,31 @@ function ProjectCardInner({
         </div>
 
         <div className="project-card-actions">
+          {/*
+           * FNXC:ProjectCardEngineControls 2026-06-27-00:00:
+           * ProjectEngineManager.pauseProject already calls engine.stop(), so the card action names the engine-lifecycle action as Stop engine/Start engine while preserving the active/paused project status model and pauseProject/resumeProject wiring.
+           */}
           {isPaused ? (
             <button
               className="project-card-action project-card-action-resume"
               onClick={handleResume}
               disabled={isLoading}
-              title={t("projectCard.resumeProject", "Resume project")}
-              aria-label={t("projectCard.resumeProject", "Resume project")}
+              title={t("projectCard.resumeProject", "Start engine")}
+              aria-label={t("projectCard.resumeProject", "Start engine")}
             >
               <Play size={14} />
-              <span>{t("projectCard.resume", "Resume")}</span>
+              <span>{t("projectCard.resume", "Start engine")}</span>
             </button>
           ) : (
             <button
               className="project-card-action project-card-action-pause"
               onClick={handlePause}
               disabled={isLoading || isInitializing}
-              title={isInitializing ? t("projectCard.cannotPauseWhileInitializing", "Cannot pause while initializing") : t("projectCard.pauseProject", "Pause project")}
-              aria-label={t("projectCard.pauseProject", "Pause project")}
+              title={isInitializing ? t("projectCard.cannotPauseWhileInitializing", "Cannot stop engine while initializing") : t("projectCard.pauseProject", "Stop engine")}
+              aria-label={t("projectCard.pauseProject", "Stop engine")}
             >
-              <Pause size={14} />
-              <span>{t("projectCard.pause", "Pause")}</span>
+              <Square size={14} />
+              <span>{t("projectCard.pause", "Stop engine")}</span>
             </button>
           )}
           

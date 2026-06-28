@@ -1230,6 +1230,7 @@ export default interface Resources {
       "cancelButton": "Cancel",
       "clearConversationFailed": "Failed to clear conversation",
       "closeQuickChat": "Close quick chat",
+      "contextWindowAria": "Estimated {{used}} of {{total}} context tokens",
       "conversationArchived": "Conversation archived",
       "conversationDeleted": "Conversation deleted",
       "conversationName": "Conversation name",
@@ -1533,6 +1534,8 @@ export default interface Resources {
           "maxConcurrent": "Max concurrent tasks",
           "maxTriageConcurrent": "Max triage concurrent",
           "maxWorktrees": "Max worktrees",
+          "runningGlobal": "{{count}} running (all projects)",
+          "runningProject": "{{count}} running (this project)",
           "title": "Concurrency"
         },
         "engine": {
@@ -1761,7 +1764,8 @@ export default interface Resources {
         "system": "System",
         "team": "Team",
         "tokens": "Tokens",
-        "tools": "Tools"
+        "tools": "Tools",
+        "workflows": "Workflows"
       },
       "team": {
         "agent": "Agent",
@@ -1819,6 +1823,26 @@ export default interface Resources {
         "sessions": "Sessions",
         "summaryTitle": "Summary",
         "toolCalls": "Tool calls"
+      },
+      "workflows": {
+        "completedByWorkflow": "Tasks done by workflow",
+        "cost": "Cost",
+        "done": "Tasks done",
+        "empty": "No workflow analytics have been recorded for this range yet.",
+        "files": "Files changed",
+        "filesChanged": "Files changed",
+        "inProgress": "In progress",
+        "inReview": "In review",
+        "noChartData": "No non-zero values for this chart yet.",
+        "tableTitle": "Per-workflow breakdown",
+        "tasksCompleted": "Tasks done",
+        "tokens": "Tokens",
+        "tokensByWorkflow": "Tokens by workflow",
+        "totalCost": "Estimated cost",
+        "totalTokens": "Total tokens",
+        "totalsTitle": "Workflow totals",
+        "unknownWorkflow": "(unknown workflow)",
+        "workflow": "Workflow"
       }
     },
     "comments": {
@@ -2318,6 +2342,7 @@ export default interface Resources {
       "daysAgo_one": "{{count}}d ago",
       "daysAgo_other": "{{count}}d ago",
       "engineControls": "Engine controls",
+      "engineControlsClose": "Close engine controls",
       "escalated": "Escalated",
       "escalatedSuffix": " (escalated)",
       "hideProjectDir": "Hide project directory",
@@ -4814,7 +4839,7 @@ export default interface Resources {
     "projectCard": {
       "activeTasks": "Active Tasks",
       "agents": "Agents",
-      "cannotPauseWhileInitializing": "Cannot pause while initializing",
+      "cannotPauseWhileInitializing": "Cannot stop engine while initializing",
       "completed": "Completed",
       "confirm": "Confirm",
       "confirmRemove": "Confirm remove",
@@ -4834,11 +4859,11 @@ export default interface Resources {
       "nodeAvailability": "Project node availability",
       "open": "Open",
       "openProject": "Open project",
-      "pause": "Pause",
-      "pauseProject": "Pause project",
+      "pause": "Stop engine",
+      "pauseProject": "Stop engine",
       "removeProject": "Remove project",
-      "resume": "Resume",
-      "resumeProject": "Resume project"
+      "resume": "Start engine",
+      "resumeProject": "Start engine"
     },
     "projectDetection": {
       "editName": "Edit name",
@@ -5936,6 +5961,12 @@ export default interface Resources {
       "keepLocal": "Keep Local",
       "keepRemote": "Keep Remote",
       "loading": "Loading…",
+      "mcp": {
+        "globalDescription": "Configure MCP servers shared by all projects. Project settings may override or disable these servers by name.",
+        "globalTitle": "Global MCP servers",
+        "projectDescription": "Configure project-specific MCP servers, overrides, and disabled inherited servers.",
+        "projectTitle": "Project MCP servers"
+      },
       "memory": {
         "03": "0 3 * * *",
         "agentsGetMemorySearchMemoryGetAndMemory": "Agents get memory_search, memory_get, and memory_append tools. Search defaults to qmd with a local file fallback.",
@@ -6070,12 +6101,12 @@ export default interface Resources {
         "origin": "origin",
         "personalAccessToken": "Personal access token",
         "pickALocalBranchFromTheDropdownCommon": "). Pick a local branch from the dropdown — common integration names like ",
-        "positiveIntegerRetryCapForAutoMergeConflict": "Positive integer retry cap for auto-merge conflict resolution before a task parks for human recovery. Default 3.",
         "planApprovalMode": "Plan approval mode",
         "planApprovalModeAutoApproveAll": "Auto-approve all tasks",
         "planApprovalModeHelp": "Project-wide override for the planning approval gate. Leave on workflow to use each workflow's Require plan approval setting, or force all approved specs to bypass or wait for manual approval.",
         "planApprovalModeRequireAll": "Require approval for all tasks",
         "planApprovalModeWorkflow": "Use workflow setting",
+        "positiveIntegerRetryCapForAutoMergeConflict": "Positive integer retry cap for auto-merge conflict resolution before a task parks for human recovery. Default 3.",
         "postMergeAuditMode": "Post-merge audit mode",
         "pushRemote": "Push Remote",
         "pushToRemoteAfterMerge": " Push to remote after merge ",
@@ -6143,6 +6174,8 @@ export default interface Resources {
           "global": "Global setting",
           "project": "Project setting"
         },
+        "globalMcp": "MCP Servers",
+        "mcp": "MCP Servers",
         "prompts": "Prompts",
         "secrets": "Secrets",
         "tooltip": {
@@ -7567,6 +7600,32 @@ export default interface Resources {
       "summary": {
         "heading": "Summary"
       },
+      "summaryTab": {
+        "agentWorkHeading": "Work done by agents",
+        "cachedTokens": "Cached",
+        "changedHeading": "What changed",
+        "commit": "Commit",
+        "completedSteps": "Completed steps",
+        "completionHeading": "Completion summary",
+        "cost": "Cost",
+        "costUnavailable": "No pricing for this model",
+        "deletions": "Removed",
+        "filesChanged": "Files",
+        "inputTokens": "Input",
+        "insertions": "Added",
+        "model": "Model",
+        "noAgentWork": "No completed steps or workflow results are available for this task.",
+        "noChangedFiles": "No changed-file list is available for this task.",
+        "noCompletionSummary": "No completion summary was recorded for this task.",
+        "noTokenUsage": "No token usage recorded for this task yet.",
+        "outputTokens": "Output",
+        "retries": "Agents retried this task {{count}} time{{plural}}.",
+        "tokenCostHeading": "Token usage & cost",
+        "totalCost": "Total cost",
+        "totalTokens": "Total",
+        "unknownModel": "(unknown)",
+        "workflowResults": "Workflow results"
+      },
       "tabs": {
         "changes": "Changes",
         "chat": "Chat",
@@ -7579,6 +7638,7 @@ export default interface Resources {
         "review": "Review",
         "routing": "Routing",
         "stats": "Stats",
+        "summary": "Summary",
         "terminal": "Terminal",
         "workflow": "Workflow"
       },

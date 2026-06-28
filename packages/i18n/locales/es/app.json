@@ -4827,7 +4827,7 @@
   "projectCard": {
     "activeTasks": "Tareas activas",
     "agents": "Agentes",
-    "cannotPauseWhileInitializing": "No se puede pausar mientras se inicializa",
+    "cannotPauseWhileInitializing": "",
     "completed": "Completado",
     "confirm": "Confirmar",
     "confirmRemove": "Confirmar eliminación",
@@ -4847,11 +4847,11 @@
     "noHealthData": "No hay datos de salud disponibles",
     "open": "Abrir",
     "openProject": "Abrir proyecto",
-    "pause": "Pausar",
-    "pauseProject": "Pausar proyecto",
+    "pause": "",
+    "pauseProject": "",
     "removeProject": "Eliminar proyecto",
-    "resume": "Reanudar",
-    "resumeProject": "Reanudar proyecto"
+    "resume": "",
+    "resumeProject": ""
   },
   "projectDetection": {
     "editName": "Editar nombre",

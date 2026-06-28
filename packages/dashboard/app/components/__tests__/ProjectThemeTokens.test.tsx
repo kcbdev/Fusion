@@ -23,6 +23,7 @@ import type { ProjectInfo } from "../../../app/api";
 vi.mock("lucide-react", () => ({
   Play: () => <span>Play</span>,
   Pause: () => <span>Pause</span>,
+  Square: () => <span>Square</span>,
   AlertCircle: () => <span>AlertCircle</span>,
   Loader2: () => <span>Loader2</span>,
   ChevronDown: () => <span>ChevronDown</span>,
