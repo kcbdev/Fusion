@@ -8460,9 +8460,11 @@ export class TaskExecutor {
                 const settings = await this.store.getSettings();
                 const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
 
-                if (!preserveProgress) {
-                  await this.resetStepsIfWorkLost(latestTask);
-                }
+                /*
+                FNXC:StuckRequeue 2026-06-27-23:15:
+                Stuck requeue may destroy a checkout that contains only uncommitted step output. Always reconcile lost-work step state before worktree removal, even when preserve-progress is enabled, so a retry cannot skip code that no longer exists.
+                */
+                await this.resetStepsIfWorkLost(latestTask);
 
                 if (worktreePath && existsSync(worktreePath)) {
                   try {
@@ -10195,13 +10197,11 @@ export class TaskExecutor {
             const settings = await this.store.getSettings();
             const preserveProgress = settings.preserveProgressOnStuckRequeue !== false;
 
-            // Reset steps whose work was never committed before destroying
-            // the worktree. Skipped when preserveProgress is on — the
-            // setting's whole point is to keep step status across the
-            // requeue so the agent can resume from where it left off.
-            if (!preserveProgress) {
-              await this.resetStepsIfWorkLost(latestTask);
-            }
+            /*
+            FNXC:StuckRequeue 2026-06-27-23:15:
+            Preserve-progress stuck requeues still remove the old checkout. Reconcile steps first so uncommitted-only output is reset to pending while committed progress can remain complete.
+            */
+            await this.resetStepsIfWorkLost(latestTask);
 
             // Clean up the old worktree so the retry gets a fresh one
             if (worktreePath && existsSync(worktreePath)) {
@@ -15259,46 +15259,53 @@ You have access to the file system to review changes.${verdictBlock}`;
       const branchHead = branchHeadStdout.trim();
 
       if (mergeBase === branchHead) {
-        // Branch has no unique commits — all step work was lost
-        executorLog.warn(
-          `${task.id} branch has no unique commits — resetting ${completedSteps.length} step(s) to pending`,
-        );
-
-        for (let i = 0; i < task.steps.length; i++) {
-          if (task.steps[i].status === "done" || task.steps[i].status === "in-progress") {
-            await this.store.updateStep(task.id, i, "pending");
-          }
-        }
-
-        const refreshedTask = await this.store.getTask(task.id);
-        const prevCurrentStep = refreshedTask.currentStep;
-        if (refreshedTask.steps.length > 0) {
-          const firstPendingStep = refreshedTask.steps.findIndex((s) => s.status === "pending");
-          const newCurrentStep = firstPendingStep >= 0 ? firstPendingStep : 0;
-          if (newCurrentStep !== prevCurrentStep) {
-            await this.store.updateTask(task.id, { currentStep: newCurrentStep });
-            executorLog.log(
-              `${task.id}: reset currentStep to ${newCurrentStep} after lost-work reset (was ${prevCurrentStep})`,
-            );
-            await this.store.logEntry(
-              task.id,
-              `Reset currentStep to ${newCurrentStep} after lost-work step reset (was ${prevCurrentStep})`,
-            );
-          }
-        }
-
-        await this.store.logEntry(
-          task.id,
-          `Reset ${completedSteps.length} step(s) to pending — branch had no commits (uncommitted work lost with worktree)`,
-        );
+        await this.resetLostWorkStepProgress(task, completedSteps.length, "branch had no commits");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      executorLog.warn(`${task.id}: step-reset-on-work-lost failed (non-fatal, steps keep current status): ${msg}`);
-      // Branch may not exist or git commands may fail — non-fatal.
-      // Steps keep their current status (safe default: agent can
-      // inspect the worktree and decide).
+      executorLog.warn(
+        `${task.id}: unable to prove surviving branch commits before worktree removal — resetting ${completedSteps.length} step(s) to pending: ${msg}`,
+      );
+      /*
+      FNXC:StuckRequeue 2026-06-27-23:55:
+      Stuck-requeue cleanup is about to delete the checkout. If git cannot prove the branch has durable commits, treat completed/in-progress steps as lost work rather than preserving progress that may point at deleted uncommitted output.
+      */
+      await this.resetLostWorkStepProgress(task, completedSteps.length, `git proof failed: ${msg}`);
     }
+  }
+
+  private async resetLostWorkStepProgress(task: Task, completedStepCount: number, reason: string): Promise<void> {
+    executorLog.warn(
+      `${task.id} ${reason} — resetting ${completedStepCount} step(s) to pending`,
+    );
+
+    for (let i = 0; i < task.steps.length; i++) {
+      if (task.steps[i].status === "done" || task.steps[i].status === "in-progress") {
+        await this.store.updateStep(task.id, i, "pending");
+      }
+    }
+
+    const refreshedTask = await this.store.getTask(task.id);
+    const prevCurrentStep = refreshedTask.currentStep;
+    if (refreshedTask.steps.length > 0) {
+      const firstPendingStep = refreshedTask.steps.findIndex((s) => s.status === "pending");
+      const newCurrentStep = firstPendingStep >= 0 ? firstPendingStep : 0;
+      if (newCurrentStep !== prevCurrentStep) {
+        await this.store.updateTask(task.id, { currentStep: newCurrentStep });
+        executorLog.log(
+          `${task.id}: reset currentStep to ${newCurrentStep} after lost-work reset (was ${prevCurrentStep})`,
+        );
+        await this.store.logEntry(
+          task.id,
+          `Reset currentStep to ${newCurrentStep} after lost-work step reset (was ${prevCurrentStep})`,
+        );
+      }
+    }
+
+    await this.store.logEntry(
+      task.id,
+      `Reset ${completedStepCount} step(s) to pending — ${reason} (uncommitted work lost with worktree)`,
+    );
   }
 
   /**
@@ -15389,9 +15396,11 @@ You have access to the file system to review changes.${verdictBlock}`;
           // clear it to prevent a later subprocess unwind from logging/moving as a pause.
           this.clearPausedAborted(taskId);
 
-          if (!preserveProgress) {
-            await this.resetStepsIfWorkLost(latestTask);
-          }
+          /*
+          FNXC:StuckRequeue 2026-06-27-23:15:
+          The force path mirrors normal stuck-requeue cleanup: before reaping a hung executor's worktree, reconcile step progress against committed branch state so preserved progress never points at deleted uncommitted work.
+          */
+          await this.resetStepsIfWorkLost(latestTask);
 
           let cleanupFailed = false;
           if (worktreePath && existsSync(worktreePath)) {
