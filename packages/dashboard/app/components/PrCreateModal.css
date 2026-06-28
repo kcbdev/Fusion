@@ -149,12 +149,34 @@ FN-7170 hosts Create PR in FloatingWindow: desktop geometry belongs to the share
 
 .pr-create-modal__inline-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-sm);
+}
+
+.pr-create-modal__body-input,
+.pr-create-modal__body-preview {
+  min-height: calc(var(--space-2xl) * 4);
 }
 
 .pr-create-modal__body-input {
   font-family: var(--font-mono);
-  min-height: calc(var(--space-2xl) * 4);
+}
+
+.pr-create-modal__body-preview {
+  overflow: auto;
+  padding: var(--space-sm) var(--space-md);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pr-create-modal__body-preview > :first-child {
+  margin-top: 0;
+}
+
+.pr-create-modal__body-preview > :last-child {
+  margin-bottom: 0;
 }
 
 .pr-create-template-hint {

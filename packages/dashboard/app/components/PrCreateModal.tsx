@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import ReactMarkdown from "react-markdown";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, RefreshCw, Sparkles, X, XCircle } from "lucide-react";
+import remarkGfm from "remark-gfm";
 import { getErrorMessage, type PrInfo, type StructuredGhError } from "@fusion/core";
 import {
   createPr,
@@ -16,6 +18,7 @@ import {
 } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { FloatingWindow } from "./FloatingWindow";
+import { sharedRehypePlugins } from "./markdownPipeline";
 import "./PrCreateModal.css";
 
 interface PrCreateModalProps {
@@ -39,6 +42,27 @@ type PreflightCheck = {
 };
 
 const PR_METADATA_TIMEOUT_MS = 15000;
+const PR_CREATE_BODY_PREVIEW_STORAGE_KEY = "fn-pr-create-body-preview";
+
+function readBooleanPref(key: string, defaultValue: boolean): boolean {
+  if (typeof window === "undefined") return defaultValue;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    return raw === "true";
+  } catch {
+    return defaultValue;
+  }
+}
+
+function writeBooleanPref(key: string, value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // ignore storage failures (quota, private mode, etc.)
+  }
+}
 
 /*
 FNXC:PrCreateModal 2026-06-27-23:48:
@@ -199,6 +223,7 @@ export function PrCreateModal({
   const [aiBody, setAiBody] = useState("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [showBodyPreview, setShowBodyPreview] = useState<boolean>(() => readBooleanPref(PR_CREATE_BODY_PREVIEW_STORAGE_KEY, false));
   const [userEditedTitle, setUserEditedTitle] = useState(false);
   const [userEditedBody, setUserEditedBody] = useState(false);
   const [templateUsed, setTemplateUsed] = useState(false);
@@ -341,6 +366,10 @@ export function PrCreateModal({
       requestSeqRef.current.options += 1;
     };
   }, [loadData, open]);
+
+  useEffect(() => {
+    writeBooleanPref(PR_CREATE_BODY_PREVIEW_STORAGE_KEY, showBodyPreview);
+  }, [showBodyPreview]);
 
   useEffect(() => {
     if (!open) return;
@@ -630,10 +659,30 @@ export function PrCreateModal({
                 <div className="pr-create-modal__inline-actions">
                   <button type="button" className="btn btn-sm" onClick={() => void regenerate()} disabled={metadataLoading}><Sparkles size={14} />{t("pr.regenerate", "Regenerate")}</button>
                   {userEditedBody && <button type="button" className="btn btn-sm" onClick={() => { setBody(aiBody); setUserEditedBody(false); }}>{t("pr.revertToAi", "Revert to AI version")}</button>}
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    data-testid="pr-create-body-preview-toggle"
+                    aria-pressed={showBodyPreview}
+                    title={showBodyPreview ? t("pr.editRawMarkdown", "Edit raw markdown") : t("pr.showFormattedMarkdown", "Show formatted markdown")}
+                    onClick={() => setShowBodyPreview((current) => !current)}
+                  >
+                    {showBodyPreview ? t("pr.editBody", "Edit") : t("pr.previewBody", "Preview")}
+                  </button>
                 </div>
               </div>
               {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.generatingBody", "Generating AI body…")}</div> : null}
-              <textarea id="pr-create-modal-body" className="input pr-create-modal__body-input" value={body} onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }} rows={8} />
+              {/**
+               * FNXC:PrCreateModal 2026-06-28-00:00:
+               * PR authors need to preview description markdown before creating the PR. The preview is render-only, uses the shared sanitized markdown pipeline, and submission/regeneration/revert always read and write the raw `body` state.
+               */}
+              {showBodyPreview ? (
+                <div className="pr-create-modal__body-preview markdown-body" role="region" aria-label={t("pr.bodyPreviewLabel", "Body markdown preview")}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins}>{body}</ReactMarkdown>
+                </div>
+              ) : (
+                <textarea id="pr-create-modal-body" className="input pr-create-modal__body-input" value={body} onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }} rows={8} />
+              )}
               {templateUsed && <p className="pr-create-template-hint">{t("pr.usingTemplate", "Using <code>.github/pull_request_template.md</code>")}</p>}
             </section>
 

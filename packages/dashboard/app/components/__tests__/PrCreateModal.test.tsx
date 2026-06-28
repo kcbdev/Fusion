@@ -246,6 +246,113 @@ describe("PrCreateModal", () => {
     expect(screen.getByText(/using/i)).toBeInTheDocument();
   });
 
+  it("defaults to raw edit mode and persists the body preview toggle preference", async () => {
+    localStorage.setItem("fn-pr-create-body-preview", "true");
+
+    await renderModalLoaded();
+
+    expect(screen.queryByLabelText(/body/i, { selector: "textarea" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Body markdown preview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    const toggle = screen.getByTestId("pr-create-body-preview-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByLabelText(/body/i, { selector: "textarea" })).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(localStorage.getItem("fn-pr-create-body-preview")).toBe("false"));
+  });
+
+  it("shows editable body by default and previews current markdown without mutating edits", async () => {
+    await renderModalLoaded();
+
+    const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
+    expect(bodyInput).toHaveValue(metadata.body);
+    expect(screen.queryByRole("region", { name: "Body markdown preview" })).toBeNull();
+
+    fireEvent.change(bodyInput, { target: { value: "# Custom title\n\nPlain text body\n\n<details><summary>More</summary>Hidden</details>" } });
+    const toggle = screen.getByTestId("pr-create-body-preview-toggle");
+    fireEvent.click(toggle);
+
+    expect(screen.queryByLabelText(/body/i, { selector: "textarea" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Body markdown preview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Custom title" })).toBeInTheDocument();
+    expect(screen.getByText("Plain text body")).toBeInTheDocument();
+    expect(screen.getByText("More")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByLabelText(/body/i)).toHaveValue("# Custom title\n\nPlain text body\n\n<details><summary>More</summary>Hidden</details>");
+  });
+
+  it("renders empty and fallback body preview states without crashing", async () => {
+    await renderModalLoaded();
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+
+    const emptyPreview = screen.getByRole("region", { name: "Body markdown preview" });
+    expect(emptyPreview).toBeInTheDocument();
+    expect(screen.getByTestId("pr-create-body-preview-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    cleanup();
+    localStorage.clear();
+    mocks.generatePrMetadata.mockRejectedValueOnce(new Error("metadata blew up"));
+    renderModal();
+
+    expect(await screen.findByText("metadata blew up")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+
+    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Linked Task" })).toBeInTheDocument();
+    expect(screen.getByText("Closes FN-4756")).toBeInTheDocument();
+  });
+
+  it("re-renders preview for regenerate and Revert to AI version body changes", async () => {
+    mocks.generatePrMetadata
+      .mockResolvedValueOnce(metadata)
+      .mockResolvedValueOnce({ title: "New title", body: "# Regenerated body\n\nFresh content", templateUsed: false });
+    await renderModalLoaded();
+
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+    expect(screen.getByRole("heading", { level: 2, name: "Summary" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^regenerate$/i })[1]);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Regenerated body" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Summary" })).toBeNull();
+    expect(screen.getByText("Fresh content")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "Plain edited body" } });
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+    expect(screen.getByText("Plain edited body")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /revert to ai version/i }));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Regenerated body" })).toBeInTheDocument();
+    expect(screen.queryByText("Plain edited body")).toBeNull();
+  });
+
+  it("submits the same body payload while markdown preview is active", async () => {
+    await renderModalLoaded();
+    const bodyText = "# Submit me\n\nPreview mode should not change payload.";
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: bodyText } });
+    fireEvent.click(screen.getByTestId("pr-create-body-preview-toggle"));
+
+    expect(screen.getByRole("heading", { level: 1, name: "Submit me" })).toBeInTheDocument();
+    const submitButton = screen.getByRole("button", { name: "Create PR" });
+    await waitFor(() => expect(submitButton).toBeEnabled());
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(1));
+    expect(mocks.createPr.mock.calls[0][1]).toMatchObject({
+      title: "AI title",
+      body: bodyText,
+    });
+  });
+
   it("renders commit preview rows in SHA, subject, author order", async () => {
     const commits = [
       {
