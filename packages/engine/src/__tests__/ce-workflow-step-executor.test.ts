@@ -24,6 +24,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BUILTIN_WORKFLOWS } from "@fusion/core";
 import "./executor-test-helpers.js";
 import { TaskExecutor } from "../executor.js";
 import {
@@ -126,6 +127,37 @@ function makeStep(overrides: Record<string, unknown> = {}) {
     updatedAt: now,
     ...overrides,
   };
+}
+
+type CeSkillStep = {
+  nodeId: string;
+  name: string;
+  skillName: string;
+  bareSkillName: string;
+  toolMode: "coding" | "readonly";
+};
+
+function compoundEngineeringSkillSteps(): CeSkillStep[] {
+  const workflow = BUILTIN_WORKFLOWS.find((wf) => wf.id === "builtin:compound-engineering");
+  if (!workflow) throw new Error("builtin:compound-engineering workflow not found");
+  return workflow.ir.nodes
+    .filter((node: any) => typeof node.config?.skillName === "string" && node.config.skillName.trim())
+    .map((node: any) => {
+      const skillName = node.config.skillName.trim();
+      return {
+        nodeId: node.id,
+        name: typeof node.config.name === "string" && node.config.name.trim() ? node.config.name.trim() : node.id,
+        skillName,
+        bareSkillName: skillName.includes(":") ? skillName.slice(skillName.lastIndexOf(":") + 1) : skillName,
+        toolMode: node.config.toolMode === "coding" ? "coding" : "readonly",
+      };
+    });
+}
+
+function skillLoadWarnings(store: ReturnType<typeof createMockStore>): string[] {
+  return store.logEntry.mock.calls
+    .map((call: unknown[]) => String(call[1] ?? ""))
+    .filter((message: string) => message.includes("[skill-load]"));
 }
 
 /** captureModifiedFiles / git diff calls go through the mocked execSync→exec. */
@@ -267,28 +299,69 @@ describe("CE workflow-step executor integration", () => {
 
   // ── Item 2 (integration half): skillName → requestedSkillNames + paths ───────
   describe("executeWorkflowStep skill merge (U1)", () => {
-    it("merges the step skillName as BOTH namespaced and bare into requestedSkillNames, and threads FUSION_CE_SKILLS_DIR as additionalSkillPaths", async () => {
+    const ceSkillSteps = compoundEngineeringSkillSteps();
+
+    it("derives every skill-bearing step from the built-in compound-engineering workflow", () => {
+      expect(ceSkillSteps.map((step) => step.skillName)).toEqual([
+        "compound-engineering:ce-plan",
+        "compound-engineering:ce-work",
+        "compound-engineering:ce-code-review",
+        "compound-engineering:ce-commit-push-pr",
+        "compound-engineering:ce-resolve-pr-feedback",
+        "compound-engineering:ce-compound",
+      ]);
+    });
+
+    it.each(ceSkillSteps)(
+      "loads named skill for built-in CE step $nodeId ($skillName)",
+      async ({ name, skillName, bareSkillName, toolMode }) => {
+        const store = createMockStore();
+        const { executor } = makeExecutor(store);
+        const cap = captureSession();
+        const ceSkillsDir = `/opt/ce/.fusion-ce-skills/${bareSkillName}`;
+
+        await (executor as any).executeWorkflowStep(
+          baseStepTask(),
+          makeStep({ name, skillName, toolMode }),
+          "/tmp/wt",
+          {},
+          { FUSION_CE_SKILLS_DIR: ceSkillsDir },
+          undefined,
+        );
+
+        const requested = cap.last?.skillSelection?.requestedSkillNames ?? [];
+        expect(requested).toContain(skillName);
+        expect(requested).toContain(bareSkillName);
+        // The install root from the injected env becomes the discovery path for every CE skill step.
+        expect(cap.last?.additionalSkillPaths).toEqual([ceSkillsDir]);
+        expect(skillLoadWarnings(store)).toEqual([]);
+      },
+    );
+
+    it("warns loudly and does not set additionalSkillPaths when a skill step lacks FUSION_CE_SKILLS_DIR", async () => {
       const store = createMockStore();
       const { executor } = makeExecutor(store);
       const cap = captureSession();
 
       await (executor as any).executeWorkflowStep(
         baseStepTask(),
-        makeStep({ skillName: "compound-engineering:ce-work" }),
+        makeStep({ name: "Execute", skillName: "compound-engineering:ce-work", toolMode: "coding" }),
         "/tmp/wt",
         {},
-        { FUSION_CE_SKILLS_DIR: "/opt/ce/.fusion-ce-skills" },
+        undefined,
         undefined,
       );
 
       const requested = cap.last?.skillSelection?.requestedSkillNames ?? [];
       expect(requested).toContain("compound-engineering:ce-work");
       expect(requested).toContain("ce-work");
-      // The install root from the injected env becomes the discovery path.
-      expect(cap.last?.additionalSkillPaths).toEqual(["/opt/ce/.fusion-ce-skills"]);
+      expect(cap.last?.additionalSkillPaths).toBeUndefined();
+      expect(skillLoadWarnings(store)).toEqual([
+        "[skill-load] Workflow step 'Execute' requests skill 'compound-engineering:ce-work' but FUSION_CE_SKILLS_DIR is unset — the skill cannot be discovered; the step runs with role-fallback skills only.",
+      ]);
     });
 
-    it("a skill-less step contributes no skillName merge and no additionalSkillPaths", async () => {
+    it("a skill-less step contributes no skillName merge, no additionalSkillPaths, and no skill-load warning", async () => {
       const store = createMockStore();
       const { executor } = makeExecutor(store);
       const cap = captureSession();
@@ -302,9 +375,36 @@ describe("CE workflow-step executor integration", () => {
         undefined,
       );
 
+      const requested = cap.last?.skillSelection?.requestedSkillNames ?? [];
+      expect(requested.some((name) => name.startsWith("compound-engineering:") || name.startsWith("ce-"))).toBe(false);
       // No CE skills dir injected → no additionalSkillPaths.
       expect(cap.last?.additionalSkillPaths).toBeUndefined();
+      expect(skillLoadWarnings(store)).toEqual([]);
     });
+
+    it.each(["coding", "readonly"] as const)(
+      "keeps skill loading independent of %s toolMode",
+      async (toolMode) => {
+        const store = createMockStore();
+        const { executor } = makeExecutor(store);
+        const cap = captureSession();
+
+        await (executor as any).executeWorkflowStep(
+          baseStepTask(),
+          makeStep({ skillName: "compound-engineering:ce-code-review", toolMode }),
+          "/tmp/wt",
+          {},
+          { FUSION_CE_SKILLS_DIR: "/opt/ce/.fusion-ce-skills" },
+          undefined,
+        );
+
+        const requested = cap.last?.skillSelection?.requestedSkillNames ?? [];
+        expect(requested).toContain("compound-engineering:ce-code-review");
+        expect(requested).toContain("ce-code-review");
+        expect(cap.last?.additionalSkillPaths).toEqual(["/opt/ce/.fusion-ce-skills"]);
+        expect(skillLoadWarnings(store)).toEqual([]);
+      },
+    );
   });
 
   // ── Item 4: spawn-tool gating by toolMode ───────────────────────────────────

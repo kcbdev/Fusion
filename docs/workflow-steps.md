@@ -51,6 +51,15 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 | PR lifecycle | `builtin:pr-workflow` | Reusable PR lifecycle graph fragment (create PR → await review → respond → gate → merge); it is a fragment, not directly selectable as a task workflow. |
 | Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields, stage columns, and reviewable enrichment/outreach task documents; requires the workflow graph executor for custom board columns. |
 
+### Skill-backed workflow steps
+
+<!--
+FNXC:WorkflowSteps 2026-06-27-17:05:
+FN-7145 locks the execution invariant for skill-backed workflow nodes: naming a skill must load the skill into the step session, not only mention it in prompt text. The engine passes both namespaced and bare request forms plus the injected Compound Engineering discovery path so bundled `SKILL.md` files are discoverable, and logs a loud warning when that path is missing.
+-->
+
+Skill-backed prompt/gate nodes run through the same workflow-step session builder as other prompt nodes, but their `skillName` is also treated as a resource-loading request. At execution time Fusion merges both the namespaced form (for example `compound-engineering:ce-work`) and the bare form (`ce-work`) into `requestedSkillNames`, then threads the injected `FUSION_CE_SKILLS_DIR` value as `additionalSkillPaths` so the bundled `SKILL.md` can be discovered. If a step names a skill but `FUSION_CE_SKILLS_DIR` is absent, the executor logs a `[skill-load]` warning instead of silently presenting only prompt text while falling back to role skills.
+
 ### Custom workflow authoring
 
 Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect built-ins, tune built-in prompts, duplicate workflows, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
