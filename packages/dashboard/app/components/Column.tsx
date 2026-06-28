@@ -91,6 +91,7 @@ interface ColumnProps {
   tasks: Task[];
   projectId?: string;
   maxConcurrent: number;
+  showWorktreeGrouping: boolean;
   onMoveTask: (id: string, column: ColumnType, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onPauseTask?: (id: string) => Promise<Task>;
   onOpenDetail: (task: Task | TaskDetail) => void;
