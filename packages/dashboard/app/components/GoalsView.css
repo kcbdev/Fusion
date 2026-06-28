@@ -295,8 +295,16 @@ The goal card is a 3-column flex row: .goals-card-main | .goals-card-actions | .
     align-items: stretch;
   }
 
-  .goals-linked-missions-link-button,
+  /*
+  FNXC:Goals 2026-06-27-00:00:
+  FN-7155: In this tablet column layout, the picker flex-basis maps to height instead of width. Reset flex so the mission picker stays at native select height while preserving full-width stacking.
+  */
   .goals-linked-missions-picker {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .goals-linked-missions-link-button {
     width: 100%;
   }
 }
@@ -321,8 +329,16 @@ The goal card is a 3-column flex row: .goals-card-main | .goals-card-actions | .
     border-top: calc(var(--space-xs) / 4) solid var(--border);
   }
 
-  .goals-linked-missions-link-button,
+  /*
+  FNXC:Goals 2026-06-27-00:00:
+  FN-7155: In this mobile column layout, the picker flex-basis maps to height instead of width. Reset flex so the mission picker stays at native select height while preserving full-width stacking.
+  */
   .goals-linked-missions-picker {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .goals-linked-missions-link-button {
     width: 100%;
   }
 
