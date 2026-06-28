@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync, accessSync, constants } from "node:fs";
+import { readFileSync, accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
 
@@ -25,6 +25,84 @@ function loadWorkflow(name: string): any {
 
 function findCompositeSetupStep(steps: any[]) {
   return steps.find((step) => step.uses === "./.github/actions/setup-node-pnpm");
+}
+
+function findSetupJavaStep(steps: any[]) {
+  return steps.find((step) => typeof step.uses === "string" && step.uses.startsWith("actions/setup-java@"));
+}
+
+function resolveCapacitorAndroidGradlePath(): string {
+  const primaryPath = join(
+    workspaceRoot,
+    "packages",
+    "mobile",
+    "node_modules",
+    "@capacitor",
+    "android",
+    "capacitor",
+    "build.gradle",
+  );
+  if (existsSync(primaryPath)) {
+    return primaryPath;
+  }
+
+  const pnpmStoreCandidates = [
+    join(workspaceRoot, "node_modules", ".pnpm"),
+    join(workspaceRoot, "packages", "mobile", "node_modules", ".pnpm"),
+  ];
+
+  for (const pnpmStore of pnpmStoreCandidates) {
+    if (!existsSync(pnpmStore)) {
+      continue;
+    }
+
+    for (const entry of readdirSync(pnpmStore)) {
+      if (!entry.startsWith("@capacitor+android@")) {
+        continue;
+      }
+
+      const candidate = join(
+        pnpmStore,
+        entry,
+        "node_modules",
+        "@capacitor",
+        "android",
+        "capacitor",
+        "build.gradle",
+      );
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  throw new Error(
+    "Unable to resolve @capacitor/android capacitor/build.gradle from packages/mobile/node_modules or the pnpm store",
+  );
+}
+
+function readCapacitorAndroidSourceCompatibilityMajor(): number {
+  const gradleContent = readFileSync(resolveCapacitorAndroidGradlePath(), "utf-8");
+  const match = gradleContent.match(/sourceCompatibility\s+JavaVersion\.VERSION_(\d+)/);
+  if (!match) {
+    throw new Error("Unable to parse @capacitor/android sourceCompatibility JavaVersion.VERSION_<major>");
+  }
+  return Number.parseInt(match[1], 10);
+}
+
+function expectAndroidBuildJobJavaVersionAtLeast(workflow: any, workflowName: string, minimumJavaVersion: number) {
+  const buildAndroidJob = workflow.jobs?.["build-android"];
+  expect(buildAndroidJob, `${workflowName} must define a build-android job`).toBeDefined();
+
+  const setupJavaStep = findSetupJavaStep(buildAndroidJob?.steps ?? []);
+  expect(setupJavaStep, `${workflowName} build-android must provision Java`).toBeDefined();
+  expect(setupJavaStep.name).toBe("Setup Java 21");
+
+  const javaVersion = setupJavaStep.with?.["java-version"];
+  expect(javaVersion, `${workflowName} build-android must pin JDK 21`).toBe("21");
+  expect(Number.parseInt(javaVersion, 10), `${workflowName} JDK must satisfy @capacitor/android sourceCompatibility`).toBeGreaterThanOrEqual(
+    minimumJavaVersion,
+  );
 }
 
 describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
@@ -339,6 +417,25 @@ describe("Version & Release workflow (.github/workflows/version.yml)", () => {
     const steps = workflow.jobs.release.steps;
     const compositeStep = findCompositeSetupStep(steps);
     expect(compositeStep?.with?.["registry-url"]).toBe("https://registry.npmjs.org");
+  });
+});
+
+describe("Android build JDK compatibility", () => {
+  let capacitorAndroidSourceCompatibility: number;
+
+  beforeAll(() => {
+    capacitorAndroidSourceCompatibility = readCapacitorAndroidSourceCompatibilityMajor();
+  });
+
+  /*
+  FNXC:MobileAndroidBuild 2026-06-28-00:00:
+  Android CI jobs that run Capacitor Gradle builds must provision a JDK version greater than or equal to @capacitor/android's sourceCompatibility. FN-7209 proved JDK 17 silently drifted below Capacitor 7's JavaVersion.VERSION_21 requirement and failed release builds with `invalid source release: 21`.
+  */
+  it("pins every Android-building workflow to a JDK compatible with Capacitor", () => {
+    for (const workflowName of ["release.yml", "test-release.yml", "mobile.yml"]) {
+      const workflow = loadWorkflow(workflowName).parsed;
+      expectAndroidBuildJobJavaVersionAtLeast(workflow, workflowName, capacitorAndroidSourceCompatibility);
+    }
   });
 });
 

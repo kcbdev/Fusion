@@ -8,7 +8,7 @@ Fusion mobile builds package the dashboard web client into Capacitor shells via 
 - **pnpm** 10+
 - **Xcode** (iOS builds)
 - **Android Studio** (Android SDK + emulator tooling)
-- **Java JDK** 17+ (Android Gradle builds)
+- **Java JDK** 21+ (Android Gradle builds)
 
 ## Quick Start
 
@@ -160,7 +160,7 @@ You can also use ImageMagick if preferred.
 
 ### Android build fails
 
-- Verify Java 17+ (`java -version`)
+- Verify Java 21+ (`java -version`)
 - Confirm Android SDK and Gradle tooling are installed via Android Studio
 
 ### PWA does not install
