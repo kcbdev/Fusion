@@ -141,6 +141,30 @@ describe("PrPanel", () => {
     expect(screen.getByRole("link", { name: /View on GitHub/i })).toBeInTheDocument();
   });
 
+  it("links the PR number to GitHub when a PR URL is available", () => {
+    render(<PrPanel taskId="FN-001" prInfo={mockPrInfo} prAuthAvailable={true} onPrUpdated={mockOnPrUpdated} addToast={mockAddToast} />);
+
+    const numberLink = screen.getByRole("link", { name: "View PR #42 on GitHub" });
+    expect(numberLink).toHaveTextContent("#42");
+    expect(numberLink).toHaveAttribute("href", mockPrInfo.url);
+    expect(numberLink).toHaveAttribute("target", "_blank");
+    expect(numberLink.getAttribute("rel")).toContain("noopener");
+    expect(numberLink.getAttribute("rel")).toContain("noreferrer");
+  });
+
+  it("keeps the PR number as a plain span when the PR URL is empty", () => {
+    render(<PrPanel taskId="FN-001" prInfo={{ ...mockPrInfo, url: "" }} prAuthAvailable={true} onPrUpdated={mockOnPrUpdated} addToast={mockAddToast} />);
+
+    expect(screen.queryByRole("link", { name: "View PR #42 on GitHub" })).toBeNull();
+    expect(screen.getByText("#42").tagName).toBe("SPAN");
+  });
+
+  it.each(["open", "merged", "closed"] as const)("links the PR number for status %s", (status) => {
+    render(<PrPanel taskId="FN-001" prInfo={{ ...mockPrInfo, status }} prAuthAvailable={true} onPrUpdated={mockOnPrUpdated} addToast={mockAddToast} />);
+
+    expect(screen.getByRole("link", { name: "View PR #42 on GitHub" })).toHaveAttribute("href", mockPrInfo.url);
+  });
+
   it("refreshes PR status and updates toast/callback", async () => {
     (refreshPrStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       prInfo: { ...mockPrInfo, status: "merged" },

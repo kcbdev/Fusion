@@ -143,6 +143,19 @@
   font-size: 0.75rem;
 }
 
+.pr-card a.pr-number {
+  text-decoration: none;
+}
+
+.pr-card a.pr-number:hover {
+  text-decoration: underline;
+}
+
+.pr-card a.pr-number:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: 0;
+}
+
 .pr-panel-refresh-icon--muted {
   opacity: 0.6;
 }

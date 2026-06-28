@@ -215,6 +215,8 @@ function PrCard({
   const hasConflictBlockingReason = blockingReasons.some((reason) => reason.toLowerCase().includes("conflict"));
   const showConflictHint = prInfo.mergeable === "conflicting" || hasConflictBlockingReason;
   const conflictDiagnostics = refreshState?.conflictDiagnostics ?? prInfo.conflictDiagnostics;
+  const prUrl = prInfo.url?.trim();
+  const prNumberLinkLabel = t("git.viewPrNumberOnGithub", "View PR #{{number}} on GitHub", { number: prInfo.number });
 
   useEffect(() => {
     setConflictsExpanded((conflictDiagnostics?.conflictingFiles.length ?? 0) > 0);
@@ -225,7 +227,15 @@ function PrCard({
       <div className="pr-header">
         <span className="pr-status-icon">{statusIcon}</span>
         <span className={`pr-status-badge pr-status-badge--${prInfo.status}`}>{prInfo.status}</span>
-        <span className="pr-number">#{prInfo.number}</span>
+        {/*
+        FNXC:PullRequests 2026-06-27-23:21:
+        The task-detail Pull Request tab should let operators open GitHub directly from the PR number while preserving a plain-span fallback when no URL exists.
+        */}
+        {prUrl ? (
+          <a className="pr-number" href={prUrl} target="_blank" rel="noopener noreferrer" aria-label={prNumberLinkLabel} title={prNumberLinkLabel}>#{prInfo.number}</a>
+        ) : (
+          <span className="pr-number">#{prInfo.number}</span>
+        )}
         <div className="pr-spacer" />
         <button className="btn btn-sm pr-refresh-btn" onClick={handleRefresh} disabled={isRefreshing} title={t("git.refreshPrStatus", "Refresh PR status")}>
           <RefreshCw size={14} className={isRefreshing ? "spin pr-panel-refresh-icon--muted" : undefined} />
