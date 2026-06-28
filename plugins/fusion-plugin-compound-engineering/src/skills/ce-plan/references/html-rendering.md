@@ -10,11 +10,10 @@ content rendered by different skills shares the same HTML principles.
 
 The HTML artifact is the *only* artifact the skill produces for that run —
 output mode is exclusive (markdown OR HTML, never both). Downstream
-consumers that read HTML today (`ce-work`, human readers) do so directly;
-the agent-consumability rules below make that work. `ce-doc-review` is
-*not* currently an HTML consumer — its mutation mechanics are markdown-only,
-so the ce-plan handoff gates the 5.3.8 doc-review pass to `OUTPUT_FORMAT=md`
-runs and skips it for HTML.
+consumers that read HTML today (`ce-work`, `ce-doc-review` report-only mode,
+human readers) do so directly; the agent-consumability rules below make that
+work. `ce-doc-review` reviews HTML without mutation: markdown autofix and
+Append-to-Open-Questions write-back remain disabled for `.html` artifacts.
 
 ## Hard invariants
 
@@ -543,10 +542,11 @@ fine when the content suggests them.
 
 ## Agent-consumability rules
 
-Downstream agents that read HTML today (`ce-work`, a skill re-reading its
-own prior artifact on a resume run, future consumers) reason over the HTML
-as text — the way they reason over markdown, not via DOM extraction or a
-script-style parse. `ce-doc-review` is not a current HTML consumer (see
+Downstream agents that read HTML today (`ce-work`, `ce-doc-review` in
+report-only mode, a skill re-reading its own prior artifact on a resume run,
+future consumers) reason over the HTML as text — the way they reason over
+markdown, not via DOM extraction or a script-style parse. `ce-doc-review`
+uses this consumable structure to produce findings without mutating HTML (see
 opening note).
 
 These rules are why such a consumer can locate one item (a single
