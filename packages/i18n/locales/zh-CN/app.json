@@ -4814,7 +4814,13 @@
       "reviewLabel": "",
       "threadFixed": "",
       "threadPending": "",
-      "verifyingGithub": ""
+      "verifyingGithub": "",
+      "backToList": "",
+      "listEmpty": "",
+      "listError": "",
+      "listItemLabel": "",
+      "listLoading": "",
+      "listTitle": ""
     }
   },
   "preview": {
@@ -7816,7 +7822,11 @@
     "showRawText": "显示原始文本",
     "startedAtSep": " · 已开始：{{timestamp}}",
     "updateFailed": "更新 {{taskId}} 失败：{{error}}",
-    "upToDate": "最新"
+    "upToDate": "最新",
+    "addressPrFeedback": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressingPrFeedback": ""
   },
   "tasks": {
     "addTaskPlaceholder": "添加任务……",
@@ -8014,7 +8024,13 @@
     "usingDefault": "使用默认",
     "viewDependency": "点击查看 {{depId}}",
     "workflow": "工作流",
-    "workflowCheck": "工作流检查"
+    "workflowCheck": "工作流检查",
+    "addressPrFeedback": "",
+    "addressPrFeedbackAriaLabel": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressPrFeedbackTitle": "",
+    "addressingPrFeedback": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

@@ -4,11 +4,12 @@ import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
 import { Bot, ExternalLink, GitPullRequest, User } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { fetchTaskReview, refreshTaskReview, reviseTaskReviewItems, updateTask } from "../api";
+import { addressPrFeedback, fetchTaskReview, refreshTaskReview, reviseTaskReviewItems, updateTask } from "../api";
 import type { SelectedReviewItem } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { resolveReviewCommentAuthor } from "../utils/githubCommentAuthor";
+import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { MailboxMessageContent } from "./MailboxMessageContent";
 
@@ -162,6 +163,7 @@ export function TaskReviewTab({
     task.autoMerge === true ? "on" : task.autoMerge === false ? "off" : "follow-default",
   );
   const [isSavingAutoMergePreference, setIsSavingAutoMergePreference] = useState(false);
+  const [addressingPrFeedback, setAddressingPrFeedback] = useState(false);
 
   const isPrMode = review?.source === "pull-request";
   const prSummary = isPrMode ? review?.summary as TaskReviewSummary | undefined : undefined;
@@ -175,6 +177,10 @@ export function TaskReviewTab({
   }, [authorTypeFilter, displayItems]);
   const visibleItemIds = useMemo(() => new Set(filteredDisplayItems.map((item) => item.id)), [filteredDisplayItems]);
   const canRevise = selected.length > 0 && !revising;
+  const canAddressPrFeedback = isPrMode
+    && Boolean(getTaskPrimaryPrInfo(task))
+    && (task.column === "in-review" || task.column === "in-progress")
+    && (canStartPrFeedbackAddressing(task) || displayItems.length > 0);
 
   useEffect(() => {
     writeBooleanPref(REVIEW_MARKDOWN_TOGGLE_STORAGE_KEY, renderMarkdown);
@@ -287,6 +293,22 @@ export function TaskReviewTab({
     }
   };
 
+  const onAddressPrFeedback = async () => {
+    try {
+      setError(null);
+      setAddressingPrFeedback(true);
+      const result = await addressPrFeedback(task.id, projectId);
+      onTaskUpdated?.(result.task);
+      addToast(t("taskReview.addressPrFeedbackStarted", "Addressing PR feedback — AI session started"), "success");
+    } catch (addressError) {
+      const message = addressError instanceof Error ? addressError.message : t("taskReview.addressPrFeedbackFailed", "Failed to start PR feedback session");
+      setError(message);
+      addToast(message, "error");
+    } finally {
+      setAddressingPrFeedback(false);
+    }
+  };
+
   const onRevise = async () => {
     try {
       if (!review) return;
@@ -396,6 +418,23 @@ export function TaskReviewTab({
               <GitPullRequest />
               {t("taskReview.createPr", "Create PR")}
             </button>
+          ) : null}
+          {canAddressPrFeedback ? (
+            <>
+              {/*
+              FNXC:TaskReviewPrFeedback 2026-06-28-00:00:
+              The Review tab must expose the same gated Address PR feedback action as task cards when PR comments or CHANGES_REQUESTED make feedback actionable. Route the click through the lifecycle API so the ce-resolve-pr-feedback steering prompt is visible in Chat and can wake the assigned agent.
+              */}
+              <button
+                className="btn btn-sm"
+                onClick={() => void onAddressPrFeedback()}
+                disabled={addressingPrFeedback}
+                data-testid="task-review-address-pr-feedback"
+              >
+                <Bot />
+                {addressingPrFeedback ? t("taskReview.addressingPrFeedback", "Addressing…") : t("taskReview.addressPrFeedback", "Address PR feedback")}
+              </button>
+            </>
           ) : null}
           <button
             className="btn btn-sm"

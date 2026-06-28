@@ -75,6 +75,7 @@ import {
   fetchPluginUiSlots,
   fetchTaskReviewData,
   refreshTaskReviewData,
+  addressPrFeedback,
   type ProjectInfo,
   type ProjectHealth,
   type ActivityFeedEntry,
@@ -1228,6 +1229,17 @@ describe("task review data api wrappers", () => {
     await refreshTaskReviewData("FN-123");
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "/api/tasks/FN-123/review/refresh",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("addressPrFeedback posts to the project-scoped PR feedback endpoint", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockFetchResponse(true, { task: FAKE_DETAIL })) as unknown as typeof fetch;
+
+    await addressPrFeedback("FN-123", "proj-1");
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/tasks/FN-123/pr/address-feedback?projectId=proj-1",
       expect.objectContaining({ method: "POST" })
     );
   });

@@ -61,6 +61,7 @@ const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
 const ARTIFACT_TYPES = new Set<ArtifactType>(["document", "image", "video", "audio", "other"]);
+const ADDRESS_PR_FEEDBACK_PROMPT = "Run /ce-resolve-pr-feedback to resolve open PR review feedback: evaluate each thread, fix valid issues, and reply.";
 
 function isArtifactType(value: string): value is ArtifactType {
   return ARTIFACT_TYPES.has(value as ArtifactType);
@@ -3741,6 +3742,72 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
 
       await scopedStore.logEntry(task.id, "Same-task review revision requested", `${selectedItems.length} item(s) submitted from review tab`);
       res.json({ task: updatedTask, reviewState: nextReviewState });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.post("/tasks/:id/pr/address-feedback", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.getTask(req.params.id);
+      const prInfo = task.prInfo ?? task.prInfos?.[0];
+      if (!prInfo) {
+        throw badRequest("Task must have a linked pull request before PR feedback can be addressed");
+      }
+      if (task.column !== "in-review" && task.column !== "in-progress") {
+        throw badRequest("PR feedback can only be addressed for in-review or in-progress tasks");
+      }
+
+      /*
+      FNXC:TaskReview 2026-06-28-00:00:
+      The manual Address PR feedback route must seed only Fusion-authored instructions plus PR identity. PR review text is untrusted and stays data fetched by ce-resolve-pr-feedback, so this lifecycle trigger cannot execute reviewer-provided directives while waking the assigned agent.
+
+      FNXC:TaskReview 2026-06-28-16:39:
+      The route response and dashboard toasts say an AI session started. Reject unsupported columns before writing steering/log entries so todo, done, and archived tasks cannot report success while no session is scheduled.
+      */
+      const prLabel = `PR #${prInfo.number}`;
+      const steeringText = [
+        ADDRESS_PR_FEEDBACK_PROMPT,
+        "If the compound-engineering skill is unavailable, inspect the linked pull request, evaluate each unresolved review thread, fix valid issues, reply with what changed or why no change was made, and resolve threads that are fully addressed.",
+        `Context: ${prLabel} ${prInfo.url}`,
+      ].join("\n\n");
+
+      const steeringComment = await scopedStore.addSteeringComment(task.id, steeringText, "user");
+      const steeringCommentId = steeringComment.id;
+
+      let updatedTask: Task = await scopedStore.getTask(task.id);
+
+      if (task.column === "in-review") {
+        await scopedStore.updateTask(task.id, {
+          status: null,
+          error: null,
+          sessionFile: null,
+        });
+        const lastDoneStep = [...task.steps]
+          .map((step, index) => ({ step, index }))
+          .reverse()
+          .find(({ step }) => step.status === "done" || step.status === "in-progress");
+        if (lastDoneStep) {
+          await scopedStore.updateStep(task.id, lastDoneStep.index, "pending");
+        }
+        updatedTask = await scopedStore.moveTask(task.id, "in-progress", { preserveProgress: true });
+      }
+
+      const hasActiveSession = Boolean(updatedTask.sessionFile);
+      if (updatedTask.column === "in-progress" && updatedTask.assignedAgentId && !hasActiveSession) {
+        await triggerCommentWakeForAssignedAgent(scopedStore, updatedTask, {
+          triggeringCommentType: "steering",
+          triggeringCommentIds: [steeringCommentId],
+          triggerDetail: "pr-address-feedback",
+        });
+      }
+
+      await scopedStore.logEntry(task.id, "Address PR feedback requested", `${prLabel} queued via ce-resolve-pr-feedback skill prompt`);
+      res.json({ task: updatedTask });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

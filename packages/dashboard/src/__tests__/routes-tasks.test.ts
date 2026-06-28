@@ -220,6 +220,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     updateIssueInfo: vi.fn().mockResolvedValue(undefined),
     linkGithubIssue: vi.fn().mockResolvedValue(undefined),
     recordActivity: vi.fn().mockResolvedValue(undefined),
+    getFusionDir: vi.fn().mockReturnValue("/fake/root/.fusion"),
     getRootDir: vi.fn().mockReturnValue("/fake/root"),
     getDistributedTaskIdAllocator: vi.fn().mockReturnValue({
       reserveDistributedTaskId: vi.fn().mockResolvedValue({ reservationId: "res-1", taskId: "FN-7001" }),
@@ -2776,5 +2777,169 @@ describe("POST /tasks/:id/review/address", () => {
     expect(unknown.status).toBe(400);
     expect(unknown.body.error).toContain("must reference existing review items");
     expect(store.createTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /tasks/:id/pr/address-feedback", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore({ updateStep: vi.fn() } as unknown as Partial<TaskStore>);
+  });
+
+  function buildApp(options?: Parameters<typeof createApiRoutes>[1]) {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, options));
+    return app;
+  }
+
+  const linkedPr = {
+    number: 42,
+    url: "https://github.com/acme/repo/pull/42",
+    status: "open",
+    title: "Feature PR",
+    headBranch: "feature/fn-7185",
+    baseBranch: "main",
+    commentCount: 3,
+    lastReviewDecision: "CHANGES_REQUESTED" as const,
+  };
+
+  it("rejects tasks without a linked pull request", async () => {
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({ ...FAKE_TASK_DETAIL, id: "FN-001", prInfo: undefined, prInfos: undefined });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/pr/address-feedback", "{}", { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("linked pull request");
+    expect(store.addSteeringComment).not.toHaveBeenCalled();
+  });
+
+  it("rejects linked PR tasks outside startable columns before recording steering", async () => {
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "done",
+      prInfo: linkedPr,
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/pr/address-feedback", "{}", { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("in-review or in-progress");
+    expect(store.addSteeringComment).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalled();
+  });
+
+  it("moves in-review tasks to in-progress and records steering plus log context", async () => {
+    const inReviewTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-review",
+      status: "awaiting-user-review",
+      error: "previous error",
+      sessionFile: "session.json",
+      assignedAgentId: null,
+      prInfo: linkedPr,
+      steps: [
+        { id: "s1", title: "Step 1", status: "done" },
+        { id: "s2", title: "Step 2", status: "pending" },
+      ],
+    };
+    const afterSteering = { ...inReviewTask, steeringComments: [{ id: "sc-1", body: "x", author: "user", createdAt: "2026-06-28T00:00:00.000Z" }] };
+    const movedTask = { ...afterSteering, column: "in-progress", status: null, error: null, sessionFile: null };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(inReviewTask).mockResolvedValueOnce(afterSteering);
+    (store.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "sc-1" });
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/pr/address-feedback", "{}", { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(store.addSteeringComment).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Run /ce-resolve-pr-feedback to resolve open PR review feedback"),
+      "user",
+    );
+    expect(store.addSteeringComment).toHaveBeenCalledWith("FN-001", expect.stringContaining("PR #42 https://github.com/acme/repo/pull/42"), "user");
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: null, error: null, sessionFile: null });
+    expect(store.updateStep).toHaveBeenCalledWith("FN-001", 0, "pending");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-progress", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Address PR feedback requested", expect.stringContaining("PR #42"));
+    expect(res.body.task.column).toBe("in-progress");
+  });
+
+  it("wakes the assigned agent for in-progress tasks with no active session", async () => {
+    const task = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress",
+      assignedAgentId: "agent-1",
+      sessionFile: null,
+      prInfo: linkedPr,
+    };
+    const executeHeartbeat = vi.fn().mockResolvedValue({ id: "run-1" });
+    const initSpy = vi.spyOn(AgentStore.prototype, "init").mockResolvedValue(undefined);
+    const getAgentSpy = vi.spyOn(AgentStore.prototype, "getAgent").mockResolvedValue({
+      id: "agent-1",
+      name: "Executor",
+      role: "executor",
+      state: "idle",
+      runtimeConfig: { messageResponseMode: "immediate" },
+    } as any);
+    const activeRunSpy = vi.spyOn(AgentStore.prototype, "getActiveHeartbeatRun").mockResolvedValue(null);
+    (store.getFusionDir as ReturnType<typeof vi.fn>).mockReturnValue("/fake/root/.fusion");
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(task).mockResolvedValueOnce(task);
+    (store.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "sc-1" });
+
+    try {
+      const res = await REQUEST(
+        buildApp({
+          heartbeatMonitor: {
+            rootDir: "/fake/root",
+            startRun: vi.fn(),
+            executeHeartbeat,
+            stopRun: vi.fn(),
+          },
+        }),
+        "POST",
+        "/api/tasks/FN-001/pr/address-feedback",
+        "{}",
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(executeHeartbeat).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        source: "on_demand",
+        taskId: "FN-001",
+        triggerDetail: "pr-address-feedback",
+        triggeringCommentIds: ["sc-1"],
+        triggeringCommentType: "steering",
+      }));
+    } finally {
+      initSpy.mockRestore();
+      getAgentSpy.mockRestore();
+      activeRunSpy.mockRestore();
+    }
+  });
+
+  it("keeps in-progress tasks in place while adding the skill steering prompt", async () => {
+    const task = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress",
+      assignedAgentId: "agent-1",
+      sessionFile: "active.json",
+      prInfos: [linkedPr],
+    };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(task).mockResolvedValueOnce(task);
+    (store.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "sc-1" });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/FN-001/pr/address-feedback", "{}", { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.addSteeringComment).toHaveBeenCalledWith("FN-001", expect.stringContaining("ce-resolve-pr-feedback"), "user");
+    expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Address PR feedback requested", expect.stringContaining("ce-resolve-pr-feedback"));
   });
 });

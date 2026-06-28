@@ -4814,7 +4814,13 @@
       "reviewLabel": "",
       "threadFixed": "",
       "threadPending": "",
-      "verifyingGithub": ""
+      "verifyingGithub": "",
+      "backToList": "",
+      "listEmpty": "",
+      "listError": "",
+      "listItemLabel": "",
+      "listLoading": "",
+      "listTitle": ""
     }
   },
   "preview": {
@@ -7816,7 +7822,11 @@
     "showRawText": "원시 텍스트 표시",
     "startedAtSep": " · 시작: {{timestamp}}",
     "updateFailed": "{{taskId}} 업데이트에 실패했습니다: {{error}}",
-    "upToDate": "최신 상태"
+    "upToDate": "최신 상태",
+    "addressPrFeedback": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressingPrFeedback": ""
   },
   "tasks": {
     "addTaskPlaceholder": "작업 추가...",
@@ -8014,7 +8024,13 @@
     "usingDefault": "기본값 사용 중",
     "viewDependency": "클릭하여 {{depId}} 보기",
     "workflow": "워크플로우",
-    "workflowCheck": "워크플로우 확인"
+    "workflowCheck": "워크플로우 확인",
+    "addressPrFeedback": "",
+    "addressPrFeedbackAriaLabel": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressPrFeedbackTitle": "",
+    "addressingPrFeedback": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

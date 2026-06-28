@@ -15,6 +15,7 @@ const apiMocks = vi.hoisted(() => ({
   refreshTaskReview: vi.fn(),
   reviseTaskReviewItems: vi.fn(),
   updateTask: vi.fn(),
+  addressPrFeedback: vi.fn(),
 }));
 
 vi.mock("../../api", () => ({
@@ -22,6 +23,7 @@ vi.mock("../../api", () => ({
   refreshTaskReview: apiMocks.refreshTaskReview,
   reviseTaskReviewItems: apiMocks.reviseTaskReviewItems,
   updateTask: apiMocks.updateTask,
+  addressPrFeedback: apiMocks.addressPrFeedback,
 }));
 
 async function renderWithAct(ui: Parameters<typeof rtlRender>[0]) {
@@ -130,6 +132,131 @@ describe("TaskReviewTab", () => {
     expect(await screen.findByText("No review items yet.")).toBeInTheDocument();
     expect(screen.getByText("No reviewers reported")).toBeInTheDocument();
     expect(screen.getByText("No checks reported")).toBeInTheDocument();
+  });
+
+  it("hides Address PR feedback without a linked PR or actionable feedback", async () => {
+    const noPrTask = makeTask({
+      prInfo: undefined,
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "CHANGES_REQUESTED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [{ id: "ri-1", body: "Fix it", author: { login: "reviewer" }, createdAt: "2026-06-27T00:00:00.000Z" }],
+        addressing: [],
+      },
+    });
+    apiMocks.fetchTaskReview.mockResolvedValueOnce({ reviewState: noPrTask.reviewState, automationStatus: null, emptyMessage: null });
+    const { unmount } = await renderWithAct(<TaskReviewTab task={noPrTask} addToast={vi.fn()} />);
+    expect(screen.queryByTestId("task-review-address-pr-feedback")).not.toBeInTheDocument();
+    unmount();
+
+    const noFeedbackTask = makeTask({
+      prInfo: {
+        number: 42,
+        url: "https://github.com/acme/repo/pull/42",
+        status: "open",
+        title: "Feature PR",
+        headBranch: "feature",
+        baseBranch: "main",
+        commentCount: 0,
+        lastReviewDecision: "APPROVED",
+      },
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "APPROVED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [],
+      },
+    });
+    apiMocks.fetchTaskReview.mockResolvedValueOnce({ reviewState: noFeedbackTask.reviewState, automationStatus: null, emptyMessage: null });
+    const noFeedbackRender = await renderWithAct(<TaskReviewTab task={noFeedbackTask} addToast={vi.fn()} />);
+    expect(screen.queryByTestId("task-review-address-pr-feedback")).not.toBeInTheDocument();
+    noFeedbackRender.unmount();
+
+    const unsupportedColumnTask = makeTask({
+      column: "done",
+      prInfo: {
+        number: 43,
+        url: "https://github.com/acme/repo/pull/43",
+        status: "open",
+        title: "Feedback on done task",
+        headBranch: "feature-done",
+        baseBranch: "main",
+        commentCount: 2,
+        lastReviewDecision: "CHANGES_REQUESTED",
+      },
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "CHANGES_REQUESTED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [{ id: "ri-2", body: "Fix it", author: { login: "reviewer" }, createdAt: "2026-06-27T00:00:00.000Z" }],
+        addressing: [],
+      },
+    });
+    apiMocks.fetchTaskReview.mockResolvedValueOnce({ reviewState: unsupportedColumnTask.reviewState, automationStatus: null, emptyMessage: null });
+    await renderWithAct(<TaskReviewTab task={unsupportedColumnTask} addToast={vi.fn()} />);
+    expect(screen.queryByTestId("task-review-address-pr-feedback")).not.toBeInTheDocument();
+  });
+
+  it("starts Address PR feedback from PR mode when actionable feedback exists", async () => {
+    const addToast = vi.fn();
+    const onTaskUpdated = vi.fn();
+    const task = makeTask({
+      prInfo: {
+        number: 42,
+        url: "https://github.com/acme/repo/pull/42",
+        status: "open",
+        title: "Feature PR",
+        headBranch: "feature",
+        baseBranch: "main",
+        commentCount: 0,
+        lastReviewDecision: "CHANGES_REQUESTED",
+      },
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "CHANGES_REQUESTED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [],
+      },
+    });
+    const updatedTask = { ...task, column: "in-progress" };
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    apiMocks.addressPrFeedback.mockResolvedValue({ task: updatedTask });
+
+    await renderWithAct(<TaskReviewTab task={task} addToast={addToast} onTaskUpdated={onTaskUpdated} projectId="proj-1" />);
+    fireEvent.click(await screen.findByTestId("task-review-address-pr-feedback"));
+
+    await waitFor(() => expect(apiMocks.addressPrFeedback).toHaveBeenCalledWith(task.id, "proj-1"));
+    expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+    expect(addToast).toHaveBeenCalledWith("Addressing PR feedback — AI session started", "success");
+  });
+
+  it("shows Address PR feedback errors", async () => {
+    const addToast = vi.fn();
+    const task = makeTask({
+      prInfo: {
+        number: 42,
+        url: "https://github.com/acme/repo/pull/42",
+        status: "open",
+        title: "Feature PR",
+        headBranch: "feature",
+        baseBranch: "main",
+        commentCount: 2,
+        lastReviewDecision: "REVIEW_REQUIRED",
+      },
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "REVIEW_REQUIRED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [],
+      },
+    });
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    apiMocks.addressPrFeedback.mockRejectedValue(new Error("Cannot wake agent"));
+
+    await renderWithAct(<TaskReviewTab task={task} addToast={addToast} />);
+    fireEvent.click(await screen.findByTestId("task-review-address-pr-feedback"));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith("Cannot wake agent", "error"));
+    expect(await screen.findByText("Cannot wake agent")).toBeInTheDocument();
   });
 
   it("renders PR decision, reviewers, checks, blockers, and per-item GitHub metadata", async () => {

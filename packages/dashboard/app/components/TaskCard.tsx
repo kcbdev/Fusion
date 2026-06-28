@@ -12,7 +12,7 @@ import {
   getErrorMessage,
 } from "@fusion/core";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, type WorkflowFieldDefinition } from "../api";
+import { addressPrFeedback, fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, type WorkflowFieldDefinition } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { PrCreateModal } from "./PrCreateModal";
 import { ProviderIcon } from "./ProviderIcon";
@@ -30,6 +30,7 @@ import { getTaskAgeStalenessCopy, shouldShowTaskAgeStalenessBadge } from "../uti
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getActiveRuntimeMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
+import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
@@ -442,10 +443,6 @@ export interface CliCardState {
     | "needsAttention";
 }
 
-function getTaskPrimaryPrInfo(task: Pick<Task, "prInfo" | "prInfos">): PrInfo | undefined {
-  return task.prInfos?.[0] ?? task.prInfo;
-}
-
 function areTaskBadgeInfosEqual(
   previous: PrInfo | IssueInfo | undefined,
   next: PrInfo | IssueInfo | undefined,
@@ -735,6 +732,7 @@ function TaskCardComponent({
   const [showSendBackMenu, setShowSendBackMenu] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isPrCreateOpen, setIsPrCreateOpen] = useState(false);
+  const [isAddressingPrFeedback, setIsAddressingPrFeedback] = useState(false);
   const [timeIndicatorNowMs, setTimeIndicatorNowMs] = useState(() => Date.now());
 
   const descTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1311,6 +1309,7 @@ function TaskCardComponent({
     && !isPaused
     && !isFailed
     && !queued;
+  const showAddressPrFeedbackAction = canStartPrFeedbackAddressing(task);
   const metaRowVisible =
     (task.dependencies?.length ?? 0) > 0
     || queued
@@ -1318,7 +1317,7 @@ function TaskCardComponent({
     || Boolean(task.blockedBy)
     || Boolean(task.overlapBlockedBy)
     || Boolean(fanout && fanout.totalCount > 0);
-  const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || (showInReviewMoveControl && !metaRowVisible);
+  const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || showAddressPrFeedbackAction || (showInReviewMoveControl && !metaRowVisible);
 
   const renderInReviewMoveControl = () => (
     <div className="card-send-back" ref={sendBackRef}>
@@ -1713,6 +1712,21 @@ function TaskCardComponent({
     if (!onPromote || isPromoting) return;
     void onPromote(task.id);
   }, [isPromoting, onPromote, task.id]);
+
+  const handleAddressPrFeedbackClick = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (isAddressingPrFeedback) return;
+
+    setIsAddressingPrFeedback(true);
+    try {
+      await addressPrFeedback(task.id, projectId);
+      addToast(t("tasks.addressPrFeedbackStarted", "Addressing PR feedback — AI session started"), "success");
+    } catch (err) {
+      addToast(t("tasks.addressPrFeedbackFailed", "Failed to start PR feedback session: {{error}}", { error: getErrorMessage(err) }), "error");
+    } finally {
+      setIsAddressingPrFeedback(false);
+    }
+  }, [addToast, isAddressingPrFeedback, projectId, t, task.id]);
 
   const handleRetryTask = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -2496,6 +2510,24 @@ function TaskCardComponent({
             >
               <GitPullRequest size={12} />
               {t("tasks.createPr", "Create PR")}
+            </button>
+          )}
+          {showAddressPrFeedbackAction && (
+            <button
+              type="button"
+              className="card-create-pr-action card-address-pr-feedback-action"
+              data-testid={`card-address-pr-feedback-${task.id}`}
+              title={t("tasks.addressPrFeedbackTitle", "Start an AI session to address PR feedback")}
+              aria-label={t("tasks.addressPrFeedbackAriaLabel", "Address PR feedback")}
+              disabled={isAddressingPrFeedback}
+              onClick={handleAddressPrFeedbackClick}
+            >
+              {/*
+              FNXC:TaskCardPrFeedback 2026-06-28-00:00:
+              Operators need the task card affordance to appear only when the primary linked PR has actionable feedback. The click seeds the ce-resolve-pr-feedback steering prompt through the lifecycle route instead of reading untrusted PR comments as instructions.
+              */}
+              <Bot size={12} />
+              {isAddressingPrFeedback ? t("tasks.addressingPrFeedback", "Addressing…") : t("tasks.addressPrFeedback", "Address PR feedback")}
             </button>
           )}
           {onPromote && (

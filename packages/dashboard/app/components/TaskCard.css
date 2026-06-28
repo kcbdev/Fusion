@@ -942,8 +942,13 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
     box-shadow var(--transition-fast);
 }
 
-.card-create-pr-action:hover {
+.card-create-pr-action:hover:not(:disabled) {
   background: var(--card-hover);
+}
+
+.card-create-pr-action:disabled {
+  cursor: wait;
+  opacity: var(--opacity-disabled);
 }
 
 .card-create-pr-action:focus-visible {

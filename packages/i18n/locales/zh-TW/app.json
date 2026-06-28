@@ -4814,7 +4814,13 @@
       "reviewLabel": "",
       "threadFixed": "",
       "threadPending": "",
-      "verifyingGithub": ""
+      "verifyingGithub": "",
+      "backToList": "",
+      "listEmpty": "",
+      "listError": "",
+      "listItemLabel": "",
+      "listLoading": "",
+      "listTitle": ""
     }
   },
   "preview": {
@@ -7816,7 +7822,11 @@
     "showRawText": "顯示原始文字",
     "startedAtSep": " · 已開始：{{timestamp}}",
     "updateFailed": "更新 {{taskId}} 失敗：{{error}}",
-    "upToDate": "最新"
+    "upToDate": "最新",
+    "addressPrFeedback": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressingPrFeedback": ""
   },
   "tasks": {
     "addTaskPlaceholder": "新增任務……",
@@ -8014,7 +8024,13 @@
     "usingDefault": "使用預設",
     "viewDependency": "點擊查看 {{depId}}",
     "workflow": "工作流程",
-    "workflowCheck": "工作流程檢查"
+    "workflowCheck": "工作流程檢查",
+    "addressPrFeedback": "",
+    "addressPrFeedbackAriaLabel": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressPrFeedbackTitle": "",
+    "addressingPrFeedback": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

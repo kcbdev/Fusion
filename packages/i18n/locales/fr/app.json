@@ -4814,7 +4814,13 @@
       "reviewLabel": "",
       "threadFixed": "",
       "threadPending": "",
-      "verifyingGithub": ""
+      "verifyingGithub": "",
+      "backToList": "",
+      "listEmpty": "",
+      "listError": "",
+      "listItemLabel": "",
+      "listLoading": "",
+      "listTitle": ""
     }
   },
   "preview": {
@@ -7816,7 +7822,11 @@
     "showRawText": "Afficher le texte brut",
     "startedAtSep": " · Démarré : {{timestamp}}",
     "updateFailed": "Échec de la mise à jour {{taskId}} : {{error}}",
-    "upToDate": "À jour"
+    "upToDate": "À jour",
+    "addressPrFeedback": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressingPrFeedback": ""
   },
   "tasks": {
     "addTaskPlaceholder": "Ajouter une tâche…",
@@ -8014,7 +8024,13 @@
     "usingDefault": "Valeur par défaut",
     "viewDependency": "Cliquer pour afficher {{depId}}",
     "workflow": "workflow",
-    "workflowCheck": "Vérification du workflow"
+    "workflowCheck": "Vérification du workflow",
+    "addressPrFeedback": "",
+    "addressPrFeedbackAriaLabel": "",
+    "addressPrFeedbackFailed": "",
+    "addressPrFeedbackStarted": "",
+    "addressPrFeedbackTitle": "",
+    "addressingPrFeedback": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

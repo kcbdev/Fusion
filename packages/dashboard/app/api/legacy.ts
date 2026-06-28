@@ -347,6 +347,10 @@ export interface ReviseTaskReviewResponse {
   reviewState: NonNullable<TaskDetail["reviewState"]>;
 }
 
+export interface AddressPrFeedbackResponse {
+  task: Task;
+}
+
 export interface DuplicateMatch {
   id: string;
   title: string;
@@ -6514,6 +6518,13 @@ export function reviseTaskReviewItems(taskId: string, selectedItems: SelectedRev
   return api<ReviseTaskReviewResponse>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/review/address`, projectId), {
     method: "POST",
     body: JSON.stringify({ selectedItems, tab: "review" }),
+  });
+}
+
+/** Request an AI pass that addresses open pull-request feedback for the task's primary PR. */
+export function addressPrFeedback(taskId: string, projectId?: string): Promise<AddressPrFeedbackResponse> {
+  return api<AddressPrFeedbackResponse>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/pr/address-feedback`, projectId), {
+    method: "POST",
   });
 }
 

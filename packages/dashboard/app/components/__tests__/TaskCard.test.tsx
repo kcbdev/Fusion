@@ -76,6 +76,7 @@ vi.mock("../../hooks/useBatchBadgeFetch", () => ({
 
 // Mock the api module
 vi.mock("../../api", () => ({
+  addressPrFeedback: vi.fn(),
   fetchTaskDetail: vi.fn(),
   uploadAttachment: vi.fn(),
   fetchMission: vi.fn(),
@@ -89,7 +90,7 @@ vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: mockConfirm, confirmWithChoice: mockConfirmWithChoice }),
 }));
 
-import { uploadAttachment, fetchMission, fetchAgent, fetchAgents } from "../../api";
+import { addressPrFeedback, uploadAttachment, fetchMission, fetchAgent, fetchAgents } from "../../api";
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../../test/cssFixture";
 import { writeCache, SWR_CACHE_KEYS } from "../../utils/swrCache";
 
@@ -167,6 +168,7 @@ afterEach(() => {
   unsubscribeFromBadgeMock.mockReset();
   mockConfirm.mockReset();
   mockConfirmWithChoice.mockReset();
+  vi.mocked(addressPrFeedback).mockReset();
 });
 
 describe("TaskCard", () => {
@@ -836,6 +838,166 @@ describe("TaskCard", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Create pull request" })).toBeNull();
+  });
+
+  it("hides Address PR feedback when the task has no actionable PR feedback", () => {
+    const noPrRender = render(
+      <TaskCard
+        task={makeTask({ id: "FN-NO-PR", prInfo: undefined as any, prInfos: undefined })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-address-pr-feedback-FN-NO-PR")).toBeNull();
+    expect(noPrRender.container.querySelector(".card-action-row")).toBeNull();
+    noPrRender.unmount();
+
+    const noFeedbackRender = render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-NO-FEEDBACK",
+          prInfo: {
+            url: "https://github.com/owner/repo/pull/8",
+            number: 8,
+            status: "open",
+            title: "No feedback PR",
+            headBranch: "fusion/fn-001",
+            baseBranch: "main",
+            commentCount: 0,
+            lastReviewDecision: "APPROVED",
+          } as any,
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-address-pr-feedback-FN-NO-FEEDBACK")).toBeNull();
+    expect(noFeedbackRender.container.querySelector(".card-action-row")).toBeNull();
+    noFeedbackRender.unmount();
+
+    const unsupportedColumnRender = render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-DONE-FEEDBACK",
+          column: "done",
+          prInfo: {
+            url: "https://github.com/owner/repo/pull/13",
+            number: 13,
+            status: "open",
+            title: "Feedback on done task",
+            headBranch: "fusion/fn-done",
+            baseBranch: "main",
+            commentCount: 2,
+            lastReviewDecision: "CHANGES_REQUESTED",
+          } as any,
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-address-pr-feedback-FN-DONE-FEEDBACK")).toBeNull();
+    expect(unsupportedColumnRender.container.querySelector(".card-action-row")).toBeNull();
+  });
+
+  it("renders Address PR feedback once for actionable primary PR feedback", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-PR-FEEDBACK",
+          prInfos: [
+            {
+              url: "https://github.com/owner/repo/pull/9",
+              number: 9,
+              status: "open",
+              title: "Feedback PR",
+              headBranch: "fusion/fn-001",
+              baseBranch: "main",
+              commentCount: 2,
+            } as any,
+            {
+              url: "https://github.com/owner/repo/pull/10",
+              number: 10,
+              status: "open",
+              title: "Secondary PR",
+              headBranch: "fusion/fn-001-alt",
+              baseBranch: "main",
+              commentCount: 4,
+            } as any,
+          ],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const buttons = screen.getAllByTestId("card-address-pr-feedback-FN-PR-FEEDBACK");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveClass("card-create-pr-action", "card-address-pr-feedback-action");
+    expect(buttons[0].closest(".card-action-row")).not.toBeNull();
+  });
+
+  it("starts Address PR feedback from the card without opening detail", async () => {
+    const addToast = vi.fn();
+    const onOpenDetail = vi.fn();
+    vi.mocked(addressPrFeedback).mockResolvedValue({ task: makeTask({ id: "FN-CLICK" }) });
+
+    render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-CLICK",
+          prInfo: {
+            url: "https://github.com/owner/repo/pull/11",
+            number: 11,
+            status: "open",
+            title: "Changes requested PR",
+            headBranch: "fusion/fn-click",
+            baseBranch: "main",
+            commentCount: 0,
+            lastReviewDecision: "CHANGES_REQUESTED",
+          } as any,
+        })}
+        onOpenDetail={onOpenDetail}
+        addToast={addToast}
+        projectId="proj-1"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-address-pr-feedback-FN-CLICK"));
+
+    await waitFor(() => expect(addressPrFeedback).toHaveBeenCalledWith("FN-CLICK", "proj-1"));
+    expect(addToast).toHaveBeenCalledWith("Addressing PR feedback — AI session started", "success");
+    expect(onOpenDetail).not.toHaveBeenCalled();
+  });
+
+  it("shows an error toast when Address PR feedback cannot start", async () => {
+    const addToast = vi.fn();
+    vi.mocked(addressPrFeedback).mockRejectedValue(new Error("wake failed"));
+
+    render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-ERROR",
+          prInfo: {
+            url: "https://github.com/owner/repo/pull/12",
+            number: 12,
+            status: "open",
+            title: "Feedback PR",
+            headBranch: "fusion/fn-error",
+            baseBranch: "main",
+            commentCount: 1,
+          } as any,
+        })}
+        onOpenDetail={noop}
+        addToast={addToast}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-address-pr-feedback-FN-ERROR"));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith("Failed to start PR feedback session: wake failed", "error"));
   });
 
   it.each([
