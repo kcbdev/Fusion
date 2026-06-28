@@ -218,15 +218,27 @@
 .pr-create-modal__commit-row,
 .pr-create-modal__file-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
   gap: var(--space-sm);
   align-items: center;
   padding: var(--space-xs) 0;
   border-bottom: var(--btn-border-width) solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
+/*
+FNXC:CreatePrModal 2026-06-27-22:35:
+Commit preview rows render DOM order as SHA, subject, author. The grid must mirror that order so the short SHA keeps content width, the subject owns the flexible column, and nowrap prevents overflow-wrap:anywhere from turning the SHA vertical.
+*/
+.pr-create-modal__commit-row {
+  grid-template-columns: auto 1fr auto;
+}
+
+.pr-create-modal__file-row {
+  grid-template-columns: 1fr auto auto;
+}
+
 .pr-create-modal__commit-row code {
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .pr-create-modal__commit-row > *,

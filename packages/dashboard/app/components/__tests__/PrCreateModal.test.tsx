@@ -169,6 +169,61 @@ describe("PrCreateModal", () => {
     expect(screen.getByText(/using/i)).toBeInTheDocument();
   });
 
+  it("renders commit preview rows in SHA, subject, author order", async () => {
+    const commits = [
+      {
+        sha: "1234567890abcdef1234567890abcdef12345678",
+        subject: "feat: add a very long subject that should use the flexible column instead of forcing the short SHA to wrap",
+        author: "A very long author name that remains in the trailing column",
+      },
+      {
+        sha: "abcdef0123456789abcdef0123456789abcdef01",
+        subject: "fix: keep another subject readable",
+        author: "dev",
+      },
+    ];
+    mocks.fetchPrPreflight.mockResolvedValueOnce({
+      ...preflight,
+      commits,
+      changedFiles: [
+        { path: "src/very/long/path/that/should/still/use/the/file-row-flex-column.ts", additions: 10, deletions: 2, status: "modified" as const },
+      ],
+    });
+
+    renderModal();
+    expect(await screen.findByDisplayValue("AI title")).toBeInTheDocument();
+
+    const rows = Array.from(document.querySelectorAll<HTMLDivElement>(".pr-create-modal__commit-row"));
+    expect(rows).toHaveLength(commits.length);
+    rows.forEach((row, index) => {
+      const codeCells = row.querySelectorAll("code");
+      expect(codeCells).toHaveLength(1);
+      expect(codeCells[0]).toHaveTextContent(commits[index]!.sha.slice(0, 7));
+      expect(row.children).toHaveLength(3);
+      expect(row.children[0]).toBe(codeCells[0]);
+      expect(row.children[0]).toHaveTextContent(commits[index]!.sha.slice(0, 7));
+      expect(row.children[1]).toHaveTextContent(commits[index]!.subject);
+      expect(row.children[2]).toHaveTextContent(commits[index]!.author);
+    });
+
+    const fileRow = document.querySelector(".pr-create-modal__file-row");
+    expect(fileRow?.children[0]).toHaveTextContent("src/very/long/path/that/should/still/use/the/file-row-flex-column.ts");
+    expect(fileRow?.children[1]).toHaveTextContent("+10 / −2");
+    expect(fileRow?.children[2]).toHaveTextContent("modified");
+  });
+
+  it("renders empty commit hint without commit rows", async () => {
+    mocks.fetchPrPreflight.mockResolvedValueOnce({
+      ...preflight,
+      commitsPresent: false,
+      commits: [],
+    });
+
+    renderModal();
+    expect(await screen.findByText("No commits found.")).toBeInTheDocument();
+    expect(document.querySelectorAll(".pr-create-modal__commit-row")).toHaveLength(0);
+  });
+
   it("renders preflight and options before metadata resolves", async () => {
     const metadataDeferred = createDeferred<typeof metadata>();
     mocks.generatePrMetadata.mockReturnValueOnce(metadataDeferred.promise);
