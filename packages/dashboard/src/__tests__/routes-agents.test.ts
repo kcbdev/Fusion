@@ -2892,6 +2892,93 @@ describe("Agent stale task-link sanitization", () => {
     expect(listed.pendingApprovalCount).toBe(0);
   });
 
+  it("GET /api/agents derives zero agent token totals from assigned, source, and checkout task usage without overwriting durable totals", async () => {
+    const store = new CoreTaskStore(tempDir);
+    await store.init();
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    const durable = await agentStore.createAgent({
+      name: "Durable Tokens",
+      role: "executor",
+    });
+    await agentStore.updateAgent(durable.id, {
+      totalInputTokens: 900,
+      totalOutputTokens: 100,
+    });
+    const ephemeral = await agentStore.createAgent({
+      name: "executor-FN-1234",
+      role: "executor",
+      metadata: { agentKind: "task-worker" },
+    });
+    await store.createTask({
+      description: "durable task should not replace stored cumulative totals",
+      assignedAgentId: durable.id,
+      tokenUsage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 3,
+        firstUsedAt: "2026-06-27T18:00:00.000Z",
+        lastUsedAt: "2026-06-27T18:05:00.000Z",
+      },
+    });
+    await store.createTask({
+      description: "ephemeral task derives listing totals from assignment",
+      assignedAgentId: ephemeral.id,
+      tokenUsage: {
+        inputTokens: 120,
+        outputTokens: 45,
+        cachedTokens: 10,
+        cacheWriteTokens: 5,
+        totalTokens: 180,
+        firstUsedAt: "2026-06-27T18:00:00.000Z",
+        lastUsedAt: "2026-06-27T18:05:00.000Z",
+      },
+    });
+    await store.createTask({
+      description: "ephemeral task derives listing totals from source link",
+      source: { sourceType: "agent_heartbeat", sourceAgentId: ephemeral.id },
+      tokenUsage: {
+        inputTokens: 30,
+        outputTokens: 15,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 45,
+        firstUsedAt: "2026-06-27T18:00:00.000Z",
+        lastUsedAt: "2026-06-27T18:05:00.000Z",
+      },
+    });
+    const checkedTask = await store.createTask({
+      description: "ephemeral task derives listing totals from checkout link",
+      tokenUsage: {
+        inputTokens: 50,
+        outputTokens: 20,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 70,
+        firstUsedAt: "2026-06-27T18:00:00.000Z",
+        lastUsedAt: "2026-06-27T18:05:00.000Z",
+      },
+    });
+    await store.updateTask(checkedTask.id, { checkedOutBy: ephemeral.id });
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+
+    const res = await GET(app, "/api/agents?includeEphemeral=true");
+
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const listedDurable = agents.find((a: { id: string }) => a.id === durable.id);
+    const listedEphemeral = agents.find((a: { id: string }) => a.id === ephemeral.id);
+    expect(listedDurable).toMatchObject({ totalInputTokens: 900, totalOutputTokens: 100 });
+    expect(listedEphemeral).toMatchObject({ totalInputTokens: 200, totalOutputTokens: 80 });
+    store.close();
+  });
+
   it("GET /api/agents pendingApprovalCount ignores approvals for missing agents", async () => {
     const app = buildAgentApp();
     await createPendingApproval("agent-missing");

@@ -5,6 +5,7 @@ import type { Agent, AgentCapability, AgentUpdateInput, TaskStore, AgentPermissi
 import {
   ApprovalRequestStore,
   AGENT_PERMISSION_POLICY_ACTION_CATEGORIES,
+  aggregateTaskTokenTotalsByAgentLink,
   getDefaultHeartbeatProcedurePath,
   isAgentPermissionPolicyPresetId,
   isEphemeralAgent,
@@ -79,6 +80,40 @@ function isCompatibleDefaultHeartbeatPath(path: string | undefined, agent: Agent
   return new RegExp(`^\\.fusion/agents/[^/]+-${safeId}/HEARTBEAT\\.md$`).test(trimmed);
 }
 
+function withTaskDerivedTokenTotals<T extends Agent>(agents: T[], scopedStore: TaskStore): T[] {
+  try {
+    const tokenTotalsByAgentId = aggregateTaskTokenTotalsByAgentLink(scopedStore.getDatabase());
+
+    return agents.map((agent) => {
+      const storedInputTokens = agent.totalInputTokens ?? 0;
+      const storedOutputTokens = agent.totalOutputTokens ?? 0;
+      if (storedInputTokens > 0 || storedOutputTokens > 0) {
+        return agent;
+      }
+
+      const taskTotals = tokenTotalsByAgentId.get(agent.id);
+      if (!taskTotals || (taskTotals.inputTokens <= 0 && taskTotals.outputTokens <= 0)) {
+        return agent;
+      }
+
+      /*
+      FNXC:Agents 2026-06-27-19:16:
+      The Agents listing derives zero/absent token totals from task links so ephemeral task-worker rows show real dashboard counts while durable agents keep their non-zero cumulative heartbeat totals.
+
+      FNXC:Agents 2026-06-27-23:06:
+      Use the shared assigned/source/checkout token attribution so list rows match Agent Detail for task-worker agents that only sourced or checked out a task.
+      */
+      return {
+        ...agent,
+        totalInputTokens: taskTotals.inputTokens,
+        totalOutputTokens: taskTotals.outputTokens,
+      };
+    });
+  } catch {
+    return agents;
+  }
+}
+
 function withPendingApprovalCounts<T extends Agent>(agents: T[], scopedStore: TaskStore): Array<T & { pendingApprovalCount: number }> {
   try {
     const approvalStore = new ApprovalRequestStore(scopedStore.getDatabase());
@@ -125,7 +160,8 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
 
       const agents = await agentStore.listAgents(filter as { state?: "idle" | "active" | "running" | "paused" | "error"; role?: AgentCapability; includeEphemeral?: boolean });
       const sanitizedAgents = await sanitizeAgentTaskLinks(agents, scopedStore);
-      res.json(withPendingApprovalCounts(sanitizedAgents, scopedStore));
+      const agentsWithTokenTotals = withTaskDerivedTokenTotals(sanitizedAgents, scopedStore);
+      res.json(withPendingApprovalCounts(agentsWithTokenTotals, scopedStore));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

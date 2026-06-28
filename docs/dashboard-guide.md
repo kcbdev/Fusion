@@ -712,6 +712,7 @@ Navigation:
 Features:
 - Switch between **List**, **Board**, and **Org chart** layouts
 - Filter by role/state, include/exclude system agents, and inspect health/status
+- **Token Usage by Agent** includes task-derived token counts for ephemeral/task-worker system agents when system agents are shown, matching Agent detail and Command Center Team token surfaces.
 - Agent list cards show the configured **Model** or plugin **Runtime** for each agent, falling back to **Auto** when no override is set
 <!-- FNXC:AgentTaskStateDrift 2026-06-27-16:46: Agent task badges include the linked task column so parked `triage`/`todo` ownership from the FN-7138 invariant is not misread as execution drift. -->
 - Agent list, live-agent, and detail task badges show the linked task ID with its current column when the task is non-terminal (for example `FN-6902 · Triage` or `FN-6902 · In Progress`). Terminal linked tasks are omitted, and unresolved column lookups render an explicit `Unresolved task` suffix so missing or deleted task links are not mistaken for healthy parked work.

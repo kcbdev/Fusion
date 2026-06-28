@@ -86,10 +86,22 @@ describe("GET /api/agents/:id/token-usage", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 for ephemeral agents", async () => {
+  it("returns summary for ephemeral agents", async () => {
+    mockGetAgent.mockResolvedValueOnce({ id: "executor-FN-1234", role: "executor", name: "executor-FN-1234", metadata: { agentKind: "task-worker" } });
     mockIsEphemeralAgent.mockReturnValueOnce(true);
-    const res = await get(app, "/api/agents/agent-001/token-usage");
-    expect(res.status).toBe(400);
-    expect((res.body as any).error).toContain("ephemeral");
+    mockAggregateAgentTokenUsage.mockResolvedValueOnce({
+      agentId: "executor-FN-1234",
+      role: "executor",
+      last24h: { totalInputTokens: 120, totalCachedTokens: 20, totalCacheWriteTokens: 5, totalOutputTokens: 40, nTasks: 1, hitRatio: 20 / 140 },
+      last7d: { totalInputTokens: 120, totalCachedTokens: 20, totalCacheWriteTokens: 5, totalOutputTokens: 40, nTasks: 1, hitRatio: 20 / 140 },
+      allTime: { totalInputTokens: 120, totalCachedTokens: 20, totalCacheWriteTokens: 5, totalOutputTokens: 40, nTasks: 1, hitRatio: 20 / 140 },
+    });
+
+    const res = await get(app, "/api/agents/executor-FN-1234/token-usage");
+
+    expect(res.status).toBe(200);
+    expect((res.body as any).agentId).toBe("executor-FN-1234");
+    expect((res.body as any).allTime.totalInputTokens).toBe(120);
+    expect(mockAggregateAgentTokenUsage).toHaveBeenCalledWith(expect.objectContaining({ agentId: "executor-FN-1234" }));
   });
 });

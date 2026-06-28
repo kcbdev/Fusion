@@ -206,6 +206,54 @@ describe("team-analytics", () => {
     expect(result.agents[0].tasksInProgress).toBe(1);
   });
 
+  it("includes ephemeral executor agents in per-agent token totals", () => {
+    insertAgent(db, "agent-durable", "Durable", "executor", "idle");
+    insertAgent(db, "agent-ephemeral", "executor-FN-1234", "executor", "running");
+    insertTask(db, {
+      id: "durable-tokens",
+      agentId: "agent-durable",
+      inputTokens: 40,
+      outputTokens: 10,
+      cachedTokens: 5,
+      cacheWriteTokens: 1,
+      totalTokens: 56,
+      tokenUsageLastUsedAt: "2026-03-02T00:00:00.000Z",
+    });
+    insertTask(db, {
+      id: "ephemeral-tokens",
+      agentId: "agent-ephemeral",
+      inputTokens: 120,
+      outputTokens: 45,
+      cachedTokens: 10,
+      cacheWriteTokens: 5,
+      totalTokens: 180,
+      tokenUsageLastUsedAt: "2026-03-02T00:00:00.000Z",
+    });
+    insertTask(db, {
+      id: "ephemeral-no-usage",
+      agentId: "agent-ephemeral",
+      tokenUsageLastUsedAt: null,
+    });
+
+    const result = aggregateTeamAnalytics(db, {});
+    const byAgent = new Map(result.agents.map((agent) => [agent.agentId, agent]));
+
+    expect(byAgent.get("agent-ephemeral")).toMatchObject({
+      agentName: "executor-FN-1234",
+      role: "executor",
+      state: "running",
+    });
+    expect(byAgent.get("agent-ephemeral")?.tokens).toMatchObject({
+      inputTokens: 120,
+      outputTokens: 45,
+      cachedTokens: 10,
+      cacheWriteTokens: 5,
+      totalTokens: 180,
+      nTasks: 1,
+    });
+    expect(result.totals.tokens.totalTokens).toBe(236);
+  });
+
   it("keeps a safe row for a task whose agent row was deleted", () => {
     insertTask(db, {
       id: "orphan",

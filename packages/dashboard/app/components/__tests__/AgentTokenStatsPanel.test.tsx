@@ -52,6 +52,27 @@ describe("AgentTokenStatsPanel", () => {
     expect(within(rows[2]).getByText("Beta")).toBeInTheDocument();
   });
 
+  it("renders non-zero task-derived totals for an ephemeral agent row", () => {
+    render(
+      <AgentTokenStatsPanel
+        agents={[
+          makeAgent({
+            id: "agent-ephemeral",
+            name: "executor-FN-1234",
+            metadata: { agentKind: "task-worker" },
+            totalInputTokens: 120,
+            totalOutputTokens: 45,
+          }),
+        ]}
+      />,
+    );
+
+    const row = screen.getByRole("row", { name: /executor-FN-1234/i });
+    expect(within(row).getByText("120")).toBeInTheDocument();
+    expect(within(row).getByText("45")).toBeInTheDocument();
+    expect(within(row).getByText("165")).toBeInTheDocument();
+  });
+
   it("treats missing token fields as zero and shows empty state when there is no usage", () => {
     render(
       <AgentTokenStatsPanel

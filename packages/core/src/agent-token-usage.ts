@@ -1,6 +1,7 @@
 import type { AgentStore } from "./agent-store.js";
+import type { Database } from "./db.js";
 import type { TaskStore } from "./store.js";
-import { isEphemeralAgent, type AgentRole } from "./types.js";
+import type { AgentRole } from "./types.js";
 
 export interface AgentTokenUsageWindowSummary {
   totalInputTokens: number;
@@ -19,6 +20,80 @@ export interface AgentTokenUsageSummary {
   allTime: AgentTokenUsageWindowSummary;
 }
 
+export interface AgentTaskTokenTotals {
+  inputTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  nTasks: number;
+}
+
+interface TaskTokenLinkRow {
+  taskId: string;
+  assignedAgentId: string | null;
+  sourceAgentId: string | null;
+  checkedOutBy: string | null;
+  inputTokens: number | null;
+  cachedTokens: number | null;
+  cacheWriteTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
+export function aggregateTaskTokenTotalsByAgentLink(db: Database): Map<string, AgentTaskTokenTotals> {
+  /*
+  FNXC:AgentTokenUsage 2026-06-27-23:06:
+  List-row token totals must use the same assigned/source/checkout attribution as Agent Detail so ephemeral task-worker agents do not report zero when they only sourced or checked out a task.
+  */
+  const rows = db.prepare(`
+    SELECT
+      id AS taskId,
+      assignedAgentId,
+      sourceAgentId,
+      checkedOutBy,
+      tokenUsageInputTokens AS inputTokens,
+      tokenUsageCachedTokens AS cachedTokens,
+      tokenUsageCacheWriteTokens AS cacheWriteTokens,
+      tokenUsageOutputTokens AS outputTokens,
+      tokenUsageTotalTokens AS totalTokens
+    FROM tasks
+    WHERE tokenUsageInputTokens IS NOT NULL
+       OR tokenUsageCachedTokens IS NOT NULL
+       OR tokenUsageCacheWriteTokens IS NOT NULL
+       OR tokenUsageOutputTokens IS NOT NULL
+       OR tokenUsageTotalTokens IS NOT NULL
+  `).all() as TaskTokenLinkRow[];
+
+  const totalsByAgentId = new Map<string, AgentTaskTokenTotals>();
+  for (const row of rows) {
+    const agentIds = new Set([row.assignedAgentId, row.sourceAgentId, row.checkedOutBy].filter((value): value is string => Boolean(value)));
+    for (const agentId of agentIds) {
+      const existing = totalsByAgentId.get(agentId) ?? createTaskTokenTotals();
+      existing.inputTokens += row.inputTokens ?? 0;
+      existing.cachedTokens += row.cachedTokens ?? 0;
+      existing.cacheWriteTokens += row.cacheWriteTokens ?? 0;
+      existing.outputTokens += row.outputTokens ?? 0;
+      existing.totalTokens += row.totalTokens ?? (row.inputTokens ?? 0) + (row.cachedTokens ?? 0) + (row.cacheWriteTokens ?? 0) + (row.outputTokens ?? 0);
+      existing.nTasks += 1;
+      totalsByAgentId.set(agentId, existing);
+    }
+  }
+
+  return totalsByAgentId;
+}
+
+function createTaskTokenTotals(): AgentTaskTokenTotals {
+  return {
+    inputTokens: 0,
+    cachedTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    nTasks: 0,
+  };
+}
+
 export async function aggregateAgentTokenUsage({
   taskStore,
   agentStore,
@@ -31,10 +106,14 @@ export async function aggregateAgentTokenUsage({
   now?: Date;
 }): Promise<AgentTokenUsageSummary | null> {
   const agent = await agentStore.getAgent(agentId);
-  if (!agent || isEphemeralAgent(agent)) {
+  if (!agent) {
     return null;
   }
 
+  /*
+  FNXC:AgentTokenUsage 2026-06-27-19:10:
+  Ephemeral/task-worker agents must surface task-derived token usage because their cumulative agent token fields are never accumulated by the durable-agent heartbeat path.
+  */
   const tasks = await taskStore.listTasks({ slim: true, includeArchived: true });
   const nowMs = now.getTime();
   const last24hMs = nowMs - (24 * 60 * 60 * 1000);

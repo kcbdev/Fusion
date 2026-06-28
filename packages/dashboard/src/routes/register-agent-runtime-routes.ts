@@ -680,16 +680,13 @@ export function registerAgentRuntimeRoutes(ctx: ApiRoutesContext, deps: AgentRun
   router.get("/agents/:id/token-usage", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { AgentStore, aggregateAgentTokenUsage, isEphemeralAgent } = await import("@fusion/core");
+      const { AgentStore, aggregateAgentTokenUsage } = await import("@fusion/core");
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
       const agent = await agentStore.getAgent(req.params.id);
       if (!agent) {
         throw notFound("Agent not found");
-      }
-      if (isEphemeralAgent(agent)) {
-        throw badRequest("Token usage is not available for ephemeral agents");
       }
 
       const summary = await aggregateAgentTokenUsage({
