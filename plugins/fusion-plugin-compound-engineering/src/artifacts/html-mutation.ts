@@ -216,6 +216,16 @@ function normalizeDuplicateInterBlockWhitespace(document: Document): { ok: true;
         applied = true;
       }
     }
+    for (let index = 1; index < parent.childNodes.length - 1; index += 1) {
+      const current = parent.childNodes[index];
+      if (!isWhitespaceText(current) || !/\n\s*\n/.test(current.value)) continue;
+      const previous = parent.childNodes[index - 1];
+      const next = parent.childNodes[index + 1];
+      if (isElement(previous) && isElement(next)) {
+        current.value = "\n";
+        applied = true;
+      }
+    }
   });
   return { ok: true, applied };
 }
@@ -242,7 +252,7 @@ function replaceVisibleText(
 }
 
 function mutateExpectedVisibleText(text: string, operation: HtmlMutationOperation): string {
-  if (operation.type === "append-open-question") return normalizeVisibleText(`${text} ${getVisibleText(parseFragment(operation.itemHtml))}`);
+  if (operation.type === "append-open-question") return normalizeVisibleText(`${text}${getVisibleText(parseFragment(operation.itemHtml))}`);
   if (operation.type === "replace-visible-text") return normalizeVisibleText(text.replace(operation.from, operation.to));
   return text;
 }
@@ -324,7 +334,7 @@ function snapshotProtectedRegions(root: ParentNode): ProtectedSnapshot {
     const id = getAttr(node, "id");
     if (id) ids.push(id);
     for (const attr of node.attrs) {
-      if (attr.name.startsWith("data-")) dataAttrs.push(`${node.tagName}[${attr.name}=${attr.value}]`);
+      if (attr.name.startsWith("data-")) dataAttrs.push(`${attr.name}=${attr.value}`);
     }
   });
   return { protectedMarkup, ids, dataAttrs };
