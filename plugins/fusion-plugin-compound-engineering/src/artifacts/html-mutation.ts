@@ -112,7 +112,7 @@ export function writeHtmlMutationsToFile(
     if (!result.ok) return result;
     if (result.fixesApplied === 0 || result.html === original) return { ok: true, fixesApplied: 0, path: safePath };
 
-    tempPath = join(dirname(safePath), `.${basename(safePath)}.fn-7149-${randomUUID()}.tmp`);
+    tempPath = join(dirname(safePath), `.${basename(safePath)}.html-mutation-${randomUUID()}.tmp`);
     writeFileSync(tempPath, result.html, { encoding: "utf8", mode: 0o600 });
     renameSync(tempPath, safePath);
     tempPath = undefined;
@@ -120,7 +120,10 @@ export function writeHtmlMutationsToFile(
     const written = readFileSync(safePath, "utf8");
     const postWrite = parseStableDocument(written);
     if (!postWrite.ok || written !== result.html || options.validateWrittenHtml?.(written) === false) {
-      writeFileSync(safePath, original, "utf8");
+      tempPath = join(dirname(safePath), `.${basename(safePath)}.html-mutation-rollback-${randomUUID()}.tmp`);
+      writeFileSync(tempPath, original, { encoding: "utf8", mode: 0o600 });
+      renameSync(tempPath, safePath);
+      tempPath = undefined;
       return refusal("post-write validation failed; restored original HTML artifact");
     }
 
@@ -245,14 +248,17 @@ function mutateExpectedVisibleText(text: string, operation: HtmlMutationOperatio
 }
 
 function resolveOpenQuestionsAnchor(document: Document): { ok: true; element: Element } | HtmlMutationRefusal {
-  const byId = ["open-questions", "outstanding-questions"].flatMap((id) => findElements(document, (el) => getAttr(el, "id") === id));
-  const byHeading = findElements(
-    document,
-    (el) => isHeading(el) && /^(open|outstanding) questions$/i.test(getVisibleText(el).trim()),
+  const byId = uniqueElements(
+    ["open-questions", "outstanding-questions"].flatMap((id) => findElements(document, (el) => getAttr(el, "id") === id)),
   );
-  const unique = uniqueElements([...byId, ...byHeading]);
-  if (unique.length !== 1) return refusal(unique.length === 0 ? "Open Questions anchor not found" : "Open Questions anchor is ambiguous");
-  return { ok: true, element: unique[0] };
+  if (byId.length === 1) return { ok: true, element: byId[0] };
+  if (byId.length > 1) return refusal("Open Questions anchor is ambiguous");
+
+  const byHeading = uniqueElements(
+    findElements(document, (el) => isHeading(el) && /^(open|outstanding) questions$/i.test(getVisibleText(el).trim())),
+  );
+  if (byHeading.length !== 1) return refusal(byHeading.length === 0 ? "Open Questions anchor not found" : "Open Questions anchor is ambiguous");
+  return { ok: true, element: byHeading[0] };
 }
 
 function resolveQuestionList(anchor: Element): { ok: true; element: Element } | HtmlMutationRefusal {
@@ -327,7 +333,7 @@ function snapshotProtectedRegions(root: ParentNode): ProtectedSnapshot {
 function getVisibleText(root: ParentNode): string {
   let text = "";
   walkNodes(root, (node, ancestors) => {
-    if (isText(node) && !isInsideProtected(ancestors)) text += node.value;
+    if (isText(node) && !isInsideProtectedOrRawText(ancestors)) text += node.value;
   });
   return normalizeVisibleText(text);
 }
