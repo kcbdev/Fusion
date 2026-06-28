@@ -279,13 +279,18 @@ describe("resolveAgentPrompt", () => {
 
   it("fast triage prompt is sourced from built-in workflow seam data", () => {
     const fastTemplate = BUILTIN_AGENT_PROMPTS.find((prompt) => prompt.id === "default-triage-fast");
+    const fastPrompt = builtinSeamPrompt("planning-fast");
+    const standardPrompt = builtinSeamPrompt("planning");
 
     expect(fastTemplate).toBeDefined();
     expect(fastTemplate?.role).toBe("triage");
     expect(BUILTIN_SEAM_PROMPTS["planning-fast"]).toBe(fastTemplate?.prompt);
-    expect(builtinSeamPrompt("planning-fast")).toBe(fastTemplate?.prompt);
-    expect(builtinSeamPrompt("planning-fast")).toContain("This task is running in **fast mode**");
-    expect(builtinSeamPrompt("planning-fast")).not.toContain("## Review Level");
+    expect(fastPrompt).toBe(fastTemplate?.prompt);
+    expect(fastPrompt).toContain("This task is running in **fast mode**");
+    expect(fastPrompt).not.toContain("## Review Level");
+    expect(fastPrompt.length).toBeLessThan(standardPrompt.length / 3);
+    expect(fastPrompt.length).toBeLessThan(6000);
+    expect(fastPrompt.split("\n").length).toBeLessThan(120);
   });
 
   it("triage planning prompt is sourced from workflow IR without an engine duplicate", () => {

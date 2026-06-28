@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Settings, Task, TaskDetail, TaskStore } from "@fusion/core";
+import type { Settings, Task, TaskDetail, TaskStore, WorkflowIr } from "@fusion/core";
 import {
   BUILTIN_CODING_WORKFLOW_IR,
   builtinSeamPrompt,
@@ -155,6 +155,39 @@ describe("fast-mode workflow variant resolution", () => {
   it("resolves fast tasks to the lean planning-fast workflow prompt", async () => {
     const task = createTask({ id: "FN-6236-FAST-PROMPT", executionMode: "fast" });
     const store = createStore(task);
+
+    await expect(captureBasePrompt(task, store)).resolves.toBe(renderedFastPlanningPrompt);
+  });
+
+  it("lets a selected workflow planning-fast seam override the built-in lean prompt", async () => {
+    const task = createTask({ id: "FN-6236-FAST-CUSTOM-SEAM", executionMode: "fast" });
+    const customFastPrompt = "custom workflow fast planning prompt";
+    const customIr: WorkflowIr = {
+      version: "v1",
+      name: "custom-fast-workflow",
+      nodes: [{ id: "planning-fast", kind: "prompt", config: { seam: "planning-fast", prompt: customFastPrompt } }],
+      edges: [],
+    };
+    const store = createStore(task, {}, {
+      getTaskWorkflowSelection: vi.fn().mockReturnValue({ workflowId: "WF-fast", stepIds: [] }),
+      getWorkflowDefinition: vi.fn().mockResolvedValue({ ir: customIr }),
+    });
+
+    await expect(captureBasePrompt(task, store)).resolves.toBe(customFastPrompt);
+  });
+
+  it("falls back to the built-in lean fast prompt when the selected workflow has no planning-fast seam", async () => {
+    const task = createTask({ id: "FN-6236-FAST-NO-SEAM", executionMode: "fast" });
+    const noFastSeamIr: WorkflowIr = {
+      version: "v1",
+      name: "no-fast-seam-workflow",
+      nodes: [{ id: "planning", kind: "prompt", config: { seam: "planning", prompt: "standard-only prompt" } }],
+      edges: [],
+    };
+    const store = createStore(task, {}, {
+      getTaskWorkflowSelection: vi.fn().mockReturnValue({ workflowId: "WF-no-fast", stepIds: [] }),
+      getWorkflowDefinition: vi.fn().mockResolvedValue({ ir: noFastSeamIr }),
+    });
 
     await expect(captureBasePrompt(task, store)).resolves.toBe(renderedFastPlanningPrompt);
   });
