@@ -1645,6 +1645,9 @@ The done-task Summary tab is a scrollable overview composed from existing detail
 /*
 FNXC:TaskDetailSummaryTokenCost 2026-06-27-00:00:
 The done-task Summary token-cost section must reuse task-summary card hierarchy while showing per-model counts and cost without hardcoded colors or spacing. Mobile converts table rows to stacked cards so the modal and right dock do not trap horizontal scrolling.
+
+FNXC:TaskDetailSummaryTokenCost 2026-06-28-00:00:
+The desktop table needs a token-scale min-width and non-anywhere model-name wrapping so narrow right-dock containers scroll horizontally instead of collapsing MODEL values to one character per line.
 */
 .task-summary-token-table-wrap {
   width: 100%;
@@ -1653,6 +1656,7 @@ The done-task Summary token-cost section must reuse task-summary card hierarchy 
 
 .task-summary-token-table {
   width: 100%;
+  min-width: calc(var(--space-2xl) * 16);
   border-collapse: collapse;
   color: var(--text);
 }
@@ -1693,7 +1697,8 @@ The done-task Summary token-cost section must reuse task-summary card hierarchy 
 }
 
 .task-summary-model-label span:last-child {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .task-summary-cost-unavailable {
@@ -1801,6 +1806,7 @@ The done-task Summary token-cost section must reuse task-summary card hierarchy 
   .task-summary-token-table th,
   .task-summary-token-table td {
     display: block;
+    min-width: 0;
   }
 
   .task-summary-token-table thead {

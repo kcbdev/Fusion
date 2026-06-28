@@ -387,9 +387,20 @@ describe("TaskDetailModal Summary tab", () => {
 
   it("keeps token-cost summary styling responsive without hardcoded colors", () => {
     const css = readDashboardStylesSource();
+    const tokenTableRule = css.match(/\.task-summary-token-table\s*\{[^}]*\}/)?.[0] ?? "";
+    const modelNameRule = css.match(/\.task-summary-model-label span:last-child\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileTokenBlock = css.slice(css.indexOf("@media (max-width: 768px)"), css.indexOf("/* Spec tab layout"));
+
     expect(css).toContain(".task-summary-token-table");
+    expect(tokenTableRule).toMatch(/min-width:\s*calc\(var\(--space-2xl\)\s*\*\s*16\)/);
+    expect(modelNameRule).toContain("overflow-wrap: normal");
+    expect(modelNameRule).toContain("word-break: normal");
+    expect(modelNameRule).not.toContain("overflow-wrap: anywhere");
     expect(css).toContain("@media (max-width: 768px)");
-    expect(css).toContain(".task-summary-token-table td::before");
+    expect(mobileTokenBlock).toContain(".task-summary-token-table-wrap");
+    expect(mobileTokenBlock).toContain("overflow-x: visible");
+    expect(mobileTokenBlock).toContain(".task-summary-token-table td::before");
+    expect(mobileTokenBlock).toContain("min-width: 0");
     expect(css).toContain("var(--color-warning)");
     expect(css).not.toMatch(/task-summary-token[^{}]*#[0-9a-fA-F]{3,8}/);
   });
