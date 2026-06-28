@@ -53,6 +53,10 @@ class MockStore extends EventEmitter {
     };
   }
 
+  async getDefaultWorkflowId(): Promise<string | undefined> {
+    return undefined;
+  }
+
   getGlobalSettingsStore() {
     return {
       /*
@@ -88,6 +92,7 @@ const ENDPOINTS: Array<{ method?: "GET" | "POST"; path: string }> = [
   { method: "POST", path: "/api/command-center/productivity/backfill-loc" },
   { path: "/api/command-center/plugin-activations" },
   { path: "/api/command-center/team" },
+  { path: "/api/command-center/workflows" },
   { path: "/api/command-center/github" },
   { path: "/api/command-center/signals" },
   { path: "/api/command-center/live" },

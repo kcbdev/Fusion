@@ -247,6 +247,34 @@ function teamFixture(agents: unknown[] = [
   };
 }
 
+function workflowFixture(workflows: unknown[] = [
+  {
+    workflowId: "builtin:coding",
+    workflowName: "Coding (built-in)",
+    isBuiltin: true,
+    tokens: { inputTokens: 900, outputTokens: 450, cachedTokens: 150, cacheWriteTokens: 0, totalTokens: 1500, nTasks: 2 },
+    cost: { usd: 4.25, unavailable: false, stale: false },
+    filesChanged: 7,
+    tasksCompleted: 3,
+    tasksInProgress: 1,
+    tasksInReview: 0,
+  },
+]) {
+  return {
+    from: "2026-06-08",
+    to: null,
+    totals: {
+      tokens: { inputTokens: 900, outputTokens: 450, cachedTokens: 150, cacheWriteTokens: 0, totalTokens: 1500, nTasks: 2 },
+      cost: { usd: 4.25, unavailable: false, stale: false },
+      filesChanged: 7,
+      tasksCompleted: 3,
+      tasksInProgress: 1,
+      tasksInReview: 0,
+    },
+    workflows,
+  };
+}
+
 function signalsFixture(open = 2) {
   return {
     totalSignals: open,
@@ -329,6 +357,7 @@ function mockOverviewApi({
   activity = activityFixture(),
   github = githubFixture(),
   team = teamFixture([]),
+  workflows = workflowFixture([]),
   signals = signalsFixture(),
   live = liveFixture(),
 }: {
@@ -337,6 +366,7 @@ function mockOverviewApi({
   activity?: unknown;
   github?: unknown;
   team?: unknown;
+  workflows?: unknown;
   signals?: unknown;
   live?: unknown;
 } = {}) {
@@ -346,6 +376,9 @@ function mockOverviewApi({
     if (path.startsWith("/command-center/activity")) return Promise.resolve(activity);
     if (path.startsWith("/command-center/github")) return Promise.resolve(github);
     if (path.startsWith("/command-center/team")) return team instanceof Error ? Promise.reject(team) : Promise.resolve(team);
+    if (path.startsWith("/command-center/workflows")) {
+      return workflows instanceof Error ? Promise.reject(workflows) : Promise.resolve(workflows);
+    }
     if (path.startsWith("/command-center/signals")) {
       return signals instanceof Error ? Promise.reject(signals) : Promise.resolve(signals);
     }
@@ -938,8 +971,8 @@ describe("CommandCenter shell", () => {
     render(<CommandCenter />);
     const tablist = screen.getByRole("tablist");
     const tabs = within(tablist).getAllByRole("tab");
-    // Overview, Tokens, Tools, Activity, Productivity, Team, Ecosystem, GitHub, Signals, System, Reliability, Mission Control.
-    expect(tabs.length).toBe(12);
+    // Overview, Tokens, Tools, Activity, Productivity, Team, Workflows, Ecosystem, GitHub, Signals, System, Reliability, Mission Control.
+    expect(tabs.length).toBe(13);
     expect(screen.queryByTestId("command-center-tab-nodes")).toBeNull();
     // roving tabindex: exactly one tab is focusable.
     const focusable = tabs.filter((tab) => tab.getAttribute("tabindex") === "0");
@@ -1045,6 +1078,19 @@ describe("CommandCenter shell", () => {
     expect(rows[0].getAttribute("data-testid")).toBe("cc-team-row-agent-alpha");
   });
 
+  it("renders and routes the Workflows tab exactly once", async () => {
+    mockOverviewApi({ workflows: workflowFixture() });
+    render(<CommandCenter />);
+    expect(screen.getAllByTestId("command-center-tab-workflows")).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId("command-center-tab-workflows"));
+
+    await screen.findByTestId("cc-area-workflows");
+    expect(screen.getByTestId("command-center-tab-workflows").getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByTestId("command-center-panel-workflows")).toBeTruthy();
+    expect(screen.getByTestId("cc-workflows-table").textContent).toContain("Coding (built-in)");
+  });
+
   it("renders the Team empty state for zero agents without an empty chart shell", async () => {
     mockOverviewApi({ team: teamFixture([]) });
     render(<CommandCenter />);
@@ -1111,6 +1157,7 @@ describe("CommandCenter shell", () => {
       "tools",
       "activity",
       "productivity",
+      "workflows",
       "ecosystem",
       "github",
       "signals",

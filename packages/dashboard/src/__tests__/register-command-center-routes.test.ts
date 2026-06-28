@@ -99,6 +99,37 @@ function seedTeamMetrics(db: Database, opts: { agentId: string; name: string; to
   );
 }
 
+function seedWorkflowMetrics(db: Database, opts: { taskId: string; workflowId?: string; workflowName?: string; tokens: number }): void {
+  if (opts.workflowId && opts.workflowName) {
+    db.prepare(
+      `INSERT OR IGNORE INTO workflows (id, name, description, ir, layout, kind, createdAt, updatedAt)
+       VALUES (?, ?, '', '{"version":"v1","name":"test","nodes":[],"edges":[]}', '{}', 'workflow',
+               '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z')`,
+    ).run(opts.workflowId, opts.workflowName);
+  }
+  db.prepare(
+    `INSERT INTO tasks
+       (id, description, "column", modelProvider, modelId,
+        tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageTotalTokens,
+        tokenUsageLastUsedAt, modifiedFiles, columnMovedAt, createdAt, updatedAt)
+     VALUES (?, 'desc', 'done', 'anthropic', 'claude-sonnet-4-5', ?, ?, ?,
+             '2026-03-01T00:00:00.000Z', ?, '2026-03-02T00:00:00.000Z',
+             '2026-03-01T00:00:00.000Z', '2026-03-02T00:00:00.000Z')`,
+  ).run(
+    opts.taskId,
+    opts.tokens,
+    opts.tokens,
+    opts.tokens * 2,
+    JSON.stringify([`src/${opts.taskId}.ts`]),
+  );
+  if (opts.workflowId) {
+    db.prepare(
+      `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
+       VALUES (?, ?, '[]', '2026-03-02T00:00:00.000Z')`,
+    ).run(opts.taskId, opts.workflowId);
+  }
+}
+
 function seedSignalMetrics(db: Database, opts: { prefix: string; source: string; open: number; resolved: number }): void {
   let seq = 0;
   for (let i = 0; i < opts.open; i += 1) {
@@ -218,6 +249,7 @@ function storeFor(
     ...globalSettings,
   } as GlobalSettings;
   store.getDatabase = () => db;
+  store.getDefaultWorkflowId = vi.fn(async () => undefined) as TaskStore["getDefaultWorkflowId"];
   store.getGlobalSettingsStore = () => ({
     getSettings: async () => settings,
     invalidateCache: vi.fn(),
@@ -463,6 +495,43 @@ describe("register-command-center-routes", () => {
     );
   });
 
+  it("returns the workflow aggregator shape for a fixture DB", async () => {
+    seedWorkflowMetrics(dbA, { taskId: "FN-A-workflow-custom", workflowId: "WF-route-a", workflowName: "Route Workflow", tokens: 321 });
+    seedWorkflowMetrics(dbA, { taskId: "FN-A-workflow-default", tokens: 50 });
+
+    const res = await request(
+      app,
+      "GET",
+      "/api/command-center/workflows?from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z&projectId=proj-a",
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      totals: { tokens: { totalTokens: number }; filesChanged: number; tasksCompleted: number };
+      workflows: Array<{ workflowId: string; workflowName: string; tokens: { totalTokens: number }; filesChanged: number }>;
+    };
+    expect(body).toHaveProperty("totals");
+    expect(body).toHaveProperty("workflows");
+    expect(body.totals.tokens.totalTokens).toBe(942);
+    expect(body.totals.filesChanged).toBe(2);
+    expect(body.totals.tasksCompleted).toBe(2);
+    expect(body.workflows).toContainEqual(
+      expect.objectContaining({
+        workflowId: "WF-route-a",
+        workflowName: "Route Workflow",
+        tokens: expect.objectContaining({ totalTokens: 642 }),
+        filesChanged: 1,
+      }),
+    );
+    expect(body.workflows).toContainEqual(
+      expect.objectContaining({
+        workflowId: "builtin:coding",
+        workflowName: "Coding (built-in)",
+        tokens: expect.objectContaining({ totalTokens: 300 }),
+      }),
+    );
+  });
+
   it("team analytics applies persisted pricing overrides", async () => {
     seedTeamMetrics(dbA, { agentId: "agent-route-a", name: "Route Alpha", tokens: 100, taskId: "FN-A-team-override" });
     const storeA = storeFor(dbA, {}, {
@@ -586,6 +655,7 @@ describe("register-command-center-routes", () => {
       "activity",
       "productivity",
       "team",
+      "workflows",
       "github",
       "signals",
       "plugin-activations",
@@ -713,6 +783,22 @@ describe("register-command-center-routes", () => {
       { pluginId: "plugin.b", count: 1 },
     ]);
     expect(empty.body).toMatchObject({ activations: 0, byPlugin: [], unavailable: true });
+  });
+
+  it("workflow endpoint stays project scoped", async () => {
+    seedWorkflowMetrics(dbA, { taskId: "FN-A-workflow", workflowId: "WF-project-a", workflowName: "Project A Workflow", tokens: 111 });
+    seedWorkflowMetrics(dbB, { taskId: "FN-B-workflow", workflowId: "WF-project-b", workflowName: "Project B Workflow", tokens: 999 });
+    const range = "from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z";
+
+    const a = await request(app, "GET", `/api/command-center/workflows?${range}&projectId=proj-a`);
+    const b = await request(app, "GET", `/api/command-center/workflows?${range}&projectId=proj-b`);
+
+    const aWorkflows = (a.body as { workflows: Array<{ workflowId: string; workflowName: string; tokens: { totalTokens: number } }> }).workflows;
+    const bWorkflows = (b.body as { workflows: Array<{ workflowId: string; workflowName: string; tokens: { totalTokens: number } }> }).workflows;
+    expect(aWorkflows.some((workflow) => workflow.workflowId === "WF-project-a" && workflow.tokens.totalTokens === 222)).toBe(true);
+    expect(aWorkflows.some((workflow) => workflow.workflowId === "WF-project-b" || workflow.workflowName === "Project B Workflow")).toBe(false);
+    expect(bWorkflows.some((workflow) => workflow.workflowId === "WF-project-b" && workflow.tokens.totalTokens === 1998)).toBe(true);
+    expect(bWorkflows.some((workflow) => workflow.workflowId === "WF-project-a" || workflow.workflowName === "Project A Workflow")).toBe(false);
   });
 
   it("team endpoint stays project scoped", async () => {
@@ -864,6 +950,27 @@ describe("register-command-center-routes", () => {
     expect(lines[1]).toContain(",0,");
   });
 
+  it("?format=csv includes workflow detail rows", async () => {
+    const range = "from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z";
+    seedWorkflowMetrics(dbA, { taskId: "FN-A-workflow-csv", workflowId: "WF-csv", workflowName: "CSV Workflow", tokens: 123 });
+
+    const res = await request(
+      app,
+      "GET",
+      `/api/command-center/workflows?${range}&projectId=proj-a&format=csv`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/csv");
+    expect(res.headers["content-disposition"]).toBe(
+      'attachment; filename="command-center-workflows.csv"',
+    );
+    const csv = res.body as string;
+    expect(csv).toContain("workflowId,workflowName,isBuiltin");
+    expect(csv).toContain("WF-csv,CSV Workflow,false");
+    expect(csv).toContain("(total),(total),");
+  });
+
   it("?format=csv includes GitHub resolved issue detail rows", async () => {
     seedGithubIssueMetrics(dbA, { prefix: "FN-A", repo: "acme/alpha", filed: 1, fixed: 1 });
     seedGithubIssueMetrics(dbB, { prefix: "FN-B", repo: "acme/beta", filed: 1, fixed: 1 });
@@ -941,6 +1048,7 @@ describe("register-command-center-routes", () => {
       ["tools", "command-center-tools.csv"],
       ["activity", "command-center-activity.csv"],
       ["productivity", "command-center-productivity.csv"],
+      ["workflows", "command-center-workflows.csv"],
       ["github", "command-center-github.csv"],
     ]) {
       const res = await request(
@@ -1072,6 +1180,7 @@ describe("vite /api proxy negative-lookahead (proxy verification)", () => {
   it("proxies the real command-center endpoints to the backend", () => {
     expect(PROXY_RE.test("/api/command-center/tokens")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/team")).toBe(true);
+    expect(PROXY_RE.test("/api/command-center/workflows")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/live")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/github")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/signals")).toBe(true);

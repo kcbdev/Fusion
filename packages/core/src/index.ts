@@ -655,6 +655,13 @@ export type {
   TeamAgentSummary,
   TeamMetricTotals,
 } from "./team-analytics.js";
+export { aggregateWorkflowAnalytics } from "./workflow-analytics.js";
+export type {
+  WorkflowAnalytics,
+  WorkflowAnalyticsQuery,
+  WorkflowSummary,
+  WorkflowMetricTotals,
+} from "./workflow-analytics.js";
 export { aggregateGithubIssueAnalytics } from "./github-issue-analytics.js";
 export type {
   GithubIssueAnalytics,

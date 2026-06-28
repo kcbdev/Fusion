@@ -4,6 +4,7 @@ import type {
   ActivityAnalytics,
   ProductivityAnalytics,
   GithubIssueAnalytics,
+  WorkflowAnalytics,
 } from "@fusion/core";
 
 /**
@@ -179,6 +180,62 @@ export function productivityAnalyticsToTable(
   rows.push(["medianDurationMs", result.taskDuration.medianMs ?? ""]);
   rows.push(["p90DurationMs", result.taskDuration.p90Ms ?? ""]);
   rows.push(["totalDurationMs", result.taskDuration.totalMs ?? ""]);
+  return { header, rows };
+}
+
+/** Workflow analytics → CSV. One row per workflow plus a summary row. */
+export function workflowAnalyticsToTable(result: WorkflowAnalytics): CsvTable {
+  const header = [
+    "workflowId",
+    "workflowName",
+    "isBuiltin",
+    "inputTokens",
+    "outputTokens",
+    "cachedTokens",
+    "cacheWriteTokens",
+    "totalTokens",
+    "nTasks",
+    "costUsd",
+    "costUnavailable",
+    "tasksCompleted",
+    "tasksInProgress",
+    "tasksInReview",
+    "filesChanged",
+  ];
+  const rows: CsvCell[][] = result.workflows.map((workflow) => [
+    workflow.workflowId,
+    workflow.workflowName,
+    workflow.isBuiltin,
+    workflow.tokens.inputTokens,
+    workflow.tokens.outputTokens,
+    workflow.tokens.cachedTokens,
+    workflow.tokens.cacheWriteTokens,
+    workflow.tokens.totalTokens,
+    workflow.tokens.nTasks,
+    workflow.cost.usd,
+    workflow.cost.unavailable,
+    workflow.tasksCompleted,
+    workflow.tasksInProgress,
+    workflow.tasksInReview,
+    workflow.filesChanged,
+  ]);
+  rows.push([
+    "(total)",
+    "(total)",
+    "",
+    result.totals.tokens.inputTokens,
+    result.totals.tokens.outputTokens,
+    result.totals.tokens.cachedTokens,
+    result.totals.tokens.cacheWriteTokens,
+    result.totals.tokens.totalTokens,
+    result.totals.tokens.nTasks,
+    result.totals.cost.usd,
+    result.totals.cost.unavailable,
+    result.totals.tasksCompleted,
+    result.totals.tasksInProgress,
+    result.totals.tasksInReview,
+    result.totals.filesChanged,
+  ]);
   return { header, rows };
 }
 

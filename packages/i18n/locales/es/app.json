@@ -1760,6 +1760,7 @@
       "signals": "",
       "system": "",
       "team": "",
+      "workflows": "Workflows",
       "tokens": "",
       "tools": ""
     },
@@ -1786,6 +1787,26 @@
       "unknownAgent": "",
       "unknownRole": "",
       "unknownState": ""
+    },
+    "workflows": {
+      "completedByWorkflow": "Tasks done by workflow",
+      "cost": "Cost",
+      "done": "Tasks done",
+      "empty": "No workflow analytics have been recorded for this range yet.",
+      "files": "Files changed",
+      "filesChanged": "Files changed",
+      "inProgress": "In progress",
+      "inReview": "In review",
+      "noChartData": "No non-zero values for this chart yet.",
+      "tableTitle": "Per-workflow breakdown",
+      "tasksCompleted": "Tasks done",
+      "tokens": "Tokens",
+      "tokensByWorkflow": "Tokens by workflow",
+      "totalCost": "Estimated cost",
+      "totalsTitle": "Workflow totals",
+      "totalTokens": "Total tokens",
+      "unknownWorkflow": "(unknown workflow)",
+      "workflow": "Workflow"
     },
     "tokens": {
       "byModelChart": "",

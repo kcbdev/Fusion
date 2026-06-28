@@ -10,6 +10,7 @@ import { ToolsArea } from "./areas/ToolsArea";
 import { ActivityArea } from "./areas/ActivityArea";
 import { ProductivityArea } from "./areas/ProductivityArea";
 import { TeamArea } from "./areas/TeamArea";
+import { WorkflowArea } from "./areas/WorkflowArea";
 import { EcosystemArea } from "./areas/EcosystemArea";
 import { GithubArea } from "./areas/GithubArea";
 import { SignalsArea } from "./areas/SignalsArea";
@@ -36,6 +37,7 @@ type SubViewId =
   | "activity"
   | "productivity"
   | "team"
+  | "workflows"
   | "ecosystem"
   | "github"
   | "signals"
@@ -59,6 +61,9 @@ const OVERVIEW_TOKEN_MODEL_LIMIT = 8;
 FNXC:CommandCenter 2026-06-18-16:57:
 Team tab shows each agent's tokens/cost/files-changed/tasks-completed with live status and bar charts, reusing existing analytics primitives; GitHub-issue per-agent stats are FN-6653, not here.
 
+FNXC:CommandCenter 2026-06-27-12:00:
+Workflows is the canonical Command Center tab for read-only per-workflow observability. Keep it adjacent to Team because both surfaces break down the same tokens/cost/files/task-count metrics by an operational dimension.
+
 FNXC:CommandCenter 2026-06-19-00:00:
 FN-6702 moves Reliability from a top-level dashboard view into a Command Center tab next to System telemetry. Reuse ReliabilityView unchanged so its /api/health/reliability loading, error, insufficient-data, and populated states keep the same data flow.
 
@@ -74,6 +79,7 @@ function useSubViews(nodesEnabled: boolean): SubView[] {
     { id: "activity", label: t("commandCenter.tabs.activity", "Activity") },
     { id: "productivity", label: t("commandCenter.tabs.productivity", "Productivity") },
     { id: "team", label: t("commandCenter.tabs.team", "Team") },
+    { id: "workflows", label: t("commandCenter.tabs.workflows", "Workflows") },
     { id: "ecosystem", label: t("commandCenter.tabs.ecosystem", "Ecosystem") },
     { id: "github", label: t("commandCenter.tabs.github", "GitHub") },
     { id: "signals", label: t("commandCenter.tabs.signals", "Signals") },
@@ -562,6 +568,8 @@ export function CommandCenter({
         return <ProductivityArea range={range} />;
       case "team":
         return <TeamArea range={range} projectId={projectId} addToast={addToast} />;
+      case "workflows":
+        return <WorkflowArea range={range} />;
       case "ecosystem":
         return <EcosystemArea range={range} />;
       case "github":

@@ -5,6 +5,7 @@ import {
   aggregateProductivityAnalytics,
   aggregatePluginActivations,
   aggregateTeamAnalytics,
+  aggregateWorkflowAnalytics,
   aggregateGithubIssueAnalytics,
   aggregateSignalsAnalytics,
   composeLiveSnapshot,
@@ -21,6 +22,7 @@ import {
   toolAnalyticsToTable,
   activityAnalyticsToTable,
   productivityAnalyticsToTable,
+  workflowAnalyticsToTable,
   githubIssueAnalyticsToTable,
   type CsvTable,
 } from "../command-center-csv.js";
@@ -348,6 +350,34 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err, "Failed to aggregate team analytics");
+    }
+  });
+
+  /**
+   * GET /api/command-center/workflows
+   * Per-workflow store-derived tokens/cost, files changed, and task counts.
+   */
+  router.get("/command-center/workflows", async (req, res) => {
+    try {
+      const store = await getScopedStore(req);
+      const range = resolveRange(req.query);
+      const settings = await store.getGlobalSettingsStore().getSettings();
+      const defaultWorkflowId = (await store.getDefaultWorkflowId()) ?? "builtin:coding";
+      const result = aggregateWorkflowAnalytics(store.getDatabase(), {
+        from: range.from,
+        to: range.to,
+        now: Date.now(),
+        pricingOverrides: settings.modelPricingOverrides,
+        defaultWorkflowId,
+      });
+      if (wantsCsv(req.query)) {
+        sendCsv(res, "command-center-workflows.csv", workflowAnalyticsToTable(result));
+        return;
+      }
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to aggregate workflow analytics");
     }
   });
 
