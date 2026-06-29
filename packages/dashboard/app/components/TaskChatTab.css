@@ -382,8 +382,50 @@ FN-7240 raises the FN-7225 follow-up tool-call typography to the readable base s
   font-weight: 600;
 }
 
-.task-chat-entry-kicker {
+/*
+FNXC:TaskChatTimestamps 2026-06-29-14:47:
+FN-7241 adds timestamps inside individual task-detail transcript blocks. Keep block-level timestamps visually quieter than content, token-sized, and flex-contained so text bubbles, tool rows, native details summaries, and thinking summaries remain readable in both wide and narrow hosts.
+*/
+.task-chat-entry-meta .task-chat-timestamp,
+.task-chat-entry-label-row .task-chat-timestamp,
+.task-chat-tool-group-summary .task-chat-timestamp,
+.task-chat-thinking-summary .task-chat-timestamp {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: calc(var(--space-md) - (var(--space-xs) / 2));
+  font-weight: 400;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.task-chat-entry-meta .task-chat-timestamp {
+  margin-left: auto;
+}
+
+.task-chat-entry-label-row .task-chat-timestamp,
+.task-chat-tool-group-summary .task-chat-timestamp,
+.task-chat-thinking-summary .task-chat-timestamp {
+  max-inline-size: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-chat-entry-label-row,
+.task-chat-entry-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
   margin-bottom: calc(var(--space-xs) / 2);
+}
+
+.task-chat-entry-meta {
+  justify-content: flex-end;
+}
+
+.task-chat-entry-kicker {
   color: var(--text-muted);
   font-size: var(--space-md);
   font-weight: 600;

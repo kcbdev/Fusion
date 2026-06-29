@@ -365,6 +365,19 @@ describe("TaskChatTab", () => {
     expect(within(transcript).getByText(/No agent output yet/)).toBeTruthy();
     expect(within(transcript).queryByTestId("task-chat-group-time")).not.toBeInTheDocument();
     expect(within(transcript).queryByTestId("task-chat-user-time")).not.toBeInTheDocument();
+    expect(within(transcript).queryByTestId("task-chat-block-time")).not.toBeInTheDocument();
+    expect(transcript).not.toHaveTextContent(/NaN|Invalid Date/);
+  });
+
+  it("renders loading state without timestamp shells or invalid-date text", () => {
+    mockLogs([], true);
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(within(transcript).getByText("Loading agent output…")).toBeTruthy();
+    expect(within(transcript).queryByTestId("task-chat-group-time")).not.toBeInTheDocument();
+    expect(within(transcript).queryByTestId("task-chat-user-time")).not.toBeInTheDocument();
+    expect(within(transcript).queryByTestId("task-chat-block-time")).not.toBeInTheDocument();
     expect(transcript).not.toHaveTextContent(/NaN|Invalid Date/);
   });
 
@@ -600,6 +613,37 @@ describe("TaskChatTab", () => {
     expect(groupMeta).not.toBeNull();
     expect(within(groupMeta as HTMLElement).getByText("2 entries")).toBeVisible();
     expect(within(groupMeta as HTMLElement).getByTestId("task-chat-group-time")).toHaveTextContent("2m ago");
+  });
+
+  it("renders per-block timestamps for text tool thinking and user blocks", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T15:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older text chunk ", timestamp: "2026-06-17T14:58:30.000Z" }),
+      makeEntry({ agent: "executor", text: "latest text chunk", timestamp: "2026-06-17T14:59:00.000Z" }),
+      makeEntry({ agent: "executor", type: "tool", text: "bash", detail: "pnpm test", timestamp: "2026-06-17T14:56:00.000Z" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "bash", detail: "ok", timestamp: "2026-06-17T14:57:00.000Z" }),
+      makeEntry({ agent: "executor", type: "thinking", text: "first thought", timestamp: "2026-06-17T14:54:00.000Z" }),
+      makeEntry({ agent: "executor", type: "thinking", text: "latest thought", timestamp: "2026-06-17T14:55:00.000Z" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({
+          steeringComments: [makeSteeringComment({ id: "block-user", text: "block-level user guidance", createdAt: "2026-06-17T14:52:00.000Z" })],
+        })}
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    const textBlock = screen.getByTestId("task-chat-entry-text");
+    expect(textBlock).toHaveTextContent("older text chunk latest text chunk");
+    expect(within(textBlock).getByLabelText("Text block timestamp")).toHaveTextContent("1m ago");
+    expect(screen.getByLabelText("Tool group timestamp")).toHaveTextContent("3m ago");
+    expect(screen.getByLabelText("Tool invocation timestamp")).toHaveTextContent("3m ago");
+    expect(screen.getByLabelText("Thinking block timestamp")).toHaveTextContent("5m ago");
+    expect(screen.getByLabelText("User message block timestamp")).toHaveTextContent("8m ago");
   });
 
   it("keeps agent and user timestamp parity in the inline chat surface", () => {
@@ -868,6 +912,7 @@ describe("TaskChatTab", () => {
     expect(screen.getByText("Tool call → error")).toBeVisible();
     expect(screen.getByText("Error")).toBeVisible();
     expect(screen.getByText("stderr")).toBeVisible();
+    expect(screen.getByLabelText("Tool invocation timestamp")).toBeVisible();
   });
 
   it("renders a single tool entry as one collapsed group and tolerates missing detail", () => {
@@ -886,10 +931,14 @@ describe("TaskChatTab", () => {
     expect(screen.queryByText("Arguments")).not.toBeInTheDocument();
   });
 
-  it("falls back to result entries when a tool completion has no preceding call", async () => {
-    const user = userEvent.setup();
+  it.each([
+    ["result", "tool_result", "Tool result", "ok", "4m ago"],
+    ["error", "tool_error", "Tool error", "stderr", "2m ago"],
+  ] as const)("falls back to standalone %s entries when a tool completion has no preceding call", (_label, type, kickerText, detail, expectedTime) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T15:00:00.000Z"));
     mockLogs([
-      makeEntry({ agent: "executor", type: "tool_result", text: "bash", detail: "ok" }),
+      makeEntry({ agent: "executor", type, text: "bash", detail, timestamp: type === "tool_result" ? "2026-06-17T14:56:00.000Z" : "2026-06-17T14:58:00.000Z" }),
     ]);
 
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
@@ -900,14 +949,16 @@ describe("TaskChatTab", () => {
     expect(toolGroup).not.toHaveAttribute("open");
     expect(within(summary as HTMLElement).getByText("1 tool call")).toBeVisible();
     expect(within(summary as HTMLElement).getByText("bash")).toBeVisible();
+    expect(within(summary as HTMLElement).getByLabelText("Tool group timestamp")).toHaveTextContent(expectedTime);
     expect(screen.queryByText("0 tool calls")).not.toBeInTheDocument();
 
-    await user.click(within(summary as HTMLElement).getByText("1 tool call"));
+    fireEvent.click(within(summary as HTMLElement).getByText("1 tool call"));
 
-    const standaloneEntry = screen.getByTestId("task-chat-entry-tool_result");
-    const standaloneKicker = screen.getByText("Tool result");
+    const standaloneEntry = screen.getByTestId(`task-chat-entry-${type}`);
+    const standaloneKicker = screen.getByText(kickerText);
     expect(standaloneEntry).toHaveClass("task-chat-tool-entry");
     expect(standaloneKicker).toHaveClass("task-chat-entry-kicker");
+    expect(within(standaloneEntry).getByLabelText("Tool entry timestamp")).toHaveTextContent(expectedTime);
   });
 
   it("renders thinking in an expanded-by-default collapsible block", async () => {
@@ -1623,6 +1674,7 @@ describe("TaskChatTab", () => {
     const transcript = screen.getByTestId("task-chat-transcript");
     expect(within(transcript).getByText("Optimistic timestamp")).toBeVisible();
     expect(within(transcript).getByTestId("task-chat-user-time")).toHaveTextContent("just now");
+    expect(within(transcript).getByLabelText("User message block timestamp")).toHaveTextContent("just now");
   });
 
   it("renders a sent user message after pre-existing agent output under client-behind-server clock skew", () => {
@@ -1767,6 +1819,7 @@ describe("TaskChatTab", () => {
     expect(within(transcript).getByText("invalid user timestamp")).toBeVisible();
     expect(within(transcript).queryByTestId("task-chat-group-time")).not.toBeInTheDocument();
     expect(within(transcript).queryByTestId("task-chat-user-time")).not.toBeInTheDocument();
+    expect(within(transcript).queryByTestId("task-chat-block-time")).not.toBeInTheDocument();
     expect(transcript).not.toHaveTextContent(/NaN|Invalid Date/);
   });
 
@@ -2584,6 +2637,9 @@ describe("TaskChatTab", () => {
     const groupMetaRule = getCssRuleBlock(css, ".task-chat-group-meta");
     const userHeaderRule = getCssRuleBlock(css, ".task-chat-user-header");
     const timestampRule = getCssRuleBlock(css, ".task-chat-timestamp");
+    const blockTimestampRule = getCssRuleBlock(css, ".task-chat-entry-meta .task-chat-timestamp,");
+    const blockTimestampMetaRule = getCssRuleBlock(getCssAfter(css, ".task-chat-entry-meta .task-chat-timestamp {"), ".task-chat-entry-meta .task-chat-timestamp");
+    const summaryTimestampRule = getCssRuleBlock(getCssAfter(css, ".task-chat-entry-meta .task-chat-timestamp {\n  margin-left: auto;\n}\n\n"), ".task-chat-entry-label-row .task-chat-timestamp,");
     const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
     const mobileUserHeaderRule = getCssRuleBlock(mobileCss, ".task-chat-user-header");
     const mobileTimestampRule = getCssRuleBlock(mobileCss, ".task-chat-timestamp");
@@ -2595,6 +2651,18 @@ describe("TaskChatTab", () => {
     expect(timestampRule).toContain("font-size: calc(var(--space-md) - (var(--space-xs) / 2))");
     expect(timestampRule).not.toContain("px");
     expect(timestampRule).not.toContain("#");
+    expect(blockTimestampRule).toContain("display: inline-flex");
+    expect(blockTimestampRule).toContain("flex: 0 0 auto");
+    expect(blockTimestampRule).toContain("font-size: calc(var(--space-md) - (var(--space-xs) / 2))");
+    expect(blockTimestampRule).toContain("white-space: nowrap");
+    expect(blockTimestampMetaRule).toContain("margin-left: auto");
+    expect(summaryTimestampRule).toContain("max-inline-size: 40%");
+    expect(summaryTimestampRule).toContain("overflow: hidden");
+    expect(summaryTimestampRule).toContain("text-overflow: ellipsis");
+    expect(blockTimestampRule).not.toContain("px");
+    expect(blockTimestampRule).not.toContain("#");
+    expect(summaryTimestampRule).not.toContain("px");
+    expect(summaryTimestampRule).not.toContain("#");
     expect(userHeaderRule).toContain("display: inline-flex");
     expect(userHeaderRule).toContain("flex-wrap: wrap");
     expect(mobileUserHeaderRule).toContain("justify-content: flex-end");
