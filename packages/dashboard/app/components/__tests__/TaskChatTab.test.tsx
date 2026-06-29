@@ -102,6 +102,9 @@ function getCssDeclaration(rule: string, propertyName: string): string {
   return declarationMatch?.[1]?.trim() ?? "";
 }
 
+const TOO_SMALL_TASK_TOOL_FONT_SIZE = "font-size: calc(var(--space-md) - (var(--space-xs) + (var(--space-xs) / 4)))";
+const READABLE_TASK_TOOL_FONT_SIZE = "font-size: var(--space-md)";
+
 function getRootTokenPxValues(css: string): Record<string, number> {
   const rootRule = getCssRuleBlock(css, ":root");
   const tokenValues: Record<string, number> = {};
@@ -2504,6 +2507,7 @@ describe("TaskChatTab", () => {
     expect(narrowHostGroupRule).toContain("grid-template-columns: 1fr");
     expect(narrowHostHeaderRule).toContain("min-width: 0");
     expect(narrowHostUserEntryRule).toContain("max-width: 100%");
+    expect(narrowHostCss).not.toContain(TOO_SMALL_TASK_TOOL_FONT_SIZE);
     expect(listSplitGroupRule).toContain("grid-template-columns: 1fr");
     expect(mobileGroupRule).toContain("grid-template-columns: 1fr");
   });
@@ -2597,7 +2601,7 @@ describe("TaskChatTab", () => {
     expect(mobileTimestampRule).toContain("white-space: normal");
   });
 
-  it("keeps task-chat tool summaries compact like regular chat on desktop and mobile", () => {
+  it("keeps task-chat tool summaries compact and tool text readable on desktop and mobile", () => {
     const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
     const chatCss = readFileSync(resolve(__dirname, "../ChatView.css"), "utf8");
     const compactCss = getCssAfter(css, "FN-7215 aligns task-detail tool-call summaries");
@@ -2607,6 +2611,8 @@ describe("TaskChatTab", () => {
     const errorRule = getCssRuleBlock(css, ".task-chat-tool-group-error-count");
     const entriesRule = getCssRuleBlock(getCssAfter(css, ".task-chat-tool-group-entries {\n  gap"), ".task-chat-tool-group-entries");
     const entryRule = getCssRuleBlock(css, ".task-chat-tool-entry");
+    const kickerRule = getCssRuleBlock(css, ".task-chat-entry-kicker");
+    const detailLabelRule = getCssRuleBlock(css, ".task-chat-tool-detail-label");
     const detailRule = getCssRuleBlock(getCssAfter(css, ".task-chat-tool-detail {"), ".task-chat-tool-detail");
     const chatSummaryRule = getCssRuleBlock(chatCss, ".chat-tool-calls-group-summary");
     const chatNamesRule = getCssRuleBlock(chatCss, ".chat-tool-calls-names");
@@ -2617,7 +2623,7 @@ describe("TaskChatTab", () => {
 
     expect(summaryRule).toContain("flex-wrap: nowrap");
     expect(summaryRule).toContain("padding: var(--space-xs)");
-    expect(summaryRule).toContain("font-size: calc(var(--space-md) - (var(--space-xs) + (var(--space-xs) / 4)))");
+    expect(summaryRule).toContain(READABLE_TASK_TOOL_FONT_SIZE);
     expect(summaryRule).toContain("border-radius: var(--radius-sm)");
     expect(summaryRule).not.toContain("px");
     expect(summaryRule).not.toContain("#");
@@ -2630,12 +2636,25 @@ describe("TaskChatTab", () => {
     expect(errorRule).toContain("white-space: nowrap");
     expect(entriesRule).toContain("padding: 0 var(--space-xs) var(--space-xs)");
     expect(entryRule).toContain("border-radius: var(--radius-sm)");
-    expect(detailRule).toContain("font-size: calc(var(--space-md) - (var(--space-xs) + (var(--space-xs) / 4)))");
+    /*
+     * FNXC:TaskDetailChat 2026-06-29-14:13:
+     * FN-7240 regression coverage must fail if task-detail tool-call typography returns to the too-small FN-7225 calc. The summary, kicker, detail label, and detail body all use the readable base token while retaining compact spacing.
+     */
+    for (const [selector, readableToolTextRule] of [
+      [".task-chat-tool-group-summary", summaryRule],
+      [".task-chat-entry-kicker", kickerRule],
+      [".task-chat-tool-detail-label", detailLabelRule],
+      [".task-chat-tool-detail", detailRule],
+    ] as const) {
+      expect(readableToolTextRule, `${selector} uses readable tool-call typography`).toContain(READABLE_TASK_TOOL_FONT_SIZE);
+      expect(readableToolTextRule, `${selector} does not restore the too-small calc`).not.toContain(TOO_SMALL_TASK_TOOL_FONT_SIZE);
+    }
     expect(chatSummaryRule).toContain("padding: var(--space-xs)");
     expect(chatSummaryRule).toContain("border-radius: var(--radius-sm)");
     expect(chatNamesRule).toContain("text-overflow: ellipsis");
     expect(mobileSummaryRule).toContain("flex-direction: row");
     expect(mobileSummaryRule).toContain("flex-wrap: nowrap");
+    expect(mobileCss).not.toContain(TOO_SMALL_TASK_TOOL_FONT_SIZE);
     expect(mobileNamesRule).toContain("width: auto");
     expect(mobileErrorRule).toContain("width: auto");
   });
