@@ -123,7 +123,13 @@ describe("task pipeline smoke", () => {
       "browser-verification",
       "code-review",
       "code-review::code-review-step",
+      /*
+       * FNXC:WorkflowSmoke 2026-06-29-14:20:
+       * The stepwise built-in smoke tracks the full graph route, including the graph-native completion summary and bypassed post-merge verification group, so merge-gate coverage stays active without quarantining this suite.
+       */
+      "completion-summary",
       "merge",
+      "post-merge-verification",
     ]);
     expect(calls).toEqual([
       "plan",
@@ -131,6 +137,7 @@ describe("task pipeline smoke", () => {
       "parse",
       "step-execute:0",
       "custom:code-review-step",
+      "custom:completion-summary",
       "merge",
     ]);
     expect(mergeContexts).toEqual([

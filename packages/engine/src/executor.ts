@@ -16863,16 +16863,21 @@ function formatTimestamp(iso: string): string {
 // Project commands are injected here (for reliability) and also in the PROMPT.md (by triage).
 // This ensures the executor agent always sees the authoritative commands from settings,
 // even if the PROMPT.md was written manually or before commands were configured.
-function scopePromptToWorktree(prompt: string, rootDir?: string, worktreePath?: string, workspaceConfig?: WorkspaceConfig | null): string {
+function scopePromptToWorktree(prompt: string | undefined, rootDir?: string, worktreePath?: string, workspaceConfig?: WorkspaceConfig | null): string {
+  /*
+   * FNXC:ExecutorPrompts 2026-06-29-13:55:
+   * Some legacy direct-dispatch tests and recovered task rows can lack a persisted prompt. Treat a missing prompt as empty before worktree path scoping so prompt construction cannot fail before pause-abort and graph-path recovery code handles the task state.
+   */
+  const promptText = prompt ?? "";
   // FNXC:Workspace 2026-06-21-12:00: KTD1 — in workspace mode the session is rooted at the workspace root itself (worktreePath === rootDir) and path rewriting to a per-task root worktree is meaningless: edits happen in per-sub-repo worktrees the agent acquires, not at the root. No-op the rewrite. (The rootDir === worktreePath guard below already covers this, but gate explicitly so intent survives future refactors.)
   if (workspaceConfig) {
-    return prompt;
+    return promptText;
   }
-  if (!rootDir || !worktreePath || rootDir === worktreePath || !prompt.includes(rootDir)) {
-    return prompt;
+  if (!rootDir || !worktreePath || rootDir === worktreePath || !promptText.includes(rootDir)) {
+    return promptText;
   }
 
-  return prompt
+  return promptText
     .replaceAll(`${rootDir}/`, `${worktreePath}/`)
     .replaceAll(`${worktreePath}/.fusion/`, `${rootDir}/.fusion/`);
 }

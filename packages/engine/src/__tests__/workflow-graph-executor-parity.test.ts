@@ -34,6 +34,10 @@ import type { WorkflowLegacySeams } from "../workflow-node-handlers.js";
 const task = { id: "FN-5767", enabledWorkflowSteps: [] } as TaskDetail;
 type BaseSeam = "planning" | "execute" | "workflow-step" | "review" | "merge" | "schedule";
 
+function isBaseSeam(seam: unknown): seam is BaseSeam {
+  return seam === "planning" || seam === "execute" || seam === "workflow-step" || seam === "review" || seam === "merge" || seam === "schedule";
+}
+
 function runBaseSeam(seams: WorkflowLegacySeams, seam: BaseSeam, task: TaskDetail, context: Record<string, unknown>) {
   if (seam === "workflow-step") {
     return seams.workflowStep?.(task, context) ?? Promise.resolve({ outcome: "success" as const });
@@ -81,7 +85,12 @@ describe("WorkflowGraphExecutor interpreter-parity", () => {
     };
     const legacyEvents = await runLegacy(seams)();
     const executor = new WorkflowGraphExecutor({ seams, handlers: { prompt: async (node, ctx) => {
-      const seam = String(node.config?.seam) as BaseSeam;
+      const seam = node.config?.seam;
+      /*
+       * FNXC:WorkflowParity 2026-06-29-14:20:
+       * Default coding now includes non-legacy prompt nodes such as completion-summary in addition to legacy seams. Parity assertions must ignore those graph-native prompt nodes rather than failing the preserved planning/execute/review/merge byte-identity oracle.
+       */
+      if (!isBaseSeam(seam)) return { outcome: "success" };
       const result = await runBaseSeam(seams, seam, ctx.task, ctx.context);
       events.push(`${seam}:${result.outcome}`);
       return result;
@@ -191,7 +200,9 @@ describe("column-agent feature is invisible when unbound (U7 / R9)", () => {
       seams,
       handlers: {
         prompt: async (node, ctx) => {
-          const seam = String(node.config?.seam) as BaseSeam;
+          const seam = node.config?.seam;
+          // FNXC:WorkflowParity 2026-06-29-14:20: Only legacy seams participate in the column-agent invisibility observation; graph-native summary prompts stay byte-inert for this oracle.
+          if (!isBaseSeam(seam)) return { outcome: "success" };
           stages.push(seam);
           return runBaseSeam(seams, seam, ctx.task, ctx.context);
         },
