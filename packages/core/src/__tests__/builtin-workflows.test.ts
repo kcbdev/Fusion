@@ -101,6 +101,18 @@ describe("built-in workflows", () => {
     }
   });
 
+  it("all built-in Code Review optional groups are blocking gates", () => {
+    for (const workflow of BUILTIN_WORKFLOWS) {
+      const codeReview = workflow.ir.nodes.find((node) => node.id === "code-review");
+      if (!codeReview) continue;
+      expect(codeReview.kind, workflow.id).toBe("optional-group");
+      const template = codeReview.config?.template as { nodes?: Array<{ id: string; config?: Record<string, unknown> }> } | undefined;
+      const inner = template?.nodes?.find((node) => node.id === CODE_REVIEW_STEP_NODE_ID);
+      expect(inner, workflow.id).toBeDefined();
+      expect(inner?.config?.gateMode, workflow.id).toBe("gate");
+    }
+  });
+
   it("built-in workflow layouts cover every authored node", () => {
     for (const workflow of BUILTIN_WORKFLOWS) {
       const missingLayoutNodes = workflow.ir.nodes

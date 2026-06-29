@@ -79,7 +79,7 @@ const RAW_BUILTIN_CODING_WORKFLOW_IR: WorkflowIr = {
     // Pre-merge optional browser-verification (optional-group, default OFF).
     browserVerificationOptionalGroupNode("in-progress"),
     // FNXC:CodeReviewStep 2026-06-25-15:00:
-    // Pre-merge Code Review as a DEFAULT-ON optional-group (advisory), on the success path
+    // Pre-merge Code Review as a DEFAULT-ON optional-group (blocking gate), on the success path
     // between browser-verification and review (execute → browser-verification →
     // code-review → review). Runs for every coding task by default (defaultOn:true) but is
     // toggleable off per task; disabled → byte-inert pass-through.

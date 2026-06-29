@@ -143,7 +143,7 @@ const RAW_BUILTIN_STEPWISE_CODING_WORKFLOW_IR: WorkflowIr = {
     // and the rework-exhausted manual-release path flow through this node.
     browserVerificationOptionalGroupNode("in-progress"),
     // FNXC:CodeReviewStep 2026-06-25-15:00:
-    // Pre-merge Code Review as a DEFAULT-ON optional-group (advisory), on the post-foreach
+    // Pre-merge Code Review as a DEFAULT-ON optional-group (blocking gate), on the post-foreach
     // success path between browser-verification and review (steps → browser-verification →
     // code-review → review). It sits after the foreach so it runs EXACTLY ONCE pre-merge
     // (never per step-instance); both the foreach-success and rework-exhausted manual-

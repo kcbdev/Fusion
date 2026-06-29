@@ -723,7 +723,11 @@ describe("WorkflowGraphExecutor optional-group", () => {
             calls.push(node.id);
             if ((groupId === "code-review" && node.id === "code-review-step")
               || (groupId === "browser-verification" && node.id === "browser-verification-step")) {
-              return { outcome: "success", value: "REVISE", contextPatch: { output: `${groupId} finding` } };
+              return {
+                outcome: groupId === "code-review" ? "failure" : "success",
+                value: "REVISE",
+                contextPatch: { output: `${groupId} finding` },
+              };
             }
             return { outcome: "success" };
           },
@@ -767,7 +771,11 @@ describe("WorkflowGraphExecutor optional-group", () => {
           prompt: async (node) => {
             if ((groupId === "code-review" && node.id === "code-review-step")
               || (groupId === "browser-verification" && node.id === "browser-verification-step")) {
-              return { outcome: "success", value: "REVISE", contextPatch: { output: `stepwise ${groupId} finding` } };
+              return {
+                outcome: groupId === "code-review" ? "failure" : "success",
+                value: "REVISE",
+                contextPatch: { output: `stepwise ${groupId} finding` },
+              };
             }
             return { outcome: "success" };
           },
@@ -789,5 +797,57 @@ describe("WorkflowGraphExecutor optional-group", () => {
       }));
       expect(stepwiseResult.context[`node:${groupId}:fixScheduled`]).toBe(true);
     }
+  });
+
+  it("blocks builtin coding review and merge when Code Review requests revision and no remediation is scheduled", async () => {
+    const requestFix = vi.fn(async () => false);
+    const calls: string[] = [];
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        "parse-steps": async () => ({ outcome: "success", value: "no-steps" }),
+        prompt: async (node) => {
+          calls.push(node.id);
+          if (node.id === "code-review-step") {
+            return {
+              outcome: "failure",
+              value: "REVISE",
+              contextPatch: { output: "blocking code review finding" },
+            };
+          }
+          return { outcome: "success" };
+        },
+      },
+      requestPreMergeOptionalStepFix: requestFix,
+    });
+
+    const result = await executor.run({
+      ...taskWith(["plan-review", "code-review"]),
+      id: "FN-7228-regression",
+      steps: [],
+      workflowStepResults: [
+        {
+          workflowStepId: "plan-review",
+          workflowStepName: "Plan Review",
+          phase: "pre-merge",
+          status: "passed",
+          startedAt: "2026-06-29T17:00:00.000Z",
+          completedAt: "2026-06-29T17:00:01.000Z",
+        },
+      ],
+    } as TaskDetail, settingsOn(), BUILTIN_CODING_WORKFLOW_IR);
+
+    expect(requestFix).toHaveBeenCalledWith("FN-7228-regression", expect.objectContaining({
+      stepName: "Code Review",
+      feedback: "blocking code review finding",
+      nodeId: "code-review",
+      status: "failed",
+      verdict: "REVISE",
+    }));
+    expect(result.outcome).toBe("failure");
+    expect(result.visitedNodeIds).toContain("code-review::code-review-step");
+    expect(result.visitedNodeIds).not.toContain("review");
+    expect(result.visitedNodeIds).not.toContain("merge-gate");
+    expect(result.visitedNodeIds).not.toContain("merge-attempt");
+    expect(calls).not.toContain("review");
   });
 });
