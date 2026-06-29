@@ -88,6 +88,11 @@ export default defineConfig({
             "src/__tests__/hold-release.test.ts",
             "src/__tests__/workflow-graph-task-runner.test.ts",
             "src/__tests__/workflow-graph-executor-parity.test.ts",
+            /*
+            FNXC:EngineTests 2026-06-29-00:00:
+            The minimal task-pipeline smoke belongs in engine-core because the default builtin:coding path is now a merge-gate canary: it proves the unselected-task runtime reaches merge with deterministic in-memory seams only, without real git, network, subprocesses, timers, or broad e2e scope.
+            */
+            "src/__tests__/task-pipeline-smoke.test.ts",
             "src/__tests__/scheduler-workflow-cutover.test.ts",
             "src/__tests__/executor-base-commit-capture.test.ts",
             "src/__tests__/executor-capture-modified-files-attribution.test.ts",

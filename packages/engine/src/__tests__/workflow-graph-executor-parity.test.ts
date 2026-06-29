@@ -27,7 +27,11 @@ import {
 import { WorkflowGraphExecutor } from "../workflow-graph-executor.js";
 import type { WorkflowLegacySeams } from "../workflow-node-handlers.js";
 
-const task = { id: "FN-5767" } as TaskDetail;
+/*
+ * FNXC:WorkflowParity 2026-06-29-07:45:
+ * These legacy byte-parity checks intentionally disable default-on optional groups so the observed seam sequence remains the historical planning → execute → review → merge oracle. Separate tests own default-on optional step execution and the stepwise builtin pipeline smoke.
+ */
+const task = { id: "FN-5767", enabledWorkflowSteps: [] } as TaskDetail;
 type BaseSeam = "planning" | "execute" | "workflow-step" | "review" | "merge" | "schedule";
 
 function runBaseSeam(seams: WorkflowLegacySeams, seam: BaseSeam, task: TaskDetail, context: Record<string, unknown>) {
