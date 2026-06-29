@@ -15,8 +15,8 @@ execution: code
 
 | Field | Value |
 |---|---|
-| Objective | Make default Coding use stepwise execution with one final review, keep the original monolithic graph as Legacy coding, rename old Stepwise coding to Coding (per-step review), and fix workflow selection so new tasks actually attach to selected built-ins such as Coding (per-step review) and Compound engineering. |
-| Authority | User requests in this session: "create a built in stepwise coding version that doesn't review each step but just does a review of everything at the end"; "creating a new task in stepwise coding don't attach it to the workflow. it goes to the default coding built in workflow"; "and the compound engineering workflow doesn't work." |
+| Objective | Make default Coding use stepwise execution with default-on optional Plan Review before execution and default-on optional Code Review at the end, keep the original monolithic graph as Legacy coding, rename old Stepwise coding to Coding (per-step review), and fix workflow selection so new tasks actually attach to selected built-ins such as Coding (per-step review) and Compound engineering. |
+| Authority | User requests in this session: "create a built in stepwise coding version that doesn't review each step but just does a review of everything at the end"; "in the new default stepwise the plan review should be an optional step also like code review"; "make sure plan review is also an optional step before a task moves from plan to execution"; "plan review should be default on"; "per step coding should get plan review also"; "creating a new task in stepwise coding don't attach it to the workflow. it goes to the default coding built in workflow"; "and the compound engineering workflow doesn't work." |
 | Execution profile | Standard code change across `@fusion/core`, dashboard task creation surfaces/routes, docs, and focused tests. |
 | Stop conditions | Do not change existing `builtin:stepwise-coding` per-step review semantics; do not mask workflow selection bugs by only changing display labels; do not alter runtime primitives unless validation proves a missing generic capability. |
 | Tail ownership | Implementation should add focused core tests and run file-scoped verification, not the full suite. |
@@ -27,15 +27,15 @@ execution: code
 
 ### Summary
 
-Fusion's default Coding workflow should use graph-owned step execution without the overhead of per-step AI review. The workflow should preserve the stepwise execution model (`PROMPT.md` parsing plus one-step-at-a-time execution) and then rely on the existing whole-task review path after all implementation steps complete. The original monolithic coding graph should remain available as Legacy coding, and the old per-step-review Stepwise workflow should display as Coding (per-step review).
+Fusion's default Coding workflow should use graph-owned step execution without the overhead of per-step AI review. The workflow should preserve the stepwise execution model (`PROMPT.md` parsing plus one-step-at-a-time execution), run a default-on optional Plan Review before moving from planning to execution, and run exactly one end-of-work review surface through the default-on optional Code Review gate. The original monolithic coding graph should remain available as Legacy coding, and the old per-step-review Stepwise workflow should display as Coding (per-step review) while also gaining the same default-on optional Plan Review before execution.
 
 Workflow selection must also be reliable. When an operator creates a task from a workflow lane or picker, the selected workflow must persist onto the task's `task_workflow_selection` row and govern execution. The reported failures are that creating a new task in Stepwise coding falls back to `builtin:coding`, and the Compound engineering workflow does not work. Those are selection/materialization bugs, not just labeling issues.
 
 ### Problem Frame
 
-`builtin:stepwise-coding` currently demonstrates step inversion by parsing `PROMPT.md`, iterating through `Task.steps[]`, running each step, and routing each step through `step-review` with approve/revise/rethink outcomes. That is useful when every step needs independent review, but it is heavier than needed for workflows that only want a final whole-task review.
+`builtin:stepwise-coding` currently demonstrates step inversion by parsing `PROMPT.md`, iterating through `Task.steps[]`, running each step, and routing each step through `step-review` with approve/revise/rethink outcomes. That remains useful when every step needs independent review. It now also needs the same default-on optional Plan Review gate before execution as the new default Coding workflow.
 
-The default `builtin:coding` already performs a whole-task execution seam followed by optional pre-merge gates and final review, but it does not expose per-step execution as authored workflow graph structure. The requested variant fills the middle: graph-owned step execution, no per-step review, final review after the full implementation.
+The default `builtin:coding` already performs a whole-task execution seam followed by optional pre-merge gates and final review, but it does not expose per-step execution as authored workflow graph structure. The requested variant fills the middle: graph-owned step execution, default-on optional plan review before execution, no per-step review, and a single optional code review gate after the full implementation.
 
 During initial investigation, the store-level explicit/default workflow paths already have tests for default `builtin:stepwise-coding` selection seeding. That makes the likely failure surface the dashboard create-task path: the UI may display a selected lane while submitting `workflowId` as `undefined`, or it may submit optional-step state in a way that suppresses `input.workflowId` in `TaskStore.createTask`. Compound engineering adds another dimension because it is plugin-gated (`fusion-plugin-compound-engineering`) and can fail either at visibility/selection time or at runtime if the required bundled plugin/skills are unavailable.
 
@@ -44,30 +44,32 @@ During initial investigation, the store-level explicit/default workflow paths al
 - R1. `builtin:coding` uses the Stepwise-derived final-review graph and remains the default coding workflow/fallback.
 - R2. The new workflow preserves stepwise planning and execution: planning produces `PROMPT.md`, a `parse-steps` node parses it, and a `foreach(source:"task-steps")` region runs one `step-execute` node per planned step.
 - R3. The new workflow must not include a `step-review` node in the foreach template and must not include per-step revise/rethink routing.
-- R4. After all planned steps complete, the workflow runs the same pre-merge optional groups as the coding built-ins: `browser-verification` default off and `code-review` default on.
-- R5. After optional pre-merge groups, the workflow runs the existing final `review` seam and the standard merge-gate / branch-group / merge-attempt region.
-- R6. The existing `builtin:stepwise-coding` graph remains unchanged for users who rely on per-step review and rework, but its user-facing name becomes Coding (per-step review).
-- R7. The original monolithic coding graph remains selectable as `builtin:legacy-coding` with user-facing name Legacy coding.
-- R8. Creating a task while Coding (per-step review) is selected must persist `workflowId: "builtin:stepwise-coding"` and not silently resolve the task to `builtin:coding`.
-- R9. Creating a task while Compound engineering is selected must either persist `workflowId: "builtin:compound-engineering"` and execute that workflow, or clearly block selection/create with a plugin-gating explanation when the required plugin is unavailable. It must not silently fall back to `builtin:coding`.
-- R10. Task creation surfaces must preserve the distinction between `workflowId: undefined` (inherit project default), `workflowId: null` (explicit no workflow), and `workflowId: string` (explicit selected workflow).
-- R11. Explicit enabled optional steps must not accidentally suppress an explicit workflow selection unless the caller intentionally opts into trusted low-level behavior. User-facing create flows must be able to submit both the selected workflow and enabled optional-group IDs.
-- R12. Board workflow lane task creation, global New Task modal creation, list view creation, quick-entry creation, planning/subtask/mission task creation, and agent/tool-created tasks must be enumerated and tested according to the workflow selection contract.
+- R4. `builtin:coding` and `builtin:stepwise-coding` include a `plan-review` optional group between `plan` and `parse-steps`; it is default-on and toggleable per task.
+- R5. After all planned steps complete, `builtin:coding` runs the same pre-merge optional groups as the coding built-ins: `browser-verification` default off and `code-review` default on.
+- R6. `builtin:coding` has no mandatory final `review` seam; the end-of-work review is controlled by the `code-review` optional group, and success/disabled pass-through routes to the merge gate.
+- R7. The existing `builtin:stepwise-coding` graph keeps per-step review and rework for users who rely on that behavior, gains the default-on optional Plan Review before execution, and its user-facing name becomes Coding (per-step review).
+- R8. The original monolithic coding graph remains selectable as `builtin:legacy-coding` with user-facing name Legacy coding.
+- R9. Creating a task while Coding (per-step review) is selected must persist `workflowId: "builtin:stepwise-coding"` and not silently resolve the task to `builtin:coding`.
+- R10. Creating a task while Compound engineering is selected must either persist `workflowId: "builtin:compound-engineering"` and execute that workflow, or clearly block selection/create with a plugin-gating explanation when the required plugin is unavailable. It must not silently fall back to `builtin:coding`.
+- R11. Task creation surfaces must preserve the distinction between `workflowId: undefined` (inherit project default), `workflowId: null` (explicit no workflow), and `workflowId: string` (explicit selected workflow).
+- R12. Explicit enabled optional steps must not accidentally suppress an explicit workflow selection unless the caller intentionally opts into trusted low-level behavior. User-facing create flows must be able to submit both the selected workflow and enabled optional-group IDs.
+- R13. Board workflow lane task creation, global New Task modal creation, list view creation, quick-entry creation, planning/subtask/mission task creation, and agent/tool-created tasks must be enumerated and tested according to the workflow selection contract.
 
 ### Scope Boundaries
 
-- In scope: a Stepwise-derived final-review IR module, built-in registry/export updates, docs catalog updates, and tests that prove default Coding has no per-step review node while final review remains.
+- In scope: a Stepwise-derived default Coding IR module, built-in registry/export updates, docs catalog updates, and tests that prove default Coding has Plan Review before execution, no per-step review node, no mandatory final review seam, and only optional Code Review at the end.
 - In scope: diagnose and fix create-time workflow selection loss for Stepwise coding and Compound engineering across dashboard/API/store boundaries.
 - In scope: add regression coverage proving selected workflow IDs are persisted, returned, and used to resolve the task workflow IR.
 - Out of scope: runtime changes to `WorkflowGraphExecutor`, per-step parallelization, new reviewer verdict semantics, dashboard redesign, or changes to `builtin:coding` / `builtin:stepwise-coding` behavior.
-- Out of scope: removing the default-on pre-merge `code-review` optional group. The request removes per-step review only; the whole-task pre-merge code review remains the "review of everything at the end" gate alongside the final `review` seam.
+- Out of scope: removing the default-on pre-merge `code-review` optional group. The request removes per-step review and the mandatory final review seam from default Coding; the whole-task pre-merge code review remains the "review of everything at the end" gate.
 - Out of scope: redesigning plugin installation. This plan may add a clearer gating/error path for Compound engineering, but it should not rebuild the plugin manager.
 
 ### Acceptance Examples
 
-- AE1. Given a task selects `builtin:coding`, when workflow selection resolves, then the built-in registry returns a v2 IR with `parse-steps`, `foreach`, `browser-verification`, `code-review`, `review`, and merge nodes.
+- AE1. Given a task selects `builtin:coding`, when workflow selection resolves, then the built-in registry returns a v2 IR with `plan-review`, `parse-steps`, `foreach`, `browser-verification`, `code-review`, and merge nodes, and no `review` seam node.
 - AE2. Given the `builtin:coding` IR, when its foreach template is inspected, then it contains `step-execute` and a pass-through exit node, but no `step-review`.
-- AE3. Given optional-step defaults are resolved for `builtin:coding`, then `code-review` is seeded by default and `browser-verification` is not.
+- AE3. Given optional-step defaults are resolved for `builtin:coding`, then `plan-review` and `code-review` are seeded by default and `browser-verification` is not.
+- AE3b. Given optional-step defaults are resolved for `builtin:stepwise-coding`, then `plan-review` and `code-review` are seeded by default and `browser-verification` is not.
 - AE4. Given docs list built-in workflows, then the new workflow is documented separately from `builtin:stepwise-coding`.
 - AE5. Given the board/list workflow selector is set to Stepwise coding, when a new task is created from that workflow context, then `store.getTaskWorkflowSelection(task.id)?.workflowId` is `builtin:stepwise-coding`.
 - AE6. Given the board/list workflow selector is set to Compound engineering and the required plugin is available/enabled, when a new task is created from that workflow context, then `store.getTaskWorkflowSelection(task.id)?.workflowId` is `builtin:compound-engineering`.
@@ -78,7 +80,7 @@ During initial investigation, the store-level explicit/default workflow paths al
 
 - **Original symptom 1:** Creating a new task from/with Stepwise coding selected attaches the task to default `builtin:coding` instead of `builtin:stepwise-coding`.
 - **Exact reproduction 1:** In a project with built-in workflows enabled, select Stepwise coding in a task creation surface, create a task, then inspect `GET /api/tasks/:id/workflow` or `TaskStore.getTaskWorkflowSelection(task.id)`.
-- **Assertion it is gone 1:** The created task's workflow selection row has `workflowId: "builtin:stepwise-coding"` and `enabledWorkflowSteps` is seeded according to that workflow (`["code-review"]` by default).
+- **Assertion it is gone 1:** The created task's workflow selection row has `workflowId: "builtin:stepwise-coding"` and `enabledWorkflowSteps` is seeded according to that workflow (`["plan-review", "code-review"]` by default).
 - **Original symptom 2:** Compound engineering workflow "doesn't work".
 - **Exact reproduction 2:** Select/create a task with `workflowId: "builtin:compound-engineering"` through the same surfaces and inspect both selection persistence and the first workflow resolution/execution failure.
 - **Assertion it is gone 2:** With the CE plugin available/enabled, the task persists `workflowId: "builtin:compound-engineering"` and resolves to the CE IR; without the plugin, creation/selection fails visibly with the required plugin ID rather than silently falling back.
@@ -86,7 +88,7 @@ During initial investigation, the store-level explicit/default workflow paths al
 ### Surface Enumeration
 
 - **Create surfaces:** New Task modal (`packages/dashboard/app/components/NewTaskModal.tsx`), TaskForm workflow picker (`packages/dashboard/app/components/TaskForm.tsx`), board/list workflow lane quick create (`packages/dashboard/app/components/Column.tsx`, `packages/dashboard/app/components/QuickEntryBox.tsx`, `packages/dashboard/app/components/ListView.tsx`), mission triage (`packages/dashboard/app/components/MissionManager.tsx` and `packages/dashboard/src/mission-routes.ts`), planning/subtask routes (`packages/dashboard/src/routes/register-planning-subtask-routes.ts`), and agent/API creation (`packages/dashboard/src/routes/register-task-workflow-routes.ts`, `packages/engine/src/agent-tools.ts`).
-- **Workflow IDs:** `builtin:coding`, `builtin:stepwise-coding`, new final-review stepwise workflow, `builtin:compound-engineering`, custom workflow IDs, `null` no-workflow, and `undefined` inherit-default.
+- **Workflow IDs:** `builtin:coding`, `builtin:legacy-coding`, `builtin:stepwise-coding`, `builtin:compound-engineering`, custom workflow IDs, `null` no-workflow, and `undefined` inherit-default.
 - **Plugin states:** Compound engineering plugin installed/enabled, installed/disabled, unavailable, and bundled path resolution failure.
 - **Optional-step states:** `enabledWorkflowSteps` omitted, empty array, default-on only, custom toggled values, and explicit values combined with non-default workflow ID.
 - **Board states:** task starts in default `triage`/workflow intake column, workflow-specific custom columns, and workflow lane selected independently from project default.
@@ -104,22 +106,25 @@ During initial investigation, the store-level explicit/default workflow paths al
 - KTD-2. Model step completion as `step-execute -> step-done` inside the foreach template.
   The existing stepwise workflow uses `step-review` as the authority that marks a step done. Without per-step review, the foreach template should let `step-execute` complete the step through the existing step-execution primitive. The template still needs a single exit, so use a config-less `gate` node as the pass-through sink, mirroring the existing `step-done` pattern.
 
-- KTD-3. Keep whole-task review surfaces unchanged.
-  The new workflow should keep `browser-verification`, `code-review`, final `review`, and the merge region after the foreach. This satisfies the requested "review of everything at the end" without introducing a new review mechanism.
+- KTD-3. Make Plan Review a default-on optional gate before execution in both stepwise-style coding workflows.
+  `plan-review` belongs between `plan` and `parse-steps`, so the plan can be reviewed before planned steps are parsed into executable work. It is default-on and task-toggleable like `code-review`.
 
-- KTD-4. Register as a normal selectable built-in.
+- KTD-4. Make default Coding's end review controlled only by the optional Code Review gate.
+  The new default workflow keeps `browser-verification`, `code-review`, and the merge region after the foreach, but removes the mandatory final `review` seam. This satisfies the requested "review of everything at the end" while letting the operator turn it off via the `code-review` optional step.
+
+- KTD-5. Register as a normal selectable built-in.
   Add the new workflow to `BUILTIN_WORKFLOWS` with `kind: "workflow"` and let `defaultEnabledBuiltinWorkflowIds()` include it by default, matching non-plugin-gated selectable built-ins.
 
-- KTD-5. Focus verification on IR shape and registry behavior.
+- KTD-6. Focus verification on IR shape and registry behavior.
   This is primarily a built-in graph definition change. Targeted tests should validate parse/round-trip, registry presence, non-compilable built-in classification, optional-group defaults, docs-adjacent catalog expectations, and the exact absence of `step-review`.
 
-- KTD-6. Fix workflow selection at the boundary where intent is lost.
+- KTD-7. Fix workflow selection at the boundary where intent is lost.
   Store-level explicit workflow creation already records `task_workflow_selection` for built-ins, including Stepwise coding, when `workflowId` reaches `TaskStore.createTask` and `enabledWorkflowSteps` is omitted. The implementation must prove whether the lost value happens in the UI submit payload, API normalization, duplicate-reconcile response, or store precedence rule. The fix should be at that boundary, not by changing resolver fallback behavior.
 
-- KTD-7. User-facing create flows must support workflow ID plus optional-step toggles together.
+- KTD-8. User-facing create flows must support workflow ID plus optional-step toggles together.
   Current store logic intentionally treats explicit `enabledWorkflowSteps` as a trusted override that can suppress `input.workflowId`. That is dangerous for UI create flows because the workflow picker and optional-step toggles are independent controls. Either the UI/API must omit `enabledWorkflowSteps` unless the user explicitly changed them, or the store/API must preserve `workflowId` while applying explicit optional IDs for that selected workflow. The chosen fix must keep low-level backward compatibility explicit and tested.
 
-- KTD-8. Compound engineering must fail closed on missing plugin requirements.
+- KTD-9. Compound engineering must fail closed on missing plugin requirements.
   `builtin:compound-engineering` is plugin-gated by `fusion-plugin-compound-engineering`. A missing plugin should prevent selection/execution with a visible requirement, not degrade into default coding. Tests should cover both the persistence path and plugin-gated availability semantics.
 
 ### High-Level Technical Design
@@ -127,14 +132,14 @@ During initial investigation, the store-level explicit/default workflow paths al
 ```mermaid
 flowchart TB
   Start[start] --> Plan[plan prompt]
-  Plan --> Parse[parse-steps: PROMPT.md]
+  Plan --> PlanReview[plan-review optional-group]
+  PlanReview --> Parse[parse-steps: PROMPT.md]
   Parse --> Steps[foreach task-steps]
   Steps --> StepExecute[step-execute]
   StepExecute --> StepDone[step-done gate]
   Steps --> Browser[browser-verification optional-group]
   Browser --> CodeReview[code-review optional-group]
-  CodeReview --> FinalReview[final review seam]
-  FinalReview --> MergeGate[merge-gate and merge region]
+  CodeReview --> MergeGate[merge-gate and merge region]
   MergeGate --> End[end]
 ```
 
@@ -150,8 +155,9 @@ flowchart TB
 ### Assumptions
 
 - The existing `step-execute` primitive marks the active step done on success when no `step-review` node is present. This is documented in `packages/engine/src/step-runner.ts` and should be confirmed with a focused graph test if implementation exposes uncertainty.
-- The Stepwise-derived final-review graph is implemented as a reusable IR module but registered under `builtin:coding`; the original monolithic graph is registered as `builtin:legacy-coding`.
-- Pre-merge `code-review` remains the default-on final whole-task code review gate. The final `review` seam remains the lifecycle review before merge.
+- The Stepwise-derived graph is implemented as a reusable IR module but registered under `builtin:coding`; the original monolithic graph is registered as `builtin:legacy-coding`.
+- `plan-review` and `code-review` are default-on optional groups for `builtin:coding` and `builtin:stepwise-coding`; `browser-verification` remains default-off.
+- Pre-merge `code-review` is the only final whole-task review gate in default Coding.
 
 ### Sequencing
 
@@ -175,7 +181,7 @@ flowchart TB
 - **Files:**
   - Create `packages/core/src/builtin-stepwise-final-review-coding-workflow-ir.ts`
   - Modify `packages/core/src/index.ts`
-- **Approach:** Copy the stable lifecycle skeleton from `packages/core/src/builtin-stepwise-coding-workflow-ir.ts`: same columns, `PROMPT.md` artifact declaration, planning/parse/foreach, optional groups, final review, merge region, and settings. Inside the foreach template, include only `step-execute` and `step-done` with a success edge. Remove per-step `step-review`, `outcome:revise`, `outcome:rethink`, and rework-hold routing unless validation requires a generic failure path.
+- **Approach:** Copy the stable lifecycle skeleton from `packages/core/src/builtin-stepwise-coding-workflow-ir.ts`: same columns, `PROMPT.md` artifact declaration, planning/plan-review/parse/foreach, optional groups, merge region, and settings. Inside the foreach template, include only `step-execute` and `step-done` with a success edge. Remove per-step `step-review`, `outcome:revise`, `outcome:rethink`, rework-hold routing, and the mandatory final `review` seam.
 - **FNXC comment requirement:** Add or update a concise FNXC comment in the new IR file explaining that this built-in exists because operators need graph-owned step execution with one whole-task review at the end rather than per-step review.
 - **Test Scenarios:**
   - The IR parses and round-trips.
@@ -198,7 +204,7 @@ flowchart TB
   - `getBuiltinWorkflow("builtin:stepwise-final-review-coding")` returns the new workflow.
   - `defaultEnabledBuiltinWorkflowIds()` includes the new ID because it is selectable and not plugin-gated.
   - `NON_COMPILABLE_BUILTIN_IDS` includes the new ID in compiler tests because the graph uses interpreter-only node kinds.
-  - Built-in registry tests distinguish existing `builtin:stepwise-coding` as per-step-review and the new workflow as final-review-only.
+  - Built-in registry tests distinguish existing `builtin:stepwise-coding` as per-step-review and default `builtin:coding` as final-code-review-only.
 - **Verification:** Extend `packages/core/src/__tests__/builtin-workflows.test.ts`.
 
 ### U3. Preserve optional-gate behavior for the new workflow
@@ -212,7 +218,7 @@ flowchart TB
 - **Approach:** Expand test matrices that currently cover `BUILTIN_CODING_WORKFLOW_IR` and `BUILTIN_STEPWISE_CODING_WORKFLOW_IR` to include the new IR where the assertion is about shared coding optional gates. Keep per-step-review-specific assertions targeted only at `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`.
 - **Test Scenarios:**
   - `resolveWorkflowOptionalSteps(newIr)` returns browser verification default off and code review default on.
-  - `resolveDefaultOnOptionalGroupIds(newIr)` returns `["code-review"]`.
+  - `resolveDefaultOnOptionalGroupIds(newIr)` returns `["plan-review", "code-review"]`.
   - The new workflow routes `browser-verification -> code-review -> review`.
   - Code review failure routes to `end` as in the other coding built-ins.
 - **Verification:** Run focused core tests listed in the Verification Contract.
@@ -284,13 +290,13 @@ flowchart TB
   - Skill-backed CE nodes still request CE skills by both namespaced and bare forms.
 - **Verification:** Run focused core/route tests for CE gating and selection.
 
-### U8. Add the new final-review workflow to the fixed creation matrix
+### U8. Add the new default Coding workflow to the fixed creation matrix
 
-- **Goal:** Ensure the new final-review stepwise workflow benefits from the same fixed creation path and appears in workflow selectors.
+- **Goal:** Ensure the new default Stepwise-derived Coding workflow benefits from the same fixed creation path and appears in workflow selectors.
 - **Requirements:** R1, R7, R10, R11, R12
 - **Files:**
   - Modify the tests added in U2, U3, U6, and U7 to include the new workflow ID once U1/U2 create it
-- **Approach:** After the selection bug is fixed for existing Stepwise and Compound engineering workflows, include the new final-review workflow in the same create/select matrix so future built-ins do not regress.
+- **Approach:** After the selection bug is fixed for existing Stepwise and Compound engineering workflows, include the new default Coding workflow in the same create/select matrix so future built-ins do not regress.
 - **Test Scenarios:**
   - Creating a task with the new workflow selected persists the new workflow ID.
   - Optional-step defaults seed `code-review` and do not erase the selected workflow.
@@ -302,7 +308,7 @@ flowchart TB
 
 | Scope | Command | Proves |
 |---|---|---|
-| Built-in registry and IR shape | `pnpm --filter @fusion/core exec vitest run src/__tests__/builtin-workflows.test.ts src/__tests__/builtin-coding-workflow-ir.test.ts --silent=passed-only --reporter=dot` | New workflow registers, parses, round-trips, and has final-review-only stepwise shape. |
+| Built-in registry and IR shape | `pnpm --filter @fusion/core exec vitest run src/__tests__/builtin-workflows.test.ts src/__tests__/builtin-coding-workflow-ir.test.ts --silent=passed-only --reporter=dot` | New workflow registers, parses, round-trips, has Plan Review before execution, and has no per-step or mandatory final review in default Coding. |
 | Optional groups | `pnpm --filter @fusion/core exec vitest run src/__tests__/workflow-optional-steps.test.ts src/__tests__/builtin-code-review-group.test.ts --silent=passed-only --reporter=dot` | Browser verification and code review defaults/wiring match other coding built-ins. |
 | Stepwise create regression | `pnpm --filter @fusion/dashboard exec vitest run app/components/__tests__/TaskForm.test.tsx app/components/__tests__/NewTaskModal.test.tsx app/components/__tests__/ListView.test.tsx app/components/__tests__/QuickEntryBox.test.tsx app/components/__tests__/board-quickcreate-workflow-lane-visibility.test.tsx app/__tests__/api-tasks.test.ts src/routes/__tests__/task-create-workflow-route.test.ts --silent=passed-only --reporter=dot` | Selected workflow ID survives picker, quick-create, UI/task-create payload, and route boundaries and does not fall back to `builtin:coding`. |
 | Store workflow selection | `pnpm --filter @fusion/core exec vitest run src/__tests__/builtin-workflows.test.ts --silent=passed-only --reporter=dot` | `TaskStore.createTask` and reserved-ID creation persist explicit/default workflow selections correctly. |
@@ -318,11 +324,11 @@ Do not run `pnpm test:full` or `pnpm verify:workspace` for this scoped change. U
 
 - The new workflow is available from `getBuiltinWorkflow` under a stable `builtin:` ID.
 - The new workflow executes planned steps through `parse-steps` and `foreach` without any `step-review` node.
-- The new workflow keeps browser verification, code review, final review, and merge behavior aligned with existing coding built-ins.
+- The new workflow keeps browser verification, code review, and merge behavior aligned with existing coding built-ins while removing the mandatory final review seam from default Coding.
 - Existing `builtin:stepwise-coding` behavior and tests remain intact.
 - Creating a task from Stepwise coding persists `builtin:stepwise-coding` and never silently falls back to `builtin:coding`.
 - Creating/selecting Compound engineering either persists `builtin:compound-engineering` when available or gives a clear plugin-gating error when unavailable.
 - Workflow creation tests cover UI/API/store surfaces where workflow intent can be lost.
-- Docs describe the distinction between per-step-review stepwise coding and final-review-only stepwise coding.
+- Docs describe the distinction between per-step-review stepwise coding and default Coding's final-code-review-only path.
 - A valid changeset exists for `@runfusion/fusion`.
 - Focused tests in the Verification Contract pass.

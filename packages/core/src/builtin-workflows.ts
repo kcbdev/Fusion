@@ -139,17 +139,17 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
   {
     id: "builtin:coding",
     name: "Coding (built-in)",
-    description: "Default coding pipeline: plan steps, execute them one at a time, then review and merge the full result.",
+    description: "Default coding pipeline: plan steps, execute them one at a time, then run the optional final code review and merge.",
     kind: "workflow",
     ir: BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR,
     layout: {
       start: { x: 60, y: 160 },
       plan: { x: 230, y: 160 },
-      parse: { x: 400, y: 160 },
-      steps: { x: 570, y: 160 },
-      "browser-verification": { x: 740, y: 160 },
-      "code-review": { x: 910, y: 160 },
-      review: { x: 1080, y: 160 },
+      "plan-review": { x: 400, y: 160 },
+      parse: { x: 570, y: 160 },
+      steps: { x: 740, y: 160 },
+      "browser-verification": { x: 910, y: 160 },
+      "code-review": { x: 1080, y: 160 },
       "merge-gate": { x: 1250, y: 160 },
       "branch-group-member-integration": { x: 1420, y: 80 },
       "branch-group-promotion": { x: 1590, y: 80 },
@@ -374,8 +374,8 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     ],
   }),
   // The stepwise coding workflow (KTD-9) — step inversion as authored graph
-  // structure (parse-steps → foreach{ step-execute → step-review } → review →
-  // merge). Authored directly as a v2 IR (the `linear` helper only builds simple
+  // structure (plan-review → parse-steps → foreach{ step-execute → step-review }
+  // → optional gates → review → merge). Authored directly as a v2 IR (the `linear` helper only builds simple
   // pipelines); it is read-only like every built-in and runs on the default
   // workflow graph runtime.
   {
@@ -388,12 +388,21 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     layout: {
       start: { x: 60, y: 160 },
       plan: { x: 230, y: 160 },
-      parse: { x: 400, y: 160 },
-      steps: { x: 570, y: 160 },
-      "rework-hold": { x: 570, y: 320 },
-      review: { x: 740, y: 160 },
-      merge: { x: 910, y: 160 },
-      end: { x: 1080, y: 160 },
+      "plan-review": { x: 400, y: 160 },
+      parse: { x: 570, y: 160 },
+      steps: { x: 740, y: 160 },
+      "rework-hold": { x: 740, y: 320 },
+      "browser-verification": { x: 910, y: 160 },
+      "code-review": { x: 1080, y: 160 },
+      review: { x: 1250, y: 160 },
+      "merge-gate": { x: 1420, y: 160 },
+      "branch-group-member-integration": { x: 1590, y: 80 },
+      "branch-group-promotion": { x: 1760, y: 80 },
+      "merge-attempt": { x: 1930, y: 160 },
+      "merge-retry": { x: 2100, y: 80 },
+      "recovery-router": { x: 2100, y: 240 },
+      "merge-manual-hold": { x: 1590, y: 240 },
+      end: { x: 2270, y: 160 },
     },
     createdAt: BUILTIN_TS,
     updatedAt: BUILTIN_TS,

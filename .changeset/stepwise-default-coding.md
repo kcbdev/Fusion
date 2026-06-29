@@ -2,6 +2,6 @@
 "@runfusion/fusion": minor
 ---
 
-summary: Make Coding use stepwise execution with final review and keep Legacy coding available.
+summary: Make Coding use stepwise execution with default-on Plan Review and final Code Review gates.
 category: feature
-dev: `builtin:coding` now uses the stepwise final-review graph; the old monolithic graph is `builtin:legacy-coding`.
+dev: `builtin:coding` now uses the stepwise graph with `plan-review` before execution and no per-step or mandatory final review; the old graph is `builtin:legacy-coding`.

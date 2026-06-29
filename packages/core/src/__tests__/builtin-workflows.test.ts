@@ -10,6 +10,7 @@ import {
 } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BROWSER_VERIFICATION_GROUP_ID, BROWSER_VERIFICATION_STEP_NODE_ID } from "../builtin-browser-verification-group.js";
+import { PLAN_REVIEW_GROUP_ID, PLAN_REVIEW_STEP_NODE_ID } from "../builtin-plan-review-group.js";
 import { builtinPromptConfig, BUILTIN_SEAM_PROMPTS } from "../builtin-workflow-prompts.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
 import { resolveColumnFlags } from "../trait-registry.js";
@@ -30,6 +31,12 @@ function browserVerificationInnerConfig(ir: { nodes: Array<{ id: string; kind: s
   const group = ir.nodes.find((node) => node.id === BROWSER_VERIFICATION_GROUP_ID);
   const template = group?.config?.template as { nodes?: Array<{ id: string; config?: Record<string, unknown> }> } | undefined;
   return template?.nodes?.find((node) => node.id === BROWSER_VERIFICATION_STEP_NODE_ID)?.config ?? {};
+}
+
+function planReviewInnerConfig(ir: { nodes: Array<{ id: string; kind: string; config?: Record<string, unknown> }> }): Record<string, unknown> {
+  const group = ir.nodes.find((node) => node.id === PLAN_REVIEW_GROUP_ID);
+  const template = group?.config?.template as { nodes?: Array<{ id: string; config?: Record<string, unknown> }> } | undefined;
+  return template?.nodes?.find((node) => node.id === PLAN_REVIEW_STEP_NODE_ID)?.config ?? {};
 }
 
 function columnTraitMatrix(ir: { columns: Array<{ id: string; traits: Array<{ trait: string; config?: unknown }> }> }): Array<{
@@ -76,6 +83,9 @@ describe("built-in workflows", () => {
     if (ir.version !== "v2") throw new Error("expected v2");
     // The chain: a parse-steps node dominating a foreach with a step-review template.
     expect(ir.nodes.some((n) => n.kind === "parse-steps")).toBe(true);
+    expect(ir.nodes.some((n) => n.id === "plan-review" && n.kind === "optional-group")).toBe(true);
+    expect(ir.edges.some((edge) => edge.from === "plan" && edge.to === "plan-review")).toBe(true);
+    expect(ir.edges.some((edge) => edge.from === "plan-review" && edge.to === "parse")).toBe(true);
     const foreach = ir.nodes.find((n) => n.kind === "foreach");
     expect(foreach).toBeDefined();
     const template = (
@@ -94,9 +104,13 @@ describe("built-in workflows", () => {
 
     expect(ir.nodes.some((node) => node.kind === "parse-steps")).toBe(true);
     expect(ir.nodes.map((node) => node.id)).toEqual(
-      expect.arrayContaining(["plan", "parse", "steps", "browser-verification", "code-review", "review", "merge-gate", "merge-attempt"]),
+      expect.arrayContaining(["plan", "plan-review", "parse", "steps", "browser-verification", "code-review", "merge-gate", "merge-attempt"]),
     );
     expect(ir.nodes.some((node) => node.id === "rework-hold")).toBe(false);
+    expect(ir.nodes.some((node) => node.id === "review")).toBe(false);
+    expect(ir.edges.some((edge) => edge.from === "plan" && edge.to === "plan-review" && edge.condition === "success")).toBe(true);
+    expect(ir.edges.some((edge) => edge.from === "plan-review" && edge.to === "parse" && edge.condition === "success")).toBe(true);
+    expect(ir.edges.some((edge) => edge.from === "code-review" && edge.to === "merge-gate" && edge.condition === "success")).toBe(true);
 
     const foreach = ir.nodes.find((node) => node.kind === "foreach");
     expect(foreach).toBeDefined();
@@ -180,7 +194,7 @@ describe("built-in workflows", () => {
     expect(coding).toBeDefined();
     expect(coding!.id).toBe("builtin:coding");
     expect(coding!.name).toBe("Coding (built-in)");
-    expect(coding!.description).toContain("execute them one at a time");
+    expect(coding!.description).toContain("optional final code review");
     expect(coding!.kind).toBe("workflow");
     expect(coding!.createdAt).toBe("2026-01-01T00:00:00.000Z");
     expect(coding!.updatedAt).toBe("2026-01-01T00:00:00.000Z");
@@ -332,6 +346,12 @@ describe("built-in workflows", () => {
 
     const byId = new Map(ir.nodes.map((node) => [node.id, node]));
     expect(byId.get("plan")?.column).toBe("in-progress");
+    expect(byId.get("plan-review")?.kind).toBe("optional-group");
+    expect(byId.get("plan-review")?.column).toBe("in-progress");
+    expect(planReviewInnerConfig(ir)).toMatchObject({
+      toolMode: "readonly",
+      gateMode: "advisory",
+    });
     expect(byId.get("parse")?.column).toBe("in-progress");
     expect(byId.get("steps")?.column).toBe("in-progress");
     // U6: the legacy `workflow-step` seam is replaced by the pre-merge
@@ -344,7 +364,7 @@ describe("built-in workflows", () => {
       gateMode: "advisory",
       requiresBrowser: true,
     });
-    expect(byId.get("review")?.column).toBe("in-review");
+    expect(byId.get("review")).toBeUndefined();
     // Merge is the native primitive region (FN-6035), placed in in-review.
     expect(byId.get("merge")).toBeUndefined();
     expect(byId.get("merge-gate")?.column).toBe("in-review");
@@ -686,11 +706,15 @@ describe("built-in workflows", () => {
     expect(ce.ir.edges.some((edge) => edge.from === "code-review" && edge.to === "commit-pr")).toBe(true);
   });
 
-  it("other built-in workflows retain their generic review nodes", () => {
+  it("non-default coding built-ins retain their generic review nodes", () => {
     const coding = getBuiltinWorkflow("builtin:coding")!;
+    const legacy = getBuiltinWorkflow("builtin:legacy-coding")!;
+    const stepwise = getBuiltinWorkflow("builtin:stepwise-coding")!;
     const reviewHeavy = getBuiltinWorkflow("builtin:review-heavy")!;
 
-    expect(coding.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
+    expect(coding.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(false);
+    expect(legacy.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
+    expect(stepwise.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
     expect(reviewHeavy.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
   });
 
@@ -788,13 +812,14 @@ describe("built-in workflows", () => {
       const coding = getBuiltinWorkflow("builtin:coding");
       const plan = coding?.ir.nodes.find((node) => node.id === "plan");
       const steps = coding?.ir.nodes.find((node) => node.id === "steps");
-      const review = coding?.ir.nodes.find((node) => node.id === "review");
+      const codeReview = coding?.ir.nodes.find((node) => node.id === "code-review");
       const legacy = getBuiltinWorkflow("builtin:legacy-coding");
       const legacyExecute = legacy?.ir.nodes.find((node) => node.id === "execute");
 
       expect((plan?.config as { prompt?: string } | undefined)?.prompt).toContain("You are a task specification agent");
       expect(steps?.kind).toBe("foreach");
-      expect((review?.config as { prompt?: string } | undefined)?.prompt).toContain("You are an independent code and plan reviewer");
+      expect(codeReview?.kind).toBe("optional-group");
+      expect(coding?.ir.edges.some((edge) => edge.from === "code-review" && edge.to === "merge-gate")).toBe(true);
       expect((legacyExecute?.config as { prompt?: string } | undefined)?.prompt).toContain("You are a task execution agent");
       // No `merge` seam node post-FN-6035 — merge runs as native primitives.
       expect(coding?.ir.nodes.find((node) => node.id === "merge")).toBeUndefined();
@@ -811,13 +836,14 @@ describe("built-in workflows", () => {
       // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — `selectTaskWorkflow` no longer
       // materializes legacy `workflow_steps` rows; it seeds `enabledWorkflowSteps` with the
       // workflow's DEFAULT-ON optional-group node ids, exactly matching the create-time path
-      // (a task that SELECTS builtin:coding now enables `code-review` just like one CREATED
-      // with builtin:coding — previously select returned [] and silently skipped the gate).
+      // (a task that SELECTS builtin:coding now enables default-on optional groups just
+      // like one CREATED with builtin:coding — previously select returned [] and silently
+      // skipped the gate).
       const expectedGroups: Record<string, string[]> = {
-        "builtin:coding": ["code-review"],
+        "builtin:coding": ["plan-review", "code-review"],
         "builtin:legacy-coding": ["code-review"],
         "builtin:marketing": [],
-        "builtin:stepwise-coding": ["code-review"],
+        "builtin:stepwise-coding": ["plan-review", "code-review"],
       };
       for (const workflowId of ["builtin:coding", "builtin:legacy-coding", "builtin:marketing", "builtin:stepwise-coding"]) {
         const task = await store.createTask({ description: `select ${workflowId}`, enabledWorkflowSteps: [] });
@@ -831,15 +857,15 @@ describe("built-in workflows", () => {
       }
     });
 
-    it("create-time branching built-in workflowId records selection and seeds the default-on code-review group", async () => {
+    it("create-time branching built-in workflowId records selection and seeds the default-on review groups", async () => {
       const task = await store.createTask({ description: "explicit builtin coding", workflowId: "builtin:coding" });
 
       const detail = await store.getTask(task.id);
-      // FNXC:CodeReviewStep — builtin:coding carries the DEFAULT-ON `code-review`
-      // optional-group, so the explicit-workflow create path seeds it into the task's
-      // enabledWorkflowSteps (and records it in the selection).
-      expect(detail.enabledWorkflowSteps ?? []).toEqual(["code-review"]);
-      expect(store.getTaskWorkflowSelection(task.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
+      // FNXC:PlanReviewStep/FNXC:CodeReviewStep — builtin:coding carries DEFAULT-ON
+      // `plan-review` and `code-review` optional groups, so the explicit-workflow
+      // create path seeds them into the task's enabledWorkflowSteps.
+      expect(detail.enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
+      expect(store.getTaskWorkflowSelection(task.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["plan-review", "code-review"] });
     });
 
     it("a task can disable code-review by creating with explicit enabledWorkflowSteps excluding it", async () => {
@@ -850,14 +876,14 @@ describe("built-in workflows", () => {
       const task = await store.createTask({
         description: "coding without code review",
         workflowId: "builtin:coding",
-        enabledWorkflowSteps: ["browser-verification"],
+        enabledWorkflowSteps: ["plan-review", "browser-verification"],
       });
       const detail = await store.getTask(task.id);
       expect(detail.enabledWorkflowSteps ?? []).not.toContain("code-review");
-      expect(detail.enabledWorkflowSteps ?? []).toEqual(["browser-verification"]);
+      expect(detail.enabledWorkflowSteps ?? []).toEqual(["plan-review", "browser-verification"]);
       expect(store.getTaskWorkflowSelection(task.id)).toEqual({
         workflowId: "builtin:coding",
-        stepIds: ["browser-verification"],
+        stepIds: ["plan-review", "browser-verification"],
       });
     });
 
@@ -865,13 +891,13 @@ describe("built-in workflows", () => {
       const task = await store.createTask({
         description: "stepwise with toggles",
         workflowId: "builtin:stepwise-coding",
-        enabledWorkflowSteps: ["code-review"],
+        enabledWorkflowSteps: ["plan-review", "code-review"],
       });
 
-      expect((await store.getTask(task.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
+      expect((await store.getTask(task.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
       expect(store.getTaskWorkflowSelection(task.id)).toEqual({
         workflowId: "builtin:stepwise-coding",
-        stepIds: ["code-review"],
+        stepIds: ["plan-review", "code-review"],
       });
     });
 
@@ -894,15 +920,15 @@ describe("built-in workflows", () => {
         {
           description: "reserved stepwise with toggles",
           workflowId: "builtin:stepwise-coding",
-          enabledWorkflowSteps: ["code-review"],
+          enabledWorkflowSteps: ["plan-review", "code-review"],
         },
         { taskId: "reserved-stepwise-with-toggles" },
       );
 
-      expect((await store.getTask(task.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
+      expect((await store.getTask(task.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
       expect(store.getTaskWorkflowSelection(task.id)).toEqual({
         workflowId: "builtin:stepwise-coding",
-        stepIds: ["code-review"],
+        stepIds: ["plan-review", "code-review"],
       });
     });
 
@@ -911,35 +937,34 @@ describe("built-in workflows", () => {
         description: "implicit builtin default",
       });
 
-      // FNXC:CodeReviewStep — builtin:coding/stepwise are interpreter-deferred (they
+      // FNXC:PlanReviewStep/FNXC:CodeReviewStep — builtin:coding/stepwise are interpreter-deferred (they
       // carry optional-group nodes), so DEFAULT-workflow materialization records no legacy
-      // WorkflowStep rows. They DO carry the DEFAULT-ON `code-review` optional-group, so
-      // the project-default create path now seeds `code-review` into enabledWorkflowSteps
-      // and records a selection (mirroring the explicit-workflow path) — that is how
-      // default-on actually takes effect. browser-verification stays off (defaultOn:false).
+      // WorkflowStep rows. They DO carry DEFAULT-ON optional-group ids, so the project-default
+      // create path now seeds those ids into enabledWorkflowSteps and records a selection
+      // (mirroring the explicit-workflow path). browser-verification stays off (defaultOn:false).
       await store.setDefaultWorkflowId("builtin:coding");
       const codingTask = await store.createTask({ description: "default builtin coding" });
-      expect((await store.getTask(codingTask.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
-      expect(store.getTaskWorkflowSelection(codingTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
+      expect((await store.getTask(codingTask.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
+      expect(store.getTaskWorkflowSelection(codingTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["plan-review", "code-review"] });
 
       const reservedCodingTask = await store.createTaskWithReservedId(
         { description: "reserved default builtin coding" },
         { taskId: "reserved-default-builtin-coding" },
       );
-      expect((await store.getTask(reservedCodingTask.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
-      expect(store.getTaskWorkflowSelection(reservedCodingTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
+      expect((await store.getTask(reservedCodingTask.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
+      expect(store.getTaskWorkflowSelection(reservedCodingTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["plan-review", "code-review"] });
 
       await store.setDefaultWorkflowId("builtin:stepwise-coding");
       const stepwiseTask = await store.createTask({ description: "default builtin stepwise" });
-      expect((await store.getTask(stepwiseTask.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
-      expect(store.getTaskWorkflowSelection(stepwiseTask.id)).toEqual({ workflowId: "builtin:stepwise-coding", stepIds: ["code-review"] });
+      expect((await store.getTask(stepwiseTask.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
+      expect(store.getTaskWorkflowSelection(stepwiseTask.id)).toEqual({ workflowId: "builtin:stepwise-coding", stepIds: ["plan-review", "code-review"] });
 
       const reservedStepwiseTask = await store.createTaskWithReservedId(
         { description: "reserved default builtin stepwise" },
         { taskId: "reserved-default-builtin-stepwise" },
       );
-      expect((await store.getTask(reservedStepwiseTask.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
-      expect(store.getTaskWorkflowSelection(reservedStepwiseTask.id)).toEqual({ workflowId: "builtin:stepwise-coding", stepIds: ["code-review"] });
+      expect((await store.getTask(reservedStepwiseTask.id)).enabledWorkflowSteps ?? []).toEqual(["plan-review", "code-review"]);
+      expect(store.getTaskWorkflowSelection(reservedStepwiseTask.id)).toEqual({ workflowId: "builtin:stepwise-coding", stepIds: ["plan-review", "code-review"] });
     });
 
     it("rejects selecting the PR lifecycle fragment for a task", async () => {
