@@ -503,6 +503,34 @@ describe("onboarding flow integration", () => {
       expect(screen.getByTestId("claude-cli-provider-card")).toHaveAttribute("data-authenticated", "false");
     });
 
+    it("renders dual Anthropic OAuth and API-key controls in onboarding", async () => {
+      mockFetchAuthStatus.mockResolvedValue({
+        providers: [
+          { id: "anthropic", name: "Anthropic", authenticated: false, type: "oauth", supportsApiKey: true },
+          { id: "openai", name: "OpenAI", authenticated: false, type: "api_key" },
+        ],
+      });
+
+      renderModal();
+
+      await waitFor(() => {
+        expect(screen.getByTestId("onboarding-apikey-input-anthropic")).toBeInTheDocument();
+      });
+
+      const anthropicCard = screen.getByTestId("onboarding-provider-card-anthropic");
+      expect(within(anthropicCard).getByRole("button", { name: "Login" })).toBeInTheDocument();
+      expect(screen.getByTestId("onboarding-apikey-input-openai")).toBeInTheDocument();
+
+      fireEvent.change(screen.getByTestId("onboarding-apikey-input-anthropic"), {
+        target: { value: "sk-ant-api03-flow-test" },
+      });
+      fireEvent.click(screen.getByTestId("onboarding-apikey-save-anthropic"));
+
+      await waitFor(() => {
+        expect(mockSaveApiKey).toHaveBeenCalledWith("anthropic", "sk-ant-api03-flow-test");
+      });
+    });
+
     it("still progresses to later onboarding steps after interacting with the sectioned provider UI", async () => {
       mockFetchAuthStatus.mockResolvedValue({
         providers: [

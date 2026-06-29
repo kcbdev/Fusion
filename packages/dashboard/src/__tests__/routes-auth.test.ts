@@ -848,6 +848,61 @@ describe("GET /auth/status", () => {
     expect(openrouter.type).toBe("api_key");
   });
 
+  it("marks an OAuth provider as supporting API keys when provider ids collide", async () => {
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (authStorage.hasApiKey as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "anthropic");
+    (authStorage.get as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => (
+      provider === "anthropic" ? { type: "api_key", key: "sk-ant-api03-abcdef1234" } : undefined
+    ));
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    const anthropicProviders = res.body.providers.filter((p: any) => p.id === "anthropic");
+    expect(anthropicProviders).toHaveLength(1);
+    expect(anthropicProviders[0]).toMatchObject({
+      id: "anthropic",
+      name: "Anthropic",
+      authenticated: true,
+      type: "oauth",
+      supportsApiKey: true,
+      keyHint: "sk-•••••1234",
+      requiresManualCode: true,
+    });
+  });
+
+  it("preserves OAuth authentication while surfacing a stored dual-provider API key", async () => {
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "anthropic");
+    (authStorage.hasApiKey as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "anthropic");
+    (authStorage.get as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => (
+      provider === "anthropic" ? { type: "api_key", key: "sk-ant-api03-oauthandkey" } : undefined
+    ));
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    const anthropicProviders = res.body.providers.filter((p: any) => p.id === "anthropic");
+    expect(anthropicProviders).toHaveLength(1);
+    expect(anthropicProviders[0]).toMatchObject({
+      authenticated: true,
+      type: "oauth",
+      supportsApiKey: true,
+      keyHint: "sk-•••••dkey",
+    });
+  });
+
   it("reports research API-key providers with type api_key", async () => {
     (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
       { id: "tavily", name: "Tavily" },
@@ -2103,6 +2158,21 @@ describe("POST /auth/api-key", () => {
 
     expect(res.status).toBe(200);
     expect(authStorage.setApiKey).toHaveBeenCalledWith("tavily", "tavily-secret");
+  });
+
+  it("saves an Anthropic API key when Anthropic is also an OAuth provider", async () => {
+    (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/api-key", JSON.stringify({
+      provider: "anthropic",
+      apiKey: "  sk-ant-api03-test-key  ",
+    }), { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(authStorage.setApiKey).toHaveBeenCalledWith("anthropic", "sk-ant-api03-test-key");
   });
 
   it("returns 400 when provider is missing", async () => {

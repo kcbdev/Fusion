@@ -122,15 +122,18 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
     expect(providerIds).toContain("opencode-go");
   });
 
-  it("filters opencode-go from API key providers when OAuth provider id collides", () => {
+  it("keeps built-in API key providers when OAuth provider ids collide", () => {
     const fusionAuth = makeAuthStorage();
-    fusionAuth.getOAuthProviders = vi.fn(() => [{ id: "opencode-go", name: "Opencode Go OAuth" }]);
+    fusionAuth.getOAuthProviders = vi.fn(() => [
+      { id: "anthropic", name: "Anthropic OAuth" },
+      { id: "opencode-go", name: "Opencode Go OAuth" },
+    ]);
     const modelRegistry = { getAll: vi.fn(() => []) } as any;
 
     const wrapped = wrapAuthStorageWithApiKeyProviders(fusionAuth, modelRegistry);
     const providerIds = wrapped.getApiKeyProviders().map((provider) => provider.id);
 
-    expect(providerIds).not.toContain("opencode-go");
+    expect(providerIds).toEqual(expect.arrayContaining(["anthropic", "opencode-go"]));
   });
 
   it("reads legacy auth JSON without creating missing files", async () => {
@@ -186,7 +189,7 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
       expect(oauthIds).toContain("github-copilot");
     });
 
-    it("does not duplicate anthropic in getApiKeyProviders when OAuth-backed", () => {
+    it("includes anthropic in getApiKeyProviders when OAuth-backed", () => {
       const fusionAuth = makeAuthStorage();
       fusionAuth.getOAuthProviders = vi.fn(() => [
         { id: "anthropic", name: "Anthropic" },
@@ -196,11 +199,28 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
       const wrapped = wrapAuthStorageWithApiKeyProviders(fusionAuth, modelRegistry);
       const apiKeyProviders = wrapped.getApiKeyProviders();
 
-      const anthropic = apiKeyProviders.find((p) => p.id === "anthropic");
-      expect(anthropic).toBeUndefined();
+      expect(apiKeyProviders).toContainEqual({ id: "anthropic", name: "Anthropic" });
     });
 
-    it("stores anthropic credentials as api_key type", () => {
+    it("keeps only explicit built-ins when a model-registry-derived provider is also OAuth-backed", () => {
+      const fusionAuth = makeAuthStorage();
+      fusionAuth.getOAuthProviders = vi.fn(() => [
+        { id: "openai", name: "OpenAI OAuth" },
+        { id: "github-copilot", name: "GitHub Copilot" },
+      ]);
+      const modelRegistry = { getAll: vi.fn(() => [
+        { provider: "openai", id: "openai/gpt-4o" },
+        { provider: "github-copilot", id: "github-copilot/gpt-4o" },
+      ]) } as any;
+
+      const wrapped = wrapAuthStorageWithApiKeyProviders(fusionAuth, modelRegistry);
+      const apiKeyProviders = wrapped.getApiKeyProviders();
+
+      expect(apiKeyProviders.some((p) => p.id === "openai")).toBe(false);
+      expect(apiKeyProviders.some((p) => p.id === "github-copilot")).toBe(false);
+    });
+
+    it("round-trips anthropic API key credentials", async () => {
       const fusionAuth = makeAuthStorage();
       fusionAuth.getOAuthProviders = vi.fn(() => [
         { id: "anthropic", name: "Anthropic" },
@@ -214,20 +234,15 @@ describe("wrapAuthStorageWithApiKeyProviders", () => {
         type: "api_key",
         key: "sk-ant-api03-test-key",
       });
-    });
-
-    it("detects anthropic as authenticated via hasApiKey after storing API key", () => {
-      const fusionAuth = makeAuthStorage({
-        anthropic: { type: "api_key", key: "sk-ant-api03-test" },
-      });
-      fusionAuth.getOAuthProviders = vi.fn(() => [
-        { id: "anthropic", name: "Anthropic" },
-      ]);
-      const modelRegistry = { getAll: vi.fn(() => []) } as any;
-
-      const wrapped = wrapAuthStorageWithApiKeyProviders(fusionAuth, modelRegistry);
-
       expect(wrapped.hasApiKey("anthropic")).toBe(true);
+      expect(await wrapped.getApiKey("anthropic")).toBe("sk-ant-api03-test-key");
+      expect(wrapped.get("anthropic")).toEqual({ type: "api_key", key: "sk-ant-api03-test-key" });
+
+      wrapped.clearApiKey("anthropic");
+
+      expect(fusionAuth.remove).toHaveBeenCalledWith("anthropic");
+      expect(wrapped.hasApiKey("anthropic")).toBe(false);
+      expect(await wrapped.getApiKey("anthropic")).toBeUndefined();
     });
   });
 

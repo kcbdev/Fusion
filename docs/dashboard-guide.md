@@ -562,6 +562,8 @@ For Claude/Anthropic OAuth credentials, the same `/auth/status` poll also attemp
 
 If the OAuth credential has no refresh token, the refresh request fails, or the provider is not Anthropic, the provider stays expired and the banner remains visible. Re-authenticate with manual re-login from **Settings → Authentication** or Model Onboarding.
 
+Anthropic also supports a raw `ANTHROPIC_API_KEY` from the same provider card in **Settings → Authentication** and Model Onboarding, so operators can use the API-key row without removing the OAuth sign-in path. The dashboard only displays masked key hints after a key is saved.
+
 ## Smart Pull
 
 Smart Pull is a one-shot pull workflow that keeps local work safe while advancing your checked-out integration branch.

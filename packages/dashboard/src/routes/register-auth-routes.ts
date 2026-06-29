@@ -272,6 +272,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         type: "oauth" | "api_key" | "cli";
         expired?: boolean;
         keyHint?: string;
+        supportsApiKey?: boolean;
         loginInProgress?: boolean;
         requiresManualCode?: boolean;
       }[] = await Promise.all(oauthProviders.map(async (p) => {
@@ -306,14 +307,26 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       if (storage.getApiKeyProviders) {
         const apiKeyProviders = storage.getApiKeyProviders();
         for (const p of apiKeyProviders) {
-          // Skip if already listed as an OAuth provider (avoid duplicates)
-          if (providers.some((existing) => existing.id === p.id)) continue;
           let keyHint: string | undefined;
           if (storage.get) {
             const cred = storage.get(p.id);
             if (cred?.type === "api_key" && cred?.key) {
               keyHint = maskApiKey(cred.key);
             }
+          }
+          const existing = providers.find((provider) => provider.id === p.id);
+          if (existing) {
+            /*
+            FNXC:ProviderAuth 2026-06-28-15:58:
+            Anthropic can be authenticated by either OAuth or `ANTHROPIC_API_KEY`, so `/auth/status` must expose one dual-auth card instead of duplicating the provider or hiding the key row.
+            Mark API-key-only credentials authenticated here because settings groups cards solely by `authenticated`.
+            */
+            existing.supportsApiKey = true;
+            existing.keyHint = keyHint;
+            if (!existing.authenticated && storage.hasApiKey) {
+              existing.authenticated = storage.hasApiKey(p.id);
+            }
+            continue;
           }
           providers.push({
             id: p.id,

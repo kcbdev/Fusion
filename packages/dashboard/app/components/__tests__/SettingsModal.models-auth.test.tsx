@@ -16,6 +16,7 @@ import {
   mockLogoutProvider,
   mockCancelProviderLogin,
   mockSaveApiKey,
+  mockClearApiKey,
   mockSubmitProviderManualCode,
   mockFetchModels,
   mockFetchWorkflow,
@@ -91,6 +92,7 @@ vi.mock("../../api", async (importOriginal) => {
     logoutProvider: (...args: unknown[]) => mockLogoutProvider(...args),
     cancelProviderLogin: (...args: unknown[]) => mockCancelProviderLogin(...args),
     saveApiKey: (...args: unknown[]) => mockSaveApiKey(...args),
+    clearApiKey: (...args: unknown[]) => mockClearApiKey(...args),
     submitProviderManualCode: (...args: unknown[]) => mockSubmitProviderManualCode(...args),
     fetchModels: (...args: unknown[]) => mockFetchModels(...args),
     fetchWorkflow: (...args: unknown[]) => mockFetchWorkflow(...args),
@@ -1354,6 +1356,55 @@ describe("SettingsModal", () => {
 
       await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(addToast).toHaveBeenCalledWith(expect.stringContaining("manually"), "error");
+    });
+
+    it("renders dual Anthropic OAuth and API-key controls in Authentication settings", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [{ id: "anthropic", name: "Anthropic", authenticated: false, type: "oauth", supportsApiKey: true }],
+      });
+
+      render(<SettingsModal onClose={noop} addToast={vi.fn()} />);
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Authentication" }));
+
+      const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
+      expect(within(anthropicCard).getByRole("button", { name: "Login" })).toBeInTheDocument();
+      await settingsModalUser.type(within(anthropicCard).getByPlaceholderText("Enter API key"), "sk-ant-api03-settings");
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Save" }));
+
+      expect(mockSaveApiKey).toHaveBeenCalledWith("anthropic", "sk-ant-api03-settings");
+    });
+
+    it("renders Login and Clear for an Anthropic API-key-only card", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [{ id: "anthropic", name: "Anthropic", authenticated: false, type: "oauth", supportsApiKey: true, keyHint: "sk-•••••1234" }],
+      });
+
+      render(<SettingsModal onClose={noop} addToast={vi.fn()} />);
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Authentication" }));
+
+      const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
+      expect(within(anthropicCard).getByRole("button", { name: "Login" })).toBeInTheDocument();
+      expect(within(anthropicCard).queryByRole("button", { name: "Logout" })).not.toBeInTheDocument();
+      expect(within(anthropicCard).getByText("Key: sk-•••••1234")).toBeInTheDocument();
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Clear" }));
+
+      expect(mockClearApiKey).toHaveBeenCalledWith("anthropic");
+    });
+
+    it("renders Clear beside OAuth controls for stored Anthropic API keys", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [{ id: "anthropic", name: "Anthropic", authenticated: true, type: "oauth", supportsApiKey: true, keyHint: "sk-•••••dkey" }],
+      });
+
+      render(<SettingsModal onClose={noop} addToast={vi.fn()} />);
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Authentication" }));
+
+      const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
+      expect(within(anthropicCard).getByRole("button", { name: "Logout" })).toBeInTheDocument();
+      expect(within(anthropicCard).getByText("Key: sk-•••••dkey")).toBeInTheDocument();
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Clear" }));
+
+      expect(mockClearApiKey).toHaveBeenCalledWith("anthropic");
     });
 
     it("scrolls settings content to top after API key save succeeds", async () => {

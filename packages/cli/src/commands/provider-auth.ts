@@ -42,6 +42,7 @@ interface ReadFallbackAuthStorage {
 type StoredCredential = StoredAuthCredential;
 
 const BUILT_IN_API_KEY_PROVIDERS: Array<{ id: string; name: string }> = [
+  { id: "anthropic", name: "Anthropic" },
   { id: "brave", name: "Brave Search" },
   { id: "kimi-coding", name: "Kimi" },
   { id: "minimax", name: "Minimax" },
@@ -97,9 +98,12 @@ export function wrapAuthStorageWithApiKeyProviders(
       const providers = new Map<string, string>();
 
       for (const provider of BUILT_IN_API_KEY_PROVIDERS) {
-        if (!oauthProviderIds.has(provider.id)) {
-          providers.set(provider.id, provider.name);
-        }
+        /*
+        FNXC:ProviderAuth 2026-06-28-15:53:
+        Anthropic supports raw API-key credentials next to its OAuth-capable provider surface, so built-in API-key providers must remain visible even when their id also appears in the OAuth provider list.
+        Keep OAuth-id exclusion only for registry-derived providers to avoid accidentally reclassifying unrelated OAuth providers while preserving explicit API-key targets.
+        */
+        providers.set(provider.id, provider.name);
       }
 
       for (const model of modelRegistry.getAll()) {

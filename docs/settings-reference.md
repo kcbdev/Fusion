@@ -708,6 +708,10 @@ Fusion automatically refreshes Claude/Anthropic OAuth credentials before reporti
 
 Manual re-login is still required when no refresh token is stored, the refresh request fails, or the expired OAuth credential belongs to a non-Anthropic provider. In those cases the credential remains expired, `oauth-token-expired` notifications/startup warnings may fire subject to their 12-hour provider throttle, and users should re-authenticate from **Settings → Authentication** or Model Onboarding.
 
+### Anthropic API-key authentication
+
+Anthropic can be connected with a raw API key from both Model Onboarding and **Settings → Authentication**. Anthropic appears as a dual-auth provider: the same Anthropic card keeps the OAuth Login/Logout controls and also shows an API-key row for `ANTHROPIC_API_KEY`, with only masked key hints returned by `/api/auth/status`.
+
 ### Authentication troubleshooting (mobile OAuth fallback)
 
 #### `/api/auth/login` response shape for device-code providers

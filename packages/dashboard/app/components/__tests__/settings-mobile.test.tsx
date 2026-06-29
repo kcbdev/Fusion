@@ -47,7 +47,7 @@ vi.mock("../../api", () => ({
   fetchSettingsByScope: vi.fn(() => Promise.resolve({ global: { ...defaultSettings }, project: {} })),
   updateSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   updateGlobalSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
-  fetchAuthStatus: vi.fn(() => Promise.resolve({ providers: [{ id: "anthropic", name: "Anthropic", authenticated: false }] })),
+  fetchAuthStatus: vi.fn(() => Promise.resolve({ providers: [{ id: "anthropic", name: "Anthropic", authenticated: false, type: "oauth", supportsApiKey: true }] })),
   loginProvider: vi.fn(() => Promise.resolve({ url: "https://auth.example.com/login" })),
   logoutProvider: vi.fn(() => Promise.resolve({ success: true })),
   saveApiKey: vi.fn(() => Promise.resolve({ success: true })),
@@ -373,6 +373,20 @@ describe("SettingsModal mobile adaptations", () => {
     const globalBannerIcon = globalBanner!.querySelector(".settings-scope-icon svg");
     expect(globalBannerIcon).toBeTruthy();
     expect(getByText("These settings are shared across all your Fusion projects.")).toBeTruthy();
+  });
+
+  it("renders dual Anthropic Authentication controls on mobile", async () => {
+    mockSettingsViewport(true);
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    const user = userEvent.setup();
+    const { findByTestId, getByLabelText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+    await user.selectOptions(getByLabelText("Settings Section"), "authentication");
+
+    const card = (await findByTestId("auth-provider-icon-anthropic")).closest(".auth-provider-card") as HTMLElement;
+    expect(within(card).getByRole("button", { name: "Login" })).toBeTruthy();
+    expect(within(card).getByPlaceholderText("Enter API key")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Save" })).toBeTruthy();
   });
 
   it("renders notification provider cards responsively on mobile", async () => {

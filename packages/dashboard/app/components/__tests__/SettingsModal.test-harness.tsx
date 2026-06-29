@@ -33,6 +33,7 @@ export const mockLoginProvider = vi.fn();
 export const mockLogoutProvider = vi.fn();
 export const mockCancelProviderLogin = vi.fn();
 export const mockSaveApiKey = vi.fn();
+export const mockClearApiKey = vi.fn();
 export const mockSubmitProviderManualCode = vi.fn();
 export const mockFetchModels = vi.fn();
 export const mockFetchWorkflow = vi.fn();
@@ -280,6 +281,7 @@ export function installSettingsModalEnv() {
     mockDeleteCustomProvider.mockResolvedValue(undefined);
     mockCancelProviderLogin.mockResolvedValue({ success: true, cancelled: true });
     mockSaveApiKey.mockResolvedValue(undefined);
+    mockClearApiKey.mockResolvedValue({ success: true });
     mockSubmitProviderManualCode.mockResolvedValue({ success: true, submitted: true });
     mockTestNotification.mockResolvedValue({ success: true });
     mockFetchBackups.mockResolvedValue({ backups: [], totalSize: 0 });

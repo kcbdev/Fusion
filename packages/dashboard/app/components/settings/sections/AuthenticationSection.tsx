@@ -79,6 +79,77 @@ export function AuthenticationSection({ auth }: AuthenticationSectionProps) {
         (claudeCliProvider && !claudeCliProvider.authenticated) ||
         (cursorCliProvider && !cursorCliProvider.authenticated) ||
         (llamaCppProvider && !llamaCppProvider.authenticated);
+    const providerSupportsApiKey = (provider: AuthProvider) => provider.type === "api_key" || provider.supportsApiKey === true;
+    const renderApiKeySection = (provider: AuthProvider) => (<div className="auth-apikey-section">
+      <div className="auth-apikey-input-row">
+        <input type="password" className="auth-apikey-input" placeholder={t("settings.authentication.enterAPIKey", "Enter API key")} value={apiKeyInputs[provider.id] ?? ""} onChange={(e) => setApiKeyInputs((prev) => ({ ...prev, [provider.id]: e.target.value }))} disabled={authActionInProgress === provider.id}/>
+        {provider.keyHint && !apiKeyInputs[provider.id] ? (<button className="btn btn-sm" onClick={() => handleClearApiKey(provider.id)} disabled={authActionInProgress === provider.id}>
+            {t("settings.auth.clearKey", "Clear")}
+          </button>) : (<button className="btn btn-primary btn-sm" onClick={() => handleSaveApiKey(provider.id)} disabled={authActionInProgress === provider.id}>
+            {t("settings.actions.save", "Save")}
+          </button>)}
+      </div>
+      {authActionInProgress === provider.id && (<small className="auth-apikey-progress">{t("settings.auth.savingKey", "Saving…")}</small>)}
+      {apiKeyErrors[provider.id] && (<small className="auth-apikey-error">{apiKeyErrors[provider.id]}</small>)}
+      {(provider.id === "opencode" || provider.id === "opencode-go") && opencodeApiKeyRefreshStatus[provider.id] && (<small className={opencodeApiKeyRefreshStatus[provider.id].tone === "error" ? "form-error" : "text-muted"}>
+          {opencodeApiKeyRefreshStatus[provider.id].message}
+        </small>)}
+    </div>);
+    const renderAuthenticatedOAuthActions = (provider: AuthProvider) => (<div>
+      {authActionInProgress === provider.id ? (<button className="btn btn-sm" disabled>
+          {t("settings.auth.loggingOut", "Logging out…")}
+        </button>) : provider.loginInProgress ? (<div className="auth-provider-actions-row">
+          <button className="btn btn-sm" disabled>
+            {t("settings.auth.waitingForLogin", "Waiting for login…")}
+          </button>
+          <button className="btn btn-sm" onClick={() => handleCancelLogin(provider.id)}>
+            {t("settings.actions.cancel", "Cancel")}
+          </button>
+        </div>) : (<button className="btn btn-sm" onClick={() => handleLogout(provider.id)}>
+          {t("settings.auth.logout", "Logout")}
+        </button>)}
+    </div>);
+    const renderAvailableOAuthActions = (provider: AuthProvider) => (<div>
+      {authActionInProgress === provider.id ? (<button className="btn btn-sm" disabled>
+          {t("settings.auth.waitingForLogin", "Waiting for login…")}
+        </button>) : provider.loginInProgress ? (<div className="auth-provider-actions-row">
+          <button className="btn btn-sm" disabled>
+            {t("settings.auth.waitingForLogin", "Waiting for login…")}
+          </button>
+          <button className="btn btn-sm" onClick={() => handleCancelLogin(provider.id)}>
+            {t("settings.actions.cancel", "Cancel")}
+          </button>
+        </div>) : (<button className="btn btn-primary btn-sm" onClick={() => handleLogin(provider.id)}>
+          {t("settings.auth.login", "Login")}
+        </button>)}
+      {provider.id === "github-copilot" && deviceCodes[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<div className="auth-device-code-panel" data-testid={`auth-device-code-${provider.id}`}>
+          <strong>{t("settings.auth.enterCodeOnGitHub", "Enter this code on GitHub")}</strong>
+          <div className="auth-device-code-pill">{deviceCodes[provider.id].userCode}</div>
+          <div className="auth-provider-actions-row">
+            <button className="btn btn-sm" onClick={() => {
+            void (async () => {
+                const copied = await copyTextToClipboard(deviceCodes[provider.id].userCode);
+                if (copied) {
+                    addToast(t("settings.auth.copiedCodeToClipboard", "Copied code to clipboard"), "success");
+                    return;
+                }
+                addToast(t("settings.auth.failedToCopyCode", "Failed to copy code — copy it manually from the box above"), "error");
+            })();
+        }}>
+              {t("settings.auth.copyCode", "Copy code")}
+            </button>
+            <button className="btn btn-sm" onClick={() => window.open(appendTokenQuery(deviceCodes[provider.id].verificationUri), "_blank")}>
+              {t("settings.auth.openGitHub", "Open GitHub")}
+            </button>
+          </div>
+        </div>)}
+      {loginInstructions[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<LoginInstructions instructions={loginInstructions[provider.id]} data-testid={`auth-login-instructions-${provider.id}`}/>)}
+      {manualCodeConfigs[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<OAuthManualCodeForm value={manualCodeInputs[provider.id] ?? ""} onChange={(value) => setManualCodeInputs((prev) => ({ ...prev, [provider.id]: value }))} onSubmit={() => void handleSubmitManualCode(provider.id)} prompt={manualCodeConfigs[provider.id].prompt} placeholder={manualCodeConfigs[provider.id].placeholder} helpText={manualCodeConfigs[provider.id].helpText} disabled={manualCodeSubmitInProgress === provider.id} submitLabel={manualCodeSubmitInProgress === provider.id ? "Submitting…" : "Submit code"} data-testid={`auth-manual-code-${provider.id}`}/>)}</div>);
+    /*
+    FNXC:ProviderAuth 2026-06-28-16:02:
+    A provider can be dual-auth: Anthropic keeps its OAuth login controls while also accepting an `ANTHROPIC_API_KEY` stored through the same API-key row as standalone providers.
+    Render both intentional controls on one card so Settings does not create duplicate provider cards or orphaned action wrappers.
+    */
     return (<>
       <h4 className="settings-section-heading">{t("settings.auth.title", "Authentication")}</h4>
       {authLoading ? (<div className="settings-empty-state"><LoadingSpinner label={t("settings.auth.loadingStatus", "Loading authentication status…")} /></div>) : authProviders.length === 0 ? (<div className="settings-empty-state settings-muted">
@@ -107,34 +178,8 @@ export function AuthenticationSection({ auth }: AuthenticationSectionProps) {
                       </span>
                       {provider.authenticated && provider.keyHint && (<span className="auth-key-hint">{t("settings.authentication.key", "Key: ")}{provider.keyHint}</span>)}
                     </div>
-                    {provider.type === "api_key" ? (<div className="auth-apikey-section">
-                        <div className="auth-apikey-input-row">
-                          <input type="password" className="auth-apikey-input" placeholder={t("settings.authentication.enterAPIKey", "Enter API key")} value={apiKeyInputs[provider.id] ?? ""} onChange={(e) => setApiKeyInputs((prev) => ({ ...prev, [provider.id]: e.target.value }))} disabled={authActionInProgress === provider.id}/>
-                          {provider.authenticated && !apiKeyInputs[provider.id] ? (<button className="btn btn-sm" onClick={() => handleClearApiKey(provider.id)} disabled={authActionInProgress === provider.id}>
-                              {t("settings.auth.clearKey", "Clear")}
-                            </button>) : (<button className="btn btn-primary btn-sm" onClick={() => handleSaveApiKey(provider.id)} disabled={authActionInProgress === provider.id}>
-                              {t("settings.actions.save", "Save")}
-                            </button>)}
-                        </div>
-                        {authActionInProgress === provider.id && (<small className="auth-apikey-progress">{t("settings.auth.savingKey", "Saving…")}</small>)}
-                        {apiKeyErrors[provider.id] && (<small className="auth-apikey-error">{apiKeyErrors[provider.id]}</small>)}
-                        {(provider.id === "opencode" || provider.id === "opencode-go") && opencodeApiKeyRefreshStatus[provider.id] && (<small className={opencodeApiKeyRefreshStatus[provider.id].tone === "error" ? "form-error" : "text-muted"}>
-                            {opencodeApiKeyRefreshStatus[provider.id].message}
-                          </small>)}
-                      </div>) : (<div>
-                        {authActionInProgress === provider.id ? (<button className="btn btn-sm" disabled>
-                            {t("settings.auth.loggingOut", "Logging out…")}
-                          </button>) : provider.loginInProgress ? (<div className="auth-provider-actions-row">
-                            <button className="btn btn-sm" disabled>
-                              {t("settings.auth.waitingForLogin", "Waiting for login…")}
-                            </button>
-                            <button className="btn btn-sm" onClick={() => handleCancelLogin(provider.id)}>
-                              {t("settings.actions.cancel", "Cancel")}
-                            </button>
-                          </div>) : (<button className="btn btn-sm" onClick={() => handleLogout(provider.id)}>
-                            {t("settings.auth.logout", "Logout")}
-                          </button>)}
-                      </div>)}
+                    {provider.type !== "api_key" && renderAuthenticatedOAuthActions(provider)}
+                    {providerSupportsApiKey(provider) && renderApiKeySection(provider)}
                   </div>
                 </div>))}
             </div>)}
@@ -154,56 +199,10 @@ export function AuthenticationSection({ auth }: AuthenticationSectionProps) {
                       <span data-testid={`auth-status-${provider.id}`} className={`auth-status-badge ${provider.authenticated ? "authenticated" : "not-authenticated"}`}>
                         {t("settings.auth.statusNotConnected", "✗ Not connected")}
                       </span>
+                      {provider.keyHint && (<span className="auth-key-hint">{t("settings.authentication.key", "Key: ")}{provider.keyHint}</span>)}
                     </div>
-                    {provider.type === "api_key" ? (<div className="auth-apikey-section">
-                        <div className="auth-apikey-input-row">
-                          <input type="password" className="auth-apikey-input" placeholder={t("settings.authentication.enterAPIKey", "Enter API key")} value={apiKeyInputs[provider.id] ?? ""} onChange={(e) => setApiKeyInputs((prev) => ({ ...prev, [provider.id]: e.target.value }))} disabled={authActionInProgress === provider.id}/>
-                          <button className="btn btn-primary btn-sm" onClick={() => handleSaveApiKey(provider.id)} disabled={authActionInProgress === provider.id}>
-                            {t("settings.actions.save", "Save")}
-                          </button>
-                        </div>
-                        {authActionInProgress === provider.id && (<small className="auth-apikey-progress">{t("settings.auth.savingKey", "Saving…")}</small>)}
-                        {apiKeyErrors[provider.id] && (<small className="auth-apikey-error">{apiKeyErrors[provider.id]}</small>)}
-                        {(provider.id === "opencode" || provider.id === "opencode-go") && opencodeApiKeyRefreshStatus[provider.id] && (<small className={opencodeApiKeyRefreshStatus[provider.id].tone === "error" ? "form-error" : "text-muted"}>
-                            {opencodeApiKeyRefreshStatus[provider.id].message}
-                          </small>)}
-                      </div>) : (<div>
-                        {authActionInProgress === provider.id ? (<button className="btn btn-sm" disabled>
-                            {t("settings.auth.waitingForLogin", "Waiting for login…")}
-                          </button>) : provider.loginInProgress ? (<div className="auth-provider-actions-row">
-                            <button className="btn btn-sm" disabled>
-                              {t("settings.auth.waitingForLogin", "Waiting for login…")}
-                            </button>
-                            <button className="btn btn-sm" onClick={() => handleCancelLogin(provider.id)}>
-                              {t("settings.actions.cancel", "Cancel")}
-                            </button>
-                          </div>) : (<button className="btn btn-primary btn-sm" onClick={() => handleLogin(provider.id)}>
-                            {t("settings.auth.login", "Login")}
-                          </button>)}
-                        {provider.id === "github-copilot" && deviceCodes[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<div className="auth-device-code-panel" data-testid={`auth-device-code-${provider.id}`}>
-                            <strong>{t("settings.auth.enterCodeOnGitHub", "Enter this code on GitHub")}</strong>
-                            <div className="auth-device-code-pill">{deviceCodes[provider.id].userCode}</div>
-                            <div className="auth-provider-actions-row">
-                              <button className="btn btn-sm" onClick={() => {
-                                void (async () => {
-                                    const copied = await copyTextToClipboard(deviceCodes[provider.id].userCode);
-                                    if (copied) {
-                                        addToast(t("settings.auth.copiedCodeToClipboard", "Copied code to clipboard"), "success");
-                                        return;
-                                    }
-                                    addToast(t("settings.auth.failedToCopyCode", "Failed to copy code — copy it manually from the box above"), "error");
-                                })();
-                            }}>
-                                {t("settings.auth.copyCode", "Copy code")}
-                              </button>
-                              <button className="btn btn-sm" onClick={() => window.open(appendTokenQuery(deviceCodes[provider.id].verificationUri), "_blank")}>
-                                {t("settings.auth.openGitHub", "Open GitHub")}
-                              </button>
-                            </div>
-                          </div>)}
-                        {loginInstructions[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<LoginInstructions instructions={loginInstructions[provider.id]} data-testid={`auth-login-instructions-${provider.id}`}/>)}
-                        {manualCodeConfigs[provider.id] && (provider.loginInProgress || authActionInProgress === provider.id) && (<OAuthManualCodeForm value={manualCodeInputs[provider.id] ?? ""} onChange={(value) => setManualCodeInputs((prev) => ({ ...prev, [provider.id]: value }))} onSubmit={() => void handleSubmitManualCode(provider.id)} prompt={manualCodeConfigs[provider.id].prompt} placeholder={manualCodeConfigs[provider.id].placeholder} helpText={manualCodeConfigs[provider.id].helpText} disabled={manualCodeSubmitInProgress === provider.id} submitLabel={manualCodeSubmitInProgress === provider.id ? "Submitting…" : "Submit code"} data-testid={`auth-manual-code-${provider.id}`}/>)}
-                      </div>)}
+                    {provider.type !== "api_key" && renderAvailableOAuthActions(provider)}
+                    {providerSupportsApiKey(provider) && renderApiKeySection(provider)}
                   </div>
                 </div>))}
             </div>)}
