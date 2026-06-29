@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "../builtin-stepwise-coding-workflow-ir.js";
+import { BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR } from "../builtin-stepwise-final-review-coding-workflow-ir.js";
 import {
   resolveDefaultOnOptionalGroupIds,
   resolveWorkflowOptionalSteps,
@@ -130,6 +131,7 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     ];
     expect(resolveWorkflowOptionalSteps(BUILTIN_CODING_WORKFLOW_IR)).toEqual(expected);
     expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).toEqual(expected);
+    expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR)).toEqual(expected);
   });
 
   it("seeds code-review (default ON) but not browser-verification (default OFF) for the built-ins", () => {
@@ -137,6 +139,7 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     // default: code-review is on, browser-verification is off.
     expect(resolveDefaultOnOptionalGroupIds(BUILTIN_CODING_WORKFLOW_IR)).toEqual(["code-review"]);
     expect(resolveDefaultOnOptionalGroupIds(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).toEqual(["code-review"]);
+    expect(resolveDefaultOnOptionalGroupIds(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR)).toEqual(["code-review"]);
   });
 });
 
