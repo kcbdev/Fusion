@@ -43,6 +43,12 @@ import { runLoop, runOptionalGroup } from "./workflow-graph-loop.js";
 
 export type WorkflowNodeOutcome = "success" | "failure";
 
+export type WorkflowNodeAbortKind = "engine-pause";
+
+export const WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY = "workflow:interruptedNodeId";
+export const WORKFLOW_INTERRUPTED_NODE_ABORT_KIND_CONTEXT_KEY = "workflow:interruptedNodeAbortKind";
+export const WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND: WorkflowNodeAbortKind = "engine-pause";
+
 export interface WorkflowNodeResult {
   outcome: WorkflowNodeOutcome;
   value?: string;
@@ -685,7 +691,7 @@ export class WorkflowGraphExecutor {
           return await traverseChildren(node, result);
         }
 
-        const result = await this.executeNodeWithRetries(node, task, settings, context, ir);
+        const result = await this.executeNodeWithRetries(node, task, settings, context, ir, this.deps.signal);
         if (result.contextPatch) Object.assign(context, result.contextPatch);
         context[`node:${node.id}:outcome`] = result.outcome;
         if (result.value !== undefined) context[`node:${node.id}:value`] = result.value;
@@ -749,6 +755,7 @@ export class WorkflowGraphExecutor {
         settings,
         context,
         ir,
+        this.deps.signal,
       );
       if (result.contextPatch) Object.assign(context, result.contextPatch);
       context[`node:${syntheticMergeNode.id}:outcome`] = result.outcome;
@@ -996,21 +1003,32 @@ export class WorkflowGraphExecutor {
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      // Fail-fast cancellation: a branch aborted mid-retry stops re-trying.
-      if (signal?.aborted) return { outcome: "failure", value: "aborted" };
+      // Fail-fast cancellation: a branch or top-level graph abort mid-retry stops re-trying.
+      if (signal?.aborted) return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
       try {
         const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
         if (pluginResult) {
-          return await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
+          const projected = await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
+          return signal?.aborted || this.isAbortNodeResult(projected)
+            ? this.withEnginePauseAbortContext(node, projected)
+            : projected;
         }
         if (!handler) {
           throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
         }
         const result = await handler(node, { task, settings, context, signal });
-        return await this.publishTaskProjectionFromResult(task.id, node, result);
+        const projected = await this.publishTaskProjectionFromResult(task.id, node, result);
+        return signal?.aborted || this.isAbortNodeResult(projected)
+          ? this.withEnginePauseAbortContext(node, projected)
+          : projected;
       } catch (error) {
+        if (signal?.aborted) return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
         lastError = error;
       }
+    }
+
+    if (signal?.aborted) {
+      return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
     }
 
     return {
@@ -1018,6 +1036,28 @@ export class WorkflowGraphExecutor {
       value: "exception",
       contextPatch: {
         [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
+      },
+    };
+  }
+
+  private isAbortNodeResult(result: WorkflowNodeResult): boolean {
+    return result.outcome === "failure" && result.value === "aborted";
+  }
+
+  private withEnginePauseAbortContext(node: WorkflowIrNode, result: WorkflowNodeResult): WorkflowNodeResult {
+    /*
+    FNXC:WorkflowLifecycle 2026-06-28-18:15:
+    FN-7214 requires engine-pause aborts of in-flight workflow nodes to be re-entrant at the node boundary. Stamp a typed abort marker on the node result so executor recovery can re-run the graph without conflating this interruption with genuine node failures such as REVISE, projection errors, or exceptions.
+    */
+    return {
+      ...result,
+      outcome: "failure",
+      value: result.value ?? "aborted",
+      contextPatch: {
+        ...(result.contextPatch ?? {}),
+        [`node:${node.id}:abortKind`]: WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND,
+        [WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY]: node.id,
+        [WORKFLOW_INTERRUPTED_NODE_ABORT_KIND_CONTEXT_KEY]: WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND,
       },
     };
   }

@@ -7,7 +7,16 @@ import {
   WorkflowCompileError,
 } from "@fusion/core";
 
-import { WorkflowGraphExecutor, type WorkflowGraphExecutorDeps, type WorkflowNodeOutcome, type WorkflowTaskProjection } from "./workflow-graph-executor.js";
+import {
+  WORKFLOW_INTERRUPTED_NODE_ABORT_KIND_CONTEXT_KEY,
+  WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY,
+  WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND,
+  WorkflowGraphExecutor,
+  type WorkflowGraphExecutorDeps,
+  type WorkflowNodeAbortKind,
+  type WorkflowNodeOutcome,
+  type WorkflowTaskProjection,
+} from "./workflow-graph-executor.js";
 import type {
   CodeNodeRunner,
   ForeachActiveContext,
@@ -47,6 +56,10 @@ export interface WorkflowGraphTaskRunResult {
   reason?: string;
   /** Shared graph context after the run (node outcomes/values). */
   context?: Record<string, unknown>;
+  /** Node that was executing when an engine pause/abort interrupted the graph. */
+  interruptedNodeId?: string;
+  /** Typed abort provenance for the interrupted node; absent for genuine node failures. */
+  interruptedAbortKind?: WorkflowNodeAbortKind;
 }
 
 /** The minimal store surface the runner needs — keeps tests fake-friendly. */
@@ -63,6 +76,8 @@ export interface WorkflowGraphTaskRunnerDeps {
   maxRetriesPerNode?: number;
   /** Optional diagnostics hook (audit/log emission). Never throws into the run. */
   onEvent?: (event: { type: "start" | "terminal" | "fallback"; taskId: string; detail: string }) => void;
+  /** Top-level graph abort signal used to classify engine pause/abort interruptions at node boundaries. */
+  signal?: AbortSignal;
   /** Per-branch run-state persistence + resume (U13). Additive; in-memory without it. */
   branchPersistence?: WorkflowBranchPersistence;
   /** Bounds concurrent branch-node execution (U13); omit when the semaphore is
@@ -270,6 +285,7 @@ export class WorkflowGraphTaskRunner {
         recordWorkflowStepResult: this.deps.recordWorkflowStepResult,
         requestPreMergeOptionalStepFix: this.deps.requestPreMergeOptionalStepFix,
         publishTaskProjection: this.deps.publishTaskProjection,
+        signal: this.deps.signal,
         publishTouchedFiles: this.deps.publishTouchedFiles,
         // Single source of truth (KTD-6): prefer the caller-threaded run id so the
         // executor's persistence deps probe/flip rows under the SAME id; fall back
@@ -290,11 +306,19 @@ export class WorkflowGraphTaskRunner {
       }
       const disposition: WorkflowGraphRunDisposition = result.outcome === "success" ? "completed" : "failed";
       this.emit("terminal", task.id, `${definition.id}:${disposition}`);
+      const interruptedNodeId = typeof result.context[WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY] === "string"
+        ? result.context[WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY]
+        : undefined;
+      const interruptedAbortKind = result.context[WORKFLOW_INTERRUPTED_NODE_ABORT_KIND_CONTEXT_KEY] === WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND
+        ? WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND
+        : undefined;
       return {
         disposition,
         outcome: result.outcome,
         visitedNodeIds: result.visitedNodeIds,
         context: result.context,
+        interruptedNodeId,
+        interruptedAbortKind,
       };
     } catch (err) {
       const reason = `interpreter-error: ${err instanceof Error ? err.message : String(err)}`;

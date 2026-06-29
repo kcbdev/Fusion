@@ -37,7 +37,7 @@ import {
   type ForeachActiveContext,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
-import { MERGE_REGION_KINDS } from "./workflow-graph-executor.js";
+import { MERGE_REGION_KINDS, WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND } from "./workflow-graph-executor.js";
 import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
 import type {
   AuditPrimitiveInput,
@@ -1575,6 +1575,8 @@ export class TaskExecutor {
   private activeWorkflowStepSessionSeenSteeringIds = new Map<string, Set<string>>();
   /** Active configured-command abort controllers keyed by task. */
   private activeConfiguredCommandControllers = new Map<string, Set<AbortController>>();
+  /** Active workflow-graph runner abort controllers keyed by task. */
+  private activeWorkflowGraphAbortControllers = new Map<string, AbortController>();
   /**
    * Active CLI agent task sessions per task (U7). Mirrors activeSessions for the
    * cli-agent executor kind so the hard-cancel / abort path can SIGKILL the PTY
@@ -2304,6 +2306,12 @@ export class TaskExecutor {
         controller.abort();
       }
     }
+    const claimedWorkflowGraphController = this.activeWorkflowGraphAbortControllers.get(taskId);
+    if (claimedWorkflowGraphController) {
+      hadActiveSurface = true;
+      this.activeWorkflowGraphAbortControllers.delete(taskId);
+      claimedWorkflowGraphController.abort();
+    }
     const claimedSubagents = this.activeSubagentSessions.has(taskId);
     if (claimedSubagents) {
       hadActiveSurface = true;
@@ -2383,6 +2391,7 @@ export class TaskExecutor {
       ...this.activeStepExecutors.keys(),
       ...this.activeWorkflowStepSessions.keys(),
       ...this.activeConfiguredCommandControllers.keys(),
+      ...this.activeWorkflowGraphAbortControllers.keys(),
       ...this.activeSubagentSessions.keys(),
       ...this.activeCliTaskSessions.keys(),
     ]);
@@ -3013,6 +3022,16 @@ export class TaskExecutor {
           }
           workflowSession.dispose();
           this.deleteActiveWorkflowStepSession(taskId);
+          this.loopRecoveryState.delete(taskId);
+          this.spawnedAgents.delete(taskId);
+          this.stuckAborted.delete(taskId);
+        }
+        for (const [taskId, controller] of this.activeWorkflowGraphAbortControllers) {
+          executorLog.log(`Global pause — aborting workflow graph runner for ${taskId}`);
+          this.markPausedAborted(taskId, "global-pause");
+          this.options.stuckTaskDetector?.untrackTask(taskId);
+          controller.abort();
+          this.activeWorkflowGraphAbortControllers.delete(taskId);
           this.loopRecoveryState.delete(taskId);
           this.spawnedAgents.delete(taskId);
           this.stuckAborted.delete(taskId);
@@ -4313,6 +4332,7 @@ export class TaskExecutor {
     // Claim synchronously before any await so concurrent execute() calls for
     // the same task cannot both enter graph routing (mirrors executingTaskLock).
     this.graphRouting.add(task.id);
+    let graphAbortController: AbortController | undefined;
     try {
       let settings: Settings;
       try {
@@ -4431,6 +4451,8 @@ export class TaskExecutor {
       // the finally below clears it.
       this.graphUnattendedRuns.delete(task.id);
 
+      graphAbortController = new AbortController();
+      this.activeWorkflowGraphAbortControllers.set(task.id, graphAbortController);
       const runner = new WorkflowGraphTaskRunner({
         store: {
           ...this.store,
@@ -4460,6 +4482,7 @@ export class TaskExecutor {
           });
         },
         onEvent: (event) => executorLog.log(`[workflow-graph] ${event.type} ${event.taskId}: ${event.detail}`),
+        signal: graphAbortController.signal,
         // Wire SQLite-backed per-branch persistence in production (#1407): the
         // executor writes each branch's currentNodeId/status to
         // workflow_run_branches so fan-out crash-resume and the U9 badges have
@@ -4582,6 +4605,9 @@ export class TaskExecutor {
         await this.terminateAllChildren(task.id);
       } catch (err) {
         executorLog.warn(`terminateAllChildren failed for graph task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (graphAbortController && this.activeWorkflowGraphAbortControllers.get(task.id) === graphAbortController) {
+        this.activeWorkflowGraphAbortControllers.delete(task.id);
       }
       this.graphRouting.delete(task.id);
       // Clear per-run step-inversion pins (KTD-8: pinned only for the run's life).
@@ -6897,6 +6923,131 @@ export class TaskExecutor {
     return true;
   }
 
+  private async isReentrantPausedAbortedInFlightNode(
+    live: TaskDetail,
+    result: WorkflowGraphTaskRunResult,
+    abortProvenance: "global-pause" | "merge-seam" | "hard-cancel" | "completion-finalize" | undefined,
+    pausedAborted: boolean,
+    userCanceled: boolean,
+  ): Promise<boolean> {
+    /*
+    FNXC:WorkflowLifecycle 2026-06-28-18:32:
+    FN-7214 makes engine-internal pause aborts re-entrant only when the workflow graph reports a typed in-flight node interruption. User pauses, active global pauses, merge/finalize aborts, genuine node failures, autoMerge:false review rows, and exhausted retry budgets must continue through the existing protected failure paths.
+
+    FNXC:WorkflowLifecycle 2026-06-28-21:39:
+    A global engine pause aborts active workflow graph controllers with `global-pause` provenance; after the global pause is lifted, the typed interrupted-node marker is sufficient to re-enter that node. Only active global-pause settings and explicit task/user pauses remain terminal so resume never runs behind an operator-controlled pause.
+    */
+    if (!pausedAborted) return false;
+    if (abortProvenance !== "hard-cancel" && abortProvenance !== "global-pause") return false;
+    if (userCanceled) return false;
+    if (live.paused || live.userPaused === true) return false;
+    if (live.status != null || live.error != null) return false;
+    if (live.column === "done" || live.column === "archived") return false;
+    if (result.interruptedAbortKind !== WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND) return false;
+    if (!result.interruptedNodeId) return false;
+    if (this.isMergeGraphFailure(result.interruptedNodeId)) return false;
+    if (this.isTerminalMergeGraphFailureValue(this.graphFailureValue(result))) return false;
+    if ((live.graphResumeRetryCount ?? 0) >= MAX_TRANSIENT_GRAPH_RESUME_RETRIES) return false;
+    let settings: Settings | undefined;
+    if (abortProvenance === "global-pause" || live.column === "in-review") {
+      try {
+        settings = await this.store.getSettings();
+      } catch {
+        return false;
+      }
+      if (settings.globalPause === true) return false;
+    }
+    if (live.column === "in-review") {
+      if (live.autoMerge === false) return false;
+      if (!settings) return false;
+      const sharedBranchMember = isSharedBranchGroupMemberIntegration(live);
+      if (!sharedBranchMember && !allowsAutoMergeProcessing(live, settings)) return false;
+      if (live.mergeDetails?.mergeConfirmed === true) return false;
+    }
+    return live.column === "todo" || live.column === "in-review" || live.column === "in-progress";
+  }
+
+  private async reenterPausedAbortedWorkflowNode(
+    live: TaskDetail,
+    result: WorkflowGraphTaskRunResult,
+    abortProvenance: "global-pause" | "merge-seam" | "hard-cancel" | "completion-finalize" | undefined,
+  ): Promise<boolean> {
+    const nodeId = result.interruptedNodeId ?? result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
+    const priorRetries = live.graphResumeRetryCount ?? 0;
+    if (priorRetries >= MAX_TRANSIENT_GRAPH_RESUME_RETRIES) return false;
+    const nextRetries = priorRetries + 1;
+    const preservedInReview = live.column === "in-review";
+    this.clearPausedAborted(live.id);
+    this.activeWorktrees.delete(live.id);
+    const message = `Workflow graph node '${nodeId}' was interrupted by engine pause/resume — re-entering workflow graph (${nextRetries}/${MAX_TRANSIENT_GRAPH_RESUME_RETRIES})`;
+    executorLog.log(`${live.id}: ${message}`);
+    await this.store.logEntry(live.id, message, undefined, this.getRunContextFor(live.id));
+    await this.store.logEntry(live.id, `Auto-recovered: re-entering paused-aborted workflow graph node '${nodeId}' — failure notification suppressed`, undefined, this.getRunContextFor(live.id));
+    await this.store.updateTask(live.id, { graphResumeRetryCount: nextRetries, status: null, error: null }, this.getRunContextFor(live.id));
+    try {
+      await this.store.recordRunAuditEvent?.({
+        taskId: live.id,
+        agentId: "executor",
+        runId: generateSyntheticRunId("workflow-node-reentry", live.id),
+        domain: "database",
+        mutationType: "task:reenter-paused-aborted-workflow-node",
+        target: live.id,
+        metadata: {
+          nodeId,
+          fromColumn: live.column,
+          attempt: nextRetries,
+          maxAttempts: MAX_TRANSIENT_GRAPH_RESUME_RETRIES,
+          abortProvenance: abortProvenance ?? "unknown",
+          preservedInReview,
+          mode: preservedInReview ? "preserved-in-review" : live.column === "todo" ? "reexecuted-from-todo" : "reentered-graph",
+        },
+      });
+    } catch (error) {
+      executorLog.warn(`${live.id}: failed to record paused-node graph re-entry audit: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.persistTokenUsage(live.id);
+
+    const scheduleRetry = () => {
+      void (async () => {
+        try {
+          const resumeTask = await this.store.getTask(live.id);
+          if (
+            resumeTask.deletedAt
+            || resumeTask.paused
+            || resumeTask.userPaused
+            || resumeTask.status != null
+            || resumeTask.error != null
+            || (preservedInReview ? resumeTask.column !== "in-review" : resumeTask.column !== "todo" && resumeTask.column !== "in-progress")
+            || this.activeSessions.has(live.id)
+            || this.activeStepExecutors.has(live.id)
+            || this.activeWorkflowStepSessions.has(live.id)
+            || this.activeWorkflowGraphAbortControllers.has(live.id)
+            || TaskExecutor.processWideGraphRouting.has(live.id)
+          ) {
+            executorLog.log(`${live.id}: skipping paused-node graph re-entry — task is no longer in a safe resume state`);
+            return;
+          }
+          if (preservedInReview) {
+            await this.maybeExecuteWorkflowGraph(resumeTask);
+          } else if (resumeTask.column === "todo") {
+            await this.execute(resumeTask);
+          } else {
+            await this.maybeExecuteWorkflowGraph(resumeTask);
+          }
+        } catch (err) {
+          executorLog.error(`Failed paused-node graph re-entry for ${live.id}:`, err);
+        }
+      })();
+    };
+    if (TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS > 0) {
+      const handle = setTimeout(scheduleRetry, TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS);
+      handle.unref?.();
+    } else {
+      setTimeout(scheduleRetry, 0).unref?.();
+    }
+    return true;
+  }
+
   private async routeGraphMergeFailureToRetry(
     live: TaskDetail,
     result: WorkflowGraphTaskRunResult,
@@ -6995,6 +7146,11 @@ export class TaskExecutor {
           || (live.paused && !mergeSeamAborted && !suppressFinalizedCompletionAbort)
           || (pausedAborted && !mergeSeamAborted && !completionFinalizeAborted && !suppressFinalizedCompletionAbort),
       );
+      if (genuinePauseAbort && await this.isReentrantPausedAbortedInFlightNode(live, result, abortProvenance, pausedAborted, this.userCanceledTaskIds.has(task.id))) {
+        if (await this.reenterPausedAbortedWorkflowNode(live, result, abortProvenance)) {
+          return;
+        }
+      }
       if (genuinePauseAbort && await this.isRetryableBenignMergePauseAbort(live, result, abortProvenance, pausedAborted)) {
         if (await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
           return;

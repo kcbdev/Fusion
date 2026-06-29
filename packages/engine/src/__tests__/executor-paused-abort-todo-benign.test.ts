@@ -47,17 +47,23 @@ function makeHarness(
     autoMerge: true,
     maxAutoMergeRetries: 3,
   });
+  store.recordRunAuditEvent = vi.fn();
   const executor = new TaskExecutor(store, "/tmp/test", {});
   (executor as any).markPausedAborted(task.id, provenance);
   return { store, task, executor };
 }
 
-async function invokeGraphFailure(executor: TaskExecutor, task: TaskDetail) {
+async function invokeGraphFailure(
+  executor: TaskExecutor,
+  task: TaskDetail,
+  resultOverrides: Record<string, unknown> = {},
+) {
   await (executor as any).handleGraphFailure(task, {
     disposition: "failed",
     outcome: "failure",
     visitedNodeIds: ["plan", "execute"],
     context: {},
+    ...resultOverrides,
   });
 }
 
@@ -263,7 +269,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
     expect(clearedFailure).toBe(true);
   });
 
-  it("STILL parks a non-todo (in-review) pause-abort as operator-action failed", async () => {
+  it("STILL parks a non-todo (in-review) pause-abort without a typed interrupted-node marker", async () => {
     const { store, task, executor } = makeHarness({ column: "in-review" });
 
     await invokeGraphFailure(executor, task);
@@ -273,5 +279,226 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
     );
     expect(parkedFailed).toBe(true);
     expect(logText(store)).toContain("operator action required");
+  });
+
+  it("auto-recovers an in-review paused-aborted in-flight workflow node without operator-action parking", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: {
+        "node:plan:value": "aborted",
+        "node:plan:abortKind": "engine-pause",
+        "workflow:interruptedNodeId": "plan",
+        "workflow:interruptedNodeAbortKind": "engine-pause",
+      },
+    });
+
+    const parkedFailed = store.updateTask.mock.calls.some(
+      (call: unknown[]) => (call[1] as { status?: string } | undefined)?.status === "failed",
+    );
+    expect(parkedFailed).toBe(false);
+    expect(logText(store)).toContain("Auto-recovered: re-entering paused-aborted workflow graph node 'plan'");
+    expect(logText(store)).not.toContain("operator action required");
+    const bumpedRetry = store.updateTask.mock.calls.some(
+      (call: unknown[]) => {
+        const patch = call[1] as { graphResumeRetryCount?: number; status?: unknown; error?: unknown } | undefined;
+        return patch?.graphResumeRetryCount === 1 && patch?.status === null && patch?.error === null;
+      },
+    );
+    expect(bumpedRetry).toBe(true);
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reenter-paused-aborted-workflow-node",
+      metadata: expect.objectContaining({
+        nodeId: "plan",
+        fromColumn: "in-review",
+        attempt: 1,
+        maxAttempts: 2,
+        abortProvenance: "hard-cancel",
+        preservedInReview: true,
+        mode: "preserved-in-review",
+      }),
+    }));
+    await flushScheduledRetry();
+    expect(graphSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fire-time guard skips in-review graph re-entry when a graph run is already active", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    (executor as any).activeWorkflowGraphAbortControllers.set(task.id, new AbortController());
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT auto-recover an explicit user pause even with an interrupted-node marker", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review", userPaused: true });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("auto-recovers an in-review paused-aborted execute node through graph re-entry", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "execute",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:execute:value": "aborted", "node:execute:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("Auto-recovered: re-entering paused-aborted workflow graph node 'execute'");
+    expect(logText(store)).not.toContain("operator action required");
+    await flushScheduledRetry();
+    expect(graphSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-recovers a todo paused-aborted execute node by re-executing the task", async () => {
+    const { store, task, executor } = makeHarness({ column: "todo" });
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "execute",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:execute:value": "aborted", "node:execute:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("Auto-recovered: re-entering paused-aborted workflow graph node 'execute'");
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reenter-paused-aborted-workflow-node",
+      metadata: expect.objectContaining({ nodeId: "execute", fromColumn: "todo", mode: "reexecuted-from-todo" }),
+    }));
+    await flushScheduledRetry();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("STILL parks a genuine in-review node failure with no paused-node audit", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      visitedNodeIds: ["plan"],
+      context: { "node:plan:value": "REVISE" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reenter-paused-aborted-workflow-node",
+    }));
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("auto-recovers a global-pause in-review interrupted node after global resume", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" }, "global-pause");
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("Auto-recovered: re-entering paused-aborted workflow graph node 'plan'");
+    expect(logText(store)).not.toContain("operator action required");
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reenter-paused-aborted-workflow-node",
+      metadata: expect.objectContaining({
+        nodeId: "plan",
+        fromColumn: "in-review",
+        abortProvenance: "global-pause",
+        mode: "preserved-in-review",
+      }),
+    }));
+    await flushScheduledRetry();
+    expect(graphSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT auto-recover a global-pause in-review failure without an interrupted-node marker", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" }, "global-pause");
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      visitedNodeIds: ["plan"],
+      context: { "node:plan:value": "aborted" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reenter-paused-aborted-workflow-node",
+    }));
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT auto-recover a global-pause interrupted node while global pause is still active", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review" }, "global-pause");
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      autoMerge: true,
+      globalPause: true,
+      maxAutoMergeRetries: 3,
+    });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT auto-recover an autoMerge:false in-review interrupted node", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review", autoMerge: false });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT auto-recover an exhausted in-review interrupted node", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review", graphResumeRetryCount: 2 });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      interruptedNodeId: "plan",
+      interruptedAbortKind: "engine-pause",
+      context: { "node:plan:value": "aborted", "node:plan:abortKind": "engine-pause" },
+    });
+
+    expect(logText(store)).toContain("operator action required");
+    await flushScheduledRetry();
+    expect(graphSpy).not.toHaveBeenCalled();
   });
 });
