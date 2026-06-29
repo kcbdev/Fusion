@@ -168,6 +168,41 @@ describe("getUnifiedTaskProgress", () => {
     expect(progress.items.filter((i) => i.source === "workflow")).toHaveLength(2);
   });
 
+  it("orders Plan Review before implementation steps and Code Review after them", () => {
+    const progress = getUnifiedTaskProgress(
+      makeTask({
+        steps: [
+          { name: "Preflight", status: "pending" },
+          { name: "Implement", status: "pending" },
+        ],
+        enabledWorkflowSteps: ["plan-review", "code-review"],
+        workflowStepResults: [
+          {
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            phase: "pre-merge",
+            status: "failed",
+            startedAt: "2026-06-29T07:38:49.871Z",
+            completedAt: "2026-06-29T07:38:57.744Z",
+          },
+        ],
+      }),
+    );
+
+    expect(progress.items.map((item) => item.name)).toEqual([
+      "Plan Review",
+      "Preflight",
+      "Implement",
+      "Code Review",
+    ]);
+    expect(progress.items.map((item) => item.id)).toEqual([
+      "workflow-plan-review",
+      "step-0",
+      "step-1",
+      "workflow-code-review",
+    ]);
+  });
+
   it("maps impl step statuses straight through and skipped as completed", () => {
     const progress = getUnifiedTaskProgress(
       makeTask({

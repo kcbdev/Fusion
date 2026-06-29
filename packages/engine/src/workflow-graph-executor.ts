@@ -9,7 +9,7 @@ import type {
   WorkflowNodeExtensionResult,
   WorkflowStepResult,
 } from "@fusion/core";
-import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, getWorkflowExtensionRegistry, resolveMaxReworkCycles, isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, PLAN_REVIEW_GROUP_ID, WorkflowIrError, getWorkflowExtensionRegistry, resolveMaxReworkCycles, isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG } from "@fusion/core";
 
 import {
   createDefaultNodeHandlers,
@@ -668,18 +668,30 @@ export class WorkflowGraphExecutor {
           };
           context[`node:${node.id}:outcome`] = result.outcome;
           if (result.value !== undefined) context[`node:${node.id}:value`] = result.value;
-          if (
+          /*
+           * FNXC:PlanReviewReplan 2026-06-29-00:41:
+           * Plan Review sits between specification and execution. A REVISE verdict
+           * or hard failure at this node means PROMPT.md needs another planning pass,
+           * not executor remediation. Forward the failure into the same pre-merge fix
+           * seam with a synthesized REVISE verdict so the executor can route it back
+           * to triage and then let approved replans continue through todo/execution.
+           */
+          const shouldRequestPreMergeFix =
             stepPhase === "pre-merge"
-            && verdict === "REVISE"
             && (stepStatus === "advisory_failure" || stepStatus === "failed")
-          ) {
-            const feedback = stepOutput?.trim() || stepNotes?.trim() || "(no feedback captured)";
+            && (verdict === "REVISE" || node.id === PLAN_REVIEW_GROUP_ID);
+          if (shouldRequestPreMergeFix) {
+            const feedback = stepOutput?.trim()
+              || stepNotes?.trim()
+              || (node.id === PLAN_REVIEW_GROUP_ID
+                ? "Plan Review failed before execution. Re-run triage to revise PROMPT.md before implementation continues."
+                : "(no feedback captured)");
             const fixScheduled = await this.deps.requestPreMergeOptionalStepFix?.(task.id, {
               stepName: groupName,
               feedback,
               phase: stepPhase,
               status: stepStatus,
-              verdict,
+              verdict: verdict ?? (node.id === PLAN_REVIEW_GROUP_ID ? "REVISE" : undefined),
               nodeId: node.id,
               maxRevisions: node.config?.maxRevisions,
             });

@@ -113,7 +113,13 @@ export function getUnifiedTaskProgress(
     };
   });
 
-  const items = [...stepItems, ...workflowItems];
+  /*
+  FNXC:TaskCardWorkflowProgress 2026-06-29-00:41:
+  Plan Review is a pre-execution optional step in the default stepwise Coding workflow, so task cards must show it before parsed implementation steps. End-of-work optional steps such as Code Review stay after implementation steps so the card order matches workflow execution order.
+  */
+  const preExecutionWorkflowItems = workflowItems.filter((item) => item.id === "workflow-plan-review");
+  const remainingWorkflowItems = workflowItems.filter((item) => item.id !== "workflow-plan-review");
+  const items = [...preExecutionWorkflowItems, ...stepItems, ...remainingWorkflowItems];
   const total = items.length;
   const completed = items.filter((item) => isCompleted(item.status)).length;
 

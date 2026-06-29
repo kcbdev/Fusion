@@ -27,6 +27,39 @@ function isOptionalGroupNode(
   return node.kind === "optional-group";
 }
 
+function computeNodeExecutionRanks(ir: WorkflowIr): Map<string, number> {
+  const ranks = new Map<string, number>();
+  if (ir.version !== "v2" || !Array.isArray(ir.nodes) || !Array.isArray(ir.edges)) {
+    return ranks;
+  }
+
+  const outgoing = new Map<string, string[]>();
+  for (const edge of ir.edges) {
+    if (!outgoing.has(edge.from)) outgoing.set(edge.from, []);
+    outgoing.get(edge.from)?.push(edge.to);
+  }
+
+  const queue: Array<{ id: string; rank: number }> = [];
+  for (const node of ir.nodes) {
+    if (node.kind === "start" || node.id === "start") {
+      queue.push({ id: node.id, rank: 0 });
+    }
+  }
+
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next) continue;
+    const current = ranks.get(next.id);
+    if (current !== undefined && current <= next.rank) continue;
+    ranks.set(next.id, next.rank);
+    for (const target of outgoing.get(next.id) ?? []) {
+      queue.push({ id: target, rank: next.rank + 1 });
+    }
+  }
+
+  return ranks;
+}
+
 /**
  * Resolve a workflow's `optional-group` nodes into per-task toggle display
  * metadata. Each enabled group's node id is what a task stores in
@@ -50,8 +83,9 @@ export function resolveWorkflowOptionalSteps(
 ): ResolvedWorkflowOptionalStep[] {
   if (ir.version !== "v2" || !Array.isArray(ir.nodes)) return [];
 
-  const resolved: ResolvedWorkflowOptionalStep[] = [];
-  for (const node of ir.nodes) {
+  const ranks = computeNodeExecutionRanks(ir);
+  const resolved: Array<ResolvedWorkflowOptionalStep & { rank: number; nodeIndex: number }> = [];
+  for (const [nodeIndex, node] of ir.nodes.entries()) {
     if (!isOptionalGroupNode(node)) continue;
     const config = (node.config ?? {}) as Partial<WorkflowOptionalGroupConfig>;
     resolved.push({
@@ -61,9 +95,17 @@ export function resolveWorkflowOptionalSteps(
       description: "",
       phase: "pre-merge",
       defaultOn: config.defaultOn === true,
+      /*
+      FNXC:WorkflowDefinitionSteps 2026-06-29-00:41:
+      Definition/task creation surfaces must order optional groups by graph execution position, not raw node-array order. Derived built-ins can insert Plan Review between planning and parse while appending its node object, and operators still need the step list to show Plan Review before execution.
+      */
+      rank: ranks.get(node.id) ?? Number.MAX_SAFE_INTEGER,
+      nodeIndex,
     });
   }
-  return resolved;
+  return resolved
+    .sort((a, b) => a.rank - b.rank || a.nodeIndex - b.nodeIndex)
+    .map(({ rank: _rank, nodeIndex: _nodeIndex, ...step }) => step);
 }
 
 /**

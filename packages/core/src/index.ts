@@ -151,6 +151,7 @@ export type {
   EffectiveAgentResult,
 } from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export { PLAN_REVIEW_GROUP_ID } from "./builtin-plan-review-group.js";
 export { BUILTIN_MARKETING_WORKFLOW_IR } from "./builtin-marketing-workflow-ir.js";
 export {
   resolveWorkflowOptionalSteps,

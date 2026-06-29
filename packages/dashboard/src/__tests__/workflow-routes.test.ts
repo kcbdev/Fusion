@@ -252,11 +252,25 @@ describe("workflow routes (U4)", () => {
     // and `phase: "pre-merge"`. Assert the current group-sourced shape.
     expect(builtin.body).toEqual([
       expect.objectContaining({
+        templateId: "plan-review",
+        name: "Plan Review",
+        description: "",
+        phase: "pre-merge",
+        defaultOn: true,
+      }),
+      expect.objectContaining({
         templateId: "browser-verification",
         name: "Browser Verification",
         description: "",
         phase: "pre-merge",
         defaultOn: false,
+      }),
+      expect.objectContaining({
+        templateId: "code-review",
+        name: "Code Review",
+        description: "",
+        phase: "pre-merge",
+        defaultOn: true,
       }),
     ]);
 
@@ -313,7 +327,7 @@ describe("workflow routes (U4)", () => {
     const sel = await put(`/api/tasks/${task.id}/workflow`, { workflowId: wfId });
     expect(sel.status).toBe(200);
     const detail = await store.getTask(task.id);
-    expect(detail.enabledWorkflowSteps).toHaveLength(1);
+    expect(detail.enabledWorkflowSteps ?? []).toHaveLength(0);
 
     const read = await get(`/api/tasks/${task.id}/workflow`);
     expect((read.body as { workflowId: string }).workflowId).toBe(wfId);
@@ -403,7 +417,7 @@ describe("workflow routes (U4)", () => {
 
     const task = await store.createTask({ description: "inherits" });
     const detail = await store.getTask(task.id);
-    expect(detail.enabledWorkflowSteps).toHaveLength(1);
+    expect(detail.enabledWorkflowSteps ?? []).toHaveLength(0);
   });
 
   it("selecting an unknown workflow returns 404 without mutating or emitting SSE", async () => {
@@ -772,19 +786,19 @@ describe("workflow routes (U4)", () => {
       expect(res.status).toBe(200);
       const body = res.body as { stored: Record<string, string>; defaults: Record<string, string>; effective: Record<string, string> };
       expect(body.stored).toEqual({});
-      expect(body.defaults.execute).toContain("You are a task execution agent");
-      expect(body.effective.execute).toBe(body.defaults.execute);
+      expect(body.defaults.plan).toContain("You are a task specification agent");
+      expect(body.effective.plan).toBe(body.defaults.plan);
     });
 
     it("PATCH sets and resets a built-in prompt override", async () => {
       const set = await patch("/api/workflows/builtin:coding/prompt-overrides", {
-        overrides: { execute: "Execute route override" },
+        overrides: { plan: "Plan route override" },
       });
       expect(set.status).toBe(200);
-      expect((set.body as { stored: Record<string, string>; effective: Record<string, string> }).stored.execute).toBe(
-        "Execute route override",
+      expect((set.body as { stored: Record<string, string>; effective: Record<string, string> }).stored.plan).toBe(
+        "Plan route override",
       );
-      expect((set.body as { effective: Record<string, string> }).effective.execute).toBe("Execute route override");
+      expect((set.body as { effective: Record<string, string> }).effective.plan).toBe("Plan route override");
       expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
         "workflow:updated",
         expect.objectContaining({ id: "builtin:coding" }),
@@ -792,23 +806,23 @@ describe("workflow routes (U4)", () => {
       );
 
       const reset = await patch("/api/workflows/builtin:coding/prompt-overrides", {
-        overrides: { execute: null },
+        overrides: { plan: null },
       });
       expect(reset.status).toBe(200);
       const resetBody = reset.body as { stored: Record<string, string>; defaults: Record<string, string>; effective: Record<string, string> };
-      expect(resetBody.stored.execute).toBeUndefined();
-      expect(resetBody.effective.execute).toBe(resetBody.defaults.execute);
+      expect(resetBody.stored.plan).toBeUndefined();
+      expect(resetBody.effective.plan).toBe(resetBody.defaults.plan);
     });
 
     it("PATCH treats empty and whitespace prompt overrides as reset", async () => {
       await patch("/api/workflows/builtin:coding/prompt-overrides", {
-        overrides: { execute: "Execute route override" },
+        overrides: { plan: "Plan route override" },
       });
       const res = await patch("/api/workflows/builtin:coding/prompt-overrides", {
-        overrides: { execute: "   " },
+        overrides: { plan: "   " },
       });
       expect(res.status).toBe(200);
-      expect((res.body as { stored: Record<string, string> }).stored.execute).toBeUndefined();
+      expect((res.body as { stored: Record<string, string> }).stored.plan).toBeUndefined();
     });
 
     it("PATCH rejects node ids that are not prompt-bearing", async () => {

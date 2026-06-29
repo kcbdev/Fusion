@@ -381,6 +381,69 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(requestFix).not.toHaveBeenCalled();
   });
 
+  it("routes hard Plan Review failures into the pre-merge replan seam before execution continues", async () => {
+    const requestFix = vi.fn(async () => true);
+    const calls: string[] = [];
+    const records: unknown[] = [];
+    const ir: WorkflowIr = {
+      version: "v2",
+      name: "plan-review-hard-failure",
+      columns: [{ id: "work", name: "Work", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "plan-review",
+          kind: "optional-group",
+          config: {
+            name: "Plan Review",
+            defaultOn: true,
+            template: {
+              nodes: [{ id: "plan-review-step", kind: "prompt", config: { prompt: "review plan" } }],
+              edges: [],
+            },
+          },
+        },
+        { id: "execute", kind: "prompt", config: { prompt: "execute" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "plan-review" },
+        { from: "plan-review", to: "execute", condition: "success" },
+        { from: "plan-review", to: "end", condition: "failure" },
+        { from: "execute", to: "end" },
+      ],
+    };
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => {
+          calls.push(node.id);
+          return node.id === "plan-review-step"
+            ? { outcome: "failure" }
+            : { outcome: "success" };
+        },
+      },
+      recordWorkflowStepResult: async (_taskId, result) => { records.push(result); },
+      requestPreMergeOptionalStepFix: requestFix,
+    });
+
+    const result = await executor.run(taskWith(["plan-review"]), settingsOn(), ir);
+
+    expect(requestFix).toHaveBeenCalledWith("FN-OG", {
+      stepName: "Plan Review",
+      feedback: "Plan Review failed before execution. Re-run triage to revise PROMPT.md before implementation continues.",
+      phase: "pre-merge",
+      status: "failed",
+      verdict: "REVISE",
+      nodeId: "plan-review",
+      maxRevisions: undefined,
+    });
+    expect(calls).not.toContain("execute");
+    expect(result.context["node:plan-review:fixScheduled"]).toBe(true);
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({ workflowStepId: "plan-review", status: "failed" }),
+    ]));
+  });
+
   it("cycles REVISE findings across graph runs until APPROVE, and falls through only after the budget seam declines", async () => {
     const verdicts = ["REVISE", "REVISE", "APPROVE"];
     const requestFix = vi.fn(async () => true);

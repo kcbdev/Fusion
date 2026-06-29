@@ -3875,10 +3875,47 @@ export class TaskExecutor {
     },
   ): Promise<boolean> {
     if (info.phase !== "pre-merge") return false;
-    if (info.verdict !== "REVISE") return false;
     if (info.status !== "advisory_failure" && info.status !== "failed") return false;
 
     const liveTask = await this.store.getTask(taskId).catch(() => fallbackTask);
+    const isPlanReview = info.nodeId === "plan-review" || info.stepName === "Plan Review";
+    if (isPlanReview) {
+      if (info.verdict !== undefined && info.verdict !== "REVISE") return false;
+      /*
+       * FNXC:PlanReviewReplan 2026-06-29-00:41:
+       * Plan Review is pre-execution spec validation, so a failed/revision result
+       * must repair PROMPT.md through triage instead of reopening implementation
+       * steps. Triage already advances an approved `needs-replan` task to `todo`,
+       * which lets the scheduler continue execution after the planner fixes it.
+       */
+      const feedback = info.feedback?.trim()
+        || "Plan Review failed before execution. Revise the task plan, then continue execution.";
+      await this.store.logEntry(
+        taskId,
+        "AI spec revision requested",
+        `Plan Review requested a planning revision before execution.\n\nStatus: ${info.status}\nFeedback:\n${feedback}`,
+        this.getRunContextFor(taskId),
+      );
+      await this.store.logEntry(
+        taskId,
+        "Plan Review failed — moved to triage for automatic replan",
+        feedback,
+        this.getRunContextFor(taskId),
+      );
+      if (liveTask.column !== "triage") {
+        await this.store.moveTask(taskId, "triage");
+      }
+      await this.store.updateTask(taskId, {
+        status: "needs-replan",
+        error: null,
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
+        graphResumeRetryCount: 0,
+      }, this.getRunContextFor(taskId));
+      return true;
+    }
+
+    if (info.verdict !== "REVISE") return false;
     const settings = await mergeEffectiveSettings(this.store, liveTask, await this.store.getSettings());
     const budget = resolveOptionalStepRevisionBudget(info.maxRevisions, settings.maxPostReviewFixes ?? 3);
     if (!budget.unbounded && (!Number.isFinite(budget.max) || budget.max <= 0)) return false;

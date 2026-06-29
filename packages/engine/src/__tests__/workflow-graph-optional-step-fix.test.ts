@@ -126,6 +126,42 @@ describe("TaskExecutor pre-merge optional-step fix seam", () => {
     expect(store.updateTask.mock.invocationCallOrder[0]).toBeLessThan(sendBack.mock.invocationCallOrder[0]);
   });
 
+  it("routes Plan Review failures to triage replan instead of executor remediation", async () => {
+    const store = createMockStore();
+    const liveTask = task({ postReviewFixCount: 0, column: "in-progress", status: null });
+    store.getTask.mockResolvedValue(liveTask);
+    store.getSettings.mockResolvedValue({ maxPostReviewFixes: 3 });
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const sendBack = vi.spyOn(executor as any, "sendTaskBackForFix").mockResolvedValue(undefined);
+
+    const scheduled = await (executor as any).requestPreMergeOptionalStepFix(liveTask.id, liveTask, {
+      stepName: "Plan Review",
+      feedback: "PROMPT.md is missing the new workflow-order requirement",
+      phase: "pre-merge" as const,
+      status: "failed" as const,
+      verdict: "REVISE",
+      nodeId: "plan-review",
+    });
+
+    expect(scheduled).toBe(true);
+    expect(sendBack).not.toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-7066",
+      "AI spec revision requested",
+      expect.stringContaining("PROMPT.md is missing the new workflow-order requirement"),
+      undefined,
+    );
+    expect(store.moveTask).toHaveBeenCalledWith("FN-7066", "triage");
+    expect(store.updateTask).toHaveBeenCalledWith("FN-7066", {
+      status: "needs-replan",
+      error: null,
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
+      graphResumeRetryCount: 0,
+    }, undefined);
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-7066", { postReviewFixCount: 1 }, undefined);
+  });
+
   it("uses the default budget of 3 for repeated fix passes and then declines when exhausted", async () => {
     const sendBackCalls: number[] = [];
 

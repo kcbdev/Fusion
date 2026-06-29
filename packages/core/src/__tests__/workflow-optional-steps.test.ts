@@ -109,7 +109,7 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     ]);
   });
 
-  it("resolves the built-in coding/stepwise optional-groups in node order", () => {
+  it("resolves the built-in coding/stepwise optional-groups in execution order", () => {
     // Legacy coding carries two optional-group toggles on the pre-merge path:
     // `browser-verification` (default OFF) then `code-review` (default ON — runs by default
     // but is toggleable off per task).
@@ -142,6 +142,28 @@ describe("resolveWorkflowOptionalSteps (optional-group nodes)", () => {
     expect(resolveWorkflowOptionalSteps(BUILTIN_CODING_WORKFLOW_IR)).toEqual(legacyExpected);
     expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).toEqual(stepwiseExpected);
     expect(resolveWorkflowOptionalSteps(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR)).toEqual(stepwiseExpected);
+  });
+
+  it("orders Plan Review before execution even when the node is appended after Code Review", () => {
+    const ir = v2([
+      { id: "plan", kind: "prompt", column: "todo" },
+      { id: "parse", kind: "parse-steps", column: "todo", config: { artifact: "PROMPT.md", parser: "step-headings" } },
+      optionalGroupNode("code-review", { name: "Code Review", defaultOn: true }),
+      optionalGroupNode("plan-review", { name: "Plan Review", defaultOn: true }),
+    ]);
+    ir.edges = [
+      { from: "start", to: "plan" },
+      { from: "plan", to: "plan-review" },
+      { from: "plan-review", to: "parse" },
+      { from: "parse", to: "code-review" },
+      { from: "code-review", to: "end" },
+    ];
+
+    expect(resolveWorkflowOptionalSteps(ir).map((step) => step.templateId)).toEqual([
+      "plan-review",
+      "code-review",
+    ]);
+    expect(resolveDefaultOnOptionalGroupIds(ir)).toEqual(["plan-review", "code-review"]);
   });
 
   it("seeds default-on optional groups but not browser-verification for the built-ins", () => {
