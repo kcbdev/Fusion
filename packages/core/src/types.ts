@@ -819,6 +819,8 @@ export interface WorkflowStepResult {
   workflowStepName: string;
   /** Lifecycle phase at execution time */
   phase?: WorkflowStepPhase;
+  /** Runtime source for distinguishing graph-authored node progress from optional-toggle checks. */
+  source?: "optional-group" | "node";
   /** Execution status */
   status: "passed" | "failed" | "advisory_failure" | "skipped" | "pending";
   /** Output from the workflow step agent (findings, errors, etc.) */

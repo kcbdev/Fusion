@@ -529,7 +529,7 @@ export class WorkflowGraphExecutor {
             getLiveSteps: () => this.resolveTaskSteps(task),
             context,
             runTemplateNode: (tNode, sig, contextOverride) =>
-              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig),
+              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig, false),
             shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
             persistence: this.deps.stepInstancePersistence,
             onReworkReset: this.deps.onReworkReset,
@@ -557,7 +557,7 @@ export class WorkflowGraphExecutor {
           const loopResult = await runLoop(node, {
             context,
             runTemplateNode: (tNode, sig, contextOverride) =>
-              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig),
+              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig, false),
             shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
             signal: this.deps.signal,
             now: this.deps.runLoopNowForTests,
@@ -670,6 +670,7 @@ export class WorkflowGraphExecutor {
             workflowStepName: groupName,
             phase: stepPhase,
             status: "pending",
+            source: "optional-group",
             startedAt: stepStartedAt,
           });
           this.deps.logTaskEntry?.(`${logPrefix} Starting workflow step: ${groupName}`);
@@ -677,7 +678,7 @@ export class WorkflowGraphExecutor {
           const groupResult = await runOptionalGroup(node, {
             context,
             runTemplateNode: (tNode, sig, contextOverride) =>
-              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig),
+              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig, false),
             shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
             signal: this.deps.signal,
           });
@@ -705,6 +706,7 @@ export class WorkflowGraphExecutor {
             workflowStepId: node.id,
             workflowStepName: groupName,
             phase: stepPhase,
+            source: "optional-group",
             status: stepStatus,
             ...(verdict ? { verdict } : {}),
             ...(stepOutput !== undefined ? { output: stepOutput } : {}),
@@ -1127,6 +1129,7 @@ export class WorkflowGraphExecutor {
     context: Record<string, unknown>,
     workflow: WorkflowIr,
     signal?: AbortSignal,
+    recordProgress = true,
   ): Promise<WorkflowNodeResult> {
     const handler = this.handlers[node.kind];
 
@@ -1142,21 +1145,32 @@ export class WorkflowGraphExecutor {
       if (signal?.aborted) return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
       try {
         await this.prepareNodeExecution(node, task);
+        const progressRecord = recordProgress && this.shouldRecordNodeProgress(node)
+          ? await this.recordNodeProgressStart(task.id, node)
+          : null;
         const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
         if (pluginResult) {
           const projected = await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
-          return signal?.aborted || this.isAbortNodeResult(projected)
-            ? this.withEnginePauseAbortContext(node, projected)
-            : projected;
+          if (signal?.aborted || this.isAbortNodeResult(projected)) {
+            return this.withEnginePauseAbortContext(node, projected);
+          }
+          if (progressRecord) {
+            await this.recordNodeProgressFinish(task.id, node, progressRecord, projected);
+          }
+          return projected;
         }
         if (!handler) {
           throw new WorkflowIrError(`No handler registered for node kind: ${node.kind}`);
         }
         const result = await handler(node, { task, settings, context, signal });
         const projected = await this.publishTaskProjectionFromResult(task.id, node, result);
-        return signal?.aborted || this.isAbortNodeResult(projected)
-          ? this.withEnginePauseAbortContext(node, projected)
-          : projected;
+        if (signal?.aborted || this.isAbortNodeResult(projected)) {
+          return this.withEnginePauseAbortContext(node, projected);
+        }
+        if (progressRecord) {
+          await this.recordNodeProgressFinish(task.id, node, progressRecord, projected);
+        }
+        return projected;
       } catch (error) {
         if (signal?.aborted) return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
         lastError = error;
@@ -1167,13 +1181,68 @@ export class WorkflowGraphExecutor {
       return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
     }
 
-    return {
+    const failureResult: WorkflowNodeResult = {
       outcome: "failure",
       value: "exception",
       contextPatch: {
         [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
       },
     };
+    if (recordProgress && this.shouldRecordNodeProgress(node)) {
+      await this.recordNodeProgressFinish(task.id, node, null, failureResult);
+    }
+    return failureResult;
+  }
+
+  private shouldRecordNodeProgress(node: WorkflowIrNode): boolean {
+    /*
+     * FNXC:WorkflowNodeProgress 2026-06-29-15:05:
+     * Compound Engineering stages are top-level skill prompt/gate nodes, not parsed implementation steps or optional toggles. Record those skill nodes into `task.workflowStepResults` so cards and task details show the active CE stage while avoiding duplicate records for ordinary model prompts and optional-group template internals.
+     */
+    const skillName = typeof node.config?.skillName === "string" ? node.config.skillName.trim() : "";
+    return skillName.length > 0 && (node.kind === "prompt" || node.kind === "gate");
+  }
+
+  private workflowNodeProgressName(node: WorkflowIrNode): string {
+    const configuredName = typeof node.config?.name === "string" ? node.config.name.trim() : "";
+    return configuredName || node.id;
+  }
+
+  private async recordNodeProgressStart(taskId: string, node: WorkflowIrNode): Promise<WorkflowStepResult | null> {
+    const startedAt = new Date().toISOString();
+    const result: WorkflowStepResult = {
+      workflowStepId: node.id,
+      workflowStepName: this.workflowNodeProgressName(node),
+      phase: node.config?.phase === "post-merge" ? "post-merge" : "pre-merge",
+      source: "node",
+      status: "pending",
+      startedAt,
+    };
+    await this.recordOptionalGroupStepResult(taskId, result);
+    return result;
+  }
+
+  private async recordNodeProgressFinish(
+    taskId: string,
+    node: WorkflowIrNode,
+    started: WorkflowStepResult | null,
+    nodeResult: WorkflowNodeResult,
+  ): Promise<void> {
+    const status: WorkflowStepResult["status"] = nodeResult.outcome === "success" ? "passed" : "failed";
+    const contextPatch = nodeResult.contextPatch ?? {};
+    const output = typeof contextPatch.output === "string" ? contextPatch.output : undefined;
+    const notes = typeof contextPatch.notes === "string" ? contextPatch.notes : undefined;
+    await this.recordOptionalGroupStepResult(taskId, {
+      workflowStepId: node.id,
+      workflowStepName: this.workflowNodeProgressName(node),
+      phase: started?.phase ?? (node.config?.phase === "post-merge" ? "post-merge" : "pre-merge"),
+      source: "node",
+      status,
+      ...(output !== undefined ? { output } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      startedAt: started?.startedAt ?? new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+    });
   }
 
   private async prepareNodeExecution(node: WorkflowIrNode, task: TaskDetail): Promise<void> {
