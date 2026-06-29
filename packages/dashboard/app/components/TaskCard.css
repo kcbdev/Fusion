@@ -978,6 +978,18 @@ The execution-time badge is part of the footer's bottom-right chip cluster, so i
   flex-shrink: 0;
 }
 
+.card-progress-active {
+  flex-shrink: 0;
+  padding: 1px var(--space-xs);
+  border: 1px solid color-mix(in srgb, var(--in-progress) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--in-progress) 12%, transparent);
+  color: var(--in-progress);
+  font-size: 0.625rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
 /* Steps toggle and list */
 .card-steps-toggle {
   display: flex;
@@ -1080,6 +1092,23 @@ executing. These map 1:1 to the unified progress status so the dot color encodes
 .card-step-name.completed {
   text-decoration: line-through;
   opacity: 0.6;
+}
+
+.card-step-name.active {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.card-step-active-badge {
+  flex-shrink: 0;
+  padding: 1px var(--space-xs);
+  border: 1px solid color-mix(in srgb, var(--in-progress) 40%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--in-progress);
+  font-size: 0.5625rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .card-step-workflow-badge {

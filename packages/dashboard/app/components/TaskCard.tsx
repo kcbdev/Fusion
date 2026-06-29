@@ -1074,6 +1074,14 @@ function TaskCardComponent({
     () => getUnifiedTaskProgress(task),
     [task.steps, task.enabledWorkflowSteps, task.workflowStepResults],
   );
+  /*
+  FNXC:TaskCardProgress 2026-06-29-02:26:
+  Operators need to see active step work on the card before it becomes `done`. Keep the completed count strict, but surface `in-progress` task steps and running workflow checks as an active badge so card progress does not look stale while execution is underway.
+  */
+  const activeProgressCount = useMemo(
+    () => unifiedProgress.items.filter((item) => item.status === "in-progress" || item.status === "running").length,
+    [unifiedProgress.items],
+  );
   const showProgressSection =
     unifiedProgress.total > 0 && (task.status === "executing" || task.column === "in-progress");
 
@@ -2281,6 +2289,11 @@ function TaskCardComponent({
                 />
               </div>
               <span className="card-progress-label">{unifiedProgress.completed}/{unifiedProgress.total}</span>
+              {activeProgressCount > 0 && (
+                <span className="card-progress-active">
+                  {t("tasks.activeStepCount", "{{count}} active", { count: activeProgressCount })}
+                </span>
+              )}
             </div>
             <button
               type="button"
@@ -2312,9 +2325,14 @@ function TaskCardComponent({
                         className={`card-step-dot card-step-dot--${step.status}`}
                         aria-hidden="true"
                       />
-                      <span className={`card-step-name${step.status === "done" ? " completed" : ""}`}>
+                      <span className={`card-step-name${step.status === "done" ? " completed" : ""}${step.status === "in-progress" || step.status === "running" ? " active" : ""}`}>
                         {step.name}
                       </span>
+                      {(step.status === "in-progress" || step.status === "running") && (
+                        <span className="card-step-active-badge">
+                          {t("tasks.active", "active")}
+                        </span>
+                      )}
                       {step.source === "workflow" && (
                         <span
                           className={`card-step-workflow-badge card-step-workflow-badge--${step.phase}`}

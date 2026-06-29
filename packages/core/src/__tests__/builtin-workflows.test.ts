@@ -922,7 +922,13 @@ describe("built-in workflows", () => {
         enabledWorkflowSteps: [],
       });
 
-      expect((await store.getTask(task.id)).enabledWorkflowSteps ?? []).toEqual([]);
+      /*
+      FNXC:WorkflowOptionalSteps 2026-06-29-02:55:
+      An explicit empty optional-step selection must hydrate back as `[]`, not
+      `undefined`; otherwise later workflow execution can confuse "all disabled"
+      with "not materialized" and re-run default-on Plan Review / Code Review.
+      */
+      expect((await store.getTask(task.id)).enabledWorkflowSteps).toEqual([]);
       expect(store.getTaskWorkflowSelection(task.id)).toEqual({
         workflowId: "builtin:coding",
         stepIds: [],

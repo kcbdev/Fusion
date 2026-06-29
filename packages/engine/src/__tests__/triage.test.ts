@@ -1279,6 +1279,115 @@ describe("TriageProcessor", () => {
     expect(processor).toBeInstanceOf(TriageProcessor);
   });
 
+  it("runs enabled Plan Review in triage before moving to todo", async () => {
+    const task = createTriageTask({
+      id: "FN-PLAN-APPROVE",
+      title: "Plan approve",
+      status: "planning",
+      enabledWorkflowSteps: ["plan-review", "code-review"],
+    } as Partial<Task>);
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    mockReviewStep.mockResolvedValue({
+      verdict: "APPROVE",
+      review: "### Verdict: APPROVE\n\n### Summary\nReady.",
+      summary: "Ready.",
+    });
+
+    await (processor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      task,
+      "# Task: FN-PLAN-APPROVE - Plan approve\n\n## Mission\n\nDo it.\n",
+      { requirePlanApproval: false } as Settings,
+    );
+
+    expect(mockReviewStep).toHaveBeenCalledWith(
+      rootDir,
+      "FN-PLAN-APPROVE",
+      0,
+      "PROMPT.md",
+      "plan",
+      expect.any(String),
+      undefined,
+      expect.objectContaining({ taskId: "FN-PLAN-APPROVE" }),
+    );
+    expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-APPROVE", expect.objectContaining({
+      workflowStepResults: expect.arrayContaining([
+        expect.objectContaining({ workflowStepId: "plan-review", status: "passed", verdict: "APPROVE" }),
+      ]),
+    }));
+    expect(store.moveTask).toHaveBeenCalledWith("FN-PLAN-APPROVE", "todo");
+  });
+
+  it("keeps the task in triage when Plan Review requests revision", async () => {
+    const task = createTriageTask({
+      id: "FN-PLAN-REVISE",
+      title: "Plan revise",
+      status: "planning",
+      enabledWorkflowSteps: ["plan-review", "code-review"],
+    } as Partial<Task>);
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    mockReviewStep.mockResolvedValue({
+      verdict: "REVISE",
+      review: "### Verdict: REVISE\n\n### Issues Found\nMissing verification.",
+      summary: "Missing verification.",
+    });
+
+    await (processor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      task,
+      "# Task: FN-PLAN-REVISE - Plan revise\n\n## Mission\n\nDo it.\n",
+      { requirePlanApproval: false } as Settings,
+    );
+
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-REVISE", expect.objectContaining({
+      status: "needs-replan",
+      error: null,
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-REVISE", expect.objectContaining({
+      workflowStepResults: expect.arrayContaining([
+        expect.objectContaining({ workflowStepId: "plan-review", status: "failed", verdict: "REVISE" }),
+      ]),
+    }));
+  });
+
+  it("keeps the task in triage with retry backoff when Plan Review is unavailable", async () => {
+    const task = createTriageTask({
+      id: "FN-PLAN-UNAVAILABLE",
+      title: "Plan unavailable",
+      status: "planning",
+      enabledWorkflowSteps: ["plan-review", "code-review"],
+    } as Partial<Task>);
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+    mockReviewStep.mockRejectedValue(new Error("runtime unavailable"));
+
+    await (processor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      task,
+      "# Task: FN-PLAN-UNAVAILABLE - Plan unavailable\n\n## Mission\n\nDo it.\n",
+      { requirePlanApproval: false } as Settings,
+    );
+
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-UNAVAILABLE", expect.objectContaining({
+      status: "plan-review-unavailable",
+      error: "Plan Review did not produce a verdict; retrying from triage.",
+      nextRecoveryAt: expect.any(String),
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-UNAVAILABLE", expect.objectContaining({
+      workflowStepResults: expect.arrayContaining([
+        expect.objectContaining({
+          workflowStepId: "plan-review",
+          status: "failed",
+          output: expect.stringContaining("runtime unavailable"),
+        }),
+      ]),
+    }));
+  });
+
   it("includes workflow discovery and selection tools in the full triage toolset", async () => {
     const task = createTriageTask({ id: "FN-WORKFLOW-TOOLS" });
     const detailedTask = { ...mockTaskDetail, id: task.id, attachments: [], comments: [] };

@@ -2200,7 +2200,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       })(),
       breakIntoSubtasks: row.breakIntoSubtasks ? true : undefined,
       noCommitsExpected: row.noCommitsExpected ? true : undefined,
-      enabledWorkflowSteps: (() => { const e = fromJson<string[]>(row.enabledWorkflowSteps); return e && e.length > 0 ? e : undefined; })(),
+      /*
+      FNXC:WorkflowOptionalSteps 2026-06-29-02:55:
+      Preserve an explicitly empty optional-step selection as `[]`. Quick Add, inline create, and task details use `[]` to mean "the operator disabled every optional workflow group"; converting it back to `undefined` lets later workflow hydration re-seed default-on Plan Review / Code Review and run gates the task opted out of.
+      */
+      enabledWorkflowSteps: (() => { const e = fromJson<string[]>(row.enabledWorkflowSteps); return Array.isArray(e) ? e : undefined; })(),
       modifiedFiles: (() => { const m = fromJson<string[]>(row.modifiedFiles); return m && m.length > 0 ? m : undefined; })(),
       missionId: row.missionId || undefined,
       sliceId: row.sliceId || undefined,
@@ -4612,7 +4616,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         }
       }
     } else if (input.enabledWorkflowSteps.length === 0) {
-      resolvedWorkflowSteps = undefined;
+      resolvedWorkflowSteps = [];
     }
 
     // U7c: selection seeds are optional-group node ids (not materialized
@@ -4807,7 +4811,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         }
       }
     } else if (Array.isArray(input.enabledWorkflowSteps) && input.enabledWorkflowSteps.length === 0) {
-      resolvedWorkflowSteps = undefined;
+      resolvedWorkflowSteps = [];
     }
 
     // U7c: selection seeds are optional-group node ids (not materialized

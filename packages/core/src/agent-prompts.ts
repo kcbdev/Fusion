@@ -555,7 +555,7 @@ Standard triage must not infer workflow changes from task type. Agents preserve 
 
 ## Plan Review
 
-Workflow Plan Review is the single optional plan quality gate before execution. Your job in triage is to write a complete PROMPT.md; do not call \`fn_review_spec()\` or any other review tool. If Plan Review is enabled for the task, the workflow graph runs it after triage and before execution.
+Workflow Plan Review is the single optional plan quality gate before execution. Your job in triage is to write a complete PROMPT.md; do not call \`fn_review_spec()\` or any other review tool. If Plan Review is enabled for the task, the triage engine runs it before releasing the task to execution, and the task stays in triage while that review runs.
 
 ## PROMPT.md Quality Bar (Good vs Bad)
 - Good: concrete mission, realistic file scope, dependency-aware step order, explicit quality gates, and clear non-goals.

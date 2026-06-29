@@ -165,7 +165,7 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(disabledResult.outcome).toBe("success");
   });
 
-  it("runs default-on optional groups when the task has no explicit optional-step selection", async () => {
+  it("treats defaultOn as a creation-time seed, not an execution-time fallback", async () => {
     const ir = optionalGroupIr();
     const group = ir.nodes.find((node) => node.id === "group");
     if (group?.config) group.config.defaultOn = true;
@@ -182,8 +182,8 @@ describe("WorkflowGraphExecutor optional-group", () => {
     const unsetResult = await executor.run(taskWith(undefined), settingsOn(), ir);
     const explicitEmptyResult = await executor.run(taskWith([]), settingsOn(), ir);
 
-    expect(calls.filter((id) => id === "optstep")).toHaveLength(1);
-    expect(unsetResult.visitedNodeIds).toContain("group::optstep");
+    expect(calls.filter((id) => id === "optstep")).toHaveLength(0);
+    expect(unsetResult.visitedNodeIds).not.toContain("group::optstep");
     expect(explicitEmptyResult.visitedNodeIds).not.toContain("group::optstep");
   });
 
@@ -522,6 +522,60 @@ describe("WorkflowGraphExecutor optional-group", () => {
         output: "malformed output — no verdict extracted",
       }),
     ]));
+  });
+
+  it("skips Plan Review in the execution graph when triage already passed it", async () => {
+    const requestFix = vi.fn(async () => true);
+    const calls: string[] = [];
+    const logs: string[] = [];
+    const ir: WorkflowIr = {
+      version: "v2",
+      name: "plan-review-already-passed",
+      columns: [{ id: "work", name: "Work", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "plan-review",
+          kind: "optional-group",
+          config: {
+            name: "Plan Review",
+            defaultOn: true,
+            template: {
+              nodes: [{ id: "plan-review-step", kind: "prompt", config: { prompt: "review plan" } }],
+              edges: [],
+            },
+          },
+        },
+        { id: "execute", kind: "prompt", config: { prompt: "execute" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "plan-review" },
+        { from: "plan-review", to: "execute", condition: "success" },
+        { from: "execute", to: "end" },
+      ],
+    };
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => {
+          calls.push(node.id);
+          return { outcome: "success" };
+        },
+      },
+      logTaskEntry: (summary) => { logs.push(summary); },
+      requestPreMergeOptionalStepFix: requestFix,
+    });
+
+    const result = await executor.run({
+      ...taskWith(["plan-review"]),
+      id: "FN-plan-review-passed",
+      workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", phase: "pre-merge", status: "passed" }],
+    } as TaskDetail, settingsOn(), ir);
+
+    expect(result.outcome).toBe("success");
+    expect(calls).toEqual(["execute"]);
+    expect(requestFix).not.toHaveBeenCalled();
+    expect(logs).toContain("[pre-merge] Workflow step already passed: Plan Review");
   });
 
   it("cycles REVISE findings across graph runs until APPROVE, and falls through only after the budget seam declines", async () => {

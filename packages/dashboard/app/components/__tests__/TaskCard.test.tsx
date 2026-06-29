@@ -2063,6 +2063,29 @@ describe("TaskCard", () => {
     expect(screen.getByText("5 steps")).toBeDefined();
   });
 
+  it("surfaces in-progress implementation steps on the collapsed card", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "in-progress",
+          status: "executing" as any,
+          steps: [
+            { name: "Step 0", status: "done" },
+            { name: "Step 1", status: "in-progress" },
+            { name: "Step 2", status: "pending" },
+          ],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("1/3")).toBeDefined();
+    expect(screen.getByText("1 active")).toBeDefined();
+    expect(screen.getByText("active")).toBeDefined();
+    expect(container.querySelector(".card-step-name.active")?.textContent).toBe("Step 1");
+  });
+
   it("uses singular step label when unified progress total is one", () => {
     render(
       <TaskCard

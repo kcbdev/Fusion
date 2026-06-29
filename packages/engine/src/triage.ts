@@ -6,9 +6,11 @@ import type {
   TaskDetail,
   TaskAttachment,
   Settings,
+  WorkflowStepResult,
 } from "@fusion/core";
 import {
   DUPLICATE_OF_METADATA_KEY,
+  PLAN_REVIEW_GROUP_ID,
   TaskDeletedError,
   buildTriageMemoryInstructions,
   getTaskDuplicateLineage,
@@ -135,6 +137,7 @@ import { archiveAsGhostBug } from "./self-healing.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
+import { reviewStep } from "./reviewer.js";
 
 
 export interface TriageProcessorOptions {
@@ -1237,7 +1240,7 @@ export class TriageProcessor {
 
           /*
           FNXC:PlanReview 2026-06-29-01:52:
-          Workflow Plan Review is the single operator-controlled AI plan gate. Triage must not remind agents to call fn_review_spec or retry planning only because that legacy tool was not approved; the graph runs optional Plan Review before parse/execution and routes failed plans back to triage.
+          Workflow Plan Review is the single operator-controlled AI plan gate. Triage must not remind agents to call fn_review_spec or retry planning only because that legacy tool was not approved; after PROMPT.md is written, triage itself runs optional Plan Review before releasing the task to execution.
           */
 
           const written = await readFile(
@@ -1773,6 +1776,146 @@ export class TriageProcessor {
     return null;
   }
 
+  private isPlanReviewEnabled(task: Task): boolean {
+    /*
+    FNXC:PlanReview 2026-06-29-02:40:
+    Plan Review is a triage-owned pre-release gate. Task creation materializes default-on optional groups into `enabledWorkflowSteps`; an explicit empty array from Quick Add means the operator disabled every optional group. Use only that materialized list here so triage does not resurrect disabled Plan Review.
+    */
+    return Array.isArray(task.enabledWorkflowSteps) && task.enabledWorkflowSteps.includes(PLAN_REVIEW_GROUP_ID);
+  }
+
+  private async recordPlanReviewWorkflowResult(task: Task, result: WorkflowStepResult): Promise<void> {
+    const live = await this.store.getTask(task.id).catch(() => task);
+    const existing = Array.isArray(live?.workflowStepResults)
+      ? [...live.workflowStepResults]
+      : [];
+    const idx = existing.findIndex((entry) => entry.workflowStepId === PLAN_REVIEW_GROUP_ID);
+    if (idx >= 0) existing[idx] = result;
+    else existing.push(result);
+    await this.store.updateTask(task.id, { workflowStepResults: existing });
+  }
+
+  private async runPlanReviewBeforeExecution(task: Task, promptContent: string, settings: Settings): Promise<"approved" | "blocked"> {
+    if (!this.isPlanReviewEnabled(task)) {
+      return "approved";
+    }
+
+    const alreadyPassed = task.workflowStepResults?.some(
+      (result) => result.workflowStepId === PLAN_REVIEW_GROUP_ID && result.status === "passed",
+    );
+    if (alreadyPassed) {
+      return "approved";
+    }
+
+    const startedAt = new Date().toISOString();
+    await this.recordPlanReviewWorkflowResult(task, {
+      workflowStepId: PLAN_REVIEW_GROUP_ID,
+      workflowStepName: "Plan Review",
+      phase: "pre-merge",
+      status: "pending",
+      startedAt,
+    });
+    await this.store.logEntry(task.id, "[pre-merge] Starting workflow step: Plan Review");
+
+    const review = await reviewStep(
+      this.rootDir,
+      task.id,
+      0,
+      "PROMPT.md",
+      "plan",
+      promptContent,
+      undefined,
+      {
+        store: this.store,
+        taskId: task.id,
+        taskTitle: task.title,
+        settings,
+        task,
+        rootDir: this.rootDir,
+        agentStore: this.options.agentStore,
+        pluginRunner: this.options.pluginRunner,
+        onSessionCreated: (session) => this.registerSubagentSession(task.id, session),
+        onSessionEnded: (session) => this.unregisterSubagentSession(task.id, session),
+      },
+    ).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      planLog.warn(`${task.id}: Plan Review unavailable before execution (${message})`);
+      return {
+        verdict: "UNAVAILABLE" as const,
+        review: `Plan Review session failed before producing a verdict: ${message}`,
+        summary: "Plan Review session unavailable.",
+      };
+    });
+
+    const completedAt = new Date().toISOString();
+    if (review.verdict === "APPROVE") {
+      await this.recordPlanReviewWorkflowResult(task, {
+        workflowStepId: PLAN_REVIEW_GROUP_ID,
+        workflowStepName: "Plan Review",
+        phase: "pre-merge",
+        status: "passed",
+        verdict: "APPROVE",
+        output: review.review,
+        notes: review.summary,
+        startedAt,
+        completedAt,
+      });
+      await this.store.logEntry(task.id, "[pre-merge] Workflow step completed: Plan Review", review.summary);
+      return "approved";
+    }
+
+    if (review.verdict === "REVISE" || review.verdict === "RETHINK") {
+      await this.recordPlanReviewWorkflowResult(task, {
+        workflowStepId: PLAN_REVIEW_GROUP_ID,
+        workflowStepName: "Plan Review",
+        phase: "pre-merge",
+        status: "failed",
+        verdict: "REVISE",
+        output: review.review,
+        notes: review.summary,
+        startedAt,
+        completedAt,
+      });
+      await this.store.logEntry(task.id, "[pre-merge] Workflow step failed: Plan Review", review.review);
+      await this.store.logEntry(
+        task.id,
+        "AI spec revision requested",
+        `Plan Review requested a planning revision before execution.\n\nStatus: ${review.verdict}\nFeedback:\n${review.review || review.summary || "(no feedback captured)"}`,
+      );
+      await this.store.updateTask(task.id, {
+        status: "needs-replan",
+        error: null,
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
+      });
+      return "blocked";
+    }
+
+    /*
+    FNXC:PlanReview 2026-06-29-02:40:
+    UNAVAILABLE means the reviewer session did not produce a usable verdict. Keep the task in triage and retry with backoff; do not fabricate a REVISE or send the planner through another full rewrite loop when no reviewer actually rejected the plan.
+    */
+    const retryAt = new Date(Date.now() + 30_000).toISOString();
+    const unavailableOutput = review.review || review.summary || "Plan Review was unavailable before producing a verdict.";
+    await this.recordPlanReviewWorkflowResult(task, {
+      workflowStepId: PLAN_REVIEW_GROUP_ID,
+      workflowStepName: "Plan Review",
+      phase: "pre-merge",
+      status: "failed",
+      output: unavailableOutput,
+      notes: review.summary,
+      startedAt,
+      completedAt,
+    });
+    await this.store.logEntry(task.id, "[pre-merge] Workflow step unavailable: Plan Review", unavailableOutput);
+    await this.store.updateTask(task.id, {
+      status: "plan-review-unavailable",
+      error: "Plan Review did not produce a verdict; retrying from triage.",
+      nextRecoveryAt: retryAt,
+    });
+    return "blocked";
+  }
+
   private async tryFinalizeExplicitDuplicateMarker(
     task: Task,
     written: string,
@@ -2182,6 +2325,13 @@ export class TriageProcessor {
         "Specification approved but task is paused — leaving in triage, will resume on unpause",
       );
       planLog.log(`${task.id} specified task paused — leaving in triage, will resume on unpause`);
+      return;
+    }
+
+    const planReviewTask = latestTransitionTask ?? task;
+    const planReviewResult = await this.runPlanReviewBeforeExecution(planReviewTask, written, settings);
+    if (planReviewResult === "blocked") {
+      planLog.log(`${task.id} Plan Review blocked execution — staying in triage`);
       return;
     }
 

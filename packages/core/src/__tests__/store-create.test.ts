@@ -963,6 +963,7 @@ describe("TaskStore", () => {
       const result = await store.applyReplicatedTaskCreate(payload);
       expect(result.applied).toBe(true);
       expect(result.task.enabledWorkflowSteps).toBeUndefined();
+      expect((await store.getTask(payload.taskId)).enabledWorkflowSteps).toEqual([]);
     });
 
     it("applyReplicatedTaskCreate is idempotent and detects collisions", async () => {

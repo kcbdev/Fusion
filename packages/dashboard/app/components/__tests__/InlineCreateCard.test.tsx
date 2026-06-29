@@ -1066,7 +1066,8 @@ describe("InlineCreateCard button visibility when collapsed", () => {
     expect(document.querySelector(".inline-create-optional-steps")).toBeNull();
   });
 
-  it("submits with enabledWorkflowSteps undefined", async () => {
+  it("submits with enabledWorkflowSteps undefined when workflow has no optional steps", async () => {
+    vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValueOnce([]);
     const mockOnSubmit = vi.fn().mockResolvedValue(createMockTask());
     renderCard([], { onSubmit: mockOnSubmit });
     expandCard();
@@ -1079,6 +1080,42 @@ describe("InlineCreateCard button visibility when collapsed", () => {
       expect(mockOnSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
           enabledWorkflowSteps: undefined,
+        }),
+      );
+    });
+  });
+
+  it("submits an empty enabledWorkflowSteps list when optional steps are all unchecked", async () => {
+    vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValueOnce([
+      {
+        templateId: "plan-review",
+        name: "Plan Review",
+        description: "Review PROMPT.md before execution",
+        icon: "clipboard-check",
+        phase: "pre-merge",
+        defaultOn: true,
+      },
+    ]);
+    const mockOnSubmit = vi.fn().mockResolvedValue(createMockTask());
+    renderCard([], { onSubmit: mockOnSubmit });
+    expandCard();
+
+    const trigger = await screen.findByTestId("inline-create-optional-steps-trigger");
+    expect(trigger).toHaveTextContent("Steps: 1 selected");
+    fireEvent.click(trigger);
+    const option = await screen.findByTestId("wf-optional-steps-dropdown-option-plan-review");
+    fireEvent.click(option);
+    expect(trigger).toHaveTextContent("Steps: none");
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Task without optional review gates" },
+    });
+    fireEvent.click(screen.getByTestId("save-button"));
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enabledWorkflowSteps: [],
         }),
       );
     });

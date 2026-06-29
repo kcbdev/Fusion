@@ -558,15 +558,16 @@ export class WorkflowGraphExecutor {
            * still reaches the same downstream node.
            */
           /*
-           * FNXC:WorkflowOptionalSteps 2026-06-29-02:05:
-           * `enabledWorkflowSteps === undefined` means the task has no explicit
-           * optional-step selection, so default-on workflow nodes must run. An
-           * explicit empty array still means the operator disabled every optional
-           * step from Quick Add or task details.
+           * FNXC:WorkflowOptionalSteps 2026-06-29-02:45:
+           * Optional-group execution is driven only by the task's materialized
+           * `enabledWorkflowSteps` list. Workflow `defaultOn` seeds that list at
+           * task creation/selection time; using it here as a fallback resurrects
+           * unchecked Quick Add steps and makes legacy/in-memory tasks run review
+           * gates that were never explicitly selected.
            */
           const enabled = Array.isArray(task.enabledWorkflowSteps)
             ? task.enabledWorkflowSteps.includes(node.id)
-            : node.config?.defaultOn === true;
+            : false;
           if (!enabled) {
             // FNXC:WorkflowOptionalGroup 2026-06-21-16:30: record the group's own
             // outcome on bypass too (mirrors the enabled path + every other node
@@ -597,6 +598,20 @@ export class WorkflowGraphExecutor {
           const groupName = typeof node.config?.name === "string" && node.config.name.trim()
             ? node.config.name.trim()
             : node.id;
+          /*
+          FNXC:PlanReview 2026-06-29-02:40:
+          Triage runs Plan Review before releasing a task to execution so the task stays in the triage column during review. When the execution graph later reaches the same optional group, treat an existing passed Plan Review result as satisfied and do not launch a duplicate reviewer session.
+          */
+          if (
+            node.id === PLAN_REVIEW_GROUP_ID
+            && task.workflowStepResults?.some(
+              (result) => result.workflowStepId === PLAN_REVIEW_GROUP_ID && result.status === "passed",
+            )
+          ) {
+            context[`node:${node.id}:outcome`] = "success";
+            this.deps.logTaskEntry?.("[pre-merge] Workflow step already passed: Plan Review");
+            return await traverseChildren(node, { outcome: "success", value: "already-passed" });
+          }
           /*
            * FNXC:WorkflowPostMerge 2026-06-26-09:00:
            * Phase is read from the optional-group node's `config.phase` (defaults to

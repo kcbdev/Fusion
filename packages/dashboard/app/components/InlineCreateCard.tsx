@@ -477,7 +477,11 @@ export function InlineCreateCard({
       validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
       planningModelProvider: hasPlanningOverride ? planningProvider : undefined,
       planningModelId: hasPlanningOverride ? planningModelId : undefined,
-      enabledWorkflowSteps: enabledOptionalStepIds.length ? enabledOptionalStepIds : undefined,
+      /*
+      FNXC:InlineCreateWorkflowSteps 2026-06-29-02:45:
+      Inline create optional-step toggles are explicit task intent. When a workflow exposes optional steps and the operator unchecks all of them, submit `[]` so default-on Plan Review / Code Review stay disabled on the created task instead of reappearing from workflow defaults.
+      */
+      enabledWorkflowSteps: optionalSteps.length > 0 ? enabledOptionalStepIds : undefined,
       priority,
       nodeId,
     };
@@ -494,7 +498,7 @@ export function InlineCreateCard({
     }
 
     await submitTask(input);
-  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, enabledOptionalStepIds, priority, nodeId, projectId, addToast, submitTask]);
+  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, optionalSteps.length, enabledOptionalStepIds, priority, nodeId, projectId, addToast, submitTask]);
 
   const handleDuplicateProceed = useCallback(async () => {
     const matches = duplicateMatches;
