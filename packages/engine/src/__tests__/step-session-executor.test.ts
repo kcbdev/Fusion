@@ -60,6 +60,14 @@ function makeTaskDetail(overrides: Partial<TaskDetail> = {}): TaskDetail {
   };
 }
 
+function makeIndependentSteps(count: number): TaskDetail["steps"] {
+  return Array.from({ length: count }, (_, i) => ({
+    name: `Step ${i}`,
+    status: "pending" as const,
+    dependsOn: [],
+  }));
+}
+
 // ── parseStepFileScopes tests ──────────────────────────────────────────
 
 describe("parseStepFileScopes", () => {
@@ -289,31 +297,52 @@ describe("buildConflictMatrix", () => {
 // ── determineParallelWaves tests ───────────────────────────────────────
 
 describe("determineParallelWaves", () => {
+  const independentSteps = (count: number) =>
+    Array.from({ length: count }, () => ({ dependsOn: [] as number[] }));
+
   it("maxParallel=1 → all steps sequential (one per wave)", () => {
     const scopes = new Map<number, string[]>([
       [0, ["src/a.ts"]],
       [1, ["src/b.ts"]],
       [2, ["src/c.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 1);
+    const waves = determineParallelWaves(scopes, 1, independentSteps(3));
     expect(waves).toHaveLength(3);
     expect(waves[0]).toEqual({ indices: [0], waveNumber: 0 });
     expect(waves[1]).toEqual({ indices: [1], waveNumber: 1 });
     expect(waves[2]).toEqual({ indices: [2], waveNumber: 2 });
   });
 
-  it("no conflicts → all steps in wave 0 (capped by maxParallel)", () => {
+  it("explicitly independent non-conflicting steps share waves capped by maxParallel", () => {
     const scopes = new Map<number, string[]>([
       [0, ["src/a.ts"]],
       [1, ["src/b.ts"]],
       [2, ["src/c.ts"]],
       [3, ["src/d.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 2);
+    const waves = determineParallelWaves(scopes, 2, independentSteps(4));
     // All non-conflicting, capped at 2 per wave → 2 waves
     expect(waves).toHaveLength(2);
     expect(waves[0].indices).toEqual([0, 1]);
     expect(waves[1].indices).toEqual([2, 3]);
+  });
+
+  it("unannotated steps are sequential so verification cannot start before implementation", () => {
+    const scopes = new Map<number, string[]>([
+      [0, ["preflight.md"]],
+      [1, ["src/implementation.ts"]],
+      [2, ["src/implementation.test.ts"]],
+      [3, ["verification.log"]],
+    ]);
+
+    const waves = determineParallelWaves(scopes, 4, [
+      {},
+      {},
+      {},
+      {},
+    ]);
+
+    expect(waves.map((wave) => wave.indices)).toEqual([[0], [1], [2], [3]]);
   });
 
   it("all steps conflict → each step in its own wave", () => {
@@ -322,7 +351,7 @@ describe("determineParallelWaves", () => {
       [1, ["src/a.ts"]],
       [2, ["src/a.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 4);
+    const waves = determineParallelWaves(scopes, 4, independentSteps(3));
     // All conflict with each other → each in own wave
     expect(waves).toHaveLength(3);
     expect(waves[0].indices).toEqual([0]);
@@ -338,7 +367,7 @@ describe("determineParallelWaves", () => {
       [2, ["packages/engine"]],
       [3, ["packages/engine/src/executor.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 2);
+    const waves = determineParallelWaves(scopes, 2, independentSteps(4));
     // 0 and 1 conflict (0 is prefix of 1), 2 and 3 conflict (2 is prefix of 3)
     // 0 and 2 don't conflict → wave 0: [0, 2]
     // 1 and 3 don't conflict → wave 1: [1, 3]
@@ -352,7 +381,7 @@ describe("determineParallelWaves", () => {
       [0, []],
       [1, []],
     ]);
-    const waves = determineParallelWaves(scopes, 4);
+    const waves = determineParallelWaves(scopes, 4, independentSteps(2));
     expect(waves).toHaveLength(1);
     expect(waves[0].indices).toEqual([0, 1]);
   });
@@ -364,7 +393,7 @@ describe("determineParallelWaves", () => {
       [2, ["c.ts"]],
       [3, ["d.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 2);
+    const waves = determineParallelWaves(scopes, 2, independentSteps(4));
     expect(waves).toHaveLength(2);
     expect(waves[0].indices).toHaveLength(2);
     expect(waves[1].indices).toHaveLength(2);
@@ -375,7 +404,7 @@ describe("determineParallelWaves", () => {
       [0, ["a.ts"]],
       [1, ["b.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 1);
+    const waves = determineParallelWaves(scopes, 1, independentSteps(2));
     for (let i = 0; i < waves.length; i++) {
       expect(waves[i].waveNumber).toBe(i);
     }
@@ -387,7 +416,7 @@ describe("determineParallelWaves", () => {
       [1, ["b.ts"]],
       [2, ["c.ts"]],
     ]);
-    const waves = determineParallelWaves(scopes, 2);
+    const waves = determineParallelWaves(scopes, 2, independentSteps(3));
     // 3 non-conflicting steps, max 2 → wave 0: [0,1], wave 1: [2]
     expect(waves).toHaveLength(2);
     expect(waves[0].indices).toEqual([0, 1]);
@@ -1578,10 +1607,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -1623,10 +1649,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -1680,10 +1703,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -1732,10 +1752,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -1825,10 +1842,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
       const semaphore = new AgentSemaphore(4);
@@ -1868,10 +1882,7 @@ describe("StepSessionExecutor", () => {
 
         const task = makeTaskDetail({
           prompt,
-          steps: [
-            { name: "Step 0", status: "pending" },
-            { name: "Step 1", status: "pending" },
-          ],
+          steps: makeIndependentSteps(2),
         });
         const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -1956,11 +1967,7 @@ describe("StepSessionExecutor", () => {
 
         const task = makeTaskDetail({
           prompt,
-          steps: [
-            { name: "Step 0", status: "pending" },
-            { name: "Step 1", status: "pending" },
-            { name: "Step 2", status: "pending" },
-          ],
+          steps: makeIndependentSteps(3),
         });
         const settings = makeSettings({ maxParallelSteps: 3 });
 
@@ -2019,11 +2026,7 @@ describe("StepSessionExecutor", () => {
 
         const task = makeTaskDetail({
           prompt,
-          steps: [
-            { name: "Step 0", status: "pending" },
-            { name: "Step 1", status: "pending" },
-            { name: "Step 2", status: "pending" },
-          ],
+          steps: makeIndependentSteps(3),
         });
         const settings = makeSettings({ maxParallelSteps: 3 });
 
@@ -2129,10 +2132,7 @@ describe("StepSessionExecutor", () => {
 
         const task = makeTaskDetail({
           prompt,
-          steps: [
-            { name: "Step 0", status: "pending" },
-            { name: "Step 1", status: "pending" },
-          ],
+          steps: makeIndependentSteps(2),
         });
         const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -2181,11 +2181,7 @@ describe("StepSessionExecutor", () => {
 
         const task = makeTaskDetail({
           prompt,
-          steps: [
-            { name: "Step 0", status: "pending" },
-            { name: "Step 1", status: "pending" },
-            { name: "Step 2", status: "pending" },
-          ],
+          steps: makeIndependentSteps(3),
         });
         const settings = makeSettings({ maxParallelSteps: 3 });
 
@@ -2331,10 +2327,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 
@@ -2398,10 +2391,7 @@ describe("StepSessionExecutor", () => {
 
       const task = makeTaskDetail({
         prompt,
-        steps: [
-          { name: "Step 0", status: "pending" },
-          { name: "Step 1", status: "pending" },
-        ],
+        steps: makeIndependentSteps(2),
       });
       const settings = makeSettings({ maxParallelSteps: 2 });
 

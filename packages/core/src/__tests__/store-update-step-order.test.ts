@@ -57,13 +57,13 @@ describe("TaskStore.updateStep step-order guard", () => {
 
   // ── U6: graph-source projection discipline (KTD-7/KTD-11) ──────────────────
 
-  it("graph source: done is legal for independent steps even when an earlier step is in-progress", async () => {
-    // Graph-owned step sessions can complete independent steps out of index order.
-    // Missing dependsOn means the graph/wave planner already decided the step was
-    // runnable; TaskStore must not invent a hidden previous-step dependency.
+  it("graph source: done is legal for explicitly independent steps even when an earlier step is in-progress", async () => {
     const store = harness.store();
     const task = await harness.createTaskWithSteps();
     await store.updateStep(task.id, 0, "pending");
+    const primed = await store.getTask(task.id);
+    const steps = primed.steps.map((s, i) => (i === 2 ? { ...s, dependsOn: [] } : { ...s }));
+    await store.updateTask(task.id, { steps });
 
     await store.updateStep(task.id, 1, "in-progress", { source: "graph" });
     const updated = await store.updateStep(task.id, 2, "done", { source: "graph" });
@@ -71,6 +71,20 @@ describe("TaskStore.updateStep step-order guard", () => {
     expect(updated.steps[2].status).toBe("done");
     expect(updated.steps[1].status).toBe("in-progress");
     expect(updated.log.some((e) => e.action.includes("Ignored out-of-order done for step 2"))).toBe(false);
+  });
+
+  it("graph source: missing dependsOn defaults to previous step and blocks early verification", async () => {
+    const store = harness.store();
+    const task = await harness.createTaskWithSteps();
+    await store.updateStep(task.id, 0, "pending");
+
+    await store.updateStep(task.id, 1, "in-progress", { source: "graph" });
+    const updated = await store.updateStep(task.id, 2, "done", { source: "graph" });
+
+    expect(updated.steps[2].status).toBe("pending");
+    expect(
+      updated.log.some((e) => e.action.includes("Ignored dependency-order done for step 2")),
+    ).toBe(true);
   });
 
   it("graph source: explicit dependsOn still suppresses completion until dependencies finish", async () => {

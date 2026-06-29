@@ -294,11 +294,12 @@ function pathsOverlap(a: string[], b: string[]): boolean {
 }
 
 /**
- * Group non-conflicting steps into parallel execution waves.
+ * Group dependency-ready, non-conflicting steps into parallel execution waves.
  *
- * Uses a greedy left-to-right scan: for each wave, add steps that don't
- * conflict with any step already in the wave. Each wave's `indices` array
- * is capped at `maxParallel`. Remaining steps spill into subsequent waves.
+ * Uses a greedy left-to-right scan: for each wave, add steps whose dependencies
+ * have all been assigned to earlier waves and that don't conflict with any step
+ * already in the wave. Each wave's `indices` array is capped at `maxParallel`.
+ * Remaining steps spill into subsequent waves.
  *
  * @param stepScopes - Map from step index to array of file paths.
  * @param maxParallel - Maximum number of steps per wave (range 1–4).
@@ -307,6 +308,7 @@ function pathsOverlap(a: string[], b: string[]): boolean {
 export function determineParallelWaves(
   stepScopes: Map<number, string[]>,
   maxParallel: number,
+  steps: Array<{ dependsOn?: number[] }> = [],
 ): ParallelWave[] {
   const indices = [...stepScopes.keys()].sort((a, b) => a - b);
   if (indices.length === 0) return [];
@@ -326,6 +328,8 @@ export function determineParallelWaves(
     for (const idx of indices) {
       if (assigned.has(idx)) continue;
       if (waveIndices.length >= clampedMax) break;
+      const deps = resolveStepSessionDependsOn(steps, idx);
+      if (!deps.every((dep) => assigned.has(dep))) continue;
 
       const pos = posMap.get(idx)!;
 
@@ -341,8 +345,9 @@ export function determineParallelWaves(
     }
 
     if (waveIndices.length === 0) {
-      // Safety: if no steps could be added (shouldn't happen with diagonal=true),
-      // force-add the next unassigned step
+      // Safety: malformed/cyclic dependencies should not infinite-loop the
+      // executor. Force the next unassigned step and let downstream execution/
+      // validation report the real problem.
       const next = indices.find((idx) => !assigned.has(idx));
       if (next !== undefined) {
         waveIndices.push(next);
@@ -360,6 +365,12 @@ export function determineParallelWaves(
   }
 
   return waves;
+}
+
+function resolveStepSessionDependsOn(steps: Array<{ dependsOn?: number[] }>, stepIndex: number): number[] {
+  const deps = steps[stepIndex]?.dependsOn;
+  if (Array.isArray(deps)) return deps;
+  return stepIndex > 0 ? [stepIndex - 1] : [];
 }
 
 // ── Step Prompt Builder ───────────────────────────────────────────────
@@ -765,7 +776,11 @@ export class StepSessionExecutor {
       }
     }
 
-    const waves = determineParallelWaves(stepScopes, this.maxParallel);
+    /*
+     * FNXC:WorkflowStepControl 2026-06-29-10:45:
+     * Step-session parallelism must respect the workflow graph's dependency model. FN-7228 showed Testing & Verification running while Preflight/implementation were still in progress because this planner considered only file conflicts. Unannotated steps are sequential by default; only explicit dependsOn metadata may unlock out-of-index parallelism.
+     */
+    const waves = determineParallelWaves(stepScopes, this.maxParallel, taskDetail.steps ?? []);
 
     stepExecLog.log(
       `Executing ${stepCount} steps in ${waves.length} wave(s) for task ${taskDetail.id} ` +
