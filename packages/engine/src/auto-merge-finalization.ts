@@ -67,11 +67,11 @@ async function recordFinalizationAudit(args: {
 function buildFinalizationMergeDetails(task: Task, result?: MergeResult): NonNullable<Task["mergeDetails"]> {
   const mergedAt = task.mergeDetails?.mergedAt ?? new Date().toISOString();
   /*
-   * FNXC:WorkflowMerge 2026-06-29-08:33:
-   * Workflow graph merge nodes receive the direct merge result shape. Some merge callers prove landing with `merged:true` before durable task metadata is refreshed, so finalization must promote that result into `mergeConfirmed` instead of failing the graph at the merge-finalize boundary.
+   * FNXC:WorkflowMerge 2026-06-29-09:04:
+   * Workflow graph merge finalization must never promote loose `merged:true` or `noOp:true` results into durable merge proof. A task can reach `done` only when the merger records `mergeConfirmed:true`; otherwise replay/recovery must block so the branch is merged instead of bypassed.
    */
   const mergeConfirmed =
-    result?.mergeConfirmed === true || result?.merged === true || task.mergeDetails?.mergeConfirmed === true;
+    result?.mergeConfirmed === true || task.mergeDetails?.mergeConfirmed === true;
   return {
     ...(task.mergeDetails ?? {}),
     ...(result?.commitSha ? { commitSha: result.commitSha } : {}),
@@ -83,8 +83,12 @@ function buildFinalizationMergeDetails(task: Task, result?: MergeResult): NonNul
     ...(result?.mergeCommitMessage ? { mergeCommitMessage: result.mergeCommitMessage } : {}),
     mergedAt,
     mergeConfirmed,
-    ...(result?.noOp ? { noOpMerge: true, noOpReason: result.reason } : {}),
+    ...(result?.noOp && mergeConfirmed ? { noOpMerge: true, noOpReason: result.reason } : {}),
   };
+}
+
+function hasDurableMergeProof(task: Task, result?: MergeResult): boolean {
+  return task.mergeDetails?.mergeConfirmed === true || result?.mergeConfirmed === true;
 }
 
 /**
@@ -107,12 +111,25 @@ export async function finalizeProvenAutoMergeTask({
   }
 
   if (latest.column === "done") {
+    if (!hasDurableMergeProof(latest, result)) {
+      const reason = "done-without-merge-confirmation";
+      await recordFinalizationAudit({
+        store,
+        audit,
+        task: latest,
+        type: "task:auto-merge-finalize-column-mismatch-no-action",
+        reason,
+        auditAgentId,
+        auditPhase,
+      });
+      return { outcome: "blocked", task: latest, previousColumn: "done", reason };
+    }
     if (result) result.task = latest;
     return { outcome: "already-done", task: latest, previousColumn: "done" };
   }
 
   const mergeDetails = buildFinalizationMergeDetails(latest, result);
-  const hasProof = mergeDetails.mergeConfirmed === true || result?.mergeConfirmed === true || result?.merged === true || result?.noOp === true;
+  const hasProof = hasDurableMergeProof({ ...latest, mergeDetails } as Task, result);
   if (!hasProof) {
     const reason = "missing-merge-confirmation";
     await recordFinalizationAudit({

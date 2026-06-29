@@ -315,7 +315,7 @@ describe("auto-merge proven finalization helper", () => {
     );
   });
 
-  it("treats a successful merged result as finalization proof even before mergeConfirmed is persisted", async () => {
+  it("blocks loose merged results that lack durable merge confirmation", async () => {
     const strandedTask = {
       id: "FN-MERGED-PROOF",
       title: "Merged proof",
@@ -333,11 +333,6 @@ describe("auto-merge proven finalization helper", () => {
       updatedAt: new Date().toISOString(),
       mergeDetails: undefined,
     } as Task;
-    const doneTask = {
-      ...strandedTask,
-      column: "done",
-      mergeDetails: { mergeConfirmed: true, commitSha: "abc123" },
-    } as Task;
     const store = createMockStore(strandedTask) as unknown as TaskStore & {
       getTask: ReturnType<typeof vi.fn>;
       updateTask: ReturnType<typeof vi.fn>;
@@ -345,7 +340,6 @@ describe("auto-merge proven finalization helper", () => {
       recordRunAuditEvent: ReturnType<typeof vi.fn>;
     };
     store.getTask.mockResolvedValue(strandedTask);
-    store.moveTask.mockResolvedValue(doneTask);
 
     const result = await finalizeProvenAutoMergeTask({
       store,
@@ -354,18 +348,13 @@ describe("auto-merge proven finalization helper", () => {
       source: "workflow-graph-merge-finalize",
     });
 
-    expect(result.outcome).toBe("done");
-    expect(store.updateTask).toHaveBeenCalledWith(
-      "FN-MERGED-PROOF",
-      expect.objectContaining({
-        mergeDetails: expect.objectContaining({ commitSha: "abc123", mergeConfirmed: true }),
-      }),
-    );
-    expect(store.moveTask).toHaveBeenCalledWith(
-      "FN-MERGED-PROOF",
-      "done",
-      expect.objectContaining({ recoveryRehome: true, preserveProgress: true }),
-    );
+    expect(result).toEqual(expect.objectContaining({ outcome: "blocked", reason: "missing-merge-confirmation" }));
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-merge-finalize-column-mismatch-no-action",
+      metadata: expect.objectContaining({ previousColumn: "in-progress", reason: "missing-merge-confirmation" }),
+    }));
   });
 
   it("treats already-done landed rows as idempotent success", async () => {
@@ -403,6 +392,44 @@ describe("auto-merge proven finalization helper", () => {
     expect(store.updateTask).not.toHaveBeenCalled();
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.recordRunAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("blocks already-done rows that lack merge confirmation instead of accepting the column", async () => {
+    const doneTask = {
+      id: "FN-DONE-NOPROOF",
+      title: "Already done without proof",
+      description: "Test",
+      column: "done",
+      dependencies: [],
+      steps: [{ status: "done" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mergeDetails: { mergeConfirmed: false, noOpMerge: true },
+    } as Task;
+    const store = createMockStore(doneTask) as unknown as TaskStore & {
+      getTask: ReturnType<typeof vi.fn>;
+      updateTask: ReturnType<typeof vi.fn>;
+      moveTask: ReturnType<typeof vi.fn>;
+      recordRunAuditEvent: ReturnType<typeof vi.fn>;
+    };
+    store.getTask.mockResolvedValue(doneTask);
+
+    const result = await finalizeProvenAutoMergeTask({
+      store,
+      taskId: "FN-DONE-NOPROOF",
+      result: { task: doneTask, ok: true, merged: true, noOp: true } as MergeResult,
+      source: "workflow-graph-merge-finalize",
+    });
+
+    expect(result).toEqual(expect.objectContaining({ outcome: "blocked", reason: "done-without-merge-confirmation" }));
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-merge-finalize-column-mismatch-no-action",
+      metadata: expect.objectContaining({ previousColumn: "done", reason: "done-without-merge-confirmation" }),
+    }));
   });
 
   it("diagnoses rows without merge proof instead of finalizing them", async () => {
