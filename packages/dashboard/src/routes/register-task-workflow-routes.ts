@@ -1640,7 +1640,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   // Retry failed, stuck-killed, or stranded triage/planning task
   router.post("/tasks/:id/retry", async (req, res) => {
     try {
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, engine } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       const retrySpecification =
         task.column === "triage" &&
@@ -1668,6 +1668,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification && !isInReviewRetry) {
         throw badRequest(`Task is not in a retryable state (current status: ${task.status || 'none'})`);
       }
+
+      /*
+      FNXC:ManualRetry 2026-06-29-00:57:
+      Dashboard retry is a fresh run boundary. Clear executor-only pause-abort provenance before mutating task state so stale pause/resume markers cannot relabel the next Plan Review or execution failure as an engine pause.
+      */
+      engine?.clearTaskPauseAbortState?.(req.params.id);
 
       const autoPauseClearPatch = buildAutoPauseClearPatch(task);
       const clearedDeadlockAutoPause = Object.keys(autoPauseClearPatch).length > 0;

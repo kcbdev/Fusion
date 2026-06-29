@@ -1378,6 +1378,10 @@ export class InProcessRuntime
     return this.scheduler;
   }
 
+  clearTaskPauseAbortState(taskId: string): void {
+    this.executor?.clearPauseAbortStateForManualRetry(taskId);
+  }
+
   configurePrMonitoring(options: {
     prMonitor: PrMonitor;
     onClosedPrFeedback?: (taskId: string, prInfo: PrInfo, comments: PrComment[]) => void | Promise<void>;

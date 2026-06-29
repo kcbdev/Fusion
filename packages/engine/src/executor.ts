@@ -1654,6 +1654,40 @@ export class TaskExecutor {
     this.completionFinalizedTaskIds.delete(taskId);
   }
 
+  private async clearStalePauseAbortBeforeDispatch(task: Task): Promise<void> {
+    if (!this.pausedAborted.has(task.id)) return;
+    let globalPause = false;
+    try {
+      globalPause = (await this.store.getSettings()).globalPause === true;
+    } catch {
+      globalPause = false;
+    }
+    if (task.paused === true || task.userPaused === true || globalPause) return;
+    /*
+     * FNXC:WorkflowLifecycle 2026-06-29-00:57:
+     * A stale pause-abort marker must not survive into a fresh unpaused dispatch.
+     * FN-7225 showed graph-owned Plan Review and execution failures being logged
+     * as "engine pause/resume" even though the task row was not paused. Clear the
+     * volatile marker at dispatch entry so real workflow/execution failures keep
+     * their actual cause and do not loop through pause recovery.
+     */
+    this.clearPausedAborted(task.id);
+    await this.store.logEntry(
+      task.id,
+      "Cleared stale pause-abort marker before unpaused execution dispatch",
+      undefined,
+      this.getRunContextFor(task.id),
+    ).catch(() => undefined);
+  }
+
+  clearPauseAbortStateForManualRetry(taskId: string): void {
+    /*
+    FNXC:ManualRetry 2026-06-29-00:57:
+    User retry is a fresh execution boundary. Clear volatile pause-abort provenance so retries cannot inherit stale engine pause/resume classification from a prior run.
+    */
+    this.clearPausedAborted(taskId);
+  }
+
   /*
   FNXC:Workspace 2026-06-24-15:45 (concurrent workspace tasks — shared browse-root collision):
   In workspace mode `this.rootDir` is the SHARED browse-only (non-git) workspace root, and EVERY
@@ -3890,6 +3924,7 @@ export class TaskExecutor {
        */
       const feedback = info.feedback?.trim()
         || "Plan Review failed before execution. Revise the task plan, then continue execution.";
+      this.clearPausedAborted(taskId);
       await this.store.logEntry(
         taskId,
         "AI spec revision requested",
@@ -7730,6 +7765,7 @@ export class TaskExecutor {
 
   async execute(task: Task): Promise<void> {
     this.completionFinalizedTaskIds.delete(task.id);
+    await this.clearStalePauseAbortBeforeDispatch(task);
     // Workflow graph interpreter routing (cutover M-C): graph-selected tasks
     // are orchestrated by the interpreter. The execute seam re-enters this
     // method with a completion interceptor registered (which claims the task
@@ -13071,6 +13107,7 @@ ${failureFeedback}
     // assumptions and proceed instead of parking on a question. Explicit opt-in
     // only (default false = board run); see runGraphCustomNode / KTD-3.
     const unattended = stepOptions?.unattended === true;
+    const isPlanReviewStep = workflowStep.id === "graph:plan-review-step" || workflowStep.name === "Plan Review";
 
     // Compute the diff scope so the workflow step agent reviews only what THIS
     // task changed — not unrelated files it might wander into. Without this,
@@ -13099,7 +13136,19 @@ ${failureFeedback}
         ? `${scopedFiles.slice(0, MAX_SCOPE_FILES).map((f) => `- ${f}`).join("\n")}\n- ... (${scopedFiles.length - MAX_SCOPE_FILES} more files truncated)`
         : scopedFiles.map((f) => `- ${f}`).join("\n");
 
-    const scopeBlock = `Diff Scope (files changed by THIS task vs base):
+    /*
+     * FNXC:PlanReviewScope 2026-06-29-00:57:
+     * Plan Review validates the planned PROMPT.md before execution. It must not
+     * inherit the generic workflow-step diff scope, because dirty worktrees or
+     * unrelated local commits can make a plan-only gate reject implementation
+     * state and loop back to triage after the planner already approved the spec.
+     */
+    const scopeBlock = isPlanReviewStep
+      ? `Plan Review Scope:
+- Review the task plan artifact (PROMPT.md) and task metadata only.
+- Do NOT judge current implementation diffs, uncommitted worktree changes, or unrelated repository changes.
+- If PROMPT.md is internally consistent, complete, scoped, and verifiable, approve even when the worktree contains unrelated changes from another task.`
+      : `Diff Scope (files changed by THIS task vs base):
 ${scopeFileBlock}${diffShortstat ? `\nDiff stat: ${diffShortstat}` : ""}
 
 CRITICAL SCOPING RULES — read before doing anything else:

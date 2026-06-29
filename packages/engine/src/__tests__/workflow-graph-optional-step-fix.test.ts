@@ -132,6 +132,7 @@ describe("TaskExecutor pre-merge optional-step fix seam", () => {
     store.getTask.mockResolvedValue(liveTask);
     store.getSettings.mockResolvedValue({ maxPostReviewFixes: 3 });
     const executor = new TaskExecutor(store, "/tmp/test");
+    (executor as any).markPausedAborted(liveTask.id);
     const sendBack = vi.spyOn(executor as any, "sendTaskBackForFix").mockResolvedValue(undefined);
 
     const scheduled = await (executor as any).requestPreMergeOptionalStepFix(liveTask.id, liveTask, {
@@ -160,6 +161,59 @@ describe("TaskExecutor pre-merge optional-step fix seam", () => {
       graphResumeRetryCount: 0,
     }, undefined);
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-7066", { postReviewFixCount: 1 }, undefined);
+    expect((executor as any).pausedAborted.has("FN-7066")).toBe(false);
+  });
+
+  it("clears stale pause-abort provenance before a fresh unpaused execution dispatch", async () => {
+    const store = createMockStore();
+    const liveTask = task({ column: "todo", paused: false, userPaused: false });
+    store.getSettings.mockResolvedValue({ globalPause: false });
+    const executor = new TaskExecutor(store, "/tmp/test");
+    (executor as any).markPausedAborted(liveTask.id);
+
+    await (executor as any).clearStalePauseAbortBeforeDispatch(liveTask);
+
+    expect((executor as any).pausedAborted.has("FN-7066")).toBe(false);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-7066",
+      "Cleared stale pause-abort marker before unpaused execution dispatch",
+      undefined,
+      undefined,
+    );
+  });
+
+  it("clears pause-abort provenance for manual retry", () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    (executor as any).markPausedAborted("FN-7066");
+
+    executor.clearPauseAbortStateForManualRetry("FN-7066");
+
+    expect((executor as any).pausedAborted.has("FN-7066")).toBe(false);
+  });
+
+  it("preserves pause-abort provenance while the task or engine is actually paused", async () => {
+    for (const { taskPatch, settings } of [
+      { taskPatch: { paused: true }, settings: { globalPause: false } },
+      { taskPatch: { userPaused: true }, settings: { globalPause: false } },
+      { taskPatch: { paused: false, userPaused: false }, settings: { globalPause: true } },
+    ]) {
+      const store = createMockStore();
+      const liveTask = task({ column: "todo", ...taskPatch });
+      store.getSettings.mockResolvedValue(settings);
+      const executor = new TaskExecutor(store, "/tmp/test");
+      (executor as any).markPausedAborted(liveTask.id);
+
+      await (executor as any).clearStalePauseAbortBeforeDispatch(liveTask);
+
+      expect((executor as any).pausedAborted.has("FN-7066")).toBe(true);
+      expect(store.logEntry).not.toHaveBeenCalledWith(
+        "FN-7066",
+        "Cleared stale pause-abort marker before unpaused execution dispatch",
+        undefined,
+        undefined,
+      );
+    }
   });
 
   it("uses the default budget of 3 for repeated fix passes and then declines when exhausted", async () => {

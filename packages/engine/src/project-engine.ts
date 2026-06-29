@@ -924,6 +924,10 @@ export class ProjectEngine {
     return this.runtime.getAgentStore();
   }
 
+  clearTaskPauseAbortState(taskId: string): void {
+    this.runtime.clearTaskPauseAbortState?.(taskId);
+  }
+
   /** Get the MessageStore (if initialized). Returns undefined before start(). */
   getMessageStore(): import("@fusion/core").MessageStore | undefined {
     return this.runtime.getMessageStore();

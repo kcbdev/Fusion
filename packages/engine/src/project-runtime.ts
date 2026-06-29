@@ -152,6 +152,12 @@ export interface ProjectRuntime extends EventEmitter<ProjectRuntimeEvents> {
   getScheduler(): Scheduler;
 
   /**
+   * Clear volatile executor pause-abort provenance for a task before a manual retry.
+   * Optional because isolated runtimes do not expose in-memory executor state.
+   */
+  clearTaskPauseAbortState?(taskId: string): void;
+
+  /**
    * Get current runtime metrics.
    * @returns Metrics including in-flight tasks, active agents, and memory usage
    */

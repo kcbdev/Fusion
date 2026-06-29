@@ -769,15 +769,20 @@ describe("POST /tasks/:id/steer", () => {
 
 describe("POST /tasks/:id/retry", () => {
   let store: TaskStore;
+  let engine: { getTaskStore: ReturnType<typeof vi.fn>; clearTaskPauseAbortState: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     store = createMockStore();
+    engine = {
+      getTaskStore: vi.fn(() => store),
+      clearTaskPauseAbortState: vi.fn(),
+    };
   });
 
   function buildApp() {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store));
+    app.use("/api", createApiRoutes(store, { engine: engine as any } as any));
     return app;
   }
 
@@ -793,6 +798,7 @@ describe("POST /tasks/:id/retry", () => {
     });
 
     expect(res.status).toBe(200);
+    expect(engine.clearTaskPauseAbortState).toHaveBeenCalledWith("KB-001");
     expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
       status: null,
       error: null,
@@ -815,6 +821,7 @@ describe("POST /tasks/:id/retry", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("not in a retryable state");
+    expect(engine.clearTaskPauseAbortState).not.toHaveBeenCalled();
   });
 
   it("retries a failed task in any column (not just in-progress)", async () => {
@@ -4480,4 +4487,3 @@ describe("Attachment routes", () => {
     });
   });
 });
-
