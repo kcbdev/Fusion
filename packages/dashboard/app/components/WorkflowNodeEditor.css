@@ -836,18 +836,48 @@ Flow's SVG attributes and makes the graph preview read blank.
   overflow: hidden;
 }
 
+/*
+FNXC:WorkflowSimpleEditor 2026-06-29-13:20:
+Mobile simple-editor tabs must stay inside the editor width while remaining horizontally swipeable/reachable. The tab strip owns horizontal overflow, and both the scroller and tab button touch targets opt into pan-x because the global mobile reset applies `touch-action: pan-y` per element, not by inheritance.
+
+FNXC:WorkflowSimpleEditor 2026-06-29-13:32:
+Keep the scroller border-box explicit so the strip's padding and border are included in its 100% inline size even if future CSS narrows the global reset.
+
+FNXC:WorkflowSimpleEditor 2026-06-29-16:22:
+Use both physical and logical width clamps because this tab strip is reused by automatic mobile simple layout and compact simple layout. The scroller may overflow internally, but its own border box must stay pinned to the editor width so the page never expands.
+
+FNXC:WorkflowSimpleEditor 2026-06-29-16:48:
+Keep logical overflow and tab intrinsic-size declarations beside the physical fallbacks so the simple-editor tab strip remains the only horizontal scroll owner while tab-button touches can start pan-x gestures under the global mobile `touch-action: pan-y` reset.
+*/
 .wf-mobile-tabs {
+  box-sizing: border-box;
   display: flex;
   flex: 0 0 auto;
+  width: 100%;
+  inline-size: 100%;
+  max-width: 100%;
+  max-inline-size: 100%;
+  min-width: 0;
+  min-inline-size: 0;
   gap: var(--space-xs);
   padding: var(--space-sm);
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
+  overflow-inline: auto;
+  overflow-block: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
   border-bottom: 1px solid var(--border);
 }
 
 .wf-mobile-tab {
+  box-sizing: border-box;
   flex: 0 0 auto;
+  min-width: max-content;
+  min-inline-size: max-content;
+  white-space: nowrap;
+  touch-action: pan-x pan-y;
   min-height: var(--wf-editor-touch-target);
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border);
