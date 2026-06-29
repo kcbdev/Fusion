@@ -70,7 +70,7 @@ During initial investigation, the store-level explicit/default workflow paths al
 - AE2. Given the `builtin:coding` IR, when its foreach template is inspected, then it contains `step-execute` and a pass-through exit node, but no `step-review`.
 - AE3. Given optional-step defaults are resolved for `builtin:coding`, then `plan-review` and `code-review` are seeded by default and `browser-verification` is not.
 - AE3b. Given optional-step defaults are resolved for `builtin:stepwise-coding`, then `plan-review` and `code-review` are seeded by default and `browser-verification` is not.
-- AE4. Given docs list built-in workflows, then the new workflow is documented separately from `builtin:stepwise-coding`.
+- AE4. Given docs list built-in workflows, then `builtin:coding`, `builtin:legacy-coding`, and `builtin:stepwise-coding` are documented as distinct selectable workflows with their actual graph shapes.
 - AE5. Given the board/list workflow selector is set to Stepwise coding, when a new task is created from that workflow context, then `store.getTaskWorkflowSelection(task.id)?.workflowId` is `builtin:stepwise-coding`.
 - AE6. Given the board/list workflow selector is set to Compound engineering and the required plugin is available/enabled, when a new task is created from that workflow context, then `store.getTaskWorkflowSelection(task.id)?.workflowId` is `builtin:compound-engineering`.
 - AE7. Given Compound engineering is unavailable because `fusion-plugin-compound-engineering` is not installed/enabled, when a user tries to create/select a Compound engineering task, then the UI/API reports the plugin requirement instead of creating a default coding task.
@@ -176,16 +176,16 @@ flowchart TB
 
 ### U1. Add the stepwise-final-review default Coding IR
 
-- **Goal:** Create a Stepwise-derived workflow IR for `builtin:coding` that mirrors `builtin:stepwise-coding` except the foreach template omits `step-review` and routes `step-execute` success directly to a pass-through `step-done` exit.
+- **Goal:** Create a Stepwise-derived default Coding IR that is registered under `builtin:coding`, mirrors `builtin:stepwise-coding` through planning/Plan Review/parse/foreach, omits per-step `step-review`, and routes the final optional Code Review directly to merge.
 - **Requirements:** R1, R2, R3, R4, R5, R6
 - **Files:**
   - Create `packages/core/src/builtin-stepwise-final-review-coding-workflow-ir.ts`
   - Modify `packages/core/src/index.ts`
-- **Approach:** Copy the stable lifecycle skeleton from `packages/core/src/builtin-stepwise-coding-workflow-ir.ts`: same columns, `PROMPT.md` artifact declaration, planning/plan-review/parse/foreach, optional groups, merge region, and settings. Inside the foreach template, include only `step-execute` and `step-done` with a success edge. Remove per-step `step-review`, `outcome:revise`, `outcome:rethink`, rework-hold routing, and the mandatory final `review` seam.
+- **Approach:** Derive from the stable lifecycle skeleton in `packages/core/src/builtin-stepwise-coding-workflow-ir.ts`: same columns, `PROMPT.md` artifact declaration, planning/plan-review/parse/foreach, optional groups, merge region, and settings. Inside the foreach template, include only `step-execute` and `step-done` with a success edge. Remove per-step `step-review`, `outcome:revise`, `outcome:rethink`, rework-hold routing, and the mandatory final `review` seam. Register the derived IR as `builtin:coding`, not as a separate selectable workflow ID.
 - **FNXC comment requirement:** Add or update a concise FNXC comment in the new IR file explaining that this built-in exists because operators need graph-owned step execution with one whole-task review at the end rather than per-step review.
 - **Test Scenarios:**
   - The IR parses and round-trips.
-  - The top-level graph contains `parse-steps`, `foreach`, `browser-verification`, `code-review`, `review`, and merge nodes.
+  - The top-level graph contains `plan-review`, `parse-steps`, `foreach`, `browser-verification`, `code-review`, and merge nodes, with no mandatory final `review` node.
   - The foreach template contains `step-execute` and `step-done`.
   - The foreach template contains no `step-review`.
   - No template edge carries `kind: "rework"`.
@@ -193,33 +193,34 @@ flowchart TB
 
 ### U2. Register and expose the new built-in workflow
 
-- **Goal:** Make the workflow discoverable and selectable through the built-in workflow registry and package exports.
+- **Goal:** Make the new default Coding graph discoverable through the existing `builtin:coding` registry entry and package exports.
 - **Requirements:** R1, R6, R7
 - **Files:**
   - Modify `packages/core/src/builtin-workflows.ts`
   - Modify `packages/core/src/index.ts`
   - Possibly modify `packages/core/src/types.ts` if the enabled built-in IDs type or docs list is closed over explicit IDs.
-- **Approach:** Import the new IR, add a `BUILTIN_WORKFLOWS` entry near `builtin:stepwise-coding`, and provide a layout that includes `plan`, `parse`, `steps`, `browser-verification`, `code-review`, `review`, and merge/end nodes. Add the workflow ID to any tests or type-level inventories that enumerate selectable built-ins.
+- **Approach:** Import the derived IR, point the existing `builtin:coding` `BUILTIN_WORKFLOWS` entry at it, preserve the old monolithic IR as `builtin:legacy-coding`, and provide layouts that include the real node sets for default Coding and Coding (per-step review). Update tests or type-level inventories that enumerate selectable built-ins.
 - **Test Scenarios:**
-  - `getBuiltinWorkflow("builtin:stepwise-final-review-coding")` returns the new workflow.
-  - `defaultEnabledBuiltinWorkflowIds()` includes the new ID because it is selectable and not plugin-gated.
-  - `NON_COMPILABLE_BUILTIN_IDS` includes the new ID in compiler tests because the graph uses interpreter-only node kinds.
+  - `getBuiltinWorkflow("builtin:coding")` returns the derived Stepwise default Coding IR.
+  - `getBuiltinWorkflow("builtin:legacy-coding")` returns the old monolithic coding IR.
+  - `NON_COMPILABLE_BUILTIN_IDS` includes `builtin:coding` and `builtin:stepwise-coding` because the graphs use interpreter-only node kinds.
   - Built-in registry tests distinguish existing `builtin:stepwise-coding` as per-step-review and default `builtin:coding` as final-code-review-only.
 - **Verification:** Extend `packages/core/src/__tests__/builtin-workflows.test.ts`.
 
 ### U3. Preserve optional-gate behavior for the new workflow
 
-- **Goal:** Ensure the new workflow has the same end-of-task optional gates as existing coding built-ins.
+- **Goal:** Ensure the default Coding and Coding (per-step review) workflows expose the required optional gates.
 - **Requirements:** R4, R5, R7, AE3
 - **Files:**
   - Modify `packages/core/src/__tests__/workflow-optional-steps.test.ts`
   - Modify `packages/core/src/__tests__/builtin-code-review-group.test.ts`
   - Modify `packages/core/src/__tests__/builtin-coding-workflow-ir.test.ts` if it asserts "both coding built-ins"
-- **Approach:** Expand test matrices that currently cover `BUILTIN_CODING_WORKFLOW_IR` and `BUILTIN_STEPWISE_CODING_WORKFLOW_IR` to include the new IR where the assertion is about shared coding optional gates. Keep per-step-review-specific assertions targeted only at `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`.
+- **Approach:** Expand test matrices so default Coding and Coding (per-step review) both include default-on `plan-review`, default-off `browser-verification`, and default-on `code-review`, while Legacy coding continues to expose its original optional browser/code review gates.
 - **Test Scenarios:**
-  - `resolveWorkflowOptionalSteps(newIr)` returns browser verification default off and code review default on.
+  - `resolveWorkflowOptionalSteps(newIr)` returns plan review default on, browser verification default off, and code review default on.
   - `resolveDefaultOnOptionalGroupIds(newIr)` returns `["plan-review", "code-review"]`.
-  - The new workflow routes `browser-verification -> code-review -> review`.
+  - The default Coding workflow routes `browser-verification -> code-review -> merge-gate`.
+  - Coding (per-step review) routes `browser-verification -> code-review -> review`.
   - Code review failure routes to `end` as in the other coding built-ins.
 - **Verification:** Run focused core tests listed in the Verification Contract.
 

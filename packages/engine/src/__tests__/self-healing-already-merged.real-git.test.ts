@@ -340,6 +340,11 @@ describeIfGit("SelfHealingManager recoverAlreadyMergedReviewTasks (real git)", (
     expect(task.mergeDetails?.mergeConfirmed).not.toBe(true);
     expect((store as any).moveTask).not.toHaveBeenCalledWith("FN-TEST-FOREIGN-MISBOUND", "done");
     expect((store.logEntry as any).mock.calls.some((call: unknown[]) => String(call[1]).includes("already-merged rejected FN-TEST-FOREIGN-MISBOUND") && String(call[1]).includes("owner=FN-OTHER"))).toBe(true);
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-recover-already-merged-rejected",
+      target: "FN-TEST-FOREIGN-MISBOUND",
+      metadata: expect.objectContaining({ reason: "foreign-task-tip", candidateOwner: "FN-OTHER" }),
+    }));
   }, 20_000);
 
   it("is idempotent across two maintenance passes", async () => {

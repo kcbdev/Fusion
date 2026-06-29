@@ -176,6 +176,7 @@ export async function findAlreadyMergedTaskCommit(
   FN-7143/FN-7187 proved patch-id and tree-equal fallbacks need branch identity proof, not just content equivalence. Only the canonical task branch may imply ownership for fallback matches, and any explicit foreign Fusion trailer on the branch tip or candidate commit rejects the recovery.
   */
   const hasCanonicalBranchIdentity = branchName === canonicalBranchName;
+  let branchTipOwnershipVerified = false;
   try {
     branchTip = execSync(`git rev-parse --verify ${shellQuote(branchName)}`, {
       cwd: repoDir,
@@ -185,6 +186,7 @@ export async function findAlreadyMergedTaskCommit(
     if (await commitHasForeignTaskOwnership(repoDir, branchTip, taskId, lineageId)) {
       return null;
     }
+    branchTipOwnershipVerified = true;
 
     execSync(`git merge-base --is-ancestor ${shellQuote(branchTip)} ${shellQuote(baseBranch)}`, {
       cwd: repoDir,
@@ -229,7 +231,7 @@ export async function findAlreadyMergedTaskCommit(
     if (!hasCanonicalBranchIdentity) {
       return null;
     }
-    if (!branchTip) {
+    if (!branchTip || !branchTipOwnershipVerified) {
       branchTip = execSync(`git rev-parse --verify ${shellQuote(branchName)}`, {
         cwd: repoDir,
         encoding: "utf-8",
@@ -238,6 +240,7 @@ export async function findAlreadyMergedTaskCommit(
       if (await commitHasForeignTaskOwnership(repoDir, branchTip, taskId, lineageId)) {
         return null;
       }
+      branchTipOwnershipVerified = true;
     }
 
     let branchBase = baseCommitSha?.trim();
