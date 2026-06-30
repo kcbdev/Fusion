@@ -375,6 +375,83 @@ describe("TaskDetailModal Activity feed loading", () => {
 });
 
 describe("TaskDetailModal Chat task merge", () => {
+  it("exposes the steering composer only in Activity Current and posts through task updates", async () => {
+    const user = userEvent.setup();
+    const { addSteeringComment } = await import("../../api");
+    const onTaskUpdated = vi.fn();
+    const updatedTask = makeTask({
+      id: "FN-7309",
+      column: "in-progress" as any,
+      steeringComments: [{ id: "steer-7309", text: "Please keep the current approach", author: "user", createdAt: "2026-06-30T21:00:00.000Z" }],
+    });
+    vi.mocked(addSteeringComment).mockReset();
+    vi.mocked(addSteeringComment).mockResolvedValueOnce(updatedTask);
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-7309", column: "in-progress" as any, log: [{ timestamp: "2026-06-30T20:00:00.000Z", action: "Started work" }] })}
+        initialTab="chat"
+        projectId="project-7309"
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+        onTaskUpdated={onTaskUpdated}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: "Current" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("form", { name: "Steering comment" })).toHaveLength(1);
+    expect(screen.getByText("Send operational guidance to the active task through steering comments.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    expect(screen.queryByRole("form", { name: "Steering comment" })).not.toBeInTheDocument();
+    expect(screen.getByText("Started work")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    expect(screen.queryByRole("form", { name: "Steering comment" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Current" }));
+    const input = screen.getByLabelText("Message active agent session");
+    await user.type(input, "Please keep the current approach");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(addSteeringComment).toHaveBeenCalledWith("FN-7309", "Please keep the current approach", "project-7309");
+      expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+    });
+  });
+
+  it("exposes the steering composer in embedded task detail without duplicating Feed or Raw Logs composers", async () => {
+    const user = userEvent.setup();
+    render(
+      <TaskDetailContent
+        task={makeTask({ id: "FN-7310", column: "todo" as any, steeringComments: undefined, log: [] })}
+        projectId="project-7309"
+        embedded
+        onRequestClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getAllByRole("form", { name: "Steering comment" })).toHaveLength(1);
+    expect(screen.getByText("No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    expect(screen.queryByRole("form", { name: "Steering comment" })).not.toBeInTheDocument();
+    expect(screen.getByText("(no activity)")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    expect(screen.queryByRole("form", { name: "Steering comment" })).not.toBeInTheDocument();
+  });
+
   it("forwards full-detail agent fields to Chat when a sparse parent task has undefined live fields", async () => {
     const user = userEvent.setup();
     const { fetchTaskDetail, addSteeringComment } = await import("../../api");

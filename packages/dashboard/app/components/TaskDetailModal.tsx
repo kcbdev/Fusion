@@ -196,12 +196,15 @@ type ActivitySegment = "current" | "feed" | "raw-logs";
 
 /*
 FNXC:TaskDetailActivityTab 2026-06-30-00:00:
-The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for every task column, including done tasks; Summary remains explicitly available for completed work until a later subtask adds the separate planner-model Chat surface.
+The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for active task columns; done tasks keep Summary as their omitted-initial-tab landing surface so completed work still opens on the completion report while Activity remains first in tab order.
 
 FNXC:TaskDetailActivity 2026-06-30-15:50:
 Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open Activity → Current. Legacy `initialTab="logs"` now routes to Activity → Feed, and Raw Logs remains an Activity segment, because the legacy top-level Logs tab must not return while the later planner-model Chat tab remains out of scope.
+
+FNXC:TaskDetailActivity 2026-06-30-21:55:
+The first Activity segment keeps the stable Current label for legacy segment tests and links, but its embedded composer labels the operational steering-comment affordance explicitly. Do not reuse this segment as the future planner-model Chat conversation; that belongs to a later top-level tab.
 */
-function resolveDefaultTab(initialTab: TabId | undefined, _column: ColumnId): TabId {
+function resolveDefaultTab(initialTab: TabId | undefined, column: ColumnId): TabId {
   if (initialTab === "retries") {
     return "definition";
   }
@@ -211,7 +214,7 @@ function resolveDefaultTab(initialTab: TabId | undefined, _column: ColumnId): Ta
   if (initialTab) {
     return initialTab;
   }
-  return "chat";
+  return column === "done" ? "summary" : "chat";
 }
 
 function resolveDefaultActivitySegment(initialTab: TabId | undefined): ActivitySegment {
@@ -3289,6 +3292,9 @@ export function TaskDetailContent({
               {/*
                 FNXC:TaskDetailActivity 2026-06-30-15:50:
                 Activity owns the existing steering/current view, Feed, and Raw Logs inside one segmented control. The later planner-model Chat tab is intentionally out of scope, so the stable top-level tab id remains `chat`, legacy `logs` callers land on Feed, and Raw Logs is the only segment that enables raw agent-log fetching.
+
+                FNXC:TaskDetailActivity 2026-06-30-21:55:
+                The first Activity segment keeps the stable Current label for legacy segment tests and links, but its embedded composer labels the operational steering-comment affordance explicitly. Do not reuse this segment as the future planner-model Chat conversation; that belongs to a later top-level tab.
               */}
               <div className="activity-segmented-control" role="tablist" aria-label={t("taskDetail.activity.segmentsLabel", "Activity views")}>
                 <button

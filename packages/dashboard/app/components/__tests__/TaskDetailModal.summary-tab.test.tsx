@@ -76,7 +76,7 @@ function doneTask(overrides = {}) {
 }
 
 describe("TaskDetailModal Summary tab", () => {
-  it("lands done tasks on Activity first and keeps Summary accessible", () => {
+  it("lands done tasks on Summary by default while keeping Activity first and accessible", () => {
     const { container } = render(
       <TaskDetailModal
         task={doneTask()}
@@ -90,15 +90,9 @@ describe("TaskDetailModal Summary tab", () => {
     );
 
     expect(container.querySelector(".detail-tabs")?.firstElementChild?.textContent).toBe("Activity");
-    const activityButton = screen.getByRole("button", { name: "Activity" });
-    expectButtonActive(activityButton);
-    expect(screen.queryByRole("button", { name: "Chat" })).toBeNull();
-    expect(screen.queryByText("Completion summary")).toBeNull();
-    expect(container.querySelector(".detail-section--chat [data-testid='task-chat-tab']")).toBeTruthy();
-
     const summaryButton = screen.getByRole("button", { name: "Summary" });
-    fireEvent.click(summaryButton);
     expectButtonActive(summaryButton);
+    expect(screen.queryByRole("button", { name: "Chat" })).toBeNull();
     expect(screen.getByText("Completion summary")).toBeTruthy();
     expect(screen.getByText("summary")).toBeTruthy();
     expect(screen.getByText("What changed")).toBeTruthy();
@@ -107,6 +101,12 @@ describe("TaskDetailModal Summary tab", () => {
     expect(screen.getByText("Preflight")).toBeTruthy();
     expect(screen.getByText("Code Review")).toBeTruthy();
     expect(screen.getByText("Agents retried this task 1 time.")).toBeTruthy();
+
+    const activityButton = screen.getByRole("button", { name: "Activity" });
+    fireEvent.click(activityButton);
+    expectButtonActive(activityButton);
+    expect(screen.queryByText("Completion summary")).toBeNull();
+    expect(container.querySelector(".detail-section--chat [data-testid='task-chat-tab']")).toBeTruthy();
   });
 
   it("honors explicit initialTab=\"chat\" for done tasks", () => {
@@ -461,7 +461,7 @@ describe("TaskDetailModal Summary tab", () => {
     expect(summaryButton.classList.contains("detail-tab")).toBe(true);
   });
 
-  it("resolves the done-task Activity default in embedded TaskDetailContent", () => {
+  it("resolves the done-task Summary default in embedded TaskDetailContent", () => {
     const { container } = render(
       <TaskDetailContent
         task={doneTask()}
@@ -474,8 +474,8 @@ describe("TaskDetailModal Summary tab", () => {
       />,
     );
 
-    expectButtonActive(screen.getByRole("button", { name: "Activity" }));
+    expectButtonActive(screen.getByRole("button", { name: "Summary" }));
     expect(container.querySelector(".detail-tabs")?.firstElementChild?.textContent).toBe("Activity");
-    expect(screen.queryByText("Completion summary")).toBeNull();
+    expect(screen.getByText("Completion summary")).toBeTruthy();
   });
 });
