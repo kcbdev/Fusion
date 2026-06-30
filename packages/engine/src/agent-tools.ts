@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import * as fusionCore from "@fusion/core";
 import type { AgentState, AgentCapability, AgentUpdateInput, Artifact, ArtifactCreateInput, ArtifactWithTask, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS, formatCurrentTaskLine } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS, formatCurrentTaskLine, normalizeWorkflowIcon } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -190,6 +190,7 @@ export const taskPromoteParams = Type.Object({
 export const workflowCreateParams = Type.Object({
   name: Type.String({ description: "Workflow name (required, non-empty)." }),
   description: Type.Optional(Type.String({ description: "Optional human-readable description." })),
+  icon: Type.Optional(Type.String({ description: "Optional compact plain-text icon for this custom workflow." })),
   ir: Type.Unknown({
     description:
       "Workflow graph (intermediate representation). Validated server-side; a malformed graph is rejected.",
@@ -213,6 +214,7 @@ export const workflowUpdateParams = Type.Object({
   workflow_id: Type.String({ description: "The workflow definition ID to update (built-ins cannot be edited)." }),
   name: Type.Optional(Type.String({ description: "New name." })),
   description: Type.Optional(Type.String({ description: "New description." })),
+  icon: Type.Optional(Type.String({ description: "New compact plain-text icon; blank clears it." })),
   ir: Type.Optional(Type.Unknown({ description: "Replacement workflow graph (validated server-side)." })),
   layout: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Replacement node layout map." })),
   rehome_to: Type.Optional(
@@ -1997,6 +1999,7 @@ export function createWorkflowCreateTool(
         const created = await store.createWorkflowDefinition({
           name: params.name,
           description: params.description,
+          icon: normalizeWorkflowIcon(params.icon),
           ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,
@@ -2064,6 +2067,7 @@ export function createWorkflowUpdateTool(
         const updated = await store.updateWorkflowDefinition(params.workflow_id, {
           name: params.name,
           description: params.description,
+          ...(params.icon !== undefined ? { icon: normalizeWorkflowIcon(params.icon) ?? null } : {}),
           ir,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           layout: params.layout as any,

@@ -114,6 +114,7 @@ import type {
   WorkflowDefinitionUpdate,
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
+import { normalizeWorkflowIcon } from "./workflow-definition-types.js";
 import { compileWorkflowToSteps, isInterpreterDeferredWorkflowCompileError } from "./workflow-compiler.js";
 import { analyzeWorkflowLifecycle } from "./workflow-lifecycle-validation.js";
 import { resolveDefaultOnOptionalGroupIds } from "./workflow-optional-steps.js";
@@ -14798,6 +14799,7 @@ ${stepsSection}`;
     id: string;
     name: string;
     description: string;
+    icon?: string | null;
     ir: string;
     layout: string;
     kind?: string | null;
@@ -14810,6 +14812,7 @@ ${stepsSection}`;
       id: row.id,
       name: row.name,
       description: row.description,
+      icon: normalizeWorkflowIcon(row.icon ?? undefined),
       // Legacy rows (pre-migration-109) have no kind column; default to "workflow".
       kind,
       ir,
@@ -14861,6 +14864,7 @@ ${stepsSection}`;
       // not only in the editor's client-side validation.
       this.assertWorkflowIrTraitsValid(ir);
       const layout = input.layout ?? {};
+      const icon = normalizeWorkflowIcon(input.icon);
       const now = new Date().toISOString();
       const id = this.nextWorkflowDefinitionId();
       const kind = input.kind === "fragment" ? "fragment" : "workflow";
@@ -14868,6 +14872,7 @@ ${stepsSection}`;
         id,
         name,
         description: input.description ?? "",
+        icon,
         // KTD-1: fragments are pure-v1 IRs and pass through downgradeIrToV1IfPure
         // unchanged; default to "workflow" when the caller omits the kind.
         kind,
@@ -14886,13 +14891,14 @@ ${stepsSection}`;
 
       this.db
         .prepare(
-          `INSERT INTO workflows (id, name, description, ir, layout, kind, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO workflows (id, name, description, icon, ir, layout, kind, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           definition.id,
           definition.name,
           definition.description,
+          definition.icon ?? null,
           serializeWorkflowIr(
             flagOnForCreate ? definition.ir : downgradeIrToV1IfPure(definition.ir),
           ),
@@ -14957,6 +14963,7 @@ ${stepsSection}`;
       description: string;
       ir: string;
       layout: string;
+      icon?: string | null;
       kind?: string | null;
       createdAt: string;
       updatedAt: string;
@@ -14991,6 +14998,7 @@ ${stepsSection}`;
           description: string;
           ir: string;
           layout: string;
+          icon?: string | null;
           kind?: string | null;
           createdAt: string;
           updatedAt: string;
@@ -15098,6 +15106,7 @@ ${stepsSection}`;
       const name = updates.name !== undefined ? updates.name.trim() : existing.name;
       if (!name) throw new Error("Workflow name is required");
       const ir = updates.ir !== undefined ? parseWorkflowIr(updates.ir) : existing.ir;
+      const icon = updates.icon !== undefined ? normalizeWorkflowIcon(updates.icon) : existing.icon;
       // Residual A: reject save-blocking trait composition conflicts server-side
       // when the IR is being changed.
       if (updates.ir !== undefined) this.assertWorkflowIrTraitsValid(ir);
@@ -15105,6 +15114,7 @@ ${stepsSection}`;
         ...existing,
         name,
         description: updates.description !== undefined ? updates.description : existing.description,
+        icon,
         ir,
         layout: updates.layout !== undefined ? updates.layout : existing.layout,
         lifecycleWarnings: analyzeWorkflowLifecycle(ir, { kind: existing.kind }),
@@ -15113,11 +15123,12 @@ ${stepsSection}`;
 
       this.db
         .prepare(
-          `UPDATE workflows SET name = ?, description = ?, ir = ?, layout = ?, updatedAt = ? WHERE id = ?`,
+          `UPDATE workflows SET name = ?, description = ?, icon = ?, ir = ?, layout = ?, updatedAt = ? WHERE id = ?`,
         )
         .run(
           next.name,
           next.description,
+          next.icon ?? null,
           // Rollback compat (#1405): persist v1 shape when pure and flag OFF.
           serializeWorkflowIr(flagOn ? next.ir : downgradeIrToV1IfPure(next.ir)),
           JSON.stringify(next.layout),
@@ -15658,12 +15669,14 @@ ${stepsSection}`;
     const ir = parseWorkflowIr(input.ir);
     this.assertWorkflowIrTraitsValid(ir);
     const layout = input.layout ?? {};
+    const icon = normalizeWorkflowIcon(input.icon);
     const now = new Date().toISOString();
     const id = this.nextWorkflowDefinitionId();
     const definition: WorkflowDefinition = {
       id,
       name,
       description: input.description ?? "",
+      icon,
       kind: input.kind === "fragment" ? "fragment" : "workflow",
       ir,
       layout,
@@ -15672,13 +15685,14 @@ ${stepsSection}`;
     };
     this.db
       .prepare(
-        `INSERT INTO workflows (id, name, description, ir, layout, kind, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO workflows (id, name, description, icon, ir, layout, kind, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         definition.id,
         definition.name,
         definition.description,
+        definition.icon ?? null,
         serializeWorkflowIr(flagOn ? definition.ir : downgradeIrToV1IfPure(definition.ir)),
         JSON.stringify(definition.layout),
         definition.kind,

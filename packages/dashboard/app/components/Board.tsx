@@ -617,11 +617,11 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
     return map;
   }, [cardDefsByWorkflow, getEffectiveTaskWorkflowId, tasks, boardWorkflows]);
 
-  const workflowNameById = useMemo(() => {
-    const map = new Map<string, string>();
+  const workflowIdentityById = useMemo(() => {
+    const map = new Map<string, { workflowName: string; workflowIcon?: string }>();
     if (!boardWorkflows) return map;
     for (const workflow of boardWorkflows.workflows) {
-      map.set(workflow.id, workflow.name);
+      map.set(workflow.id, { workflowName: workflow.name, workflowIcon: workflow.icon });
     }
     return map;
   }, [boardWorkflows]);
@@ -631,18 +631,18 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
   All-workflows Board cards need trustworthy workflow-name badges, but per-workflow Board views and other TaskCard callers must not render empty shells. Derive badges only from board-workflows metadata, falling stale or missing task assignments back to the default workflow without persisting the aggregate sentinel.
   */
   const aggregateTaskWorkflowBadges = useMemo(() => {
-    const map = new Map<string, { workflowId: string; workflowName: string }>();
+    const map = new Map<string, { workflowId: string; workflowName: string; workflowIcon?: string }>();
     if (!boardWorkflows) return map;
     for (const task of tasks) {
       const assignedWorkflowId = boardWorkflows.taskWorkflowIds[task.id] ?? boardWorkflows.defaultWorkflowId;
-      const workflowId = workflowNameById.has(assignedWorkflowId) ? assignedWorkflowId : boardWorkflows.defaultWorkflowId;
-      const workflowName = workflowNameById.get(workflowId);
-      if (workflowName) {
-        map.set(task.id, { workflowId, workflowName });
+      const workflowId = workflowIdentityById.has(assignedWorkflowId) ? assignedWorkflowId : boardWorkflows.defaultWorkflowId;
+      const workflowIdentity = workflowIdentityById.get(workflowId);
+      if (workflowIdentity) {
+        map.set(task.id, { workflowId, ...workflowIdentity });
       }
     }
     return map;
-  }, [boardWorkflows, tasks, workflowNameById]);
+  }, [boardWorkflows, tasks, workflowIdentityById]);
 
   /*
   FNXC:WorkflowBoard 2026-06-29-16:00:

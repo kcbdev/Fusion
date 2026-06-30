@@ -339,7 +339,7 @@ describe("built-in workflows", () => {
     const coding = getBuiltinWorkflow("builtin:coding");
     expect(coding).toBeDefined();
     expect(coding!.id).toBe("builtin:coding");
-    expect(coding!.name).toBe("Coding (built-in)");
+    expect(coding!.name).toBe("Coding");
     expect(coding!.description).toContain("optional final code review");
     expect(coding!.kind).toBe("workflow");
     expect(coding!.createdAt).toBe("2026-01-01T00:00:00.000Z");
@@ -352,11 +352,15 @@ describe("built-in workflows", () => {
     const legacy = getBuiltinWorkflow("builtin:legacy-coding");
     expect(legacy).toBeDefined();
     expect(legacy!.id).toBe("builtin:legacy-coding");
-    expect(legacy!.name).toBe("Legacy coding (built-in)");
+    expect(legacy!.name).toBe("Legacy coding");
     expect(legacy!.description).toContain("original monolithic coding pipeline");
     expect(legacy!.kind).toBe("workflow");
     expect(legacy!.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(serializeWorkflowIr(legacy!.ir)).toBe(serializeWorkflowIr(BUILTIN_CODING_WORKFLOW_IR));
+  });
+
+  it("built-in workflow names omit textual built-in suffixes", () => {
+    expect(BUILTIN_WORKFLOWS.map((workflow) => workflow.name)).not.toContainEqual(expect.stringContaining("(built-in)"));
   });
 
   it("linear built-ins use the canonical trait-bearing default columns", () => {

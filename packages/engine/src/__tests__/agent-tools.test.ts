@@ -516,14 +516,14 @@ describe("createWorkflowListTool", () => {
   it("lists workflows with ids and surfaces them in details", async () => {
     const store = {
       listWorkflowDefinitions: vi.fn().mockResolvedValue([
-        { id: "builtin:coding", name: "Coding (built-in)", description: "The standard pipeline" },
+        { id: "builtin:coding", name: "Coding", description: "The standard pipeline" },
         { id: "WF-003", name: "QA", description: "" },
       ]),
     };
     const tool = createWorkflowListTool(store as any);
     const result = await tool.execute("call-1", {} as any, undefined, undefined, {} as any);
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-    expect(text).toContain("builtin:coding: Coding (built-in) — The standard pipeline");
+    expect(text).toContain("builtin:coding: Coding — The standard pipeline");
     expect(text).toContain("WF-003: QA");
     expect(result.details).toEqual({ workflowIds: ["builtin:coding", "WF-003"] });
   });

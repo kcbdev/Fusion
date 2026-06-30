@@ -1,5 +1,5 @@
 import type { WorkflowDefinition, WorkflowDefinitionKind, WorkflowIr, WorkflowIrNode, WorkflowSettingDefinition, TaskStore } from "@fusion/core";
-import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, ColumnAgentBindingError, WorkflowSettingRejectionError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel, stripApprovalBypassFlags, resolveWorkflowIrById, resolveEffectiveSettingValues, findOrphanedSettingValues, isBuiltinWorkflowId, getBuiltinWorkflow, BUILTIN_WORKFLOW_SETTINGS, AgentStore, validateColumnAgentBindings, resolveWorkflowOptionalSteps, enumeratePromptBearingWorkflowNodes } from "@fusion/core";
+import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, ColumnAgentBindingError, WorkflowSettingRejectionError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel, stripApprovalBypassFlags, resolveWorkflowIrById, resolveEffectiveSettingValues, findOrphanedSettingValues, isBuiltinWorkflowId, getBuiltinWorkflow, BUILTIN_WORKFLOW_SETTINGS, AgentStore, validateColumnAgentBindings, resolveWorkflowOptionalSteps, enumeratePromptBearingWorkflowNodes, normalizeWorkflowIcon } from "@fusion/core";
 import { buildSessionSkillContextSync, createFnAgent as engineCreateFnAgent, validateCodeNodeSources } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound, rateLimited } from "../api-error.js";
 import { emitWorkflowSseEvent } from "../sse.js";
@@ -311,14 +311,20 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   router.post("/workflows", async (req, res) => {
     try {
       const { store, projectId } = await getProjectContext(req);
-      const { name, description, layout, confirmPolicyEscalation } = req.body ?? {};
+      const { name, description, icon: rawIcon, layout, confirmPolicyEscalation } = req.body ?? {};
       if (!name || typeof name !== "string" || !name.trim()) {
         throw badRequest("name is required");
+      }
+      let icon: string | undefined;
+      try {
+        icon = normalizeWorkflowIcon(rawIcon);
+      } catch (iconErr: unknown) {
+        throw badRequest(iconErr instanceof Error ? iconErr.message : "Invalid workflow icon");
       }
       const ir = requireIr(req.body);
       await assertCodeNodesCompile(ir);
       await assertColumnAgentsExist(ir, store, confirmPolicyEscalation === true);
-      const created = await store.createWorkflowDefinition({ name, description, ir, layout });
+      const created = await store.createWorkflowDefinition({ name, description, icon, ir, layout });
       emitWorkflowSseEvent("workflow:created", created, projectId);
       res.status(201).json(created);
     } catch (err: unknown) {
@@ -364,7 +370,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
   router.patch("/workflows/:id", async (req, res) => {
     try {
       const { store, projectId } = await getProjectContext(req);
-      const { name, description, ir, layout, rehomeTo, confirmPolicyEscalation } = req.body ?? {};
+      const { name, description, icon: rawIcon, ir, layout, rehomeTo, confirmPolicyEscalation } = req.body ?? {};
       if (name !== undefined && (typeof name !== "string" || !name.trim())) {
         throw badRequest("name must be a non-empty string");
       }
@@ -373,6 +379,14 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       }
       if (rehomeTo !== undefined && typeof rehomeTo !== "string") {
         throw badRequest("rehomeTo must be a string column id");
+      }
+      let icon: string | null | undefined;
+      if (rawIcon !== undefined) {
+        try {
+          icon = normalizeWorkflowIcon(rawIcon) ?? null;
+        } catch (iconErr: unknown) {
+          throw badRequest(iconErr instanceof Error ? iconErr.message : "Invalid workflow icon");
+        }
       }
       if (ir !== undefined) {
         await assertCodeNodesCompile(ir);
@@ -383,6 +397,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         description,
         ir,
         layout,
+        ...(rawIcon !== undefined ? { icon } : {}),
         ...(rehomeTo !== undefined ? { rehomeTo } : {}),
       });
       emitWorkflowSseEvent("workflow:updated", updated, projectId);
@@ -754,6 +769,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         description: def.description,
         ir: def.ir,
         layout: def.layout,
+        ...(def.icon ? { icon: def.icon } : {}),
         settingValues: store.getWorkflowSettingValues(def.id, projectId),
         promptOverrides: store.getWorkflowPromptOverrides(def.id, projectId),
       });
@@ -857,6 +873,13 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
           : "Imported workflow";
       const name = resolveImportName(rawName, existingNames);
 
+      let icon: string | undefined;
+      try {
+        icon = normalizeWorkflowIcon(envelope.icon);
+      } catch (iconErr: unknown) {
+        throw badRequest(iconErr instanceof Error ? iconErr.message : "Invalid workflow icon");
+      }
+
       const kind: WorkflowDefinitionKind =
         envelope.kind === "fragment" ? "fragment" : "workflow";
       const layout =
@@ -870,6 +893,7 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
           name,
           description:
             typeof envelope.description === "string" ? envelope.description : "",
+          icon,
           kind,
           ir,
           layout,

@@ -160,6 +160,7 @@ Create a custom Fusion workflow definition from a validated workflow IR.
 |-----------|------|----------|-------------|
 | `name` | string | ✓ | Workflow name (required, non-empty). |
 | `description` | string | — | Optional human-readable description. |
+| `icon` | string | — | Optional compact plain-text icon for this custom workflow. |
 | `ir` | unknown | ✓ | Workflow graph (intermediate representation). Validated server-side; a malformed graph is rejected. |
 | `layout` | record | — | Optional node layout map keyed by node id. |
 | `confirm_policy_escalation` | boolean | — | Set true to confirm binding a column to an agent whose permission policy is broader (more privileged) than the project default. Required when such a binding is present; the create is otherwise rejected naming the offending column. |
@@ -173,6 +174,7 @@ Update a custom Fusion workflow definition's metadata, IR, or layout.
 | `workflow_id` | string | ✓ | The workflow definition ID to update (built-ins cannot be edited). |
 | `name` | string | — | New name. |
 | `description` | string | — | New description. |
+| `icon` | string | — | New compact plain-text icon; blank clears it. |
 | `ir` | unknown | — | Replacement workflow graph (validated server-side). |
 | `layout` | record | — | Replacement node layout map. |
 | `rehome_to` | string | — | When an IR update removes a column that still holds cards, supply the column id to re-home those occupants into. Required to resolve an OccupiedColumns conflict; the target must exist in the new IR. |

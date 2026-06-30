@@ -1339,9 +1339,11 @@ describe("schema migration", () => {
       name: string;
     }>;
     expect(workflowColumns.map((c) => c.name)).toContain("kind");
-    // Existing rows default to 'workflow'.
-    const wfRow = db.prepare("SELECT kind FROM workflows WHERE id = 'WF-legacy'").get() as { kind: string };
+    expect(workflowColumns.map((c) => c.name)).toContain("icon");
+    // Existing rows default to 'workflow' and keep no icon metadata.
+    const wfRow = db.prepare("SELECT kind, icon FROM workflows WHERE id = 'WF-legacy'").get() as { kind: string; icon: string | null };
     expect(wfRow.kind).toBe("workflow");
+    expect(wfRow.icon).toBeNull();
 
     // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — migration 109 adds
     // workflow_steps.migrated_fragment_id, but the cutover (migration 131) drops the whole
@@ -1370,6 +1372,7 @@ describe("schema migration", () => {
     expect(reopened.getSchemaVersion()).toBe(SCHEMA_VERSION);
     const workflowColumns = reopened.prepare("PRAGMA table_info(workflows)").all() as Array<{ name: string }>;
     expect(workflowColumns.filter((c) => c.name === "kind")).toHaveLength(1);
+    expect(workflowColumns.filter((c) => c.name === "icon")).toHaveLength(1);
     const stepTable = reopened
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
       .get();

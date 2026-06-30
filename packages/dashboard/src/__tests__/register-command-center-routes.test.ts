@@ -526,7 +526,7 @@ describe("register-command-center-routes", () => {
     expect(body.workflows).toContainEqual(
       expect.objectContaining({
         workflowId: "builtin:coding",
-        workflowName: "Coding (built-in)",
+        workflowName: "Coding",
         tokens: expect.objectContaining({ totalTokens: 300 }),
       }),
     );

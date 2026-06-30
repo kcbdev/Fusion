@@ -275,7 +275,7 @@ function teamFixture(agents: unknown[] = [
 function workflowFixture(workflows: unknown[] = [
   {
     workflowId: "builtin:coding",
-    workflowName: "Coding (built-in)",
+    workflowName: "Coding",
     isBuiltin: true,
     tokens: { inputTokens: 900, outputTokens: 450, cachedTokens: 150, cacheWriteTokens: 0, totalTokens: 1500, nTasks: 2 },
     cost: { usd: 4.25, unavailable: false, stale: false },
@@ -1127,7 +1127,7 @@ describe("CommandCenter shell", () => {
     await screen.findByTestId("cc-area-workflows");
     expect(screen.getByTestId("command-center-tab-workflows").getAttribute("aria-selected")).toBe("true");
     expect(screen.getByTestId("command-center-panel-workflows")).toBeTruthy();
-    expect(screen.getByTestId("cc-workflows-table").textContent).toContain("Coding (built-in)");
+    expect(screen.getByTestId("cc-workflows-table").textContent).toContain("Coding");
   });
 
   it("renders the Team empty state for zero agents without an empty chart shell", async () => {

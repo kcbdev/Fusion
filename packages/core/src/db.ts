@@ -183,7 +183,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 133;
+const SCHEMA_VERSION = 134;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -437,6 +437,8 @@ CREATE TABLE IF NOT EXISTS workflows (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  -- FNXC:WorkflowIcons 2026-06-30-12:03: custom workflow icons persist as short text metadata only. Built-in workflows stay catalog-defined/read-only and render the Fusion mark from their builtin: id rather than storing an icon row.
+  icon TEXT,
   ir TEXT NOT NULL,
   layout TEXT NOT NULL DEFAULT '{}',
   -- (workflow-editor-consolidation U1, KTD-1) discriminates reusable single-node
@@ -5484,6 +5486,13 @@ export class Database {
       // recovery/manual-hold notification state survives the SQLite persistence path.
       this.applyMigration(133, () => {
         this.addColumnIfMissing("tasks", "workflowTransitionNotification", "TEXT");
+      });
+    }
+
+    if (version < 134) {
+      // FNXC:WorkflowIcons 2026-06-30-12:04: add optional custom workflow icon metadata for migrated DBs. Existing rows remain NULL so legacy custom workflows keep clean names without empty icon shells.
+      this.applyMigration(134, () => {
+        this.addColumnIfMissing("workflows", "icon", "TEXT");
       });
     }
 

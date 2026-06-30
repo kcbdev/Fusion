@@ -28,6 +28,7 @@ export interface WorkflowMetricTotals {
 export interface WorkflowSummary extends WorkflowMetricTotals {
   workflowId: string;
   workflowName: string;
+  workflowIcon?: string;
   isBuiltin: boolean;
 }
 
@@ -41,6 +42,7 @@ export interface WorkflowAnalytics {
 interface WorkflowNameRow {
   id: string;
   name: string | null;
+  icon: string | null;
 }
 
 interface TaskTokenRow {
@@ -172,12 +174,13 @@ function addRangeClauses(column: string, clauses: string[], params: string[], qu
   }
 }
 
-function resolveWorkflowName(db: Database, workflowId: string): { workflowName: string; isBuiltin: boolean } {
+function resolveWorkflowName(db: Database, workflowId: string): { workflowName: string; workflowIcon?: string; isBuiltin: boolean } {
   const builtin = getBuiltinWorkflow(workflowId) ?? BUILTIN_WORKFLOWS.find((workflow) => workflow.id === workflowId);
   if (builtin) return { workflowName: builtin.name, isBuiltin: true };
-  const row = db.prepare("SELECT id, name FROM workflows WHERE id = ?").get(workflowId) as WorkflowNameRow | undefined;
+  const row = db.prepare("SELECT id, name, icon FROM workflows WHERE id = ?").get(workflowId) as WorkflowNameRow | undefined;
   return {
     workflowName: row?.name && row.name.length > 0 ? row.name : workflowId,
+    ...(row?.icon && row.icon.length > 0 ? { workflowIcon: row.icon } : {}),
     isBuiltin: isBuiltinWorkflowId(workflowId),
   };
 }

@@ -52,6 +52,37 @@ describe("TaskStore workflow definitions (U1)", () => {
     expect(userList[0].layout.lint).toEqual({ x: 120, y: 0 });
   });
 
+  it("creates, lists, updates, and clears compact custom workflow icons", async () => {
+    const created = await store.createWorkflowDefinition({
+      name: "Iconic",
+      icon: "🚀",
+      ir: makeIr(),
+    });
+
+    expect(created.icon).toBe("🚀");
+    expect((await store.getWorkflowDefinition(created.id))?.icon).toBe("🚀");
+    const listed = (await store.listWorkflowDefinitions()).find((workflow) => workflow.id === created.id);
+    expect(listed?.icon).toBe("🚀");
+
+    const updated = await store.updateWorkflowDefinition(created.id, { icon: " QA " });
+    expect(updated.icon).toBe("QA");
+    expect((await store.getWorkflowDefinition(created.id))?.icon).toBe("QA");
+
+    const cleared = await store.updateWorkflowDefinition(created.id, { icon: "   " });
+    expect(cleared.icon).toBeUndefined();
+    expect((await store.getWorkflowDefinition(created.id))?.icon).toBeUndefined();
+  });
+
+  it("normalizes blank workflow icons and rejects unsafe icon metadata", async () => {
+    const blank = await store.createWorkflowDefinition({ name: "Blank", icon: " ", ir: makeIr() });
+    expect(blank.icon).toBeUndefined();
+
+    await expect(store.createWorkflowDefinition({ name: "Html", icon: "<svg>", ir: makeIr() })).rejects.toThrow(/plain text/i);
+    await expect(store.createWorkflowDefinition({ name: "Url", icon: "http://x.y", ir: makeIr() })).rejects.toThrow(/plain text/i);
+    await expect(store.createWorkflowDefinition({ name: "Long", icon: "abcdefghijklmnopq", ir: makeIr() })).rejects.toThrow(/16 characters or fewer/i);
+    await expect(store.updateWorkflowDefinition(blank.id, { icon: "data:x" })).rejects.toThrow(/plain text/i);
+  });
+
   it("returns non-blocking lifecycle warnings for custom full workflows", async () => {
     const created = await store.createWorkflowDefinition({
       name: "Unsafe terminal",

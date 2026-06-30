@@ -38,6 +38,7 @@ import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlo
 import { useRetryWarning } from "../context/RetryWarningContext";
 import { useColumnLabel } from "../i18n/labels";
 import { WorkspaceWorktreesSummary, isWorkspaceTask } from "./WorkspaceWorktreesSummary";
+import { WorkflowIcon } from "./WorkflowIcon";
 import { TaskContextMenu, buildTaskActionMenuModel, getTaskPrAutomationLabel, type TaskContextMenuColumnFlags, type TaskContextMenuColumnMetadata, type TaskMenuActionDescriptor } from "./TaskContextMenu";
 
 /** Per-branch progress snapshot (U13). Surfaced as an optional additive field
@@ -427,7 +428,7 @@ interface TaskCardProps {
    *  Empty/undefined → no field badges render (card byte-identical to today). */
   cardFieldDefs?: WorkflowFieldDefinition[];
   /** Board aggregate-view workflow metadata. Absent outside trusted board callers so empty workflow badges never render. */
-  workflowBadge?: { workflowId: string; workflowName: string };
+  workflowBadge?: { workflowId: string; workflowName: string; workflowIcon?: string };
   /** Unified PR entity node-state for this task's work, surfaced on the card (R12).
    *  When present, the card shows a node-state badge linking to the PR view. The
    *  `failed` state renders a DISTINCT error badge (not the open-PR badge). */
@@ -593,6 +594,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.nearDuplicateCanonicalInactive === next.nearDuplicateCanonicalInactive &&
     previous.workflowBadge?.workflowId === next.workflowBadge?.workflowId &&
     previous.workflowBadge?.workflowName === next.workflowBadge?.workflowName &&
+    previous.workflowBadge?.workflowIcon === next.workflowBadge?.workflowIcon &&
     previous.taskColumnFlags === next.taskColumnFlags &&
     previous.taskMoveColumns === next.taskMoveColumns &&
     previous.cardFieldDefs === next.cardFieldDefs &&
@@ -3046,7 +3048,8 @@ function TaskCardComponent({
             data-testid="card-workflow-badge"
             data-workflow-id={workflowBadge.workflowId}
           >
-            {workflowBadge.workflowName}
+            <WorkflowIcon workflowId={workflowBadge.workflowId} icon={workflowBadge.workflowIcon} decorative />
+            <span>{workflowBadge.workflowName}</span>
           </span>
         </div>
       )}

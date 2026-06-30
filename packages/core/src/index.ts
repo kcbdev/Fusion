@@ -373,6 +373,10 @@ export type {
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 export {
+  MAX_WORKFLOW_ICON_LENGTH,
+  normalizeWorkflowIcon,
+} from "./workflow-definition-types.js";
+export {
   compileWorkflowToSteps,
   validateLinearity,
   WorkflowCompileError,

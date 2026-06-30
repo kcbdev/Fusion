@@ -630,6 +630,8 @@ export type { WorkflowSettingDefinition, WorkflowSettingType, WorkflowSettingOpt
 export interface BoardWorkflowDefinition {
   id: string;
   name: string;
+  /** Optional compact custom workflow icon; built-ins render the Fusion mark by id. */
+  icon?: string;
   columns: BoardWorkflowColumn[];
   /** Custom field definitions declared by this workflow (U13/KTD-14). Absent on
    *  workflows with no fields, or from older servers. */

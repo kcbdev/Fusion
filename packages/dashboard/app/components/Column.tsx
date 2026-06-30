@@ -155,7 +155,7 @@ interface ColumnProps {
   /** Per-task card-placed custom field definitions (U13/KTD-14). */
   taskCardFieldDefs?: ReadonlyMap<string, import("../api").WorkflowFieldDefinition[]>;
   /** Trusted aggregate-board workflow badges keyed by task id; omitted in per-workflow and non-board surfaces. */
-  taskWorkflowBadges?: ReadonlyMap<string, { workflowId: string; workflowName: string }>;
+  taskWorkflowBadges?: ReadonlyMap<string, { workflowId: string; workflowName: string; workflowIcon?: string }>;
   /** Precomputed blocker fanout keyed by blocker task ID. */
   blockerFanoutMap?: ReadonlyMap<string, BlockerFanoutEntry>;
   /** Whether GitHub CLI auth is available for creating PRs from task cards. */

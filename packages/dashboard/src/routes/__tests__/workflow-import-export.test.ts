@@ -55,6 +55,8 @@ describe("workflow import/export routes (U5/R9/R10)", () => {
   const get = (path: string) => request(app, "GET", path);
   const postJson = (path: string, body: unknown) =>
     request(app, "POST", path, JSON.stringify(body), { "Content-Type": "application/json" });
+  const patchJson = (path: string, body: unknown) =>
+    request(app, "PATCH", path, JSON.stringify(body), { "Content-Type": "application/json" });
 
   /** A minimal valid v1 linear IR with one prompt node. */
   function linearIr(overrides?: { nodeConfig?: Record<string, unknown> }): WorkflowIr {
@@ -116,10 +118,29 @@ describe("workflow import/export routes (U5/R9/R10)", () => {
     return (await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id));
   }
 
+  it("creates and patches workflow icons through the REST boundary", async () => {
+    const created = await postJson("/api/workflows", {
+      name: "Icon API",
+      icon: "🧪",
+      ir: linearIr(),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.icon).toBe("🧪");
+
+    const updated = await patchJson(`/api/workflows/${created.body.id}`, { icon: " QA " });
+    expect(updated.status).toBe(200);
+    expect(updated.body.icon).toBe("QA");
+
+    const invalid = await patchJson(`/api/workflows/${created.body.id}`, { icon: "<svg>" });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toMatch(/plain text/i);
+  });
+
   it("round-trips export → import reproducing ir/layout/description and kind", async () => {
     const created = await store.createWorkflowDefinition({
       name: "Source flow",
       description: "round trip",
+      icon: "🧩",
       kind: "fragment",
       ir: linearIr(),
       layout: { n1: { x: 5, y: 6 } },
@@ -131,13 +152,15 @@ describe("workflow import/export routes (U5/R9/R10)", () => {
     expect(env.fusionWorkflowExport).toBe(1);
     expect(env.schemaVersion).toBe(SCHEMA_VERSION);
     expect(env.kind).toBe("fragment");
+    expect(env.icon).toBe("🧩");
 
     const imp = await postJson("/api/workflows/import", env);
     expect(imp.status).toBe(201);
-    const body = imp.body as { workflow: { id: string; kind: string; description: string; layout: unknown; ir: WorkflowIr } };
+    const body = imp.body as { workflow: { id: string; kind: string; description: string; icon?: string; layout: unknown; ir: WorkflowIr } };
     expect(body.workflow.id).not.toBe(created.id);
     expect(body.workflow.kind).toBe("fragment");
     expect(body.workflow.description).toBe("round trip");
+    expect(body.workflow.icon).toBe("🧩");
     expect(body.workflow.layout).toEqual({ n1: { x: 5, y: 6 } });
     // Semantic IR equality: same node ids/kinds.
     expect(body.workflow.ir.nodes.map((n) => n.id)).toEqual(created.ir.nodes.map((n) => n.id));
@@ -224,6 +247,13 @@ describe("workflow import/export routes (U5/R9/R10)", () => {
     );
     expect(res.status).toBe(400);
     expect((await userDefs()).map((w) => w.name)).not.toContain("Bad prompt import");
+  });
+
+  it("rejects unsafe workflow icons at the import boundary", async () => {
+    const res = await postJson("/api/workflows/import", envelope({ icon: "<svg>" }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/plain text/i);
+    expect((await userDefs()).map((w) => w.name)).not.toContain("Imported flow");
   });
 
   it("suffixes the name on collision", async () => {

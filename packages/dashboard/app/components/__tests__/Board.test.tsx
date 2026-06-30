@@ -135,7 +135,7 @@ vi.mock("../Lane", () => ({
 
 const DEFAULT_WORKFLOW = {
   id: "builtin:coding",
-  name: "Coding (built-in)",
+  name: "Coding",
   columns: [
     { id: "triage", name: "Triage", flags: { intake: true } },
     { id: "todo", name: "Todo", flags: { hold: true } },
@@ -1400,7 +1400,7 @@ describe("Board", () => {
       expect(screen.getByTestId("column-todo")).toHaveAttribute("data-tasks", expect.stringContaining("FN-1"));
       expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
       expect(JSON.parse(screen.getByTestId("column-todo").getAttribute("data-workflow-badges") || "{}")).toMatchObject({
-        "FN-1": { workflowId: "builtin:coding", workflowName: "Coding (built-in)" },
+        "FN-1": { workflowId: "builtin:coding", workflowName: "Coding" },
       });
       expect(JSON.parse(screen.getByTestId("column-intake").getAttribute("data-workflow-badges") || "{}")).toMatchObject({
         "FN-2": { workflowId: "wf-custom", workflowName: "Custom Flow" },
@@ -1518,9 +1518,9 @@ describe("Board", () => {
       const aggregateTodoIds = JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]").map((task: Task) => task.id).sort();
       expect(aggregateTodoIds).toEqual(["FN-default", "FN-missing", "FN-stale"]);
       expect(JSON.parse(screen.getByTestId("column-todo").getAttribute("data-workflow-badges") || "{}")).toMatchObject({
-        "FN-default": { workflowId: "builtin:coding", workflowName: "Coding (built-in)" },
-        "FN-missing": { workflowId: "builtin:coding", workflowName: "Coding (built-in)" },
-        "FN-stale": { workflowId: "builtin:coding", workflowName: "Coding (built-in)" },
+        "FN-default": { workflowId: "builtin:coding", workflowName: "Coding" },
+        "FN-missing": { workflowId: "builtin:coding", workflowName: "Coding" },
+        "FN-stale": { workflowId: "builtin:coding", workflowName: "Coding" },
       });
       expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-custom"));
     });
@@ -1599,7 +1599,7 @@ describe("Board", () => {
     it("uses default workflow column labels and flags for duplicate aggregate column ids", async () => {
       const duplicateNameWorkflow = {
         id: "wf-duplicate",
-        name: "Coding (built-in)",
+        name: "Coding",
         columns: [
           { id: "todo", name: "Queue from duplicate", flags: { intake: true } },
           { id: "done", name: "Complete from duplicate", flags: { complete: true } },
