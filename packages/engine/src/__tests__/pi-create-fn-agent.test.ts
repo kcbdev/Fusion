@@ -1774,6 +1774,73 @@ describe("createFnAgent", () => {
     expect(createSessionArgs.customTools.map((tool) => tool.name)).toContain("fn_heartbeat_done");
   });
 
+  it("exposes connected MCP tools in readonly sessions only with the explicit opt-in", async () => {
+    const { createFnAgent } = await import("../pi.js");
+    const close = vi.fn(async () => undefined);
+    const mcpClient = {
+      connect: vi.fn(async () => undefined),
+      listTools: vi.fn(async () => ({
+        tools: [{
+          name: "lookup",
+          description: "Lookup docs",
+          inputSchema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"] },
+        }],
+      })),
+      callTool: vi.fn(async () => ({ content: [{ type: "text", text: "ok" }] })),
+      close,
+    };
+
+    const created = await createFnAgent({
+      cwd: "/test/project",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+      mcpServers: [{ name: "docs", transport: "stdio", command: "node", enabled: true }],
+      allowMcpToolsInReadonly: true,
+      mcpClientFactory: () => mcpClient as any,
+    });
+
+    const createSessionArgs = createAgentSessionMock.mock.calls[0]?.[0] as { customTools: Array<{ name: string; parameters?: unknown }> };
+    expect(createSessionArgs.customTools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "mcp__docs__lookup",
+        parameters: expect.objectContaining({
+          type: "object",
+          properties: { topic: { type: "string" } },
+          required: ["topic"],
+        }),
+      }),
+    ]));
+
+    await created.session.dispose?.();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps MCP tools out of readonly sessions without the explicit opt-in", async () => {
+    const { createFnAgent } = await import("../pi.js");
+    const mcpClient = {
+      connect: vi.fn(async () => undefined),
+      listTools: vi.fn(async () => ({ tools: [{ name: "lookup" }] })),
+      callTool: vi.fn(async () => ({ content: [{ type: "text", text: "ok" }] })),
+      close: vi.fn(async () => undefined),
+    };
+
+    await createFnAgent({
+      cwd: "/test/project",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+      mcpServers: [{ name: "docs", transport: "stdio", command: "node", enabled: true }],
+      mcpClientFactory: () => mcpClient as any,
+    });
+
+    const createSessionArgs = createAgentSessionMock.mock.calls[0]?.[0] as { customTools: Array<{ name: string }> };
+    expect(mcpClient.connect).not.toHaveBeenCalled();
+    expect(createSessionArgs.customTools.map((tool) => tool.name)).not.toContain("mcp__docs__lookup");
+  });
+
   it("logs createFnAgent startup diagnostics without leaking cwd", async () => {
     const { piLog } = await import("../logger.js");
     const logSpy = vi.spyOn(piLog, "log").mockImplementation(() => {});
