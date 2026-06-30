@@ -199,6 +199,50 @@ describe("fast mode workflow/runtime invariants", () => {
     expect(seams.merge).toHaveBeenCalledTimes(1);
   });
 
+  it("fast builtin:coding executes explicitly selected optional-group template nodes", async () => {
+    const calls: string[] = [];
+    const prompt = "# Task\n\n## Steps\n\n### Step 1: Do the work\n- [ ] edit files";
+    const taskSteps = [{ name: "Do the work", status: "pending" }];
+    const seams = {
+      planning: vi.fn(async () => ({ outcome: "success", value: "planned" })),
+      execute: vi.fn(async () => ({ outcome: "success", value: "implemented" })),
+      review: vi.fn(async () => ({ outcome: "success", value: "approved" })),
+      merge: vi.fn(async () => ({ outcome: "success", value: "merged" })),
+      schedule: vi.fn(async () => ({ outcome: "success", value: "scheduled" })),
+      stepExecute: vi.fn(async () => ({ outcome: "success", value: "step-done" })),
+    };
+    const runner = new WorkflowGraphTaskRunner({
+      store: {
+        getTaskWorkflowSelection: () => ({ workflowId: "builtin:coding", stepIds: [] }),
+        getWorkflowDefinition: vi.fn(async (id: string) => getBuiltinWorkflow(id)),
+      },
+      seams,
+      parseStepsDeps: {
+        readArtifact: async (_target, key) => key === "PROMPT.md" ? prompt : undefined,
+        writeSteps: async (target) => {
+          target.steps = taskSteps;
+        },
+      },
+      runCustomNode: vi.fn(async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success", value: "APPROVE" };
+      }),
+    });
+
+    const result = await runner.run(task({
+      id: "FN-7283",
+      executionMode: "fast",
+      enabledWorkflowSteps: ["browser-verification"],
+      prompt,
+    }), { experimentalFeatures: { workflowGraphExecutor: true } });
+
+    expect(result.disposition).toBe("completed");
+    expect(result.visitedNodeIds).toContain("browser-verification::browser-verification-step");
+    expect(calls).toContain("custom:browser-verification-step");
+    expect(result.visitedNodeIds).toContain("code-review");
+    expect(result.visitedNodeIds).not.toContain("code-review::code-review-step");
+  });
+
   it("blocks fast builtin:coding merge when parsed implementation proof is missing", async () => {
     const liveTask = task({
       id: "FN-7271",
@@ -333,6 +377,30 @@ describe("fast mode workflow/runtime invariants", () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
+  it.each(["prompt", "script", "gate"])("executes optional-group template %s nodes in fast mode", async (kind) => {
+    const { executor } = makeExecutorForTask(task({ executionMode: "fast", worktree: "/tmp/wt" }));
+    const executeStep = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true });
+    const executeScript = vi.spyOn(executor as any, "executeScriptWorkflowStep").mockResolvedValue({ success: true });
+    const config = kind === "script" ? { scriptName: "lint" } : { prompt: "check" };
+
+    const result = await (executor as any).runGraphCustomNode(
+      { id: `custom-${kind}`, kind, config },
+      task({ executionMode: "fast" }),
+      {},
+      undefined,
+      { "workflow:optionalGroupActive": "browser-verification" },
+    );
+
+    expect(result).toMatchObject({ outcome: "success" });
+    if (kind === "script") {
+      expect(executeScript).toHaveBeenCalledTimes(1);
+      expect(executeStep).not.toHaveBeenCalled();
+    } else {
+      expect(executeStep).toHaveBeenCalledTimes(1);
+      expect(executeScript).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not bypass await-input custom graph nodes in fast mode", async () => {
     const { executor } = makeExecutorForTask(task({ executionMode: "fast" }));
     const awaitInput = vi.spyOn(executor as any, "runAwaitInputNode").mockResolvedValue({ outcome: "success", value: "awaiting-input" });
@@ -353,6 +421,72 @@ describe("fast mode workflow/runtime invariants", () => {
   // skip + standard-mode run) are gone. Fast-mode skip of workflow gates is now
   // covered above by the custom-node tests ("skips custom %s nodes in fast mode")
   // and by builtin-coding-workflow-step-results.test.ts (graph recording path).
+
+  it("re-enters graph recovery for fast completed tasks with unsatisfied explicit optional steps", async () => {
+    const liveTask = task({
+      id: "FN-7283-RECOVERY",
+      executionMode: "fast",
+      enabledWorkflowSteps: ["browser-verification"],
+      worktree: "/tmp/wt",
+      baseCommitSha: "base",
+      steps: [{ name: "Do it", status: "done" }],
+      workflowStepResults: [],
+    });
+    const { executor } = makeExecutorForTask(liveTask);
+    vi.spyOn(executor as any, "captureModifiedFiles").mockResolvedValue([]);
+    const graph = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    const recovered = await executor.recoverCompletedTask(liveTask as any);
+
+    expect(recovered).toBe(true);
+    expect(graph).toHaveBeenCalledWith(liveTask);
+  });
+
+  it("fails closed when a fast task has explicit optional steps but the store cannot resolve workflow selection", async () => {
+    const liveTask = task({
+      id: "FN-7283-MINIMAL-STORE",
+      executionMode: "fast",
+      enabledWorkflowSteps: ["browser-verification"],
+      worktree: "/tmp/wt",
+    });
+    const store = createMockStore();
+    store.getTask.mockResolvedValue(liveTask);
+    const executor = new TaskExecutor(store, "/tmp/test") as any;
+    const graphFailure = vi.spyOn(executor, "handleGraphFailure").mockResolvedValue(undefined);
+
+    const handled = await executor.maybeExecuteWorkflowGraph(liveTask);
+
+    expect(handled).toBe(true);
+    expect(graphFailure).toHaveBeenCalledWith(liveTask, expect.objectContaining({
+      disposition: "failed",
+      outcome: "failure",
+      reason: expect.stringContaining("workflow-selection-api-unavailable"),
+    }));
+  });
+
+  it("skips graph recovery for fast completed tasks with no explicit optional steps", async () => {
+    const liveTask = task({
+      id: "FN-7283-RECOVERY-EMPTY",
+      executionMode: "fast",
+      enabledWorkflowSteps: [],
+      worktree: "/tmp/wt",
+      baseCommitSha: "base",
+      steps: [{ name: "Do it", status: "done" }],
+      workflowStepResults: [],
+    });
+    const { store, executor } = makeExecutorForTask(liveTask);
+    vi.spyOn(executor as any, "captureModifiedFiles").mockResolvedValue([]);
+    const graph = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    const recovered = await executor.recoverCompletedTask(liveTask as any);
+
+    expect(recovered).toBe(true);
+    expect(graph).not.toHaveBeenCalled();
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-7283-RECOVERY-EMPTY",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "completed-task-recovered" }) }),
+    );
+  });
 
   it("keeps fn_task_done mandatory while excluding fn_review_step in fast mode", async () => {
     mockedCreateFnAgent.mockImplementation(async (opts: any) => ({

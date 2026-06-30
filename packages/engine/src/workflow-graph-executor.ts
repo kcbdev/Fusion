@@ -47,6 +47,7 @@ export type WorkflowNodeAbortKind = "engine-pause";
 
 export const WORKFLOW_INTERRUPTED_NODE_ID_CONTEXT_KEY = "workflow:interruptedNodeId";
 export const WORKFLOW_INTERRUPTED_NODE_ABORT_KIND_CONTEXT_KEY = "workflow:interruptedNodeAbortKind";
+export const WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY = "workflow:optionalGroupActive";
 export const WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND: WorkflowNodeAbortKind = "engine-pause";
 
 export interface WorkflowNodeResult {
@@ -683,8 +684,17 @@ export class WorkflowGraphExecutor {
 
           const groupResult = await runOptionalGroup(node, {
             context,
-            runTemplateNode: (tNode, sig, contextOverride) =>
-              this.executeNodeWithRetries(tNode, task, settings, contextOverride ?? context, ir, sig, false),
+            runTemplateNode: (tNode, sig, contextOverride) => {
+              /*
+              FNXC:FastOptionalSteps 2026-06-30-09:12:
+              Optional-group template execution carries the parent group id in context so fast mode can skip only top-level review/validation gates. Once an operator explicitly enables an optional group, that selection is stronger than the fast default and its prompt/script/gate body must run.
+              */
+              const optionalGroupContext = {
+                ...(contextOverride ?? context),
+                [WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY]: node.id,
+              };
+              return this.executeNodeWithRetries(tNode, task, settings, optionalGroupContext, ir, sig, false);
+            },
             shouldTraverseEdge: (edge, src) => this.shouldTraverseEdge(edge, src),
             signal: this.deps.signal,
           });

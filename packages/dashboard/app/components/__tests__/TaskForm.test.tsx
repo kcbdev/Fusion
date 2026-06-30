@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TaskForm } from "../TaskForm";
 import type { Task, Column } from "@fusion/core";
 
@@ -212,6 +212,89 @@ describe("TaskForm", () => {
 
     const options = Array.from(executionModeSelect.options).map((option) => option.value);
     expect(options).toEqual(["standard", "fast"]);
+  });
+
+  it("clears optional workflow steps when inline Fast or execution-mode select enters fast mode", async () => {
+    const { fetchWorkflowOptionalSteps } = await import("../../api");
+    vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([
+      { templateId: "code-review", name: "Code Review", phase: "pre-merge", defaultOn: true },
+      { templateId: "browser-verification", name: "Browser Verification", phase: "pre-merge", defaultOn: false },
+    ] as any);
+    const onExecutionModeChange = vi.fn();
+    const onEnabledWorkflowStepsChange = vi.fn();
+
+    const { rerender, props } = renderTaskForm({
+      executionMode: "standard",
+      onExecutionModeChange,
+      enabledWorkflowSteps: ["code-review"],
+      onEnabledWorkflowStepsChange,
+    });
+
+    const trigger = await screen.findByTestId("task-form-inline-optional-steps");
+    expect(trigger).toHaveTextContent("Steps: 1 selected");
+    fireEvent.click(screen.getByTestId("task-form-inline-fast"));
+    expect(onExecutionModeChange).toHaveBeenCalledWith("fast");
+    expect(onEnabledWorkflowStepsChange).toHaveBeenCalledWith([], expect.objectContaining({ optionalStepsAvailable: true }));
+
+    rerender(
+      <TaskForm
+        {...props}
+        executionMode="fast"
+        enabledWorkflowSteps={[]}
+        onExecutionModeChange={onExecutionModeChange}
+        onEnabledWorkflowStepsChange={onEnabledWorkflowStepsChange}
+      />,
+    );
+    expect(screen.getByTestId("task-form-inline-optional-steps")).toHaveTextContent("Steps: none");
+    fireEvent.click(screen.getByTestId("task-form-inline-optional-steps"));
+    fireEvent.click(await screen.findByTestId("wf-optional-steps-dropdown-option-browser-verification"));
+    expect(onEnabledWorkflowStepsChange).toHaveBeenLastCalledWith(["browser-verification"], expect.objectContaining({ optionalStepsAvailable: true }));
+
+    onExecutionModeChange.mockClear();
+    onEnabledWorkflowStepsChange.mockClear();
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByTestId("task-form-execution-mode-select"), { target: { value: "fast" } });
+    expect(onExecutionModeChange).toHaveBeenCalledWith("fast");
+    expect(onEnabledWorkflowStepsChange).toHaveBeenCalledWith([], expect.objectContaining({ optionalStepsAvailable: true }));
+  });
+
+  it("seeds no optional steps when loading resolves after Fast is selected", async () => {
+    const { fetchWorkflowOptionalSteps } = await import("../../api");
+    let resolveOptionalSteps: (steps: Array<{ templateId: string; name: string; phase: string; defaultOn: boolean }>) => void = () => {};
+    vi.mocked(fetchWorkflowOptionalSteps).mockReturnValue(new Promise((resolve) => {
+      resolveOptionalSteps = resolve;
+    }) as any);
+    const onExecutionModeChange = vi.fn();
+    const onEnabledWorkflowStepsChange = vi.fn();
+
+    const { rerender, props } = renderTaskForm({
+      executionMode: "standard",
+      onExecutionModeChange,
+      enabledWorkflowSteps: [],
+      onEnabledWorkflowStepsChange,
+      selectedWorkflowId: "wf-explicit",
+    });
+    await waitFor(() => expect(fetchWorkflowOptionalSteps).toHaveBeenCalledWith("wf-explicit", undefined));
+    fireEvent.click(screen.getByTestId("task-form-inline-fast"));
+    expect(onExecutionModeChange).toHaveBeenCalledWith("fast");
+
+    rerender(
+      <TaskForm
+        {...props}
+        executionMode="fast"
+        enabledWorkflowSteps={[]}
+        onExecutionModeChange={onExecutionModeChange}
+        onEnabledWorkflowStepsChange={onEnabledWorkflowStepsChange}
+      />,
+    );
+
+    await act(async () => {
+      resolveOptionalSteps([{ templateId: "code-review", name: "Code Review", phase: "pre-merge", defaultOn: true }]);
+    });
+
+    const trigger = await screen.findByTestId("task-form-inline-optional-steps");
+    await waitFor(() => expect(trigger).toHaveTextContent("Steps: none"));
+    expect(onEnabledWorkflowStepsChange).toHaveBeenLastCalledWith([], expect.objectContaining({ optionalStepsAvailable: true }));
   });
 
   it("calls onExecutionModeChange when execution mode selection changes", () => {

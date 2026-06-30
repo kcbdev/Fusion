@@ -205,6 +205,10 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [optionalSteps, setOptionalSteps] = useState<ResolvedWorkflowOptionalStep[]>([]);
   const [enabledOptionalStepIds, setEnabledOptionalStepIds] = useState<string[]>([]);
   const [isFastMode, setIsFastMode] = useState(false);
+  const isFastModeRef = useRef(isFastMode);
+  useEffect(() => {
+    isFastModeRef.current = isFastMode;
+  }, [isFastMode]);
   const [githubTrackingOverride, setGithubTrackingOverride] = useState<boolean | null>(null);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [nodeId, setNodeId] = useState<string | undefined>(undefined);
@@ -340,7 +344,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       .then((steps) => {
         if (cancelled) return;
         setOptionalSteps(steps);
-        setEnabledOptionalStepIds(steps.filter((step) => step.defaultOn).map((step) => step.templateId));
+        /*
+        FNXC:FastOptionalSteps 2026-06-30-10:24:
+        Optional-step metadata can resolve after the operator has already selected Fast. Seed `[]` in that race so async defaultOn loading cannot undo Fast's speed-first opt-out; later dropdown clicks still add explicit selections normally.
+        */
+        setEnabledOptionalStepIds(isFastModeRef.current ? [] : steps.filter((step) => step.defaultOn).map((step) => step.templateId));
       })
       .catch(() => {
         if (cancelled) return;
@@ -359,6 +367,21 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         ? prev.filter((id) => id !== templateId)
         : [...prev, templateId]
     ));
+  }, []);
+
+  /*
+  FNXC:FastOptionalSteps 2026-06-30-09:05:
+  Fast task creation is speed-first: switching standard → fast clears currently enabled optional workflow steps. The dropdown remains enabled so the operator can manually opt Browser Verification, Plan Review, Code Review, or a custom optional group back in before create.
+
+  FNXC:FastOptionalSteps 2026-06-30-10:41:
+  A Fast create must submit explicit `[]` even if optional-step metadata has not loaded yet; otherwise the store/engine see `enabledWorkflowSteps` as omitted and re-seed default-on gates.
+  */
+  const toggleFastMode = useCallback(() => {
+    setIsFastMode((prev) => {
+      const next = !prev;
+      if (next) setEnabledOptionalStepIds([]);
+      return next;
+    });
   }, []);
 
   const executorSelectionValue = getModelSelectionValue(executorProvider, executorModelId);
@@ -654,7 +677,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         FNXC:QuickAddWorkflowSteps 2026-06-29-01:31:
         Quick Add optional-step toggles are explicit task intent. When the workflow exposes optional steps and the user unchecks every one, submit an empty array instead of omitting the field so default-on Plan Review / Code Review do not reappear on the created task.
         */
-        enabledWorkflowSteps: optionalSteps.length > 0 ? enabledOptionalStepIds : undefined,
+        enabledWorkflowSteps: isFastMode || optionalSteps.length > 0 ? enabledOptionalStepIds : undefined,
         ...(isFastMode ? { executionMode: "fast" } : {}),
         githubTracking: githubTrackingOverride !== null ? { enabled: githubTrackingOverride } : undefined,
         priority,
@@ -1734,7 +1757,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             <button
               type="button"
               className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
-              onClick={() => setIsFastMode((prev) => !prev)}
+              onClick={toggleFastMode}
               onMouseDown={(e) => e.preventDefault()}
               aria-pressed={isFastMode}
               data-testid="quick-entry-fast-toggle"

@@ -866,6 +866,64 @@ describe("NewTaskModal", () => {
       });
     });
 
+    it("submits explicit empty optional steps when Fast is created before optional-step metadata loads", async () => {
+      const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
+      vi.mocked(fetchWorkflows).mockResolvedValue([WF]);
+      vi.mocked(fetchWorkflowOptionalSteps).mockReturnValue(new Promise(() => undefined) as any);
+
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "fast before metadata" } });
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "wf-x" } });
+      await waitFor(() => expect(fetchWorkflowOptionalSteps).toHaveBeenCalledWith("wf-x", undefined));
+
+      fireEvent.click(screen.getByTestId("task-form-inline-fast"));
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+      await waitFor(() => {
+        expect(props.onCreateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: [] }),
+        );
+      });
+    });
+
+    it("persists explicit empty optional steps after Fast clears defaults and allows manual reselection", async () => {
+      const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
+      vi.mocked(fetchWorkflows).mockResolvedValue([WF]);
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([{ ...STEP, defaultOn: true }]);
+
+      const { props } = renderNewTaskModal();
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "fast task" } });
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "wf-x" } });
+      const trigger = await screen.findByTestId("task-form-inline-optional-steps");
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: 1 selected"));
+
+      fireEvent.click(screen.getByTestId("task-form-inline-fast"));
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: none"));
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+      await waitFor(() => {
+        expect(props.onCreateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: [] }),
+        );
+      });
+
+      vi.mocked(props.onCreateTask).mockClear();
+      vi.mocked(props.onCreateTask).mockResolvedValue(makeTask("FN-002"));
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "fast task with browser" } });
+      fireEvent.change(await screen.findByTestId("task-workflow-select"), { target: { value: "wf-x" } });
+      const nextTrigger = await screen.findByTestId("task-form-inline-optional-steps");
+      fireEvent.click(screen.getByTestId("task-form-inline-fast"));
+      fireEvent.click(nextTrigger);
+      fireEvent.click(await screen.findByTestId("wf-optional-steps-dropdown-option-browser-verification"));
+      fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+      await waitFor(() => {
+        expect(props.onCreateTask).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: ["browser-verification"] }),
+        );
+      });
+    });
+
     it("renders no dropdown and omits enabledWorkflowSteps for 'No workflow'", async () => {
       const { fetchWorkflows, fetchWorkflowOptionalSteps } = await import("../../api");
       vi.mocked(fetchWorkflows).mockResolvedValue([WF]);

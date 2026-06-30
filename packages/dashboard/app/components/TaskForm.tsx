@@ -50,6 +50,9 @@ export interface PendingImage {
 
 type TaskExecutionModeSelection = "standard" | "fast";
 export type BranchSelectionMode = "project-default" | "auto-new" | "existing" | "custom-new" | "shared-group";
+export interface EnabledWorkflowStepsChangeMeta {
+  optionalStepsAvailable: boolean;
+}
 
 const PRESET_OPTION_SEPARATOR = "──────────";
 
@@ -106,7 +109,7 @@ export interface TaskFormProps {
   // from the selected workflow's `defaultOn` and lifts the enabled set to the
   // parent (which puts it in the create payload). Only active in create mode.
   enabledWorkflowSteps?: string[];
-  onEnabledWorkflowStepsChange?: (ids: string[]) => void;
+  onEnabledWorkflowStepsChange?: (ids: string[], meta?: EnabledWorkflowStepsChangeMeta) => void;
 
   // Attachments
   pendingImages: PendingImage[];
@@ -250,6 +253,10 @@ export function TaskForm({
     (githubRepoOverride || "") !== "";
 
   const [showDepDropdown, setShowDepDropdown] = useState(false);
+  const executionModeRef = useRef(executionMode);
+  useEffect(() => {
+    executionModeRef.current = executionMode;
+  }, [executionMode]);
   const [showMoreOptions, setShowMoreOptions] = useState(
     autoExpandMoreOptionsOnSelection ? hasInitialMoreOptions : false,
   );
@@ -339,7 +346,7 @@ export function TaskForm({
       // Clear any in-flight loading state (a prior fetch may have been cancelled
       // mid-flight when switching to "No workflow"), so the loading row never sticks.
       setOptionalStepsLoading(false);
-      onEnabledWorkflowStepsChange?.([]);
+      onEnabledWorkflowStepsChange?.([], { optionalStepsAvailable: false });
       return;
     }
     setOptionalStepsLoading(true);
@@ -347,13 +354,19 @@ export function TaskForm({
       .then((steps) => {
         if (cancelled) return;
         setOptionalSteps(steps);
-        // Re-seed the enabled set from each step's defaultOn on every workflow change.
-        onEnabledWorkflowStepsChange?.(steps.filter((s) => s.defaultOn).map((s) => s.templateId));
+        /*
+        FNXC:FastOptionalSteps 2026-06-30-10:25:
+        Optional-step fetches race user mode changes. When the latest mode is Fast, seed an explicit empty set after loading instead of defaultOn ids so async workflow metadata cannot re-enable optional gates the operator has not manually reselected.
+        */
+        const seededSteps = executionModeRef.current === "fast"
+          ? []
+          : steps.filter((s) => s.defaultOn).map((s) => s.templateId);
+        onEnabledWorkflowStepsChange?.(seededSteps, { optionalStepsAvailable: steps.length > 0 });
       })
       .catch(() => {
         if (cancelled) return;
         setOptionalSteps([]);
-        onEnabledWorkflowStepsChange?.([]);
+        onEnabledWorkflowStepsChange?.([], { optionalStepsAvailable: false });
       })
       .finally(() => {
         if (!cancelled) setOptionalStepsLoading(false);
@@ -367,15 +380,26 @@ export function TaskForm({
   }, [onWorkflowIdChange, effectiveOptionalWorkflowId, projectId]);
 
   const enabledOptionalStepIds = enabledWorkflowSteps ?? [];
+  /*
+  FNXC:FastOptionalSteps 2026-06-30-09:08:
+  Full-dialog Fast controls share one transition contract: entering fast mode clears currently enabled optional workflow steps exactly once, while the inline dropdown remains active so manual reselection is persisted as explicit create intent.
+  */
+  const handleExecutionModeChange = useCallback((nextMode: TaskExecutionModeSelection) => {
+    onExecutionModeChange?.(nextMode);
+    if (nextMode === "fast") {
+      onEnabledWorkflowStepsChange?.([], { optionalStepsAvailable: optionalSteps.length > 0 });
+    }
+  }, [onEnabledWorkflowStepsChange, onExecutionModeChange, optionalSteps.length]);
+
   const toggleOptionalStep = useCallback(
     (templateId: string) => {
       const current = enabledWorkflowSteps ?? [];
       const next = current.includes(templateId)
         ? current.filter((id) => id !== templateId)
         : [...current, templateId];
-      onEnabledWorkflowStepsChange?.(next);
+      onEnabledWorkflowStepsChange?.(next, { optionalStepsAvailable: optionalSteps.length > 0 });
     },
-    [enabledWorkflowSteps, onEnabledWorkflowStepsChange],
+    [enabledWorkflowSteps, onEnabledWorkflowStepsChange, optionalSteps.length],
   );
 
   const availablePresets = settings?.modelPresets || [];
@@ -956,7 +980,7 @@ export function TaskForm({
             <button
               type="button"
               className={`btn btn-sm ${executionMode === "fast" ? "btn-primary" : ""}`}
-              onClick={() => onExecutionModeChange(executionMode === "fast" ? "standard" : "fast")}
+              onClick={() => handleExecutionModeChange(executionMode === "fast" ? "standard" : "fast")}
               aria-pressed={executionMode === "fast"}
               disabled={disabled}
               data-testid="task-form-inline-fast"
@@ -1368,7 +1392,7 @@ export function TaskForm({
               id="task-execution-mode"
               data-testid="task-form-execution-mode-select"
               value={executionMode}
-              onChange={(e) => onExecutionModeChange(e.target.value as TaskExecutionModeSelection)}
+              onChange={(e) => handleExecutionModeChange(e.target.value as TaskExecutionModeSelection)}
               disabled={disabled}
             >
               <option value="standard">{t("taskForm.executionModeStandard", "Standard")}</option>

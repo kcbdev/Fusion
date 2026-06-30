@@ -40,7 +40,7 @@ import {
   type ForeachActiveContext,
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
-import { MERGE_REGION_KINDS, WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND } from "./workflow-graph-executor.js";
+import { MERGE_REGION_KINDS, WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND, WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY } from "./workflow-graph-executor.js";
 import type { WorkflowNodePreparationRequirement, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import type {
   AuditPrimitiveInput,
@@ -3871,20 +3871,26 @@ export class TaskExecutor {
           executorLog.log(`${task.id}: recovered ${modifiedFiles.length} modified files`);
         }
 
-        // Run workflow steps before transitioning — skip in fast mode
-        if (task.executionMode !== "fast") {
-          if (areEnabledPreMergeWorkflowStepsSatisfied(liveForCompletenessCheck)) {
-            /*
-            FNXC:WorkflowLifecycle 2026-06-29-04:37:
-            Completed graph-owned tasks can be observed briefly as in-progress after
-            the main graph already recorded every enabled pre-merge gate. Recovery
-            must not restart the graph from parse in that state; foreach pins from
-            the completed run make parse fail with pin-mismatch. Hand off to review
-            instead, which is the same terminal seam the completed graph reached.
-            */
-            executorLog.log(`${task.id}: completed recovery found satisfied workflow gates — skipping graph re-entry`);
-          } else {
-            if (await this.shouldDeferCompletionForGlobalPause(task.id, "before workflow-graph re-entry during completed-task recovery")) {
+        const enabledWorkflowStepsAlreadySatisfied = task.executionMode === "fast"
+          ? areExplicitEnabledWorkflowStepsSatisfied(liveForCompletenessCheck)
+          : areEnabledPreMergeWorkflowStepsSatisfied(liveForCompletenessCheck);
+        const shouldReenterWorkflowGraph = task.executionMode === "fast"
+          ? hasUnsatisfiedExplicitEnabledWorkflowSteps(liveForCompletenessCheck)
+          : !enabledWorkflowStepsAlreadySatisfied;
+
+        // Run workflow steps before transitioning — fast mode still honors explicit optional-step selections.
+        if (enabledWorkflowStepsAlreadySatisfied) {
+          /*
+          FNXC:WorkflowLifecycle 2026-06-29-04:37:
+          Completed graph-owned tasks can be observed briefly as in-progress after
+          the main graph already recorded every enabled pre-merge gate. Recovery
+          must not restart the graph from parse in that state; foreach pins from
+          the completed run make parse fail with pin-mismatch. Hand off to review
+          instead, which is the same terminal seam the completed graph reached.
+          */
+          executorLog.log(`${task.id}: completed recovery found satisfied workflow gates — skipping graph re-entry`);
+        } else if (shouldReenterWorkflowGraph) {
+          if (await this.shouldDeferCompletionForGlobalPause(task.id, "before workflow-graph re-entry during completed-task recovery")) {
               return false;
             }
             /*
@@ -3916,13 +3922,16 @@ export class TaskExecutor {
               executorLog.log(`✓ ${task.id} auto-recovered completed task via workflow-graph re-entry`);
               return true;
             }
-            // Graph declined (minimal store WITHOUT the workflow-selection API and no
-            // enabled gates to run — a store WITH enabled steps would have been parked
-            // fail-closed above): there is nothing to gate, so fall through to the
-            // legacy in-review handoff below.
-          }
-        } else {
-          executorLog.log(`${task.id}: fast mode — skipping workflow steps on auto-recovery`);
+          // Graph declined (minimal store WITHOUT the workflow-selection API and no
+          // enabled gates to run — a store WITH enabled steps would have been parked
+          // fail-closed above): there is nothing to gate, so fall through to the
+          // legacy in-review handoff below.
+        } else if (task.executionMode === "fast") {
+          /*
+          FNXC:FastOptionalSteps 2026-06-30-12:00:
+          Fast recovery can hand off completed implementation directly only when the operator did not explicitly enable optional workflow steps, or when those enabled steps already have passed pre-merge results. Explicit optional selections are stronger than the fast default, so completed-task recovery must re-enter the workflow graph before review when any selected optional group is still unsatisfied.
+          */
+          executorLog.log(`${task.id}: fast mode — no unsatisfied explicit workflow steps on auto-recovery`);
         }
       }
 
@@ -4493,7 +4502,10 @@ export class TaskExecutor {
         Graph execution is the default for production TaskStore implementations, which expose workflow-selection APIs. Minimal test stores and older embedded adapters can lack that API; fall back to the legacy executor instead of half-entering graph routing with no workflow persistence surface.
 
         FNXC:WorkflowExecution 2026-06-25-00:00:
-        U4 (KTD-2/KTD-5) FAIL-CLOSED. The legacy `runWorkflowSteps` execution path was deleted; the graph is now the sole workflow-step executor. A store without `getTaskWorkflowSelection` can no longer reach a legacy executor that runs the enabled pre-merge gates. If we returned `false` here for a task that has enabled workflow steps, execute() would proceed and SILENTLY SKIP every gate (the exact FN-7039 silent-skip class) before handing off to review. So when the task has enabled pre-merge workflow steps (and is not fast mode, which intentionally skips them), park the task as a workflow failure instead — loud, never silent. Tasks with NO enabled steps have nothing to gate, so they keep the legacy implementation path (no behavior change), which is what minimal test stores exercise.
+        U4 (KTD-2/KTD-5) FAIL-CLOSED. The legacy `runWorkflowSteps` execution path was deleted; the graph is now the sole workflow-step executor. A store without `getTaskWorkflowSelection` can no longer reach a legacy executor that runs the enabled pre-merge gates. If we returned `false` here for a task that has enabled workflow steps, execute() would proceed and SILENTLY SKIP every gate (the exact FN-7039 silent-skip class) before handing off to review. So when the task has enabled pre-merge workflow steps, park the task as a workflow failure instead — loud, never silent. Tasks with NO enabled steps have nothing to gate, so they keep the legacy implementation path (no behavior change), which is what minimal test stores exercise.
+
+        FNXC:FastOptionalSteps 2026-06-30-09:45:
+        Fast mode only clears optional workflow steps by default; explicit `enabledWorkflowSteps` remains operator intent. Minimal or older stores that cannot resolve the graph must fail closed for non-empty explicit selections, even in fast mode, rather than falling through and silently skipping the selected optional-group body.
         */
         let liveForGate: Task | null = null;
         try {
@@ -4503,7 +4515,7 @@ export class TaskExecutor {
         }
         const gateTask = liveForGate ?? task;
         const hasEnabledSteps = (gateTask.enabledWorkflowSteps?.length ?? 0) > 0;
-        if (hasEnabledSteps && gateTask.executionMode !== "fast") {
+        if (hasEnabledSteps) {
           await this.handleGraphFailure(task, {
             disposition: "failed",
             outcome: "failure",
@@ -4603,8 +4615,8 @@ export class TaskExecutor {
         seams: this.createAuthoritativeWorkflowSeams(settings),
         prepareNodeExecution: (node, nodeTask, requirement) =>
           this.prepareGraphNodeExecution(node, nodeTask, settings, requirement),
-        runCustomNode: (node, nodeTask) =>
-          this.runGraphCustomNode(node, nodeTask, settings, resolveBindingForNode(node.id)),
+        runCustomNode: (node, nodeTask, context) =>
+          this.runGraphCustomNode(node, nodeTask, settings, resolveBindingForNode(node.id), context),
         publishTaskProjection: async (taskId, patch) => {
           await this.store.updateTaskAtomic(taskId, (liveTask) => {
             const update: Parameters<TaskStore["updateTask"]>[1] = {};
@@ -6898,6 +6910,7 @@ export class TaskExecutor {
     nodeTask: TaskDetail,
     settings: Settings,
     columnBinding?: WorkflowColumnAgent,
+    graphContext?: Record<string, unknown>,
   ): Promise<WorkflowNodeResult> {
     const cfg = node.config ?? {};
     let live = await this.store.getTask(nodeTask.id);
@@ -6963,7 +6976,14 @@ export class TaskExecutor {
     // WorkflowStep executions below, so skip them here before worktree or CLI
     // approval gates can fire. Human waits (`awaitInput`) and implementation
     // CLI-agent nodes are handled above and remain enforced.
-    if (live.executionMode === "fast" && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
+    const optionalGroupId = typeof graphContext?.[WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY] === "string"
+      ? graphContext[WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY]
+      : undefined;
+    /*
+    FNXC:FastOptionalSteps 2026-06-30-09:14:
+    Fast skips top-level custom prompt/script/gate review bodies by default, but an enabled optional-group template is explicit operator intent. The graph marks those template nodes so Browser Verification and custom optional groups still run under fast mode.
+    */
+    if (live.executionMode === "fast" && !optionalGroupId && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
       executorLog.log(`${live.id}: fast mode — skipping custom graph node '${node.id}'`);
       await this.store.logEntry(
         live.id,
@@ -17359,6 +17379,30 @@ function hasNonTerminalWorkflowSteps(task: Pick<TaskDetail, "steps">): boolean {
   return task.steps.length > 0 && task.steps.some((step) => step.status !== "done" && step.status !== "skipped");
 }
 
+function workflowStepResultPassed(task: Pick<Task, "workflowStepResults"> | undefined, workflowStepId: string): boolean {
+  const results = task?.workflowStepResults ?? [];
+  return results.some((result) =>
+    result.workflowStepId === workflowStepId
+    && result.phase === "pre-merge"
+    && result.status === "passed",
+  );
+}
+
+function areExplicitEnabledWorkflowStepsSatisfied(
+  task: Pick<Task, "enabledWorkflowSteps" | "workflowStepResults"> | undefined,
+): boolean {
+  const enabled = task?.enabledWorkflowSteps;
+  if (!Array.isArray(enabled) || enabled.length === 0) return false;
+  return enabled.every((id) => workflowStepResultPassed(task, id));
+}
+
+function hasUnsatisfiedExplicitEnabledWorkflowSteps(
+  task: Pick<Task, "enabledWorkflowSteps" | "workflowStepResults"> | undefined,
+): boolean {
+  const enabled = task?.enabledWorkflowSteps;
+  return Array.isArray(enabled) && enabled.length > 0 && !areExplicitEnabledWorkflowStepsSatisfied(task);
+}
+
 function areEnabledPreMergeWorkflowStepsSatisfied(
   task: Pick<Task, "enabledWorkflowSteps" | "workflowStepResults"> | undefined,
 ): boolean {
@@ -17376,14 +17420,7 @@ function areEnabledPreMergeWorkflowStepsSatisfied(
     : ["plan-review", "code-review"];
   if (enabledPreMerge.length === 0) return false;
   if (Array.isArray(enabled) && enabledPreMerge.length !== enabled.length) return false;
-  const results = task?.workflowStepResults ?? [];
-  return enabledPreMerge.every((id) =>
-    results.some((result) =>
-      result.workflowStepId === id
-      && result.phase === "pre-merge"
-      && result.status === "passed",
-    ),
-  );
+  return enabledPreMerge.every((id) => workflowStepResultPassed(task, id));
 }
 
 function preservePreExecutionWorkflowStepResults(task: Pick<Task, "workflowStepResults" | "log">): CoreWorkflowStepResult[] {

@@ -1735,6 +1735,90 @@ describe("QuickEntryBox", () => {
       });
     });
 
+    it("clears default-on optional steps when Fast is selected and preserves manual reselection", async () => {
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([DEFAULT_ON_STEP, MANUAL_STEP]);
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate, workflowId: "wf-explicit" });
+
+      const trigger = await screen.findByTestId("quick-entry-optional-steps-trigger");
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: 1 selected"));
+
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: none"));
+      fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Fast without optional steps" } });
+      clickSave();
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: [] }),
+        );
+      });
+    });
+
+    it("submits explicit empty optional steps when Fast is created before optional-step metadata loads", async () => {
+      vi.mocked(fetchWorkflowOptionalSteps).mockReturnValue(new Promise(() => undefined));
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate, workflowId: "wf-explicit" });
+
+      await waitFor(() => expect(fetchWorkflowOptionalSteps).toHaveBeenCalledWith("wf-explicit", TEST_PROJECT_ID));
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+      fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Fast before metadata" } });
+      clickSave();
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: [] }),
+        );
+      });
+    });
+
+    it("keeps Fast-selected tasks empty when optional-step loading resolves after the toggle", async () => {
+      let resolveOptionalSteps: (steps: typeof DEFAULT_ON_STEP[]) => void = () => {};
+      vi.mocked(fetchWorkflowOptionalSteps).mockReturnValue(new Promise((resolve) => {
+        resolveOptionalSteps = resolve;
+      }));
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate, workflowId: "wf-explicit" });
+
+      await waitFor(() => expect(fetchWorkflowOptionalSteps).toHaveBeenCalledWith("wf-explicit", TEST_PROJECT_ID));
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+
+      await act(async () => {
+        resolveOptionalSteps([DEFAULT_ON_STEP]);
+      });
+
+      const trigger = await screen.findByTestId("quick-entry-optional-steps-trigger");
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: none"));
+      fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Fast before optional steps loaded" } });
+      clickSave();
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: [] }),
+        );
+      });
+    });
+
+    it("keeps optional steps available for manual reselection after Fast clears defaults", async () => {
+      vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([DEFAULT_ON_STEP, MANUAL_STEP]);
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate, workflowId: "wf-explicit" });
+
+      const trigger = await screen.findByTestId("quick-entry-optional-steps-trigger");
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+      await waitFor(() => expect(trigger).toHaveTextContent("Steps: none"));
+      fireEvent.click(trigger);
+      fireEvent.click(await screen.findByTestId("wf-optional-steps-dropdown-option-manual-smoke"));
+      fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Fast with manual step" } });
+      clickSave();
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenLastCalledWith(
+          expect.objectContaining({ executionMode: "fast", enabledWorkflowSteps: ["manual-smoke"] }),
+        );
+      });
+    });
+
     it("submits defaultOn optional steps via Enter key", async () => {
       vi.mocked(fetchWorkflowOptionalSteps).mockResolvedValue([DEFAULT_ON_STEP]);
       const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
