@@ -480,7 +480,7 @@ export async function reviewStep(
 
         reviewText = "";
         const reducedRequest = buildReducedReviewRequest(
-          taskId, stepNumber, stepName, reviewType, promptContent, cwd, baseline,
+          taskId, stepNumber, stepName, reviewType, promptContent, cwd, baseline, options.userComments,
         );
 
         try {
@@ -703,7 +703,13 @@ function buildReducedReviewRequest(
   promptContent: string,
   cwd: string,
   baseline?: string,
+  userComments?: TaskComment[],
 ): string {
+  /*
+  FNXC:AgentSteering 2026-06-30-17:09:
+  Context-limit retries may compact PROMPT.md, but reviewer gates still must evaluate every explicit user requirement.
+  Preserve the canonical user comments and legacy steering section on reduced prompts so mandatory and optional reviews do not approve work that ignored operator feedback.
+  */
   return buildReviewRequest(
     taskId,
     stepNumber,
@@ -712,7 +718,7 @@ function buildReducedReviewRequest(
     buildReducedTaskPromptSummary(promptContent),
     cwd,
     baseline,
-    undefined,
+    userComments,
   );
 }
 

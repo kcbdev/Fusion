@@ -421,6 +421,13 @@ Post-merge runs **graph-native**: after a successful merge the executor continue
 
 Prompt mode can run with readonly or coding-capable tool access depending on step/template configuration.
 
+<!--
+FNXC:AgentSteering 2026-06-30-14:18:
+Workflow-step prompt agents are reviewer-style gates even when they do not call the shared reviewStep helper. They receive the same canonical user-authored task comments and legacy steering context as Plan Review and Code Review so Browser Verification and custom gates evaluate explicit operator requirements.
+-->
+
+Prompt-mode workflow-step agents receive user-authored task comments plus legacy steering entries in their system prompt. Agent-authored comments are excluded, duplicate ids are de-duped, and this context is omitted when no user-authored entries exist.
+
 ## Tool Modes
 
 `toolMode: "readonly"` is enforced as a hard session-level allowlist. Readonly workflow-step agents can only access:

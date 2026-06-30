@@ -522,6 +522,16 @@ describe("reviewStep — context-limit retry", () => {
     const verboseSection = Array.from({ length: 120 }, (_, i) => `- verbose requirement ${i}: ${"x".repeat(80)}`).join("\n");
     const promptContent = `# Task: FN-4082\n\n## Mission\nShip the reviewer retry.\n\n## Context to Read First\n${verboseSection}\n\n## Dependencies\n- None\n\n## File Scope\n- packages/engine/src/reviewer.ts\n- packages/engine/src/pi.ts\n\n## Steps\n### Step 0: Preflight\n- [ ] Confirm existing behavior\n### Step 1: Compact prompt\n- [ ] Trim the request\n### Step 2: Retry review\n- [ ] Retry once\n\n## Do NOT\n${verboseSection}`;
 
+    const userComments = [
+      {
+        id: "user-comment-1",
+        text: "User says compact retry must keep this requirement.",
+        author: "user" as const,
+        createdAt: "2026-06-30T16:00:00.000Z",
+        updatedAt: "2026-06-30T16:01:00.000Z",
+      },
+    ];
+
     const result = await reviewStep(
       "/tmp/worktree",
       "FN-4082",
@@ -530,7 +540,7 @@ describe("reviewStep — context-limit retry", () => {
       "code",
       promptContent,
       "abc123",
-      { store: store as any, taskId: "FN-4082" },
+      { store: store as any, taskId: "FN-4082", userComments },
     );
 
     expect(result.verdict).toBe("APPROVE");
@@ -542,6 +552,9 @@ describe("reviewStep — context-limit retry", () => {
     expect(secondRequest).toContain("## Mission");
     expect(secondRequest).toContain("## File Scope");
     expect(secondRequest).toContain("### Step 1: Compact prompt");
+    expect(secondRequest).toContain("## User Comments");
+    expect(secondRequest).toContain("User says compact retry must keep this requirement.");
+    expect(secondRequest.match(/## User Comments/g)).toHaveLength(1);
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4082",
       "code review hit context limit — retrying with compacted request",
@@ -1084,6 +1097,12 @@ describe("reviewStep — user comments in spec review", () => {
         author: "user",
         createdAt: "2026-01-02T10:00:00.000Z",
       },
+      {
+        id: "s1",
+        text: "Legacy steering: keep compatibility",
+        author: "user",
+        createdAt: "2026-01-02T10:05:00.000Z",
+      },
     ];
 
     await reviewStep(
@@ -1095,6 +1114,9 @@ describe("reviewStep — user comments in spec review", () => {
 
     expect(capturedPrompt).toContain("User Comment Coverage (MANDATORY)");
     expect(capturedPrompt).toContain("Make sure to handle the edge case");
+    expect(capturedPrompt).toContain("Legacy steering: keep compatibility");
+    expect(capturedPrompt.match(/User Comment Coverage \(MANDATORY\)/g)).toHaveLength(1);
+    expect(capturedPrompt).not.toContain("## User Comments");
     expect(capturedPrompt).toContain("issue a REVISE verdict");
   });
 
@@ -1121,6 +1143,7 @@ describe("reviewStep — user comments in spec review", () => {
     );
 
     expect(capturedPrompt).not.toContain("User Comment Coverage");
+    expect(capturedPrompt).not.toContain("## User Comments");
   });
 
   it.each(["plan", "code"] as const)("includes user comments for %s reviews without spec coverage gating", async (reviewType) => {
@@ -1158,6 +1181,7 @@ describe("reviewStep — user comments in spec review", () => {
 
     expect(capturedPrompt).toContain("## User Comments");
     expect(capturedPrompt).toContain("Some user feedback");
+    expect(capturedPrompt.match(/## User Comments/g)).toHaveLength(1);
     expect(capturedPrompt).not.toContain("User Comment Coverage (MANDATORY)");
   });
 

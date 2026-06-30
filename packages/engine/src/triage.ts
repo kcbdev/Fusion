@@ -141,6 +141,7 @@ import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { reviewStep } from "./reviewer.js";
+import { selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 
 
 export interface TriageProcessorOptions {
@@ -1963,6 +1964,20 @@ export class TriageProcessor {
       }
     }
 
+    const latestTaskForReview = await this.store.getTask(task.id).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      planLog.warn(`${task.id}: failed to load fresh task comments for Plan Review; using supplied task snapshot: ${message}`);
+      return task;
+    });
+    const userComments = selectUserCommentsForAgentContext(latestTaskForReview, { limit: null });
+
+    /*
+    FNXC:AgentSteering 2026-06-30-12:33:
+    Mandatory Plan Review must see user-authored unified comments and legacy steering from the latest task snapshot because it can block execution based on explicit operator requirements.
+
+    FNXC:AgentSteering 2026-06-30-13:19:
+    Plan Review receives the uncapped reviewer context so older task comments cannot be silently dropped before the mandatory execution gate evaluates operator requirements.
+    */
     const review = await reviewStep(
       this.rootDir,
       task.id,
@@ -1974,9 +1989,10 @@ export class TriageProcessor {
       {
         store: this.store,
         taskId: task.id,
-        taskTitle: task.title,
+        taskTitle: latestTaskForReview.title ?? task.title,
         settings,
-        task,
+        task: latestTaskForReview,
+        userComments: userComments.length > 0 ? userComments : undefined,
         rootDir: this.rootDir,
         agentStore: this.options.agentStore,
         pluginRunner: this.options.pluginRunner,

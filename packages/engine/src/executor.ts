@@ -83,7 +83,7 @@ import { buildSessionSkillContext } from "./session-skill-context.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import { reviewStep, type ReviewVerdict, type ReviewResult } from "./reviewer.js";
-import { selectUserCommentsForAgentContext } from "./agent-user-comments.js";
+import { buildUserCommentsPromptSection, selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -6255,10 +6255,18 @@ export class TaskExecutor {
         const reviewCwd = resolveReviewCheckoutCwd(detail, worktreePath);
         const stepName = detail.steps[stepIndex]?.name ?? `Step ${stepIndex}`;
         const promptContent = detail.prompt ?? "";
+        const userComments = selectUserCommentsForAgentContext(detail, { limit: null });
         // Merge per-task effective workflow settings (U3, KTD-3) so the validator
         // model-lane reads below pick up workflow values. Behavior-inert by default.
         const settings = await mergeEffectiveSettings(this.store, detail, await this.store.getSettings());
 
+        /*
+        FNXC:AgentSteering 2026-06-30-12:37:
+        Workflow graph step-review nodes are optional or mandatory reviewer gates. Pass canonical user comments and legacy steering into each per-cwd reviewer so workspace aggregation never drops operator requirements.
+
+        FNXC:AgentSteering 2026-06-30-13:20:
+        Graph reviewer gates request uncapped comment context because every user-authored requirement can affect approval, including older steering retained on long-running tasks.
+        */
         const sem = this.options.semaphore;
         // FNXC:Workspace 2026-06-22-00:30: KTD3 — step-inversion review seam loops per sub-repo.
         // `reviewStep` stays single-cwd; THIS CALLER loops. Single-cwd by default reviews
@@ -6295,6 +6303,7 @@ export class TaskExecutor {
               store: this.store,
               taskId: seamTask.id,
               task: detail,
+              userComments: userComments.length > 0 ? userComments : undefined,
               agentPrompts: settings.agentPrompts,
               agentStore: this.options.agentStore,
               rootDir: this.rootDir,
@@ -12794,7 +12803,14 @@ export class TaskExecutor {
           // validator model-lane reads below pick up workflow values; this tool
           // closure re-fetches independently. Behavior-inert by default.
           const latestDetailForReview = await store.getTask(taskId);
-          const userComments = selectUserCommentsForAgentContext(latestDetailForReview);
+          /*
+          FNXC:AgentSteering 2026-06-30-12:38:
+          The in-session fn_review_step tool must select fresh unified comments plus legacy steering immediately before spawning a reviewer so explicit user requirements posted during execution are reviewed.
+
+          FNXC:AgentSteering 2026-06-30-13:20:
+          In-session reviewer calls use uncapped selection so the manual review tool cannot lose older operator instructions while validating the current step.
+          */
+          const userComments = selectUserCommentsForAgentContext(latestDetailForReview, { limit: null });
           const settings = await mergeEffectiveSettings(store, latestDetailForReview, await store.getSettings());
           const reviewCwd = resolveReviewCheckoutCwd(latestDetailForReview, worktreePath);
           // Run the reviewer via semaphore.runNested so its slot accounting
@@ -14028,6 +14044,15 @@ CRITICAL SCOPING RULES — read before doing anything else:
 - If NONE of the files in the diff scope are relevant to your review category (e.g. a UX/design reviewer with no UI/CSS/component files in scope, a security reviewer with no auth/network code in scope, an a11y reviewer with no markup changes), respond IMMEDIATELY with a single short approval line such as "No relevant changes in scope — approved." and STOP. Do not start exploring the codebase.
 - Your wall-clock budget is short. Spending it browsing unmodified files will cause this step to time out and block merge.`;
 
+    const latestTaskForUserComments = await this.store.getTask(task.id).catch(() => task);
+    const workflowStepUserComments = selectUserCommentsForAgentContext(latestTaskForUserComments, { limit: null });
+    const workflowStepUserCommentSection = buildUserCommentsPromptSection(workflowStepUserComments);
+
+    /*
+     * FNXC:AgentSteering 2026-06-30-14:08:
+     * Prompt/custom workflow-step reviewers, including Browser Verification agents, do not call reviewStep. They still gate quality, so their system prompt must carry the same canonical uncapped user comments plus legacy steering selected from a fresh task snapshot.
+     */
+
     // (KTD-6) Verdict-contract reconciliation. The trailing-verdict JSON is the
     // gate-parsing contract — it only matters for steps that gate merge. A skill
     // step that isn't a gate (e.g. ce-plan / ce-work / ce-compound) produces
@@ -14072,7 +14097,7 @@ Task Context:
 - Task Description: ${task.description}
 - Worktree: ${worktreePath}
 
-${scopeBlock}
+${scopeBlock}${workflowStepUserCommentSection ? `\n\n${workflowStepUserCommentSection}` : ""}
 
 Your role:
 - Execute this workflow step exactly as scoped.
