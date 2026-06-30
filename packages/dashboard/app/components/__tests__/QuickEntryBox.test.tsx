@@ -279,6 +279,19 @@ vi.mock("../CustomModelDropdown", () => ({
   ),
 }));
 
+function mockQuickEntryNodes(nodes: Array<{ id: string; name: string; status: "online" | "offline" | "connecting" | "error"; type: "local" | "remote" }>) {
+  vi.mocked(useNodes).mockReturnValue({
+    nodes: nodes.map((node) => ({ ...node, createdAt: "", updatedAt: "" })),
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    register: vi.fn(),
+    update: vi.fn(),
+    unregister: vi.fn(),
+    healthCheck: vi.fn(),
+  });
+}
+
 function renderQuickEntryBox(props = {}, { startExpanded = false } = {}) {
   // Legacy option retained for older test call sites; disclosure now defaults expanded.
   if (startExpanded) {
@@ -4728,6 +4741,82 @@ describe("QuickEntryBox", () => {
       renderQuickEntryBox({});
       const wrapper = screen.getByTestId("quick-entry-input").parentElement;
       expect(wrapper).toHaveClass("quick-entry-textarea-wrap");
+    });
+  });
+
+  it("hides the node picker affordance for local-only projects without leaving shells", () => {
+    mockQuickEntryNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+    ]);
+    renderQuickEntryBox({});
+
+    expandQuickEntry();
+
+    expect(screen.queryByTestId("quick-entry-node-button")).not.toBeInTheDocument();
+    expect(document.querySelector(".quick-entry-box .node-trigger-wrap")).toBeNull();
+    expect(document.body.querySelector(".node-picker-dropdown")).toBeNull();
+    expect(screen.queryByText("Select execution node")).not.toBeInTheDocument();
+  });
+
+  it("hides the node picker when no registered nodes are available", () => {
+    mockQuickEntryNodes([]);
+    renderQuickEntryBox({});
+
+    expandQuickEntry();
+
+    expect(screen.queryByTestId("quick-entry-node-button")).not.toBeInTheDocument();
+    expect(document.querySelector(".quick-entry-box .node-trigger-wrap")).toBeNull();
+  });
+
+  it("shows the node picker when any remote node is available", () => {
+    mockQuickEntryNodes([
+      { id: "remote", name: "Remote Only", status: "online", type: "remote" },
+    ]);
+    renderQuickEntryBox({});
+
+    expandQuickEntry();
+
+    expect(screen.getByTestId("quick-entry-node-button")).toBeInTheDocument();
+  });
+
+  it("shows the node picker when multiple local nodes are registered", () => {
+    mockQuickEntryNodes([
+      { id: "local-a", name: "Local A", status: "online", type: "local" },
+      { id: "local-b", name: "Local A", status: "offline", type: "local" },
+    ]);
+    renderQuickEntryBox({});
+
+    expandQuickEntry();
+
+    expect(screen.getByTestId("quick-entry-node-button")).toBeInTheDocument();
+  });
+
+  it("clears a stale selected node when the registry shrinks to local-only before submit", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    mockQuickEntryNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+      { id: "remote", name: "Remote", status: "online", type: "remote" },
+    ]);
+    const { rerender, props } = renderQuickEntryBox({ onCreate });
+
+    fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Route after node shrink" } });
+    expandQuickEntry();
+    fireEvent.click(screen.getByTestId("quick-entry-node-button"));
+    fireEvent.click(screen.getByText("Remote"));
+    expect(screen.getByTestId("quick-entry-node-button")).toHaveTextContent("Remote");
+
+    mockQuickEntryNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+    ]);
+    rerender(<QuickEntryBox {...props} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("quick-entry-node-button")).not.toBeInTheDocument();
+    });
+    clickSave();
+
+    await waitFor(() => {
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ nodeId: undefined }));
     });
   });
 

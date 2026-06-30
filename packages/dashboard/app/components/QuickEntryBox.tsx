@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import type { ToastType } from "../hooks/useToast";
 import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, getErrorMessage } from "@fusion/core";
 import type { Task, Settings, TaskPriority, ResolvedWorkflowOptionalStep } from "@fusion/core";
-import type { ModelInfo, RefinementType, Agent, CreateTaskInput, DuplicateMatch, BoardWorkflowDefinition } from "../api";
+import type { ModelInfo, RefinementType, Agent, CreateTaskInput, DuplicateMatch, BoardWorkflowDefinition, NodeInfo } from "../api";
 import { checkDuplicateTasks, fetchModels, fetchSettings, refineText, getRefineErrorMessage, updateGlobalSettings, fetchAgents, uploadAttachment, fetchWorkflowOptionalSteps } from "../api";
 import { DuplicateWarningModal } from "./DuplicateWarningModal";
 import { Link, Paperclip, Brain, Lightbulb, ListTree, Sparkles, Save, ChevronDown, ChevronUp, ChevronRight, Bot, Server, Flag } from "lucide-react";
@@ -125,6 +125,14 @@ function resolveQuickAddWorkflowId(
   return workflowOptions[0]?.id ?? null;
 }
 
+function hasMeaningfulNodeChoice(nodes: NodeInfo[]): boolean {
+  /*
+  FNXC:QuickAddNodeRouting 2026-06-30-00:00:
+  Local-only projects should not show a Node button because the project-default route already means local execution. Keep the picker only when a remote or second registered node makes routing a real choice.
+  */
+  return nodes.length > 1 || nodes.some((node) => node.type !== "local");
+}
+
 export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels, onSubtaskBreakdown, workflowId, workflowOptions, defaultWorkflowId, projectId, autoExpand = true, defaultExpanded = true, singleLine = false, favoriteProviders: parentFavoriteProviders, favoriteModels: parentFavoriteModels, onToggleFavorite: parentToggleFavorite, onToggleModelFavorite: parentToggleModelFavorite, onOpenTask }: QuickEntryBoxProps) {
   const { t } = useTranslation("app");
   const [description, setDescription] = useState(() => {
@@ -217,12 +225,25 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
   const submitInFlightRef = useRef(false);
   const { nodes } = useNodes();
+  const shouldShowNodePicker = useMemo(() => hasMeaningfulNodeChoice(nodes), [nodes]);
+  const selectedNode = shouldShowNodePicker && nodeId ? nodes.find((node) => node.id === nodeId) : undefined;
+  const effectiveNodeId = shouldShowNodePicker && selectedNode ? selectedNode.id : undefined;
   // AI Refinement state
   const [isRefineMenuOpen, setIsRefineMenuOpen] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
   const refineMenuRef = useRef<HTMLDivElement>(null);
   const refineMenuPortalRef = useRef<HTMLDivElement>(null);
   const [refineMenuPosition, setRefineMenuPosition] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (shouldShowNodePicker && (!nodeId || selectedNode)) {
+      return;
+    }
+
+    setNodeId(undefined);
+    setShowNodePicker(false);
+    setNodePickerPosition(null);
+  }, [nodeId, selectedNode, shouldShowNodePicker]);
 
   // Use parent-provided favorites when available, otherwise internal state
   const effectiveFavoriteProviders = parentFavoriteProviders ?? favoriteProviders;
@@ -684,7 +705,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         ...(isFastMode ? { executionMode: "fast" } : {}),
         githubTracking: githubTrackingOverride !== null ? { enabled: githubTrackingOverride } : undefined,
         priority,
-        nodeId,
+        nodeId: effectiveNodeId,
         acknowledgedDuplicates: overrides?.acknowledgedDuplicates,
       });
       if (createdTask && pendingImages.length > 0) {
@@ -730,7 +751,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     settings,
     githubTrackingOverride,
     priority,
-    nodeId,
+    effectiveNodeId,
     pendingImages,
     projectId,
     addToast,
@@ -1582,7 +1603,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
   const selectedAgent = selectedAgentId ? agents.find((agent) => agent.id === selectedAgentId) : undefined;
   const selectedAgentLabel = selectedAgent?.name ?? selectedAgentId;
-  const selectedNode = nodeId ? nodes.find((node) => node.id === nodeId) : undefined;
   const projectGithubTrackingDefault = settings?.githubTrackingEnabledByDefault === true;
   const effectiveGithubTracking = githubTrackingOverride ?? projectGithubTrackingDefault;
   const githubToggleLabel = effectiveGithubTracking
@@ -2069,43 +2089,45 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               {modelMenuLabel}
             </button>
 
-            <div className="node-trigger-wrap" ref={nodePickerRef}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                className="btn btn-sm dep-trigger"
-                data-testid="quick-entry-node-button"
-                onClick={() => {
-                  setShowDeps(false);
-                  setShowAgentPicker(false);
-                  setAgentPickerPosition(null);
-                  setIsModelMenuOpen(false);
-                  setModelMenuPosition(null);
-                  setActiveModelSubmenu(null);
-                  setShowPriorityPicker(false);
-                  setPriorityPickerPosition(null);
-                  setShowNodePicker((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      updateNodePickerPosition();
-                    } else {
-                      setNodePickerPosition(null);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <Server size={12} style={{ verticalAlign: "middle" }} />
-                {` ${selectedNode?.name ?? t("tasks.node", "Node")}`}
-                {selectedNode && (
-                  <span className="quick-entry-node-status">
-                    <NodeHealthDot status={selectedNode.status} showLabel />
-                  </span>
-                )}
-              </button>
-            </div>
+            {shouldShowNodePicker && (
+              <div className="node-trigger-wrap" ref={nodePickerRef}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="btn btn-sm dep-trigger"
+                  data-testid="quick-entry-node-button"
+                  onClick={() => {
+                    setShowDeps(false);
+                    setShowAgentPicker(false);
+                    setAgentPickerPosition(null);
+                    setIsModelMenuOpen(false);
+                    setModelMenuPosition(null);
+                    setActiveModelSubmenu(null);
+                    setShowPriorityPicker(false);
+                    setPriorityPickerPosition(null);
+                    setShowNodePicker((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        updateNodePickerPosition();
+                      } else {
+                        setNodePickerPosition(null);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <Server size={12} style={{ verticalAlign: "middle" }} />
+                  {` ${selectedNode?.name ?? t("tasks.node", "Node")}`}
+                  {selectedNode && (
+                    <span className="quick-entry-node-status">
+                      <NodeHealthDot status={selectedNode.status} showLabel />
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
 
-            {showNodePicker && portalRoot && nodePickerPosition && createPortal(
+            {shouldShowNodePicker && showNodePicker && portalRoot && nodePickerPosition && createPortal(
               <div
                 ref={nodePickerPortalRef}
                 className="dep-dropdown node-picker-dropdown node-picker-dropdown--portal"

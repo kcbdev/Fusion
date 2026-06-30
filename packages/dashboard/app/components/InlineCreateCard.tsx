@@ -1,5 +1,5 @@
 import "./InlineCreateCard.css";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Brain, Link, ListTree, Zap, ChevronDown, ChevronUp, Bot, Maximize2, Minimize2, Server } from "lucide-react";
@@ -75,6 +75,14 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
+function hasMeaningfulNodeChoice(nodes: NodeInfo[]): boolean {
+  /*
+  FNXC:QuickAddNodeRouting 2026-06-30-00:00:
+  Local-only inline quick-create should not show a Node button because the project-default route already means local execution. Keep the picker only when a remote or second registered node makes routing a real choice.
+  */
+  return nodes.length > 1 || nodes.some((node) => node.type !== "local");
+}
+
 export function InlineCreateCard({
   tasks,
   onSubmit,
@@ -103,6 +111,9 @@ export function InlineCreateCard({
   const [showPresets, setShowPresets] = useState(false);
   const [nodeId, setNodeId] = useState<string | undefined>(undefined);
   const { nodes } = useNodes();
+  const shouldShowNodePicker = useMemo(() => hasMeaningfulNodeChoice(nodes), [nodes]);
+  const selectedNode = shouldShowNodePicker && nodeId ? nodes.find((node) => node.id === nodeId) : undefined;
+  const effectiveNodeId = shouldShowNodePicker && selectedNode ? selectedNode.id : undefined;
   const [settings, setSettings] = useState<Settings | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState<string | undefined>(undefined);
   const [executorProvider, setExecutorProvider] = useState<string | undefined>(undefined);
@@ -181,6 +192,15 @@ export function InlineCreateCard({
   useEffect(() => {
     if (!showDeps) setDepSearch("");
   }, [showDeps]);
+
+  useEffect(() => {
+    if (shouldShowNodePicker && (!nodeId || selectedNode)) {
+      return;
+    }
+
+    setNodeId(undefined);
+    setShowNodePicker(false);
+  }, [nodeId, selectedNode, shouldShowNodePicker]);
 
   useEffect(() => {
     if (!showAgentPicker) return;
@@ -482,7 +502,7 @@ export function InlineCreateCard({
       */
       enabledWorkflowSteps: optionalSteps.length > 0 ? enabledOptionalStepIds : undefined,
       priority,
-      nodeId,
+      nodeId: effectiveNodeId,
     };
 
     try {
@@ -497,7 +517,7 @@ export function InlineCreateCard({
     }
 
     await submitTask(input);
-  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, optionalSteps.length, enabledOptionalStepIds, priority, nodeId, projectId, addToast, submitTask]);
+  }, [description, submitting, dependencies, selectedAgentId, selectedPresetId, hasExecutorOverride, executorProvider, executorModelId, hasValidatorOverride, validatorProvider, validatorModelId, hasPlanningOverride, planningProvider, planningModelId, optionalSteps.length, enabledOptionalStepIds, priority, effectiveNodeId, projectId, addToast, submitTask]);
 
   const handleDuplicateProceed = useCallback(async () => {
     const matches = duplicateMatches;
@@ -627,7 +647,6 @@ export function InlineCreateCard({
 
   const selectedAgent = selectedAgentId ? agents.find((agent) => agent.id === selectedAgentId) : undefined;
   const selectedAgentLabel = selectedAgent?.name ?? selectedAgentId;
-  const selectedNode = nodeId ? nodes.find((node) => node.id === nodeId) : undefined;
 
   const handleExecutorChange = useCallback((value: string) => {
     const next = parseModelSelection(value);
@@ -937,59 +956,61 @@ export function InlineCreateCard({
               })()}
             </div>
 
-            <div className="node-trigger-wrap" ref={nodePickerRef}>
-              <button
-                type="button"
-                className="btn btn-sm dep-trigger"
-                data-testid="inline-create-node-button"
-                onClick={() => {
-                  setShowNodePicker((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setShowDeps(false);
-                      setShowAgentPicker(false);
-                      setIsModelModalOpen(false);
-                      setShowPresets(false);
-                    }
-                    return next;
-                  });
-                }}
-              >
-                <Server size={12} style={{ verticalAlign: "middle" }} />
-                {selectedNode ? ` ${selectedNode.name}` : ` ${t("inline.node", "Node")}`}
-                {selectedNode && <NodeHealthDot status={selectedNode.status} showLabel />}
-              </button>
-              {showNodePicker && (
-                <div className="dep-dropdown node-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
-                  <div className="dep-dropdown-search-header">{t("inline.selectExecutionNode", "Select execution node")}</div>
-                  <button
-                    type="button"
-                    className={`dep-dropdown-item node-picker-item${nodeId === undefined ? " selected" : ""}`}
-                    onClick={() => {
-                      setNodeId(undefined);
-                      setShowNodePicker(false);
-                    }}
-                  >
-                    <span className="dep-dropdown-title">{t("inline.projectDefaultLocal", "Project default / local")}</span>
-                  </button>
-                  {nodes.map((node) => (
+            {shouldShowNodePicker && (
+              <div className="node-trigger-wrap" ref={nodePickerRef}>
+                <button
+                  type="button"
+                  className="btn btn-sm dep-trigger"
+                  data-testid="inline-create-node-button"
+                  onClick={() => {
+                    setShowNodePicker((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setShowDeps(false);
+                        setShowAgentPicker(false);
+                        setIsModelModalOpen(false);
+                        setShowPresets(false);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <Server size={12} style={{ verticalAlign: "middle" }} />
+                  {selectedNode ? ` ${selectedNode.name}` : ` ${t("inline.node", "Node")}`}
+                  {selectedNode && <NodeHealthDot status={selectedNode.status} showLabel />}
+                </button>
+                {showNodePicker && (
+                  <div className="dep-dropdown node-picker-dropdown" onMouseDown={(e) => e.preventDefault()}>
+                    <div className="dep-dropdown-search-header">{t("inline.selectExecutionNode", "Select execution node")}</div>
                     <button
-                      key={node.id}
                       type="button"
-                      className={`dep-dropdown-item node-picker-item${nodeId === node.id ? " selected" : ""}`}
+                      className={`dep-dropdown-item node-picker-item${nodeId === undefined ? " selected" : ""}`}
                       onClick={() => {
-                        setNodeId(node.id);
+                        setNodeId(undefined);
                         setShowNodePicker(false);
                       }}
                     >
-                      <NodeHealthDot status={node.status} />
-                      <span className="dep-dropdown-title">{node.name}</span>
-                      <span className="node-picker-status-label">{getNodeStatusLabel(node.status, t)}</span>
+                      <span className="dep-dropdown-title">{t("inline.projectDefaultLocal", "Project default / local")}</span>
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                    {nodes.map((node) => (
+                      <button
+                        key={node.id}
+                        type="button"
+                        className={`dep-dropdown-item node-picker-item${nodeId === node.id ? " selected" : ""}`}
+                        onClick={() => {
+                          setNodeId(node.id);
+                          setShowNodePicker(false);
+                        }}
+                      >
+                        <NodeHealthDot status={node.status} />
+                        <span className="dep-dropdown-title">{node.name}</span>
+                        <span className="node-picker-status-label">{getNodeStatusLabel(node.status, t)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="agent-trigger-wrap" ref={agentPickerRef}>
               <button

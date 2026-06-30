@@ -185,6 +185,19 @@ function createMockTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function mockInlineNodes(nodes: Array<{ id: string; name: string; status: "online" | "offline" | "connecting" | "error"; type: "local" | "remote" }>) {
+  vi.mocked(useNodes).mockReturnValue({
+    nodes: nodes.map((node) => ({ ...node, createdAt: "", updatedAt: "" })),
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    register: vi.fn(),
+    update: vi.fn(),
+    unregister: vi.fn(),
+    healthCheck: vi.fn(),
+  });
+}
+
 function renderCard(
   tasks: Task[] = [],
   overrides: Partial<ComponentProps<typeof InlineCreateCard>> = {},
@@ -1635,6 +1648,67 @@ describe("InlineCreateCard button visibility when collapsed", () => {
 
 
 describe("InlineCreateCard node override", () => {
+  it("hides the node picker affordance for local-only inline quick-create without shells", () => {
+    mockInlineNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+    ]);
+    renderCard();
+    expandCard();
+
+    expect(screen.queryByTestId("inline-create-node-button")).not.toBeInTheDocument();
+    expect(document.querySelector(".inline-create-card .node-trigger-wrap")).toBeNull();
+    expect(document.querySelector(".node-picker-dropdown")).toBeNull();
+    expect(screen.queryByText("Select execution node")).not.toBeInTheDocument();
+  });
+
+  it("hides the node picker when inline quick-create has no registered nodes", () => {
+    mockInlineNodes([]);
+    renderCard();
+    expandCard();
+
+    expect(screen.queryByTestId("inline-create-node-button")).not.toBeInTheDocument();
+    expect(document.querySelector(".inline-create-card .node-trigger-wrap")).toBeNull();
+  });
+
+  it("shows the node picker when inline quick-create has a remote node choice", () => {
+    mockInlineNodes([
+      { id: "remote", name: "Remote Only", status: "online", type: "remote" },
+    ]);
+    renderCard();
+    expandCard();
+
+    expect(screen.getByTestId("inline-create-node-button")).toBeInTheDocument();
+  });
+
+  it("clears stale inline node override when nodes shrink to local-only before submit", async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ id: "FN-777" } as Task);
+    mockInlineNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+      { id: "remote", name: "Remote", status: "online", type: "remote" },
+    ]);
+    const { rerender, props } = renderCard([], { onSubmit });
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Inline node shrink" } });
+    expandCard();
+    fireEvent.click(screen.getByTestId("inline-create-node-button"));
+    fireEvent.click(screen.getByRole("button", { name: /Remote/i }));
+    expect(screen.getByTestId("inline-create-node-button")).toHaveTextContent("Remote");
+
+    mockInlineNodes([
+      { id: "local", name: "Local", status: "online", type: "local" },
+    ]);
+    rerender(<InlineCreateCard {...props} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("inline-create-node-button")).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("save-button"));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ nodeId: undefined }));
+    });
+  });
+
   it("opens node picker from button", () => {
     renderCard();
     expandCard();
