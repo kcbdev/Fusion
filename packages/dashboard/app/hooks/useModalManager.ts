@@ -6,8 +6,8 @@ import type { ToastType } from "./useToast";
 import { removeScopedItem } from "../utils/projectStorage";
 
 /*
-FNXC:TaskDetailActivityTab 2026-06-30-00:00:
-Keep `chat` as the public initial-tab id for the renamed Activity task-detail tab so existing dashboard callers and deep links remain compatible until the future planner Chat tab ships under its own contract.
+FNXC:TaskDetailActivity 2026-06-30-22:15:
+Keep `chat` as the public initial-tab id for the renamed Activity task-detail tab so existing dashboard callers and deep links remain compatible until the future planner Chat tab ships under its own contract. Legacy `logs` callers are also preserved by TaskDetailModal, which opens Activity → Feed instead of rendering a top-level Logs tab.
 */
 export type DetailTaskTab =
   | "summary"

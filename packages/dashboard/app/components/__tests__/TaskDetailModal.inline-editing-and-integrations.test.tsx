@@ -2112,7 +2112,8 @@ describe("TaskDetailModal", () => {
         expect(container.querySelector(".markdown-body")).toBeTruthy();
       }, { timeout: 3000 });
 
-      fireEvent.click(screen.getByText("Logs"));
+      fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
 
       const activityList = container.querySelector(".detail-activity-list");
       expect(activityList).toBeTruthy();
@@ -2258,9 +2259,9 @@ describe("TaskDetailModal", () => {
         />
       );
 
-      // Only standard tabs should be visible (Definition, Logs, etc.)
+      // Only standard tabs should be visible (Activity, Plan, etc.) without the legacy top-level Logs tab.
       expect(screen.getByText("Plan")).toBeDefined();
-      expect(screen.getByText("Logs")).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Logs" })).toBeNull();
       // Plugin tabs should not exist
       expect(screen.queryByText("Plugin A Tab")).toBeNull();
     });

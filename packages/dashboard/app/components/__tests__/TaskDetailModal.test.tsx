@@ -265,8 +265,8 @@ describe("TaskDetailModal GitHub tracking CTA", () => {
   });
 });
 
-describe("TaskDetailModal Logs activity loading", () => {
-  function renderLogsModal(task: ReturnType<typeof makeTask> | Record<string, unknown>) {
+describe("TaskDetailModal Activity feed loading", () => {
+  function renderActivityFeedModal(task: ReturnType<typeof makeTask> | Record<string, unknown>) {
     return render(
       <TaskDetailModal
         task={task as any}
@@ -295,13 +295,13 @@ describe("TaskDetailModal Logs activity loading", () => {
     vi.mocked(fetchTaskDetail).mockReset();
     vi.mocked(fetchTaskDetail).mockImplementationOnce(() => new Promise(() => {}));
 
-    renderLogsModal(makeSlimTask());
+    renderActivityFeedModal(makeSlimTask());
 
     expect(await screen.findByRole("status")).toHaveTextContent("Loading activity…");
     expect(screen.queryByText("(no activity)")).not.toBeInTheDocument();
   });
 
-  it("shows activity loading when switching to Logs before slim task detail resolves", async () => {
+  it("shows activity loading when switching to Activity Feed before slim task detail resolves", async () => {
     const user = userEvent.setup();
     const { fetchTaskDetail } = await import("../../api");
     vi.mocked(fetchTaskDetail).mockReset();
@@ -320,7 +320,8 @@ describe("TaskDetailModal Logs activity loading", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Logs" }));
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+    await user.click(screen.getByRole("tab", { name: "Feed" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Loading activity…");
     expect(screen.queryByText("(no activity)")).not.toBeInTheDocument();
   });
@@ -330,7 +331,7 @@ describe("TaskDetailModal Logs activity loading", () => {
     vi.mocked(fetchTaskDetail).mockReset();
     vi.mocked(fetchTaskDetail).mockResolvedValueOnce(makeTask({ id: "FN-6040", prompt: "# Loaded", log: [] }));
 
-    renderLogsModal(makeSlimTask());
+    renderActivityFeedModal(makeSlimTask());
 
     expect(await screen.findByText("(no activity)")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -348,7 +349,7 @@ describe("TaskDetailModal Logs activity loading", () => {
       ],
     }));
 
-    const { container } = renderLogsModal(makeSlimTask());
+    const { container } = renderActivityFeedModal(makeSlimTask());
 
     await screen.findByText("newer entry");
     const actions = Array.from(container.querySelectorAll(".detail-log-action")).map((node) => node.textContent);
@@ -366,7 +367,7 @@ describe("TaskDetailModal Logs activity loading", () => {
       activityLogTruncatedCount: 25,
     } as any));
 
-    renderLogsModal(makeSlimTask());
+    renderActivityFeedModal(makeSlimTask());
 
     expect(await screen.findByText("Showing the most recent 1 activity entries.")).toBeInTheDocument();
     expect(screen.getByText("kept entry")).toBeInTheDocument();
@@ -430,8 +431,8 @@ describe("TaskDetailModal Chat task merge", () => {
   });
 });
 
-describe("TaskDetailModal Logs agent loading", () => {
-  it("shows the Agent Log loading indicator when entering the subview", async () => {
+describe("TaskDetailModal Raw Logs agent loading", () => {
+  it("shows the Raw Logs loading indicator when entering the segment", async () => {
     const user = userEvent.setup();
     const { useAgentLogs } = await import("../../hooks/useAgentLogs");
     const mockUseAgentLogs = vi.mocked(useAgentLogs);
@@ -458,8 +459,9 @@ describe("TaskDetailModal Logs agent loading", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Logs" }));
-    await user.click(screen.getByRole("button", { name: "Agent Log" }));
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
 
     expect(screen.getByText("Loading agent logs…")).toBeInTheDocument();
     expect(screen.queryByText("No agent output yet.")).not.toBeInTheDocument();
@@ -688,8 +690,8 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
     expect(screen.getByText("Open the Review tab to see which step is blocking, then fix the failure or override the step.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "View activity log" }));
-    expect(screen.getByRole("button", { name: "Logs" })).toHaveClass("detail-tab-active");
-    expect(document.querySelector(".log-subview-toggle .log-subview-btn-active")).toHaveTextContent("Activity");
+    expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
+    expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
     const highlighted = document.querySelector(".detail-log-entry--stall-highlight .detail-log-action");
     expect(highlighted?.textContent).toContain("In-review stall surfaced [merge-blocker]");
   });

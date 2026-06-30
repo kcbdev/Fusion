@@ -192,22 +192,30 @@ function formatDurationCompact(ageMs: number): string {
 }
 
 type TabId = "summary" | "definition" | "chat" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
+type ActivitySegment = "current" | "feed" | "raw-logs";
 
 /*
 FNXC:TaskDetailActivityTab 2026-06-30-00:00:
 The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for every task column, including done tasks; Summary remains explicitly available for completed work until a later subtask adds the separate planner-model Chat surface.
 
-FNXC:TaskDetailActivityTab 2026-06-30-00:00:
-Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open the renamed Activity surface.
+FNXC:TaskDetailActivity 2026-06-30-22:15:
+Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open Activity → Current. Legacy `initialTab="logs"` now routes to Activity → Feed because Logs no longer renders as a top-level task-detail tab.
 */
 function resolveDefaultTab(initialTab: TabId | undefined, _column: ColumnId): TabId {
   if (initialTab === "retries") {
     return "definition";
   }
+  if (initialTab === "logs") {
+    return "chat";
+  }
   if (initialTab) {
     return initialTab;
   }
   return "chat";
+}
+
+function resolveDefaultActivitySegment(initialTab: TabId | undefined): ActivitySegment {
+  return initialTab === "logs" ? "feed" : "current";
 }
 
 // Lazy-load the terminal so xterm + addons stay out of the main bundle (U11).
@@ -516,6 +524,7 @@ export function TaskDetailContent({
   const columnLabel = useColumnLabel();
   const fileBrowser = useFileBrowser();
   const [activeTab, setActiveTab] = useState<TabId>(() => resolveDefaultTab(initialTab, task.column));
+  const [activitySegment, setActivitySegment] = useState<ActivitySegment>(() => resolveDefaultActivitySegment(initialTab));
   const [chatExpanded, setChatExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
@@ -646,6 +655,7 @@ export function TaskDetailContent({
   // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
   useEffect(() => {
     setActiveTab(resolveDefaultTab(initialTab, task.column));
+    setActivitySegment(resolveDefaultActivitySegment(initialTab));
     if (initialTab === "retries") {
       setRetriesExpanded(true);
     }
@@ -668,7 +678,6 @@ export function TaskDetailContent({
     setDescriptionExpanded(false);
   }, [task.column, task.id]);
 
-  const [logSubview, setLogSubview] = useState<"activity" | "agent-log">("activity");
   const [highlightStallCode, setHighlightStallCode] = useState<string | null>(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [titleOverflows, setTitleOverflows] = useState(false);
@@ -807,7 +816,7 @@ export function TaskDetailContent({
   );
 
   useEffect(() => {
-    if (activeTab !== "logs" || logSubview !== "activity") {
+    if (activeTab !== "chat" || activitySegment !== "feed") {
       setHighlightStallCode(null);
       return;
     }
@@ -820,7 +829,7 @@ export function TaskDetailContent({
     if (highlighted && typeof highlighted.scrollIntoView === "function") {
       highlighted.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [activeTab, logSubview, highlightStallCode]);
+  }, [activeTab, activitySegment, highlightStallCode]);
   const [refineFeedback, setRefineFeedback] = useState("");
   const [isRefining, setIsRefining] = useState(false);
 
@@ -828,10 +837,10 @@ export function TaskDetailContent({
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
-    if (activeTab !== "chat" || isEditing) {
+    if (activeTab !== "chat" || activitySegment !== "current" || isEditing) {
       setChatExpanded(false);
     }
-  }, [activeTab, isEditing]);
+  }, [activeTab, activitySegment, isEditing]);
 
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
@@ -955,7 +964,7 @@ export function TaskDetailContent({
     activeTaskIdRef.current = task.id;
   }, [task.id]);
 
-  // Merged project settings for effective model resolution in Agent Log header
+  // Merged project settings for effective model resolution in Raw Logs header
   const [settings, setSettings] = useState<Settings | undefined>(undefined);
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
 
@@ -1012,7 +1021,7 @@ export function TaskDetailContent({
     let cancelled = false;
     /*
     FNXC:ModelResolution 2026-06-27-10:52:
-    Task-detail model displays are task-scoped because project model lanes moved into workflow setting values. Fetch the effective settings for the selected task so Workflow, Chat, Agent Log, and Model editor surfaces resolve the same Executor/Reviewer/Planning models the engine uses.
+    Task-detail model displays are task-scoped because project model lanes moved into workflow setting values. Fetch the effective settings for the selected task so Workflow, Activity → Raw Logs, and Model editor surfaces resolve the same Executor/Reviewer/Planning models the engine uses.
     */
     fetchTaskEffectiveSettings(task.id, projectId)
       .catch(() => fetchSettings(projectId))
@@ -1774,7 +1783,7 @@ export function TaskDetailContent({
     loadingMore: agentLogLoadingMore,
   } = useAgentLogs(
     task.id,
-    activeTab === "logs" && logSubview === "agent-log",
+    activeTab === "chat" && activitySegment === "raw-logs",
     projectId,
   );
   const requestClose = useCallback(() => {
@@ -2792,7 +2801,7 @@ export function TaskDetailContent({
             )}
           </div>
         </div>
-        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && !isEditing ? " detail-body--chat" : ""}`}>
+        <div className={`detail-body${activeTab === "chat" && activitySegment === "raw-logs" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && activitySegment === "current" && !isEditing ? " detail-body--chat" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -3159,12 +3168,6 @@ export function TaskDetailContent({
             >
               {t("taskDetail.tabs.definition", "Plan")}
             </button>
-            <button
-              className={`detail-tab${activeTab === "logs" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("logs")}
-            >
-              {t("taskDetail.tabs.logs", "Logs")}
-            </button>
             {(task.column === "in-progress" || task.column === "in-review" || task.column === "done") && (
               <button
                 className={`detail-tab${activeTab === "changes" ? " detail-tab-active" : ""}`}
@@ -3282,41 +3285,58 @@ export function TaskDetailContent({
               <TaskSummaryTab task={workingTask} pricingOverrides={globalSettings?.modelPricingOverrides} />
             </div>
           ) : activeTab === "chat" ? (
-            <div className="detail-section detail-section--chat">
-              <TaskChatTab
-                task={workingTask}
-                projectId={projectId}
-                active={activeTab === "chat"}
-                addToast={addToast}
-                sessionLive={isCliSessionLive(cliSession)}
-                onTaskUpdated={handleChatTaskUpdated}
-                expanded={chatExpanded}
-                onToggleExpanded={() => setChatExpanded((value) => !value)}
-                effectiveModels={{
-                  triage: toTaskChatModelInfo(resolveEffectivePlanning(workingTask, agentLogEntries, settings)),
-                  executor: toTaskChatModelInfo(resolveEffectiveExecutor(workingTask, agentLogEntries, assignedAgent, settings)),
-                  reviewer: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
-                  merger: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
-                }}
-              />
-            </div>
-          ) : activeTab === "logs" ? (
-            <div className={`detail-section${logSubview === "agent-log" ? " detail-section--agent-log" : ""}`}>
-              <div className="log-subview-toggle">
+            <div className={`detail-section detail-section--activity${activitySegment === "current" ? " detail-section--chat" : ""}${activitySegment === "raw-logs" ? " detail-section--agent-log" : ""}`}>
+              {/*
+                FNXC:TaskDetailActivity 2026-06-30-22:15:
+                Activity owns the existing steering/current view, Feed, and Raw Logs inside one segmented control. The later planner-model Chat tab is intentionally out of scope, so the stable top-level tab id remains `chat` while the legacy `logs` id lands on the Feed segment.
+              */}
+              <div className="activity-segmented-control" role="tablist" aria-label={t("taskDetail.activity.segmentsLabel", "Activity views")}>
                 <button
-                  className={`log-subview-btn${logSubview === "activity" ? " log-subview-btn-active" : ""}`}
-                  onClick={() => setLogSubview("activity")}
+                  type="button"
+                  role="tab"
+                  aria-selected={activitySegment === "current"}
+                  className={`activity-segment${activitySegment === "current" ? " activity-segment-active" : ""}`}
+                  onClick={() => setActivitySegment("current")}
                 >
-                  {t("taskDetail.logs.activity", "Activity")}
+                  {t("taskDetail.activity.current", "Current")}
                 </button>
                 <button
-                  className={`log-subview-btn${logSubview === "agent-log" ? " log-subview-btn-active" : ""}`}
-                  onClick={() => setLogSubview("agent-log")}
+                  type="button"
+                  role="tab"
+                  aria-selected={activitySegment === "feed"}
+                  className={`activity-segment${activitySegment === "feed" ? " activity-segment-active" : ""}`}
+                  onClick={() => setActivitySegment("feed")}
                 >
-                  {t("taskDetail.logs.agentLog", "Agent Log")}
+                  {t("taskDetail.activity.feed", "Feed")}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activitySegment === "raw-logs"}
+                  className={`activity-segment${activitySegment === "raw-logs" ? " activity-segment-active" : ""}`}
+                  onClick={() => setActivitySegment("raw-logs")}
+                >
+                  {t("taskDetail.activity.rawLogs", "Raw Logs")}
                 </button>
               </div>
-              {logSubview === "agent-log" ? (
+              {activitySegment === "current" ? (
+                <TaskChatTab
+                  task={workingTask}
+                  projectId={projectId}
+                  active={activeTab === "chat" && activitySegment === "current"}
+                  addToast={addToast}
+                  sessionLive={isCliSessionLive(cliSession)}
+                  onTaskUpdated={handleChatTaskUpdated}
+                  expanded={chatExpanded}
+                  onToggleExpanded={() => setChatExpanded((value) => !value)}
+                  effectiveModels={{
+                    triage: toTaskChatModelInfo(resolveEffectivePlanning(workingTask, agentLogEntries, settings)),
+                    executor: toTaskChatModelInfo(resolveEffectiveExecutor(workingTask, agentLogEntries, assignedAgent, settings)),
+                    reviewer: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
+                    merger: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
+                  }}
+                />
+              ) : activitySegment === "raw-logs" ? (
                 <AgentLogViewer
                   entries={agentLogEntries}
                   loading={agentLogLoading}
@@ -3329,8 +3349,8 @@ export function TaskDetailContent({
                   totalCount={agentLogTotal}
                 />
               ) : (
-                <div className="detail-activity">
-                  <h4>{t("taskDetail.logs.activityHeading", "Activity")}</h4>
+                <div className="detail-activity" role="tabpanel">
+                  <h4>{t("taskDetail.activity.feedHeading", "Feed")}</h4>
                   {(workingTask as typeof workingTask & { activityLogTruncatedCount?: number }).activityLogTruncatedCount ? (
                     <div className="detail-log-truncated">
                       {t("taskDetail.logs.truncated", "Showing the most recent {{count}} activity entries.", { count: workingTask.log.length })}
@@ -3426,8 +3446,8 @@ export function TaskDetailContent({
                               type="button"
                               className="btn btn-sm detail-in-review-stall-jump"
                               onClick={() => {
-                                setActiveTab("logs");
-                                setLogSubview("activity");
+                                setActiveTab("chat");
+                                setActivitySegment("feed");
                                 setHighlightStallCode(workingTask.inReviewStall?.code ?? null);
                               }}
                             >
@@ -3474,8 +3494,8 @@ export function TaskDetailContent({
                               type="button"
                               className="btn btn-sm detail-in-review-stall-jump"
                               onClick={() => {
-                                setActiveTab("logs");
-                                setLogSubview("activity");
+                                setActiveTab("chat");
+                                setActivitySegment("feed");
                                 setHighlightStallCode(workingTask.stalePausedReview?.code ?? null);
                               }}
                             >
