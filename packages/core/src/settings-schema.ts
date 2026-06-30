@@ -71,6 +71,11 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   colorTheme: "ocean",
   shadcnCustomColors: undefined,
   dashboardFontScalePct: 100,
+  /*
+  FNXC:ModalDismissal 2026-06-29-00:00:
+  Fixed dashboard modals must ignore backdrop clicks by default so accidental outside taps do not discard in-progress form state. Operators can globally opt in to the legacy outside-click dismissal behavior.
+  */
+  dismissModalsOnOutsideClick: false,
   language: undefined,
   defaultProvider: undefined,
   defaultModelId: undefined,

@@ -2954,6 +2954,11 @@ export interface GlobalSettings {
   shadcnCustomColors?: Record<string, string>;
   /** Dashboard font size scale percentage. Bounded to 85-125. Default: 100. */
   dashboardFontScalePct?: number;
+  /**
+   * FNXC:ModalDismissal 2026-06-29-00:00:
+   * Modal backdrop dismissal is a global operator preference, not project policy. Default false keeps fixed modal overlays from closing on accidental outside clicks unless the operator opts in.
+   */
+  dismissModalsOnOutsideClick?: boolean;
   /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
    *  When unset, each surface resolves the locale at runtime (browser/env
    *  detection) and falls back to `DEFAULT_LOCALE` ("en"). */
