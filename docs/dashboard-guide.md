@@ -521,7 +521,7 @@ Features:
 - Shortcuts panel buttons preserve terminal focus on the active terminal session during pointer, mouse, and touch activation, so Ctrl combinations reliably emit control bytes to the shell
 - The Preferences panel customizes font family, font size, cursor style, cursor blink, and renderer; changes persist in browser `localStorage` under `kb-terminal-preferences`, with the legacy `kb-terminal-font-size` value migrated automatically
 - Font and cursor preferences apply live to the active xterm instance; renderer changes apply the next time the terminal opens, and mobile devices keep the WebGL renderer disabled to avoid glyph artifacts
-- Embedded CLI session terminals honor the same saved preferences for live, idle, ended, read-only, and interactive session views. Cursor blink still stays disabled for read-only/replay sessions, renderer changes apply on the next session mount, and WebGL never loads on mobile viewports.
+- Embedded CLI session terminals honor the same saved preferences and physical copy/paste semantics for live interactive session views: selected text copies with the platform copy modifier, no-selection Ctrl+C stays available to the shell, and paste travels once through xterm's native input path. Idle, ended, and read-only replay views suppress input handlers and mobile accessory controls. Cursor blink still stays disabled for read-only/replay sessions, renderer changes apply on the next session mount, and WebGL never loads on mobile viewports.
 - Mobile-aware virtual keyboard handling and auto-refit behavior
 - Reopen/reconnect/session-recovery flows preserve single-keystroke input forwarding (no duplicate characters, no page refresh required)
 

@@ -9,6 +9,9 @@ const mockTerm = {
   loadAddon: vi.fn(),
   open: vi.fn(),
   onData: vi.fn(),
+  attachCustomKeyEventHandler: vi.fn(),
+  hasSelection: vi.fn(() => false),
+  getSelection: vi.fn(() => ""),
   write: vi.fn((_data: string, cb?: () => void) => cb?.()),
   dispose: vi.fn(),
   unicode: { activeVersion: "6" },
@@ -135,6 +138,9 @@ beforeEach(() => {
   mockTerm.loadAddon.mockClear();
   mockTerm.open.mockClear();
   mockTerm.onData.mockReset();
+  mockTerm.attachCustomKeyEventHandler.mockClear();
+  mockTerm.hasSelection.mockReturnValue(false);
+  mockTerm.getSelection.mockReturnValue("");
   mockTerm.write.mockClear();
   mockTerm.dispose.mockClear();
   mockTerm.options = {};
@@ -175,10 +181,26 @@ describe("SessionTerminal (mobile)", () => {
     expect(screen.queryByTestId("cli-terminal-mobile-bar")).toBeNull();
   });
 
-  it("does not render the mobile bar when read-only", async () => {
-    apiMock.mockResolvedValue({ ticket: "tkt-1", expiresAt: "", readOnly: true });
-    await renderMobile({ readOnly: true });
+  it.each([
+    ["read-only", { readOnly: true }],
+    ["idle", { mode: "idle" as const }],
+    ["ended", { mode: "ended" as const }],
+  ])("does not render the mobile bar when %s", async (_label, props) => {
+    if (props.readOnly) {
+      apiMock.mockResolvedValue({ ticket: "tkt-1", expiresAt: "", readOnly: true });
+    }
+    await renderMobile(props);
     expect(screen.queryByTestId("cli-terminal-mobile-bar")).toBeNull();
+  });
+
+  it("does not render mobile controls when the attach ticket is read-only", async () => {
+    apiMock.mockResolvedValue({ ticket: "tkt-ro", expiresAt: "", readOnly: true });
+
+    await renderMobile();
+
+    expect(screen.queryByTestId("cli-terminal-mobile-bar")).toBeNull();
+    expect(mockTerm.options.disableStdin).toBe(true);
+    expect(mockTerm.onData).not.toHaveBeenCalled();
   });
 
   // ── Accessory bar control sequences ───────────────────────────────────────
@@ -271,15 +293,13 @@ describe("SessionTerminal (mobile)", () => {
   });
 
   // ── Input field submit ────────────────────────────────────────────────────
-  it("submitting the input field sends the text then \\r", async () => {
+  it("submitting the input field sends the text then exactly one \\r", async () => {
     const { ws } = await renderMobile();
     const input = screen.getByTestId("cli-terminal-mobile-input") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "ls -la" } });
     fireEvent.click(screen.getByTestId("cli-terminal-mobile-send"));
     const frames = inputFrames(ws);
-    const idx = frames.indexOf("ls -la");
-    expect(idx).toBeGreaterThanOrEqual(0);
-    expect(frames[idx + 1]).toBe("\r");
+    expect(frames).toEqual(["ls -la", "\r"]);
     // Field is cleared after submit.
     expect(input.value).toBe("");
   });

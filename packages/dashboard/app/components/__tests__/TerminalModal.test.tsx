@@ -1217,6 +1217,39 @@ describe("TerminalModal", () => {
       }
     });
 
+    it("sends sticky Ctrl shortcut bytes and clears the modifier after each delivery", async () => {
+      const terminalDiv = document.createElement("div");
+      terminalDiv.setAttribute("data-testid", "terminal");
+      const helperTextarea = document.createElement("textarea");
+      helperTextarea.className = "xterm-helper-textarea";
+      terminalDiv.appendChild(helperTextarea);
+      document.body.appendChild(terminalDiv);
+
+      try {
+        render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+        helperTextarea.focus();
+
+        fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+        const ctrlButton = screen.getByTestId("terminal-modifier-ctrl");
+
+        for (const [label, expected] of [
+          ["C", "\x03"],
+          ["D", "\x04"],
+          ["L", "\x0c"],
+        ] as const) {
+          fireEvent.click(ctrlButton);
+          fireEvent.click(screen.getByRole("button", { name: label }));
+          expect(mockSendInput).toHaveBeenLastCalledWith(expected);
+          expect(ctrlButton.getAttribute("aria-pressed")).toBe("false");
+        }
+
+        expect(mockSendInput.mock.calls.map(([value]) => value)).toEqual(["\x03", "\x04", "\x0c"]);
+        expect(document.activeElement).toBe(helperTextarea);
+      } finally {
+        document.body.removeChild(terminalDiv);
+      }
+    });
+
     it("sends literal ANSI arrow sequences independent of sticky modifiers", async () => {
       render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
 
