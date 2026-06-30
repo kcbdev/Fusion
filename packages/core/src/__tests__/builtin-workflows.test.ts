@@ -220,7 +220,8 @@ describe("built-in workflows", () => {
     expect(ir.edges.some((edge) => edge.from === "steps" && edge.to === "browser-verification" && edge.condition === "success")).toBe(true);
     expect(ir.edges.some((edge) => edge.from === "browser-verification" && edge.to === "code-review" && edge.condition === "success")).toBe(true);
     expect(ir.edges.some((edge) => edge.from === "code-review" && edge.to === "completion-summary" && edge.condition === "success")).toBe(true);
-    expect(ir.edges.some((edge) => edge.from === "completion-summary" && edge.to === "review" && edge.condition === "success")).toBe(true);
+    expect(ir.edges.some((edge) => edge.from === "completion-summary" && edge.to === "merge-gate" && edge.condition === "success")).toBe(true);
+    expect(ir.nodes.some((node) => node.id === "review")).toBe(false);
     const foreach = ir.nodes.find((n) => n.kind === "foreach");
     expect(foreach).toBeDefined();
     const template = (
@@ -883,7 +884,7 @@ describe("built-in workflows", () => {
     expect(ce.ir.edges.some((edge) => edge.from === "manual-pr-review" && edge.to === "completion-summary")).toBe(true);
   });
 
-  it("non-default coding built-ins retain their generic review nodes", () => {
+  it("coding variants only retain generic review nodes where the workflow requires them", () => {
     const coding = getBuiltinWorkflow("builtin:coding")!;
     const legacy = getBuiltinWorkflow("builtin:legacy-coding")!;
     const stepwise = getBuiltinWorkflow("builtin:stepwise-coding")!;
@@ -891,7 +892,7 @@ describe("built-in workflows", () => {
 
     expect(coding.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(false);
     expect(legacy.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
-    expect(stepwise.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
+    expect(stepwise.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(false);
     expect(reviewHeavy.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
   });
 

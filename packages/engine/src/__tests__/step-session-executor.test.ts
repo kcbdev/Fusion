@@ -1192,6 +1192,89 @@ describe("StepSessionExecutor", () => {
       );
     });
 
+    it("reuses the primary step session when runStepsInNewSessions is false", async () => {
+      const prompt = makeStepPrompt("FN-001", 2);
+      const task = makeTaskDetail({
+        prompt,
+        steps: [
+          { name: "Step 0", status: "pending" },
+          { name: "Step 1", status: "pending" },
+        ],
+      });
+      const settings = makeSettings({ maxParallelSteps: 1, runStepsInNewSessions: false });
+      let statsCall = 0;
+      const session = {
+        ...makeMockSession(),
+        getSessionStats: vi.fn(() => {
+          statsCall++;
+          return {
+            tokens: {
+              input: statsCall * 10,
+              output: statsCall * 20,
+              cacheRead: statsCall * 3,
+              cacheWrite: statsCall,
+              total: statsCall * 34,
+            },
+          };
+        }),
+      };
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
+
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings,
+        pluginRunner: undefined,
+      } as any);
+
+      const result = await executor.executeAll();
+      await executor.cleanup();
+
+      expect(result).toHaveLength(2);
+      expect(result.every((step) => step.success)).toBe(true);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+      expect(session.prompt).toHaveBeenCalledTimes(2);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+      expect(result[0]?.tokenUsage?.inputTokens).toBe(10);
+      expect(result[1]?.tokenUsage?.inputTokens).toBe(10);
+      expect(result[1]?.tokenUsage?.totalTokens).toBe(34);
+    });
+
+    it("creates a fresh primary step session for each step when runStepsInNewSessions is true", async () => {
+      const prompt = makeStepPrompt("FN-001", 2);
+      const task = makeTaskDetail({
+        prompt,
+        steps: [
+          { name: "Step 0", status: "pending" },
+          { name: "Step 1", status: "pending" },
+        ],
+      });
+      const settings = makeSettings({ maxParallelSteps: 1, runStepsInNewSessions: true });
+      const sessions = [makeMockSession(), makeMockSession()];
+      mockedCreateFnAgent
+        .mockResolvedValueOnce({ session: sessions[0] } as any)
+        .mockResolvedValueOnce({ session: sessions[1] } as any);
+
+      const executor = new StepSessionExecutor({
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings,
+        pluginRunner: undefined,
+      } as any);
+
+      const result = await executor.executeAll();
+
+      expect(result).toHaveLength(2);
+      expect(result.every((step) => step.success)).toBe(true);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(2);
+      expect(sessions[0]?.prompt).toHaveBeenCalledTimes(1);
+      expect(sessions[1]?.prompt).toHaveBeenCalledTimes(1);
+      expect(sessions[0]?.dispose).toHaveBeenCalledTimes(1);
+      expect(sessions[1]?.dispose).toHaveBeenCalledTimes(1);
+    });
+
     it("delivers pending steering comments in exactly one subsequent step prompt", async () => {
       const prompt = makeStepPrompt("FN-001", 2);
       const task = makeTaskDetail({
