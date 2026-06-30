@@ -15,6 +15,7 @@ vi.mock("@fusion/core", async (importOriginal) => {
 
 const TASK_ID = "FN-6778";
 const AUTHOR_ID = "agent-007";
+const PNG_IMAGE_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64");
 
 type ArtifactStore = Pick<TaskStore, "registerArtifact" | "getArtifact" | "listArtifacts">;
 
@@ -87,6 +88,103 @@ function findChatTool(name: "fn_artifact_register" | "fn_artifact_list" | "fn_ar
 describe("artifact register tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("decodes base64 image bytes before calling store.registerArtifact", async () => {
+    const { store, registerArtifact } = createMockStore();
+    registerArtifact.mockResolvedValue(createMockArtifact({
+      id: "art-image",
+      type: "image",
+      title: "Screenshot",
+      mimeType: "image/png",
+      uri: "artifacts/screenshot.png",
+      content: undefined,
+    }));
+
+    const tool = createArtifactRegisterTool(store, AUTHOR_ID);
+    const result = await runTool(tool, "call-register-image", {
+      type: "image",
+      title: "Screenshot",
+      mimeType: "image/png",
+      dataBase64: PNG_IMAGE_BYTES.toString("base64"),
+      taskId: TASK_ID,
+    });
+
+    expect(registerArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      type: "image",
+      title: "Screenshot",
+      mimeType: "image/png",
+      taskId: TASK_ID,
+      content: undefined,
+      uri: undefined,
+      data: PNG_IMAGE_BYTES,
+    }));
+    expect(getText(result)).toContain("Registered artifact");
+    expect(getText(result)).not.toContain("ERROR:");
+  });
+
+  it("rejects empty, non-image, and arbitrary-byte base64 payloads without registering", async () => {
+    const { store, registerArtifact } = createMockStore();
+    const tool = createArtifactRegisterTool(store, AUTHOR_ID);
+
+    const emptyResult = await runTool(tool, "call-empty-image", {
+      type: "image",
+      title: "Empty screenshot",
+      mimeType: "image/png",
+      dataBase64: "   ",
+      taskId: TASK_ID,
+    });
+    const documentResult = await runTool(tool, "call-document-base64", {
+      type: "document",
+      title: "Document bytes",
+      mimeType: "text/plain",
+      dataBase64: PNG_IMAGE_BYTES.toString("base64"),
+      taskId: TASK_ID,
+    });
+    const arbitraryBytesResult = await runTool(tool, "call-arbitrary-image", {
+      type: "image",
+      title: "Text pretending to be PNG",
+      mimeType: "image/png",
+      dataBase64: Buffer.from("not-a-real-png").toString("base64"),
+      taskId: TASK_ID,
+    });
+
+    expect(registerArtifact).not.toHaveBeenCalled();
+    expect(getText(emptyResult)).toContain("dataBase64 must decode to non-empty artifact bytes");
+    expect(getText(documentResult)).toContain("dataBase64 is only supported for image artifacts");
+    expect(getText(arbitraryBytesResult)).toContain("dataBase64 must decode to valid image bytes matching mimeType");
+  });
+
+  it("returns an ERROR response without registering malformed base64 image payloads", async () => {
+    const { store, registerArtifact } = createMockStore();
+
+    const tool = createArtifactRegisterTool(store, AUTHOR_ID);
+    const result = await runTool(tool, "call-register-invalid-image", {
+      type: "image",
+      title: "Broken screenshot",
+      mimeType: "image/png",
+      dataBase64: "not valid base64!",
+      taskId: TASK_ID,
+    });
+
+    expect(registerArtifact).not.toHaveBeenCalled();
+    expect(getText(result)).toContain("ERROR: Failed to register artifact");
+    expect(getText(result)).toContain("dataBase64 must be valid base64");
+  });
+
+  it("requires an image MIME type for base64 image registration", async () => {
+    const { store, registerArtifact } = createMockStore();
+
+    const tool = createArtifactRegisterTool(store, AUTHOR_ID);
+    const result = await runTool(tool, "call-register-missing-mime", {
+      type: "image",
+      title: "No MIME screenshot",
+      dataBase64: PNG_IMAGE_BYTES.toString("base64"),
+      taskId: TASK_ID,
+    });
+
+    expect(registerArtifact).not.toHaveBeenCalled();
+    expect(getText(result)).toContain("image artifacts registered with dataBase64 require an image/* mimeType");
   });
 
   it("calls store.registerArtifact with mapped agent author input", async () => {
@@ -342,6 +440,39 @@ describe("chat artifact tools", () => {
       "fn_artifact_list",
       "fn_artifact_view",
     ]);
+  });
+
+  it("registers with explicit task_id, decoded image bytes, and fixed dashboard-chat author", async () => {
+    const { store, registerArtifact } = createMockStore();
+    registerArtifact.mockResolvedValue(createMockArtifact({
+      id: "art-chat-image",
+      authorId: "dashboard-chat",
+      taskId: "FN-3030",
+      type: "image",
+      title: "Chat screenshot",
+      mimeType: "image/png",
+      uri: "artifacts/chat-screenshot.png",
+      content: undefined,
+    }));
+    const { messageStore } = createMockMessageStore();
+
+    const tool = findChatTool("fn_artifact_register", store, messageStore);
+    const result = await runTool(tool, "call-chat-register-image", {
+      task_id: "FN-3030",
+      type: "image",
+      title: "Chat screenshot",
+      mimeType: "image/png",
+      dataBase64: PNG_IMAGE_BYTES.toString("base64"),
+    });
+
+    expect(registerArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: "FN-3030",
+      authorId: "dashboard-chat",
+      authorType: "agent",
+      title: "Chat screenshot",
+      data: PNG_IMAGE_BYTES,
+    }));
+    expect(getText(result)).toContain("Registered artifact");
   });
 
   it("registers with explicit task_id and fixed dashboard-chat author", async () => {
