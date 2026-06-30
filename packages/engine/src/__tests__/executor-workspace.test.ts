@@ -153,10 +153,14 @@ describeIfGit("U1 KTD2 — activeWorktrees Set + every enumerated consumer", () 
     const pB = repoBPath(fx);
     (executor as any).addActiveWorktree("FN-WS-1", pA);
     (executor as any).addActiveWorktree("FN-WS-1", pB);
+    activeSessionRegistry.registerPath(pA, { taskId: "FN-WS-1", kind: "executor", ownerKey: "exec:FN-WS-1:a" });
+    activeSessionRegistry.registerPath(pB, { taskId: "FN-WS-1", kind: "executor", ownerKey: "exec:FN-WS-1:b" });
 
     const ok = (executor as any).clearPhantomExecutorBinding("FN-WS-1");
     expect(ok).toBe(true);
     expect((executor as any).activeWorktrees.has("FN-WS-1")).toBe(false);
+    // Default path must sweep the session-registry entries (inverse of the preserveWorktrees branch).
+    expect(activeSessionRegistry.pathsForTask("FN-WS-1")).toEqual([]);
   });
 
   it("clearPhantomExecutorBinding (FN-7249) preserveWorktrees keeps session-registry paths for re-dispatch", async () => {

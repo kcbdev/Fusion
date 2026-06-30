@@ -250,6 +250,12 @@ describe("workflow routes (U4)", () => {
     // which carry no icon. The retired legacy `ir.optionalSteps` declaration
     // supplied `icon: "globe"`; the group node instead yields `description: ""`
     // and `phase: "pre-merge"`. Assert the current group-sourced shape.
+    //
+    // FNXC:WorkflowOptionalGroup 2026-06-29-17:40: builtin:coding now also declares the
+    // default-off `post-merge-verification` optional group (FN-7039/FN-7233 routed
+    // post-merge lifecycle policy through graph-native nodes). The optional-steps
+    // resolver exposes it as a fourth `phase: "post-merge"` step; assert it here so the
+    // route contract tracks the workflow IR instead of a stale three-step snapshot.
     expect(builtin.body).toEqual([
       expect.objectContaining({
         templateId: "plan-review",
@@ -271,6 +277,13 @@ describe("workflow routes (U4)", () => {
         description: "",
         phase: "pre-merge",
         defaultOn: true,
+      }),
+      expect.objectContaining({
+        templateId: "post-merge-verification",
+        name: "Post-merge verification",
+        description: "",
+        phase: "post-merge",
+        defaultOn: false,
       }),
     ]);
 
