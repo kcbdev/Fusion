@@ -11,7 +11,12 @@
 import type { ReactNode } from "react";
 import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
 
-/** Tab identifiers for the task detail modal. Mirrors the dashboard's local enum. */
+/**
+ * Tab identifiers for the task detail modal. Mirrors the dashboard's local enum.
+ *
+ * FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+ * Plugins should continue passing `chat` to open the renamed Activity tab; the id is stable compatibility surface, while the top-level label is no longer Chat.
+ */
 export type DetailTaskTab = "summary" | "chat" | "definition" | "logs" | "changes" | "comments" | "model" | "workflow" | "pr" | "retries";
 
 export type PluginToastType = "success" | "error" | "warning" | "info";

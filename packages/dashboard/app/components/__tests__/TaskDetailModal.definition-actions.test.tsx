@@ -222,10 +222,10 @@ describe("TaskDetailModal", () => {
       );
 
       // In-progress tasks show exactly 11 tabs:
-      // Chat, Plan, Logs, Changes, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
+      // Activity, Plan, Logs, Changes, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
       const tabs = container.querySelectorAll(".detail-tab");
       expect(tabs.length).toBe(11);
-      expect(tabs[0].textContent).toBe("Chat");
+      expect(tabs[0].textContent).toBe("Activity");
       expect(tabs[1].textContent).toBe("Plan");
       expect(tabs[2].textContent).toBe("Logs");
       expect(tabs[3].textContent).toBe("Changes");
@@ -257,7 +257,7 @@ describe("TaskDetailModal", () => {
       // In-progress task with workflow steps: 11 tabs (Review after Changes, Workflow after Model)
       const tabs = container.querySelectorAll(".detail-tab");
       expect(tabs.length).toBe(11);
-      expect(tabs[0].textContent).toBe("Chat");
+      expect(tabs[0].textContent).toBe("Activity");
       expect(tabs[1].textContent).toBe("Plan");
       expect(tabs[2].textContent).toBe("Logs");
       expect(tabs[3].textContent).toBe("Changes");
@@ -287,11 +287,11 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Done task with commit SHA: Summary, Chat, Plan, Logs, Changes, Review, Comments, Artifacts, Model, Workflow, Stats, Routing (12 tabs, no Commits)
+      // Done task with commit SHA: Activity, Summary, Plan, Logs, Changes, Review, Comments, Artifacts, Model, Workflow, Stats, Routing (12 tabs, no Commits)
       const tabs = container.querySelectorAll(".detail-tab");
       expect(tabs.length).toBe(12);
-      expect(tabs[0].textContent).toBe("Summary");
-      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[0].textContent).toBe("Activity");
+      expect(tabs[1].textContent).toBe("Summary");
       expect(tabs[2].textContent).toBe("Plan");
       expect(tabs[3].textContent).toBe("Logs");
       expect(tabs[4].textContent).toBe("Changes");
@@ -327,8 +327,8 @@ describe("TaskDetailModal", () => {
       // Done task with workflow steps and commit SHA: 12 tabs including Summary and Review (no Commits)
       const tabs = container.querySelectorAll(".detail-tab");
       expect(tabs.length).toBe(12);
-      expect(tabs[0].textContent).toBe("Summary");
-      expect(tabs[1].textContent).toBe("Chat");
+      expect(tabs[0].textContent).toBe("Activity");
+      expect(tabs[1].textContent).toBe("Summary");
       expect(tabs[2].textContent).toBe("Plan");
       expect(tabs[3].textContent).toBe("Logs");
       expect(tabs[4].textContent).toBe("Changes");
@@ -358,9 +358,9 @@ describe("TaskDetailModal", () => {
       );
 
       const triageTabs = triageContainer.querySelectorAll(".detail-tab");
-      expect(triageTabs.length).toBe(10); // Chat, Plan, Logs, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
+      expect(triageTabs.length).toBe(10); // Activity, Plan, Logs, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
       expect(Array.from(triageTabs).map(t => t.textContent)).toEqual([
-        "Chat", "Plan", "Logs", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing",
+        "Activity", "Plan", "Logs", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing",
       ]);
 
       const { container: todoContainer } = render(
@@ -377,9 +377,9 @@ describe("TaskDetailModal", () => {
       );
 
       const todoTabs = todoContainer.querySelectorAll(".detail-tab");
-      expect(todoTabs.length).toBe(10); // Chat, Plan, Logs, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
+      expect(todoTabs.length).toBe(10); // Activity, Plan, Logs, Review, Comments, Artifacts, Model, Workflow, Stats, Routing
       expect(Array.from(todoTabs).map(t => t.textContent)).toEqual([
-        "Chat", "Plan", "Logs", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing",
+        "Activity", "Plan", "Logs", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing",
       ]);
     });
 

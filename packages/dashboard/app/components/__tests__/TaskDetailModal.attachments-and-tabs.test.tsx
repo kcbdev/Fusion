@@ -19,7 +19,7 @@ import { TaskDetailModal, TaskDetailContent } from "../TaskDetailModal";
 
 /*
 FNXC:TaskDetailTabs 2026-06-17-08:20:
-FN-6532 made Chat the default TaskDetailModal tab. Definition-tab regression coverage must prove both the no-`initialTab` Chat landing state and the explicit `initialTab="definition"` Definition surface for prompt, GitHub tracking, and dependency sections.
+FN-7306 labels the stable internal `chat` tab as Activity and keeps it as the default TaskDetailModal tab. Definition-tab regression coverage must prove both the no-`initialTab` Activity landing state and the explicit `initialTab="definition"` Definition surface for prompt, GitHub tracking, and dependency sections.
 */
 setupTaskDetailModalHooks();
 
@@ -439,7 +439,7 @@ describe("TaskDetailModal", () => {
   });
 
   describe("tab toggle", () => {
-    it("defaults to the Chat tab", () => {
+    it("defaults to the Activity tab", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -452,11 +452,10 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Definition")).toBeTruthy();
+      expect(screen.getByText("Plan")).toBeTruthy();
       expect(screen.getByText("Logs")).toBeTruthy();
-      // Activity and Agent Log are subviews inside the Logs tab, not top-level tabs.
-      // They should NOT be visible on the default Chat tab.
-      expect(screen.queryByText("Activity")).toBeNull();
+      // Logs subview controls should NOT be visible on the default Activity tab.
+      expect(container.querySelector(".log-subview-toggle")).toBeNull();
       expect(screen.queryByText("Agent Log")).toBeNull();
       // Chat content should be visible by default.
       expect(container.querySelector(".detail-section--chat")).toBeTruthy();
@@ -638,8 +637,8 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
 
-      // Switch back to Activity subview within Logs tab
-      fireEvent.click(screen.getByText("Activity"));
+      // Switch back to Activity subview within Logs tab.
+      fireEvent.click(container.querySelector<HTMLButtonElement>(".log-subview-toggle .log-subview-btn")!);
       expect(container.querySelector(".detail-activity")).toBeTruthy();
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
 
@@ -649,7 +648,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-activity")).toBeNull();
 
       // Switch back to Definition tab
-      fireEvent.click(screen.getByText("Definition"));
+      fireEvent.click(screen.getByText("Plan"));
       expect(container.querySelector(".markdown-body")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
 
@@ -681,7 +680,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".markdown-body")).toBeNull();
 
       // Click Definition tab to go back
-      fireEvent.click(screen.getByText("Definition"));
+      fireEvent.click(screen.getByText("Plan"));
 
       // Definition content should reappear
       expect(container.querySelector(".markdown-body")).toBeTruthy();
@@ -705,7 +704,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Default: Chat tab active → enabled should be false
+      // Default: Activity tab active → enabled should be false
       const initialCall = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
       expect(initialCall[1]).toBe(false);
 
@@ -758,18 +757,17 @@ describe("TaskDetailModal", () => {
       );
 
       // For an in-progress task (no workflow steps, no merge commit), the
-      // top-level tabs are: Chat, Definition, Logs, Changes, Review, Comments,
+      // top-level tabs are: Activity, Plan, Logs, Changes, Review, Comments,
       // Artifacts, Model, Workflow, Stats, Routing.
-      const tabTexts = ["Chat", "Definition", "Logs", "Changes", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing"];
+      const tabTexts = ["Activity", "Plan", "Logs", "Changes", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing"];
       const tabs = screen.getAllByRole("button").filter((b) =>
         tabTexts.includes(b.textContent || "")
       );
       expect(tabs.map((tab) => tab.textContent)).toEqual(tabTexts);
-      expect(tabs[0].textContent).toBe("Chat");
-      expect(tabs[1].textContent).toBe("Definition");
+      expect(tabs[0].textContent).toBe("Activity");
+      expect(tabs[1].textContent).toBe("Plan");
       expect(tabs[2].textContent).toBe("Logs");
 
-      // Activity and Agent Log are NOT top-level tabs (they are subviews inside Logs)
       expect(container.querySelectorAll(".detail-tab").length).toBe(11);
       // Workflow tab should always appear even when no workflow steps are configured
       expect(screen.getByText("Workflow")).toBeInTheDocument();
@@ -841,7 +839,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Activity" }));
       const content = container.querySelector(".task-detail-content");
       const titleRow = container.querySelector(".detail-title-row");
       expect(content).not.toHaveClass("task-detail-content--chat-expanded");
@@ -942,7 +940,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Activity" }));
       fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
       expect(container.querySelector(".task-detail-content")).toHaveClass("task-detail-content--chat-expanded");
 
@@ -951,7 +949,7 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
     });
 
-    it("FN-6532 defaults to Chat first while preserving explicit tab requests", () => {
+    it("FN-6532 defaults to Activity first while preserving explicit tab requests", () => {
       const { container, rerender } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -965,10 +963,10 @@ describe("TaskDetailModal", () => {
       );
 
       const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>(".detail-tab"));
-      expect(tabs.map((tab) => tab.textContent)).toEqual(expect.arrayContaining(["Chat", "Definition"]));
-      expect(tabs[0]).toHaveTextContent("Chat");
-      const chatTab = screen.getByRole("button", { name: "Chat" });
-      const definitionTab = screen.getByRole("button", { name: "Definition" });
+      expect(tabs.map((tab) => tab.textContent)).toEqual(expect.arrayContaining(["Activity", "Plan"]));
+      expect(tabs[0]).toHaveTextContent("Activity");
+      const chatTab = screen.getByRole("button", { name: "Activity" });
+      const definitionTab = screen.getByRole("button", { name: "Plan" });
       expect(chatTab.compareDocumentPosition(definitionTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(chatTab).toHaveClass("detail-tab-active");
       expect(definitionTab).not.toHaveClass("detail-tab-active");
@@ -988,7 +986,8 @@ describe("TaskDetailModal", () => {
       );
 
       expect(screen.getByRole("button", { name: "Logs" })).toHaveClass("detail-tab-active");
-      expect(screen.getByRole("button", { name: "Chat" })).not.toHaveClass("detail-tab-active");
+      expect(container.querySelector(".detail-tabs .detail-tab:first-child")).toHaveTextContent("Activity");
+      expect(container.querySelector(".detail-tabs .detail-tab:first-child")).not.toHaveClass("detail-tab-active");
       expect(container.querySelector(".detail-section--chat")).toBeNull();
     });
 
@@ -1010,8 +1009,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Definition" })).toHaveClass("detail-tab-active");
-      expect(screen.getByRole("button", { name: "Chat" })).not.toHaveClass("detail-tab-active");
+      expect(screen.getByRole("button", { name: "Plan" })).toHaveClass("detail-tab-active");
+      expect(screen.getByRole("button", { name: "Activity" })).not.toHaveClass("detail-tab-active");
       expect(container.querySelector(".detail-section--chat")).toBeNull();
       expect(screen.getByText("Definition body unique text.")).toBeInTheDocument();
       expect(screen.getByText("GitHub tracking")).toBeInTheDocument();
@@ -1021,7 +1020,7 @@ describe("TaskDetailModal", () => {
       expect(container).toHaveTextContent("FN-200");
     });
 
-    it("FN-6347 applies chat modifiers only while the Chat tab is active", () => {
+    it("FN-6347 applies chat modifiers only while the Activity tab is active", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -1061,7 +1060,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+      fireEvent.click(screen.getByRole("button", { name: "Activity" }));
       expect(container.querySelector(".detail-body--chat")).toBeTruthy();
 
       fireEvent.click(screen.getByLabelText("Edit task"));
@@ -1097,7 +1096,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
 
       // Switch back to Definition tab
-      fireEvent.click(screen.getByText("Definition"));
+      fireEvent.click(screen.getByText("Plan"));
 
       // modifier class should be removed
       expect(container.querySelector(".detail-body--agent-log")).toBeNull();

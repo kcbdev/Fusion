@@ -194,20 +194,20 @@ function formatDurationCompact(ageMs: number): string {
 type TabId = "summary" | "definition" | "chat" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
 
 /*
-FNXC:TaskDetailSummaryTab 2026-06-27-00:00:
-Done tasks land on Summary instead of Chat so completed work opens on the completion overview. Chat stays the implicit default for every other column, and explicit tab requests continue to win for done tasks.
+FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for every task column, including done tasks; Summary remains explicitly available for completed work until a later subtask adds the separate planner-model Chat surface.
 
-FNXC:TaskDetailSummaryTab 2026-06-27-00:00:
-Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so done tasks can still deep-link directly to Chat.
+FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open the renamed Activity surface.
 */
-function resolveDefaultTab(initialTab: TabId | undefined, column: ColumnId): TabId {
+function resolveDefaultTab(initialTab: TabId | undefined, _column: ColumnId): TabId {
   if (initialTab === "retries") {
     return "definition";
   }
   if (initialTab) {
     return initialTab;
   }
-  return column === "done" ? "summary" : "chat";
+  return "chat";
 }
 
 // Lazy-load the terminal so xterm + addons stay out of the main bundle (U11).
@@ -501,8 +501,8 @@ export function TaskDetailContent({
   autoMergeEnabled: autoMergeEnabledProp,
   onOpenWorkflowEditor,
   /**
-   * FNXC:TaskDetailTabs 2026-06-17-00:00:
-   * FN-6532 makes Chat the default task-detail view when no caller supplies an explicit initial tab.
+   * FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+   * The Activity tab is still addressed as `chat` internally so existing callers and deep links do not break while the label/order changes ahead of the future planner Chat tab.
    */
   initialTab,
   mobileHeaderMode = "close",
@@ -3136,12 +3136,15 @@ export function TaskDetailContent({
             <>
           <div className="detail-tabs">
             {/*
-              FNXC:TaskDetailTabs 2026-06-17-00:00:
-              FN-6532 requires Chat to be the first task-detail tab while preserving every explicit tab entrypoint.
-
-              FNXC:TaskDetailSummaryTab 2026-06-27-00:00:
-              Done tasks expose Summary as the first tab because the implicit Chat default resolves there for completed work; non-done tasks keep Chat first and never render an empty Summary shell.
+              FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+              The existing task activity/steering surface is now labelled Activity and always renders first. Keep the `chat` tab id because a later subtask will add the separate planner-model Chat surface; this rename must not break existing `initialTab="chat"` callers.
             */}
+            <button
+              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              {t("taskDetail.tabs.activity", "Activity")}
+            </button>
             {task.column === "done" && (
               <button
                 className={`detail-tab${activeTab === "summary" ? " detail-tab-active" : ""}`}
@@ -3150,12 +3153,6 @@ export function TaskDetailContent({
                 {t("taskDetail.tabs.summary", "Summary")}
               </button>
             )}
-            <button
-              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("chat")}
-            >
-              {t("taskDetail.tabs.chat", "Chat")}
-            </button>
             <button
               className={`detail-tab${activeTab === "definition" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("definition")}

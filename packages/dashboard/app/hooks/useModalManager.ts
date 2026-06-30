@@ -5,6 +5,10 @@ import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
 import { removeScopedItem } from "../utils/projectStorage";
 
+/*
+FNXC:TaskDetailActivityTab 2026-06-30-00:00:
+Keep `chat` as the public initial-tab id for the renamed Activity task-detail tab so existing dashboard callers and deep links remain compatible until the future planner Chat tab ships under its own contract.
+*/
 export type DetailTaskTab =
   | "summary"
   | "chat"

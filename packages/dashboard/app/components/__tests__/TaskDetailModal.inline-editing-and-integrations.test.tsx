@@ -1,6 +1,6 @@
 /*
 FNXC:TaskDetailTabs 2026-06-17-08:20:
-FN-6532 made Chat the default TaskDetailModal tab. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Chat landing state.
+FN-7306 labels the stable internal `chat` tab as Activity and keeps it as the default TaskDetailModal tab. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Activity landing state.
 */
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
@@ -2259,7 +2259,7 @@ describe("TaskDetailModal", () => {
       );
 
       // Only standard tabs should be visible (Definition, Logs, etc.)
-      expect(screen.getByText("Definition")).toBeDefined();
+      expect(screen.getByText("Plan")).toBeDefined();
       expect(screen.getByText("Logs")).toBeDefined();
       // Plugin tabs should not exist
       expect(screen.queryByText("Plugin A Tab")).toBeNull();

@@ -1,6 +1,6 @@
 /*
 FNXC:TaskDetailTabs 2026-06-17-08:20:
-FN-6532 made Chat the default TaskDetailModal tab. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Chat landing state.
+FN-7306 labels the stable internal `chat` tab as Activity and keeps it as the default TaskDetailModal tab. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Activity landing state.
 */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -689,7 +689,7 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
 
     await user.click(screen.getByRole("button", { name: "View activity log" }));
     expect(screen.getByRole("button", { name: "Logs" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("log-subview-btn-active");
+    expect(document.querySelector(".log-subview-toggle .log-subview-btn-active")).toHaveTextContent("Activity");
     const highlighted = document.querySelector(".detail-log-entry--stall-highlight .detail-log-action");
     expect(highlighted?.textContent).toContain("In-review stall surfaced [merge-blocker]");
   });
