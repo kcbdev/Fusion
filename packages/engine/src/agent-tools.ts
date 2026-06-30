@@ -1514,12 +1514,9 @@ function decodeArtifactDataBase64(params: Static<typeof artifactRegisterParams>)
   }
 
   const data = Buffer.from(normalized, "base64");
-  if (data.length === 0 || data.toString("base64").replace(/=+$/, "") !== normalized.replace(/=+$/, "")) {
-    throw new Error("dataBase64 must decode to non-empty artifact bytes.");
-  }
 
   if (!hasImageSignature(data, mimeType)) {
-    throw new Error("dataBase64 must decode to valid image bytes matching mimeType.");
+    throw new Error(`dataBase64 must decode to valid image bytes matching mimeType ${mimeType}.`);
   }
 
   return data;
