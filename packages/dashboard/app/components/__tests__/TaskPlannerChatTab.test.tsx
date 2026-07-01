@@ -847,17 +847,32 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.queryByTestId("task-planner-chat-empty")).not.toBeInTheDocument();
   });
 
-  it("renders planner question tool calls with the shared answer UI", async () => {
+  it("renders mixed persisted planner question tool calls with the shared answer UI outside collapsed details", async () => {
     const user = userEvent.setup();
     mockFetchChatMessages.mockResolvedValue({
-      messages: [plannerQuestionMessage("assistant-question", { question: "Pick a path", options: ["Conservative", "Aggressive"] })],
+      messages: [{
+        ...plannerQuestionMessage("assistant-question", { question: "Pick a path", options: ["Conservative", "Aggressive"] }),
+        metadata: {
+          toolCalls: [
+            { toolName: "bash", args: { command: "echo hi" }, isError: false, result: "hi", status: "completed" },
+            { toolName: "fn_ask_question", args: { question: "Pick a path", options: ["Conservative", "Aggressive"] }, isError: false, status: "completed" },
+          ],
+        },
+      }],
     });
     renderPlannerChat();
 
-    expect(await screen.findByTestId("chat-question-response")).toBeInTheDocument();
+    const transcript = await screen.findByTestId("task-planner-chat-transcript");
+    const question = await screen.findByTestId("chat-question-response");
+    expect(transcript).toContainElement(question);
+    expect(question).toHaveTextContent("Pick a path");
+    expect(question.closest("details.chat-tool-calls-group")).toBeNull();
+    expect(screen.getByTestId("chat-tool-calls")).toHaveTextContent("bash");
+    expect(screen.getByTestId("chat-tool-calls")).not.toHaveTextContent("fn_ask_question");
     await user.click(screen.getByTestId("chat-question-response-option-q-0-opt-0"));
     await user.click(screen.getByTestId("chat-question-response-submit"));
 
+    expect(mockStreamChatResponse).toHaveBeenCalledTimes(1);
     expect(mockStreamChatResponse).toHaveBeenCalledWith(
       "chat-planner",
       "> Q: Pick a path\nConservative",
@@ -962,11 +977,13 @@ describe("TaskPlannerChatTab", () => {
     expect(mockFetchTaskDetail).not.toHaveBeenCalled();
   });
 
-  it("streams risky change requests as clarification questions without steering mutation", async () => {
+  it("streams mixed planner question tool calls as an actionable card outside collapsed details", async () => {
     const user = userEvent.setup();
     const onTaskUpdated = vi.fn();
     mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
       setTimeout(() => {
+        handlers.onToolStart({ toolName: "bash", args: { command: "echo preparing" } });
+        handlers.onToolEnd({ toolName: "bash", isError: false, result: "preparing" });
         handlers.onToolStart({ toolName: "fn_ask_question", args: { question: "Which files and safety constraints should this destructive change use?", options: ["Clarify scope", "Cancel"] } });
         handlers.onDone({
           messageId: "assistant-risky-question",
@@ -976,7 +993,12 @@ describe("TaskPlannerChatTab", () => {
             role: "assistant",
             content: "I need clarification before adding steering.",
             thinkingOutput: null,
-            metadata: { toolCalls: [{ toolName: "fn_ask_question", args: { question: "Which files and safety constraints should this destructive change use?", options: ["Clarify scope", "Cancel"] }, isError: false }] },
+            metadata: {
+              toolCalls: [
+                { toolName: "bash", args: { command: "echo preparing" }, isError: false, result: "preparing", status: "completed" },
+                { toolName: "fn_ask_question", args: { question: "Which files and safety constraints should this destructive change use?", options: ["Clarify scope", "Cancel"] }, isError: false, status: "completed" },
+              ],
+            },
             createdAt: "2026-06-30T00:03:00.000Z",
           },
         });
@@ -989,9 +1011,23 @@ describe("TaskPlannerChatTab", () => {
     await user.type(screen.getByLabelText("Message planner chat"), "Delete the risky parts and rewrite the security flow broadly");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(await screen.findByTestId("chat-question-response")).toHaveTextContent("Which files and safety constraints should this destructive change use?");
+    const question = await screen.findByTestId("chat-question-response");
+    expect(question).toHaveTextContent("Which files and safety constraints should this destructive change use?");
+    expect(question.closest("details.chat-tool-calls-group")).toBeNull();
     expect(screen.getAllByTestId("chat-question-response")).toHaveLength(1);
     expect(screen.getAllByTestId("chat-question-response-submit")).toHaveLength(1);
+    expect(screen.getByTestId("chat-tool-calls")).toHaveTextContent("bash");
+    expect(screen.getByTestId("chat-tool-calls")).not.toHaveTextContent("fn_ask_question");
+    await user.click(screen.getByTestId("chat-question-response-option-q-0-opt-0"));
+    await user.click(screen.getByTestId("chat-question-response-submit"));
+    expect(mockStreamChatResponse).toHaveBeenLastCalledWith(
+      "chat-planner",
+      "> Q: Which files and safety constraints should this destructive change use?\nClarify scope",
+      expect.any(Object),
+      undefined,
+      "project-1",
+      { taskId: "FN-7310" },
+    );
     expect(screen.queryByTestId("task-planner-chat-steering-confirmation")).not.toBeInTheDocument();
     expect(mockFetchTaskDetail).not.toHaveBeenCalled();
     expect(onTaskUpdated).not.toHaveBeenCalled();

@@ -691,6 +691,9 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
   Planner-generated clarification questions in the task-detail Chat transcript must reuse ChatQuestionResponse instead of bespoke chat text. Submitted answers stay in the planner-chat lane as ordinary follow-up user messages, render the prior question read-only, and duplicate refetched pending tool calls hide older live forms so users never see competing submit affordances.
 
+  FNXC:TaskDetailPlannerChat 2026-07-01-09:20:
+  Task-detail Planner Chat must keep `fn_ask_question` actionable when streamed or persisted alongside other tools such as `bash`. The planner renderer owns task-scoped answer submission and dedupe while StandardChatSurface extracts the question card outside grouped tool-call details.
+
   FNXC:TaskDetailPlannerChat 2026-07-01-09:34:
   Planner Chat delegates transcript bubbles, thinking details, tool-call framing, and mobile send/stop gestures to StandardChatSurface. TaskPlannerChatTab keeps lookup-only session loading, task-context sends, starter prompts, and steering confirmations local so reuse does not collapse the lazy ChatView chunk or merge planner chat with Activity.
 

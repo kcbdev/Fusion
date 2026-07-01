@@ -183,6 +183,10 @@ export function renderStandardToolCalls(
   },
 ): ReactNode {
   if (!toolCalls || toolCalls.length === 0) return null;
+  /*
+  FNXC:StandardChatSurface 2026-07-01-09:20:
+  Planner Chat and regular Chat must surface `fn_ask_question` as an actionable ChatQuestionResponse even when the model also calls tools such as `bash`. Question cards render outside the collapsed grouped tool-call details so users are not stranded on summary text, while non-question tools keep their generic visibility.
+  */
   const renderToolCallItem = (toolCall: ToolCallInfo, index: number) => {
     const custom = options?.toolCallRenderer?.(toolCall, index);
     if (custom !== undefined) return custom;
@@ -221,29 +225,54 @@ export function renderStandardToolCalls(
       </details>
     );
   };
-  if (toolCalls.length === 1) {
-    return <div className="chat-tool-calls" data-testid="chat-tool-calls"><div className="chat-tool-calls-header"><span className="chat-tool-calls-header-icon" aria-hidden="true">•</span><span>{t("chat.toolCallsHeader", "Tool calls")}</span></div>{renderToolCallItem(toolCalls[0], 0)}</div>;
-  }
-  const runningCount = toolCalls.filter((toolCall) => toolCall.status === "running").length;
-  const errorCount = toolCalls.filter((toolCall) => toolCall.status === "completed" && toolCall.isError).length;
-  const hasRunning = runningCount > 0;
-  const uniqueNames = Array.from(new Set(toolCalls.map((toolCall) => toolCall.toolName)));
-  const visibleNames = uniqueNames.slice(0, 5);
-  const overflowCount = Math.max(0, uniqueNames.length - visibleNames.length);
-  const namesSummary = overflowCount > 0 ? `${visibleNames.join(", ")}, +${overflowCount} more` : visibleNames.join(", ");
-  const statusSummary = hasRunning ? `(${runningCount} ${t("chat.toolCallStatusRunning", "running")})` : errorCount > 0 ? `(${errorCount} ${errorCount === 1 ? t("chat.toolCallStatusError", "error") : t("chat.toolCallStatusErrors", "errors")})` : null;
+  const questionEntries: ReactNode[] = [];
+  const nonQuestionEntries: Array<{ toolCall: ToolCallInfo; index: number }> = [];
+  toolCalls.forEach((toolCall, index) => {
+    if (parseQuestionToolCall(toolCall)) {
+      const renderedQuestion = renderToolCallItem(toolCall, index);
+      if (renderedQuestion !== null && renderedQuestion !== undefined && renderedQuestion !== false) {
+        questionEntries.push(renderedQuestion);
+      }
+      return;
+    }
+    nonQuestionEntries.push({ toolCall, index });
+  });
+  const renderNonQuestionToolCalls = (): ReactNode => {
+    if (nonQuestionEntries.length === 0) return null;
+    if (nonQuestionEntries.length === 1) {
+      const entry = nonQuestionEntries[0]!;
+      return <div className="chat-tool-calls" data-testid="chat-tool-calls"><div className="chat-tool-calls-header"><span className="chat-tool-calls-header-icon" aria-hidden="true">•</span><span>{t("chat.toolCallsHeader", "Tool calls")}</span></div>{renderToolCallItem(entry.toolCall, entry.index)}</div>;
+    }
+    const nonQuestionToolCalls = nonQuestionEntries.map((entry) => entry.toolCall);
+    const runningCount = nonQuestionToolCalls.filter((toolCall) => toolCall.status === "running").length;
+    const errorCount = nonQuestionToolCalls.filter((toolCall) => toolCall.status === "completed" && toolCall.isError).length;
+    const hasRunning = runningCount > 0;
+    const uniqueNames = Array.from(new Set(nonQuestionToolCalls.map((toolCall) => toolCall.toolName)));
+    const visibleNames = uniqueNames.slice(0, 5);
+    const overflowCount = Math.max(0, uniqueNames.length - visibleNames.length);
+    const namesSummary = overflowCount > 0 ? `${visibleNames.join(", ")}, +${overflowCount} more` : visibleNames.join(", ");
+    const statusSummary = hasRunning ? `(${runningCount} ${t("chat.toolCallStatusRunning", "running")})` : errorCount > 0 ? `(${errorCount} ${errorCount === 1 ? t("chat.toolCallStatusError", "error") : t("chat.toolCallStatusErrors", "errors")})` : null;
+    return (
+      <div className="chat-tool-calls" data-testid="chat-tool-calls">
+        <details className="chat-tool-calls-group" data-testid="chat-tool-calls-group" open={hasRunning}>
+          <summary className="chat-tool-calls-group-summary">
+            <span className="chat-tool-calls-header-icon" aria-hidden="true">•</span>
+            <span className="chat-tool-calls-count">{t("chat.toolCallsCount", "{{count}} tool calls", { count: nonQuestionToolCalls.length })}</span>
+            <span className="chat-tool-calls-names" title={namesSummary}>{namesSummary}</span>
+            {statusSummary && <span className="chat-tool-calls-group-status">{statusSummary}</span>}
+          </summary>
+          {nonQuestionEntries.map(({ toolCall, index }) => renderToolCallItem(toolCall, index))}
+        </details>
+      </div>
+    );
+  };
+  const renderedNonQuestionToolCalls = renderNonQuestionToolCalls();
+  if (questionEntries.length === 0) return renderedNonQuestionToolCalls;
   return (
-    <div className="chat-tool-calls" data-testid="chat-tool-calls">
-      <details className="chat-tool-calls-group" data-testid="chat-tool-calls-group" open={hasRunning}>
-        <summary className="chat-tool-calls-group-summary">
-          <span className="chat-tool-calls-header-icon" aria-hidden="true">•</span>
-          <span className="chat-tool-calls-count">{t("chat.toolCallsCount", "{{count}} tool calls", { count: toolCalls.length })}</span>
-          <span className="chat-tool-calls-names" title={namesSummary}>{namesSummary}</span>
-          {statusSummary && <span className="chat-tool-calls-group-status">{statusSummary}</span>}
-        </summary>
-        {toolCalls.map((toolCall, index) => renderToolCallItem(toolCall, index))}
-      </details>
-    </div>
+    <>
+      {questionEntries}
+      {renderedNonQuestionToolCalls}
+    </>
   );
 }
 
