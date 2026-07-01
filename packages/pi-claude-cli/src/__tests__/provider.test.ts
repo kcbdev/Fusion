@@ -116,7 +116,7 @@ describe("provider registration (default export)", () => {
     expect(firstModel.cost).toBeDefined();
   });
 
-  it("includes supported extra Claude model entries without force-adding Sonnet 5", async () => {
+  it("includes latest Claude models including Sonnet 5 for the CLI surface", async () => {
     const registerProvider = vi.fn();
     const mockPi = { registerProvider, on: vi.fn() } as any;
 
@@ -127,6 +127,9 @@ describe("provider registration (default export)", () => {
     const modelIds = new Set(config.models.map((m: { id: string }) => m.id));
 
     for (const id of [
+      "claude-sonnet-5",
+      "claude-fable-5",
+      "claude-opus-4-8",
       "claude-opus-4-7",
       "claude-sonnet-4-6",
       "claude-sonnet-4-5",
@@ -135,30 +138,35 @@ describe("provider registration (default export)", () => {
       expect(modelIds.has(id)).toBe(true);
     }
 
-    expect(modelIds.has("claude-sonnet-5")).toBe(false);
+    expect(
+      config.models.find((m: { id: string }) => m.id === "claude-fable-5"),
+    ).toMatchObject({
+      cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+    });
   });
 
   it("deduplicates extra models when catalog already includes them", async () => {
     const registerProvider = vi.fn();
     const mockPi = { registerProvider, on: vi.fn() } as any;
     const getModelsMock = vi.mocked(getModels);
+    const upstreamSonnet5 = {
+      id: "claude-sonnet-5",
+      name: "Claude Sonnet 5 Upstream",
+      api: "anthropic",
+      provider: "anthropic",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 99, output: 199, cacheRead: 9.9, cacheWrite: 24.75 },
+      contextWindow: 123_456,
+      maxTokens: 7_654,
+    } as any;
 
     getModelsMock.mockReturnValueOnce([
       ...mockModels,
-      {
-        id: "claude-sonnet-5",
-        name: "Claude Sonnet 5 Upstream",
-        api: "anthropic",
-        provider: "anthropic",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-        contextWindow: 1_000_000,
-        maxTokens: 128_000,
-      } as any,
+      upstreamSonnet5,
       {
         id: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
+        name: "Claude Sonnet 4.6 Upstream",
         api: "anthropic",
         provider: "anthropic",
         reasoning: true,
@@ -179,6 +187,17 @@ describe("provider registration (default export)", () => {
       );
       expect(matches).toHaveLength(1);
     }
+
+    expect(
+      config.models.find((m: { id: string }) => m.id === "claude-sonnet-5"),
+    ).toMatchObject({
+      name: upstreamSonnet5.name,
+      reasoning: upstreamSonnet5.reasoning,
+      input: upstreamSonnet5.input,
+      cost: upstreamSonnet5.cost,
+      contextWindow: upstreamSonnet5.contextWindow,
+      maxTokens: upstreamSonnet5.maxTokens,
+    });
   });
 });
 
