@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { customProviderRegistryKey, mergeSupplementalAnthropicModels, resolvePlanningSettingsModel } from "@fusion/core";
 import type { CustomProvider } from "@fusion/core";
 import { ApiError } from "../api-error.js";
+import type { AuthStorageLike } from "../routes.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
 const ANTHROPIC_PROVIDER_ID = "anthropic";
+const ANTHROPIC_API_KEY_PROVIDER_ID = "anthropic-api-key";
 const ANTHROPIC_SUBSCRIPTION_PROVIDER_ID = "anthropic-subscription";
 
 /**
@@ -15,9 +17,60 @@ const ANTHROPIC_SUBSCRIPTION_PROVIDER_ID = "anthropic-subscription";
  * as opposed to supplemental credentials inherited from Codex CLI,
  * Claude Code, or environment variables.
  */
-async function getConfiguredProviderNames(): Promise<Set<string>> {
+function isRawAnthropicApiKeyCredential(credential: unknown): boolean {
+  return Boolean(
+    credential
+      && typeof credential === "object"
+      && (credential as { type?: unknown; key?: unknown }).type === "api_key"
+      && typeof (credential as { key?: unknown }).key === "string"
+      && (credential as { key: string }).key.length > 0,
+  );
+}
+
+function toModelProviderId(providerId: string): string {
+  return providerId === ANTHROPIC_API_KEY_PROVIDER_ID ? ANTHROPIC_PROVIDER_ID : providerId;
+}
+
+function addAuthStorageConfiguredProviders(authStorage: AuthStorageLike | undefined, providers: Set<string>): void {
+  if (!authStorage) {
+    return;
+  }
+
+  try {
+    authStorage.reload?.();
+  } catch {
+    // Ignore unreadable auth storage and fall back to persisted files below.
+  }
+
+  for (const provider of authStorage.getOAuthProviders?.() ?? []) {
+    const providerId = provider.id;
+    if (providerId === ANTHROPIC_PROVIDER_ID || providerId === ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) {
+      continue;
+    }
+    if (authStorage.hasAuth?.(providerId)) {
+      providers.add(providerId);
+    }
+  }
+
+  for (const provider of authStorage.getApiKeyProviders?.() ?? []) {
+    const storedCredential = authStorage.get?.(provider.id);
+    if (authStorage.hasApiKey?.(provider.id) || isRawAnthropicApiKeyCredential(storedCredential)) {
+      providers.add(toModelProviderId(provider.id));
+    }
+  }
+
+  const anthropicCredential = authStorage.get?.(ANTHROPIC_PROVIDER_ID);
+  const anthropicApiKeyCredential = authStorage.get?.(ANTHROPIC_API_KEY_PROVIDER_ID);
+  if (isRawAnthropicApiKeyCredential(anthropicCredential) || isRawAnthropicApiKeyCredential(anthropicApiKeyCredential)) {
+    providers.add(ANTHROPIC_PROVIDER_ID);
+  }
+}
+
+async function getConfiguredProviderNames(authStorage?: AuthStorageLike): Promise<Set<string>> {
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
   const providers = new Set<string>();
+
+  addAuthStorageConfiguredProviders(authStorage, providers);
 
   // Fusion primary + legacy .pi auth files
   const authPaths = [
@@ -53,6 +106,9 @@ async function getConfiguredProviderNames(): Promise<Set<string>> {
 
   FNXC:ProviderAuth 2026-07-01-12:18:
   Keep Anthropic's three surfaces distinct in discovery: raw API-key auth configures direct `anthropic`, subscription OAuth stays an auth/usage credential (`anthropic-subscription`) and is not a model provider row, and Claude CLI models appear only as `pi-claude-cli` when the CLI picker toggle is enabled.
+
+  FNXC:ModelCatalog 2026-07-01-13:41:
+  `/api/models` must follow the same connected-state source as Settings/auth status when ServerOptions.authStorage is injected. Use auth storage first for OAuth/API-key surfaces, keep OAuth-only Anthropic out of direct `anthropic/*`, and then fall back to legacy files/env so v0.50-style local API-key discovery still works.
   */
   if (process.env.ANTHROPIC_API_KEY) {
     providers.add(ANTHROPIC_PROVIDER_ID);
@@ -200,7 +256,7 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       // have set up in Fusion. We restrict to providers with credentials
       // in Fusion's own auth stores (primary + legacy .pi + models.json),
       // plus any providers enabled via settings toggles (Claude CLI, etc.).
-      const configuredProviders = await getConfiguredProviderNames();
+      const configuredProviders = await getConfiguredProviderNames(options?.authStorage);
       if (useClaudeCli) configuredProviders.add("pi-claude-cli");
       if (useDroidCli) configuredProviders.add("droid-cli");
       if (useLlamaCpp) configuredProviders.add("llama-server");

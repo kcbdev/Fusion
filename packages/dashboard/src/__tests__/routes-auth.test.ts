@@ -350,10 +350,10 @@ describe("GET /models", () => {
     store = createMockStore();
   });
 
-  function buildApp(modelRegistry?: ModelRegistryLike) {
+  function buildApp(modelRegistry?: ModelRegistryLike, authStorage?: AuthStorageLike) {
     const app = express();
     app.use(express.json());
-    app.use("/api", createApiRoutes(store, { modelRegistry }));
+    app.use("/api", createApiRoutes(store, { modelRegistry, authStorage }));
     return app;
   }
 
@@ -458,13 +458,34 @@ describe("GET /models", () => {
   // failure mode is silent and project-wide — keep these tests close to the
   // route so any future flip flips CI red immediately.
   describe("useClaudeCli filter", () => {
-    function buildAppWithSetting(useClaudeCli: boolean | undefined, modelRegistry: ModelRegistryLike) {
+    function buildAppWithSetting(useClaudeCli: boolean | undefined, modelRegistry: ModelRegistryLike, authStorage?: AuthStorageLike) {
       const globalStore = createMockGlobalSettingsStore();
       (globalStore.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue(
         useClaudeCli === undefined ? {} : { useClaudeCli },
       );
       (store.getGlobalSettingsStore as ReturnType<typeof vi.fn>).mockReturnValue(globalStore);
-      return buildApp(modelRegistry);
+      return buildApp(modelRegistry, authStorage);
+    }
+
+    function registryWithAnthropicSurfaces(): ModelRegistryLike {
+      return createMockModelRegistry({
+        getAvailable: vi.fn().mockReturnValue([
+          { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", reasoning: true, contextWindow: 200000 },
+          { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5 OAuth", provider: "anthropic-subscription", reasoning: true, contextWindow: 200000 },
+          { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5 (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 200000 },
+          { id: "claude-sonnet-5", name: "Claude Sonnet 5 (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 1_000_000 },
+          { id: "claude-sonnet-5", name: "Claude Sonnet 5 Duplicate (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 1_000_000 },
+        ]),
+      });
+    }
+
+    async function withNoFilesystemProviders(run: () => Promise<void>) {
+      await vi.mocked(fsPromises.readFile).withImplementation(async (path: unknown) => {
+        const value = String(path);
+        if (value.endsWith("auth.json")) return "{}";
+        if (value.endsWith("models.json")) return JSON.stringify({ providers: {} });
+        return "{}";
+      }, run);
     }
 
     function registryWithCli(): ModelRegistryLike {
@@ -508,6 +529,102 @@ describe("GET /models", () => {
         name: "Claude Sonnet 5 (CLI)",
         contextWindow: 1_000_000,
       }));
+    });
+
+    it("uses authStorage subscription OAuth plus Claude CLI to expose selectable CLI models only", async () => {
+      await withNoFilesystemProviders(async () => {
+        const authStorage = createMockAuthStorage({
+          getOAuthProviders: vi.fn().mockReturnValue([{ id: "anthropic", name: "Anthropic" }]),
+          hasAuth: vi.fn((provider: string) => provider === "anthropic-subscription"),
+          get: vi.fn((provider: string) => provider === "anthropic-subscription" ? {
+            type: "oauth",
+            access: "subscription-oauth",
+            refresh: "refresh",
+            expires: Date.now() + 60_000,
+          } : undefined),
+        });
+
+        const res = await GET(buildAppWithSetting(true, registryWithAnthropicSurfaces(), authStorage), "/api/models");
+
+        expect(res.status).toBe(200);
+        expect(res.body.models).not.toEqual([]);
+        const providers = res.body.models.map((m: { provider: string }) => m.provider);
+        expect(providers).toContain("pi-claude-cli");
+        expect(providers).not.toContain("anthropic");
+        expect(providers).not.toContain("anthropic-subscription");
+        const cliSonnetFiveRows = res.body.models.filter((m: { provider: string; id: string }) => m.provider === "pi-claude-cli" && m.id === "claude-sonnet-5");
+        expect(cliSonnetFiveRows).toHaveLength(1);
+      });
+    });
+
+    it("keeps legacy Anthropic OAuth from exposing direct rows while Claude CLI remains selectable", async () => {
+      await withNoFilesystemProviders(async () => {
+        const authStorage = createMockAuthStorage({
+          getOAuthProviders: vi.fn().mockReturnValue([{ id: "anthropic", name: "Anthropic" }]),
+          hasAuth: vi.fn((provider: string) => provider === "anthropic"),
+          get: vi.fn((provider: string) => provider === "anthropic" ? {
+            type: "oauth",
+            access: "legacy-oauth",
+            refresh: "refresh",
+            expires: Date.now() + 60_000,
+          } : undefined),
+        });
+
+        const res = await GET(buildAppWithSetting(true, registryWithAnthropicSurfaces(), authStorage), "/api/models");
+
+        expect(res.status).toBe(200);
+        const providers = res.body.models.map((m: { provider: string }) => m.provider);
+        expect(providers).toContain("pi-claude-cli");
+        expect(providers).not.toContain("anthropic");
+        expect(providers).not.toContain("anthropic-subscription");
+        expect(res.body.models).toEqual(expect.arrayContaining([
+          expect.objectContaining({ provider: "pi-claude-cli", id: "claude-sonnet-5" }),
+        ]));
+      });
+    });
+
+    it("uses authStorage raw Anthropic API key to expose direct rows without requiring OAuth", async () => {
+      await withNoFilesystemProviders(async () => {
+        const authStorage = createMockAuthStorage({
+          getApiKeyProviders: vi.fn().mockReturnValue([{ id: "anthropic-api-key", name: "Anthropic API Key" }]),
+          hasApiKey: vi.fn((provider: string) => provider === "anthropic-api-key"),
+          get: vi.fn((provider: string) => provider === "anthropic-api-key" ? {
+            type: "api_key",
+            key: "sk-ant-api03-direct",
+          } : undefined),
+        });
+
+        const res = await GET(buildAppWithSetting(false, registryWithAnthropicSurfaces(), authStorage), "/api/models");
+
+        expect(res.status).toBe(200);
+        const providers = res.body.models.map((m: { provider: string }) => m.provider);
+        expect(providers).toContain("anthropic");
+        expect(providers).not.toContain("pi-claude-cli");
+        expect(providers).not.toContain("anthropic-subscription");
+      });
+    });
+
+    it("does not expose Anthropic rows for authStorage OAuth-only auth when Claude CLI is disabled", async () => {
+      await withNoFilesystemProviders(async () => {
+        const authStorage = createMockAuthStorage({
+          getOAuthProviders: vi.fn().mockReturnValue([{ id: "anthropic", name: "Anthropic" }]),
+          hasAuth: vi.fn((provider: string) => provider === "anthropic-subscription"),
+          get: vi.fn((provider: string) => provider === "anthropic-subscription" ? {
+            type: "oauth",
+            access: "subscription-oauth",
+            refresh: "refresh",
+            expires: Date.now() + 60_000,
+          } : undefined),
+        });
+
+        const res = await GET(buildAppWithSetting(false, registryWithAnthropicSurfaces(), authStorage), "/api/models");
+
+        expect(res.status).toBe(200);
+        const providers = res.body.models.map((m: { provider: string }) => m.provider);
+        expect(providers).not.toContain("anthropic");
+        expect(providers).not.toContain("anthropic-subscription");
+        expect(providers).not.toContain("pi-claude-cli");
+      });
     });
 
     it("hides direct Anthropic rows for OAuth-only subscription auth while showing distinct Claude CLI rows", async () => {
