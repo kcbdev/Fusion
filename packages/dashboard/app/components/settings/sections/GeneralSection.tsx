@@ -254,6 +254,15 @@ export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast
         </small>
       </div>
       <div className="form-group">
+        {/*
+          FNXC:GithubImportTracking 2026-07-01-00:00:
+          This checkbox is project-scoped and import-specific: operators can link imported GitHub issues to GitHub tracking without turning tracking on for every new task.
+        */}
+        <label htmlFor="githubLinkImportedIssuesToTracking" className="checkbox-label">
+          <input id="githubLinkImportedIssuesToTracking" type="checkbox" checked={form.githubLinkImportedIssuesToTracking === true} onChange={(e) => setForm((f) => ({ ...f, githubLinkImportedIssuesToTracking: e.target.checked }))}/>{t("settings.general.alwaysLinkImportedGitHubIssuesToTracking", " Always link imported GitHub issues to GitHub tracking ")}</label>
+        <small>{t("settings.general.whenEnabledImportedGitHubIssuesUseTheirSource", "When enabled, GitHub issue imports become tracked tasks that adopt the source issue. This does not turn GitHub tracking on for ordinary new tasks.")}</small>
+      </div>
+      <div className="form-group">
         <label htmlFor="projectGithubTrackingDefaultRepoGeneral">{t("settings.general.projectDefaultTrackingRepo", "Project default tracking repo")}</label>
         <TrackingRepoSelect id="projectGithubTrackingDefaultRepoGeneral" ariaLabel="Project default tracking repo" value={form.githubTrackingDefaultRepo ?? ""} options={projectTrackingRepoOptions} loading={projectTrackingRepoLoading} error={projectTrackingRepoError ?? undefined} placeholder={t("settings.general.ownerRepo", "owner/repo")} onChange={(nextValue) => setForm((f) => ({ ...f, githubTrackingDefaultRepo: nextValue || undefined }))}/>
         <small>{t("settings.general.defaultRepoUsedWhenCreatingGitHubIssuesFor", "Default repo used when creating GitHub issues for tracked tasks. Falls back to the global default if blank.")}</small>

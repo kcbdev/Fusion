@@ -4239,6 +4239,12 @@ export interface ProjectSettings {
   /** When true, new tasks default GitHub tracking to enabled for this project (FN-3868).
    *  Default: false. */
   githubTrackingEnabledByDefault?: boolean;
+  /**
+   * FNXC:GithubImportTracking 2026-07-01-00:00:
+   * This project-scoped switch is intentionally narrower than githubTrackingEnabledByDefault: it only forces imported GitHub issues to become GitHub-tracked tasks so the source issue is adopted, while ordinary new tasks keep their existing default behavior.
+   * Default: false.
+   */
+  githubLinkImportedIssuesToTracking?: boolean;
   /** Project default GitHub tracking repo in `owner/repo` format (FN-3868).
    *  Falls back to global githubTrackingDefaultRepo when unset. */
   githubTrackingDefaultRepo?: string;

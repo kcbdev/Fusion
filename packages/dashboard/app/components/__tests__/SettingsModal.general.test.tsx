@@ -966,6 +966,65 @@ describe("SettingsModal", () => {
       }
     });
 
+    it("renders and saves imported GitHub issue tracking linking as a project setting", async () => {
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      const importLinkToggle = screen.getByLabelText(
+        "Always link imported GitHub issues to GitHub tracking",
+      ) as HTMLInputElement;
+      expect(importLinkToggle.id).toBe("githubLinkImportedIssuesToTracking");
+      expect(importLinkToggle.checked).toBe(false);
+      expect(screen.getByText(/does not turn GitHub tracking on for ordinary new tasks/i)).toBeInTheDocument();
+
+      await settingsModalUser.click(importLinkToggle);
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.githubLinkImportedIssuesToTracking).toBe(true);
+      if (mockUpdateGlobalSettings.mock.calls.length > 0) {
+        const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(globalPayload.githubLinkImportedIssuesToTracking).toBeUndefined();
+      }
+    });
+
+    it("saves imported GitHub issue tracking linking as disabled", async () => {
+      mockFetchSettings.mockResolvedValueOnce({
+        ...defaultSettings,
+        githubLinkImportedIssuesToTracking: true,
+      });
+      mockFetchSettingsByScope.mockResolvedValueOnce({
+        global: defaultSettings,
+        project: { githubLinkImportedIssuesToTracking: true },
+      });
+
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      const importLinkToggle = screen.getByLabelText(
+        "Always link imported GitHub issues to GitHub tracking",
+      ) as HTMLInputElement;
+      expect(importLinkToggle.checked).toBe(true);
+
+      await settingsModalUser.click(importLinkToggle);
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.githubLinkImportedIssuesToTracking).toBe(false);
+      if (mockUpdateGlobalSettings.mock.calls.length > 0) {
+        const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(globalPayload.githubLinkImportedIssuesToTracking).toBeUndefined();
+      }
+    });
+
     it("saves GitHub tracking defaults as disabled and clears the repo when emptied", async () => {
       mockFetchSettings.mockResolvedValueOnce({
         ...defaultSettings,

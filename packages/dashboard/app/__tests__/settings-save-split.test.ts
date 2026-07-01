@@ -26,6 +26,8 @@ describe("scope anchors", () => {
     expect(isProjectSettingsKey("maxConcurrent")).toBe(true);
     expect(isProjectSettingsKey("integrationBranch")).toBe(true);
     expect(isProjectSettingsKey("enabledBuiltinWorkflowIds")).toBe(true);
+    expect(isProjectSettingsKey("githubLinkImportedIssuesToTracking")).toBe(true);
+    expect(isGlobalSettingsKey("githubLinkImportedIssuesToTracking")).toBe(false);
   });
 
   it("every MODEL_LANE_KEYS entry is a project settings key", () => {
@@ -212,6 +214,23 @@ describe("splitSettingsSave", () => {
     });
 
     expect(projectPatch).toEqual({ maxConcurrent: 7 });
+  });
+
+  it("routes imported GitHub issue linking only to project settings", () => {
+    const initialScopedValues = {
+      global: {},
+      project: { githubLinkImportedIssuesToTracking: false },
+    } as never;
+
+    const { globalPatch, projectPatch } = splitSettingsSave({
+      payload: { githubLinkImportedIssuesToTracking: true },
+      initialValues: null,
+      initialScopedValues,
+      activeSection: "general",
+    });
+
+    expect(globalPatch).toEqual({});
+    expect(projectPatch).toEqual({ githubLinkImportedIssuesToTracking: true });
   });
 
   it("routes shared mcpServers only to the active MCP scope", () => {

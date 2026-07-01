@@ -484,6 +484,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   githubCommentTemplate: undefined,
   githubCloseSourceIssueOnDone: false,
   githubTrackingEnabledByDefault: false,
+  githubLinkImportedIssuesToTracking: false,
   githubTrackingDefaultRepo: undefined,
   githubTrackingDedupEnabled: true,
   githubAuthMode: "gh-cli",
