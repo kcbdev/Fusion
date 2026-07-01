@@ -1138,6 +1138,16 @@ describe("isRetryableModelSelectionError", () => {
     expect(isRetryableModelSelectionError("400 invalid_request_error: missing required field messages")).toBe(false);
   });
 
+  it("treats provider model-not-found payloads as model-selection retryable", () => {
+    expect(
+      isRetryableModelSelectionError(
+        'Error: 404 {"type":"error","error":{"type":"not_found_error","message":"Not found"},"request_id":"req_011CcawcZ3Ra9CennJXM8oWC"}',
+      ),
+    ).toBe(true);
+    expect(isRetryableModelSelectionError("model claude-sonnet-5 not found")).toBe(true);
+    expect(isRetryableModelSelectionError("GET /api/tasks/FN-404 returned 404 Not Found")).toBe(false);
+  });
+
   it("treats an unsupported message-role rejection as model-selection retryable so the fallback model is tried (issue #1261)", () => {
     expect(
       isRetryableModelSelectionError(

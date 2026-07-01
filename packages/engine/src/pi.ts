@@ -73,7 +73,7 @@ import { resolvePermanentAgentToolDecision } from "./permanent-agent-gating.js";
 import type { SystemPromptLayers } from "./prompt-layers.js";
 import { READONLY_ALLOWLIST, filterCustomToolsForReadonly, isReadonlyAllowed } from "./workflow-step-tool-policy.js";
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
-import { isModelAuthTierIncompatibilityError, isUnsupportedMessageRoleError } from "./transient-error-detector.js";
+import { isModelAuthTierIncompatibilityError, isProviderModelNotFoundError, isUnsupportedMessageRoleError } from "./transient-error-detector.js";
 import { logMcpForwardingSkipped, runtimeSupportsMcp } from "./mcp-runtime-support.js";
 import { connectMcpSessionTools, type McpClientFactory, type McpSessionToolset } from "./mcp-session-tools.js";
 export { isModelAuthTierIncompatibilityError } from "./transient-error-detector.js";
@@ -1104,6 +1104,13 @@ export function isRetryableModelSelectionError(message: string): boolean {
   // `usingFallback` guard upstream keeps this to a single swap, so an
   // incompatible fallback fails terminally rather than looping.
   if (isUnsupportedMessageRoleError(message)) {
+    return true;
+  }
+  /*
+   * FNXC:ModelFallback 2026-07-01-00:30:
+   * Prompt-time provider 404s for a selected model, including Anthropic's `not_found_error` for Claude Sonnet 5 account/surface gaps, must enter the same single-swap fallback path as auth-tier and role-compatibility failures. Generic 404s remain excluded by the classifier.
+   */
+  if (isProviderModelNotFoundError(message)) {
     return true;
   }
   const normalized = message.toLowerCase();
