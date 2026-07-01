@@ -137,25 +137,25 @@ describe("TaskDetailModal planner Chat tab", () => {
     expect(screen.getByTestId("task-planner-chat-panel")).toBeInTheDocument();
   });
 
-  it("defaults planner Chat to focused mode and lets the in-view control collapse it", async () => {
+  it("defaults planner Chat to collapsed mode and lets the in-view control expand it", async () => {
     const user = userEvent.setup();
     const { container } = renderTask("todo");
     const detail = container.querySelector(".task-detail-content");
 
-    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
     const toggle = screen.getByTestId("task-planner-chat-expand-toggle");
-    expect(toggle).toHaveAccessibleName("Collapse planner chat");
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(toggle).toHaveAccessibleName("Expand planner chat");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
 
     await user.click(toggle);
 
-    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
-    expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
-    expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAccessibleName("Expand planner chat");
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAccessibleName("Collapse planner chat");
   });
 
-  it("resets planner Chat focused mode when switching tasks", async () => {
+  it("resets planner Chat expanded mode when switching tasks", async () => {
     const user = userEvent.setup();
     const { container, rerender } = render(
       <TaskDetailModal
@@ -172,7 +172,7 @@ describe("TaskDetailModal planner Chat tab", () => {
     const detail = container.querySelector(".task-detail-content");
 
     await user.click(screen.getByTestId("task-planner-chat-expand-toggle"));
-    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
 
     rerender(
       <TaskDetailModal
@@ -187,7 +187,7 @@ describe("TaskDetailModal planner Chat tab", () => {
       />,
     );
 
-    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
   });
 
   it("keeps Activity expansion independent from planner Chat expansion", async () => {
@@ -201,11 +201,11 @@ describe("TaskDetailModal planner Chat tab", () => {
     const chatTab = container.querySelectorAll<HTMLButtonElement>(".detail-tabs .detail-tab")[0];
     expect(chatTab?.textContent?.trim()).toBe("Chat");
     fireEvent.click(chatTab!);
-    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
     expect(detail).not.toHaveClass("task-detail-content--chat-expanded");
 
     await user.click(screen.getByTestId("task-planner-chat-expand-toggle"));
-    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
     expect(detail).not.toHaveClass("task-detail-content--chat-expanded");
   });
 });

@@ -182,7 +182,9 @@ describe("TaskPlannerChatTab", () => {
     const modelBadge = screen.getByTestId("task-planner-chat-model");
     expect(toggle).toHaveAccessibleName("Collapse planner chat");
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(modelBadge.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toggle).toHaveClass("task-planner-chat-expand-toggle--overlay");
+    expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(toggle);
+    expect(modelBadge).toBeInTheDocument();
     expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByLabelText("Message planner chat"));
     expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByRole("button", { name: "Send" }));
 

@@ -883,6 +883,9 @@ Expanded Planner Chat must still expose task Priority, Execution Mode, and the t
 
 FNXC:TaskDetailPlannerChat 2026-07-02-00:04:
 Expanded Planner Chat must keep the task title and workflow badge visible on mobile. The title preserves task identity, and the workflow badge is owned by the timestamps row, so this mode hides lower-priority metadata but not `.detail-heading-row` or `.detail-timestamps`; timestamp labels inside that row can hide so the workflow badge remains compact.
+
+FNXC:TaskDetailPlannerChat 2026-07-02-00:17:
+Planner Chat should not open expanded by default. When the user expands it, the view should behave like Activity expansion: the chat panel takes nearly the whole modal, with only task title and workflow identity left above it for context.
 */
 .detail-section--planner-chat {
   display: flex;
@@ -895,11 +898,40 @@ Expanded Planner Chat must keep the task title and workflow badge visible on mob
 .task-detail-content--planner-chat-expanded .detail-body--planner-chat {
   flex: 1;
   min-height: 0;
+  padding: var(--space-md);
 }
 
 .task-detail-content--planner-chat-expanded .detail-section--planner-chat {
   flex: 1;
   min-height: 0;
+}
+
+.task-detail-content--planner-chat-expanded .detail-description-toggle,
+.task-detail-content--planner-chat-expanded .detail-near-duplicate-banner,
+.task-detail-content--planner-chat-expanded .task-fields-section,
+.task-detail-content--planner-chat-expanded .branch-group-card,
+.task-detail-content--planner-chat-expanded .workspace-worktrees-summary,
+.task-detail-content--planner-chat-expanded .modal-actions,
+.task-detail-content--planner-chat-expanded .detail-tabs,
+.task-detail-content--planner-chat-expanded .detail-meta-inline-controls,
+.task-detail-content--planner-chat-expanded .detail-provenance {
+  display: none;
+}
+
+.task-detail-content--planner-chat-expanded .modal-header {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  padding-block: var(--space-sm);
+}
+
+.task-detail-content--planner-chat-expanded .detail-meta {
+  flex: 0 0 auto;
+  margin-bottom: var(--space-sm);
+}
+
+.task-detail-content--planner-chat-expanded .detail-timestamps .detail-timestamp-item,
+.task-detail-content--planner-chat-expanded .detail-timestamps .detail-timestamp-separator {
+  display: none;
 }
 
 
@@ -1177,36 +1209,6 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
 
   .task-detail-content--chat-expanded .modal-actions {
     display: none;
-  }
-
-  .task-detail-content--planner-chat-expanded .detail-description-toggle,
-  .task-detail-content--planner-chat-expanded .detail-near-duplicate-banner,
-  .task-detail-content--planner-chat-expanded .branch-group-card,
-  .task-detail-content--planner-chat-expanded .workspace-worktrees-summary,
-  .task-detail-content--planner-chat-expanded .modal-actions,
-  .task-detail-content--planner-chat-expanded .detail-provenance {
-    display: none;
-  }
-
-  .task-detail-content--planner-chat-expanded .modal-header {
-    flex: 0 0 auto;
-    justify-content: space-between;
-    padding-block: var(--space-sm);
-  }
-
-  .task-detail-content--planner-chat-expanded .detail-meta {
-    flex: 0 0 auto;
-    margin-bottom: var(--space-sm);
-  }
-
-  .task-detail-content--planner-chat-expanded .detail-timestamps .detail-timestamp-item,
-  .task-detail-content--planner-chat-expanded .detail-timestamps .detail-timestamp-separator {
-    display: none;
-  }
-
-  .task-detail-content--planner-chat-expanded .detail-tabs {
-    flex: 0 0 auto;
-    margin-bottom: var(--space-sm);
   }
 
   .detail-body--planner-chat {

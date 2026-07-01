@@ -477,8 +477,8 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByRole("button", { name: "Logs" })).toBeNull();
       expect(screen.getByRole("button", { name: "Chat" })).toHaveClass("detail-tab-active");
       expect(screen.getByTestId("task-planner-chat-panel")).toBeTruthy();
-      expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse planner chat");
-      expect(container.querySelector(".task-detail-content")).toHaveClass("task-detail-content--planner-chat-expanded");
+      expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand planner chat");
+      expect(container.querySelector(".task-detail-content")).not.toHaveClass("task-detail-content--planner-chat-expanded");
       expect(container.querySelector(".activity-segmented-control")).toBeNull();
       expect(container.querySelector(".activity-segment")).toBeNull();
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
@@ -947,7 +947,7 @@ describe("TaskDetailModal", () => {
       );
 
       const content = container.querySelector(".task-detail-content");
-      expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse planner chat");
+      expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand planner chat");
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));

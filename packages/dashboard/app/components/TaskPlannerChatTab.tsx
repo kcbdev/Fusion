@@ -500,6 +500,19 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   */
   return (
     <section className="task-planner-chat" aria-label={t("taskDetail.plannerChat.label", "Planner chat")} data-testid="task-planner-chat-panel">
+      {onExpandedChange && (
+        <button
+          type="button"
+          className="btn btn-icon btn-sm task-planner-chat-expand-toggle task-planner-chat-expand-toggle--overlay"
+          onClick={() => onExpandedChange(!expanded)}
+          aria-label={expanded ? t("taskDetail.plannerChat.collapse", "Collapse planner chat") : t("taskDetail.plannerChat.expand", "Expand planner chat")}
+          aria-pressed={expanded}
+          aria-expanded={expanded}
+          data-testid="task-planner-chat-expand-toggle"
+        >
+          {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+        </button>
+      )}
       <div className="task-planner-chat-header">
         <div>
           <h4>{t("taskDetail.plannerChat.heading", "Planner Chat")}</h4>
@@ -514,19 +527,6 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
             >
               <ProviderIcon provider={planningModel.provider} size="md" />
             </span>
-          )}
-          {onExpandedChange && (
-            <button
-              type="button"
-              className="btn btn-icon btn-sm task-planner-chat-expand-toggle"
-              onClick={() => onExpandedChange(!expanded)}
-              aria-label={expanded ? t("taskDetail.plannerChat.collapse", "Collapse planner chat") : t("taskDetail.plannerChat.expand", "Expand planner chat")}
-              aria-pressed={expanded}
-              aria-expanded={expanded}
-              data-testid="task-planner-chat-expand-toggle"
-            >
-              {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
-            </button>
           )}
         </div>
       </div>

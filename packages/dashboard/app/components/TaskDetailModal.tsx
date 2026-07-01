@@ -557,7 +557,7 @@ export function TaskDetailContent({
   const [activeTab, setActiveTab] = useState<TabId>(() => resolveDefaultTab(initialTab, task.column, taskDetailChatFirst));
   const [activitySegment, setActivitySegment] = useState<ActivitySegment>(() => resolveDefaultActivitySegment(initialTab));
   const [activityExpanded, setActivityExpanded] = useState(false);
-  const [plannerChatExpanded, setPlannerChatExpanded] = useState(true);
+  const [plannerChatExpanded, setPlannerChatExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -708,7 +708,7 @@ export function TaskDetailContent({
   // Reset description and planner-chat focus state when task changes
   useEffect(() => {
     setDescriptionExpanded(false);
-    setPlannerChatExpanded(true);
+    setPlannerChatExpanded(false);
   }, [task.column, task.id]);
 
   const [highlightStallCode, setHighlightStallCode] = useState<string | null>(null);
