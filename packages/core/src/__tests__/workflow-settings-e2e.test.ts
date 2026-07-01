@@ -252,7 +252,7 @@ describe("workflow-settings end-to-end journey (U10)", () => {
 
       // The fresh project has declaration defaults (NOT the source project's values).
       const freshBefore = await resolveEffectiveSettingsById(resolverStore(store2), "builtin:coding", projectId2);
-      expect(freshBefore.workflowStepTimeoutMs).toBe(360_000); // legacy/declaration default
+      expect(freshBefore.workflowStepTimeoutMs).toBe(900_000); // declaration default
       expect(freshBefore.requirePrApproval).toBe(false);
 
       // ── Import the v2 export → effective values match the exported project,

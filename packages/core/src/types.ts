@@ -3945,7 +3945,7 @@ export interface ProjectSettings {
   /** Wall-clock timeout (ms) for a single pre-merge workflow step's AI call.
    *  When a step exceeds this, the session is aborted and the executor is
    *  given one shot to retry with the configured fallback model before the
-   *  step is reported as failed. Default: 360_000 (6 minutes). */
+   *  step is reported as failed. Default: 900_000 (15 minutes). */
   workflowStepTimeoutMs?: number;
   /** How pre-merge prompt workflow steps enforce declared File Scope at step end.
    *  - "block" (default): mark the step failed/revision-requested on off-scope writes

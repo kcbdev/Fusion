@@ -14351,7 +14351,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
       (c) => c.provider && c.modelId && (c.provider !== primaryProvider || c.modelId !== primaryModelId),
     );
 
-    const timeoutMs = Math.max(60_000, settings.workflowStepTimeoutMs ?? 360_000);
+    const timeoutMs = Math.max(60_000, settings.workflowStepTimeoutMs ?? 900_000);
 
     const runOnce = async (
       provider: string | undefined,

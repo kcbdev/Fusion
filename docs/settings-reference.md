@@ -505,6 +505,7 @@ Default notes:
 | `validatorModelId` | `string` | `undefined` | Model ID for plan/code reviewers. |
 | `validatorFallbackProvider` | `string` | `undefined` | Fallback provider for reviewers; also used by reviewer UNAVAILABLE/error recovery retry before returning terminal UNAVAILABLE. |
 | `validatorFallbackModelId` | `string` | `undefined` | Fallback model ID for reviewers; paired with `validatorFallbackProvider` for reviewer recovery retry. |
+| `workflowStepTimeoutMs` | `number` | `900000` | Maximum time in milliseconds a single workflow step may run before it is timed out. |
 | `modelPresets` | `ModelPreset[]` | `[]` | Reusable executor/reviewer model presets. |
 | `autoSelectModelPreset` | `boolean` | `false` | Auto-select presets by task size. |
 | `defaultPresetBySize` | `{ S?: string; M?: string; L?: string }` | `{}` | Mapping for `S`/`M`/`L` → preset ID. |

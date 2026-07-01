@@ -33,7 +33,7 @@ const TIMEOUT_DECL: WorkflowSettingDefinition = {
   id: "workflowStepTimeoutMs",
   name: "Step timeout (ms)",
   type: "number",
-  default: 360_000,
+  default: 900_000,
 };
 const FLAG_DECL: WorkflowSettingDefinition = {
   id: "runStepsInNewSessions",
@@ -131,7 +131,7 @@ describe("resolveEffectiveSettingValues", () => {
 
   it("falls to the declaration default when unset", () => {
     const eff = resolveEffectiveSettingValues([TIMEOUT_DECL], {});
-    expect(eff).toEqual({ workflowStepTimeoutMs: 360_000 });
+    expect(eff).toEqual({ workflowStepTimeoutMs: 900_000 });
   });
 
   it("drops a stored value that no longer validates (enum→number retype) and uses the default", () => {
@@ -143,7 +143,7 @@ describe("resolveEffectiveSettingValues", () => {
 
   it("drops stored values for ids with no current declaration", () => {
     const eff = resolveEffectiveSettingValues([TIMEOUT_DECL], { removedSetting: 7 });
-    expect(eff).toEqual({ workflowStepTimeoutMs: 360_000 });
+    expect(eff).toEqual({ workflowStepTimeoutMs: 900_000 });
   });
 
   it("omits a setting with neither a valid value nor a default", () => {
@@ -248,7 +248,7 @@ describe("TaskStore.updateWorkflowSettingValues", () => {
 
     const def = await store.getWorkflowDefinition(wfId);
     const decls = def!.ir.version === "v2" ? def!.ir.settings : undefined;
-    expect(resolveEffectiveSettingValues(decls, stored)).toEqual({ workflowStepTimeoutMs: 360_000 });
+    expect(resolveEffectiveSettingValues(decls, stored)).toEqual({ workflowStepTimeoutMs: 900_000 });
   });
 
   it("retype enum→number with a stale stored string: effective resolution drops it, returns default, stored row untouched", async () => {
@@ -305,6 +305,6 @@ describe("TaskStore.updateWorkflowSettingValues", () => {
     );
     expect(effective.requirePrApproval).toBe(true);
     // Untouched built-in keys resolve to their declaration defaults.
-    expect(effective.workflowStepTimeoutMs).toBe(360_000);
+    expect(effective.workflowStepTimeoutMs).toBe(900_000);
   });
 });

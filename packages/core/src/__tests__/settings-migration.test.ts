@@ -176,8 +176,8 @@ describe("settings hard-move migration (U4)", () => {
       expect((PROJECT_SETTINGS_KEYS as readonly string[]).includes(key)).toBe(false);
     }
     const effective = await resolveEffectiveSettingsById(resolverStore(store), "builtin:coding", store.getWorkflowSettingsProjectId());
-    // Declaration defaults: workflowStepTimeoutMs=360000, requirePrApproval=false.
-    expect(effective.workflowStepTimeoutMs).toBe(360_000);
+    // Declaration defaults: workflowStepTimeoutMs=900000, requirePrApproval=false.
+    expect(effective.workflowStepTimeoutMs).toBe(900_000);
     expect(effective.requirePrApproval).toBe(false);
   });
 
@@ -233,7 +233,7 @@ describe("settings hard-move migration (U4)", () => {
         ],
         edges: [{ from: "start", to: "end" }],
         settings: [
-          { id: "workflowStepTimeoutMs", name: "Step timeout", type: "number", default: 360_000 },
+          { id: "workflowStepTimeoutMs", name: "Step timeout", type: "number", default: 900_000 },
           { id: "requirePrApproval", name: "Require PR approval", type: "boolean", default: false },
         ],
       },
