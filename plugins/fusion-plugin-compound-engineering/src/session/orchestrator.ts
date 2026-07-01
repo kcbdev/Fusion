@@ -302,6 +302,7 @@ export class CeOrchestrator {
       tools: "coding",
       requestedSkillNames: [stage.skillId],
       additionalSkillPaths,
+      allowAnswerQuestionIdDrift: true,
       onProgress: (event) => this.handleProgress(sessionId, event),
       ...(defaultProvider ? { defaultProvider } : {}),
       ...(defaultModelId ? { defaultModelId } : {}),
