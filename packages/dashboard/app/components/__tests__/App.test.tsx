@@ -1329,6 +1329,61 @@ describe("App chat unread response indicator", () => {
     });
   });
 
+  it("does not show unread indicator for hidden planner assistant messages", async () => {
+    const events = await getChatEvents();
+
+    await act(async () => {
+      events["chat:message:added"](
+        new MessageEvent("chat:message:added", {
+          data: JSON.stringify({ role: "assistant", sessionId: "sess-planner", agentId: "task-planner:FN-7392" }),
+        }),
+      );
+    });
+
+    const chatNav = screen.getByTestId("sidebar-nav-chat");
+    expect(chatNav).toBeInTheDocument();
+    expect(chatUnreadDot()).toBeNull();
+    expect(chatNav.querySelector(".left-sidebar-nav__dot")).toBeNull();
+  });
+
+  it("does not show mobile unread indicator for hidden planner assistant messages", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    const events = await getChatEvents();
+
+    await act(async () => {
+      events["chat:message:added"](
+        new MessageEvent("chat:message:added", {
+          data: JSON.stringify({ role: "assistant", sessionId: "sess-planner", agentId: "task-planner:FN-7392" }),
+        }),
+      );
+    });
+
+    const mobileChatNav = screen.getByTestId("mobile-nav-tab-chat");
+    expect(mobileChatNav).toBeInTheDocument();
+    expect(mobileChatNav.querySelector(".mobile-nav-chat-unread-dot")).toBeNull();
+  });
+
+  it("shows unread indicator for planner assistant messages visible in the common Chat feed", async () => {
+    const events = await getChatEvents();
+
+    await act(async () => {
+      events["chat:message:added"](
+        new MessageEvent("chat:message:added", {
+          data: JSON.stringify({
+            role: "assistant",
+            sessionId: "sess-planner",
+            agentId: "task-planner:FN-7392",
+            taskChatVisibleInCommonFeed: true,
+          }),
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(chatUnreadDot()).not.toBeNull();
+    });
+  });
+
   it("does not show unread indicator for individual user messages", async () => {
     const events = await getChatEvents();
 

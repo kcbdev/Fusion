@@ -207,6 +207,33 @@ function stripTaskEventHeavyFields<T>(payload: T): T {
   return stripTaskListHeavyFields(payload);
 }
 
+async function enrichChatMessageSsePayload<T>(message: T, store: TaskStore, chatStore?: ChatStore): Promise<T> {
+  if (!message || typeof message !== "object" || Array.isArray(message) || !chatStore) {
+    return message;
+  }
+
+  const payload = message as Record<string, unknown>;
+  const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+  if (!sessionId) return message;
+
+  const session = chatStore.getSession(sessionId);
+  if (!session) return message;
+
+  const agentId = typeof payload.agentId === "string" ? payload.agentId : session.agentId;
+  const enrichedPayload: Record<string, unknown> = {
+    ...payload,
+    agentId,
+    projectId: payload.projectId ?? session.projectId ?? null,
+  };
+
+  if (typeof agentId === "string" && agentId.startsWith("task-planner:")) {
+    const settings = await store.getSettings().catch(() => undefined);
+    enrichedPayload.taskChatVisibleInCommonFeed = settings?.showTaskChatsInCommonFeed === true;
+  }
+
+  return enrichedPayload as T;
+}
+
 /**
  * Normalized plugin lifecycle transition types.
  * These are the unified set of transitions that the SSE stream emits.
@@ -754,7 +781,14 @@ export function createSSE(
     };
 
     const onChatMessageAdded = (message: unknown) => {
-      send(`event: chat:message:added\ndata: ${JSON.stringify(message)}\n\n`);
+      void (async () => {
+        /*
+         * FNXC:ChatBadge 2026-07-01-00:00:
+         * Task-detail planner Chat sessions are hidden from the global Chat feed unless `showTaskChatsInCommonFeed` is enabled, so direct-message SSE payloads must carry both the source session agent id and effective feed visibility. The App unread badge uses this metadata to suppress hidden task-local planner replies without regressing opt-in shared-feed planner chats or normal direct-message payload fields.
+         */
+        const payload = await enrichChatMessageSsePayload(message, store, chatStore);
+        send(`event: chat:message:added\ndata: ${JSON.stringify(payload)}\n\n`);
+      })();
     };
 
     const onChatMessageDeleted = (messageId: string) => {
