@@ -2254,7 +2254,7 @@ describe("TaskDetailModal", () => {
       }, { timeout: 3000 });
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "Activity view" }), { target: { value: "feed" } });
 
       const activityList = container.querySelector(".detail-activity-list");
       expect(activityList).toBeTruthy();

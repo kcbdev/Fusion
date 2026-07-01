@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React, { type ComponentProps } from "react";
 import type { AgentLogEntry } from "@fusion/core";
@@ -49,8 +49,12 @@ function topLevelTabLabels(): string[] {
     .map((button) => button.textContent?.trim() ?? "");
 }
 
-function activitySegmentButtons(): HTMLButtonElement[] {
-  return screen.getAllByRole("tab", { name: /^(Live|Feed|Raw Logs)$/ }) as HTMLButtonElement[];
+function activitySelector(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Activity view" }) as HTMLSelectElement;
+}
+
+function activitySelectorLabels(): string[] {
+  return Array.from(activitySelector().options).map((option) => option.textContent?.trim() ?? "");
 }
 
 function mockRawLogs(entries: AgentLogEntry[]) {
@@ -66,7 +70,7 @@ function mockRawLogs(entries: AgentLogEntry[]) {
 }
 
 describe("TaskDetailModal Activity and planner Chat tab integration", () => {
-  it("defaults to Activity first while segmenting Live, Feed, and Raw Logs without duplicate panels on desktop", async () => {
+  it("defaults to Activity first while selecting Live, Feed, and Raw without duplicate panels on desktop", async () => {
     const user = userEvent.setup();
     mockRawLogs([
       { timestamp: "2026-06-30T20:03:00.000Z", taskId: "FN-7315", type: "text", agent: "executor", text: "raw executor line" },
@@ -78,9 +82,11 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
     expect(screen.getAllByRole("button", { name: "Chat" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
     expect(screen.queryByTestId("task-planner-chat-panel")).not.toBeInTheDocument();
-    expect(activitySegmentButtons().map((button) => button.textContent?.trim())).toEqual(["Live", "Feed", "Raw Logs"]);
-    expect(activitySegmentButtons().every((button) => (button.textContent ?? "").trim().length > 0)).toBe(true);
-    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+    expect(activitySelectorLabels()).toEqual(["Live", "Feed", "Raw"]);
+    expect(activitySelector().value).toBe("current");
+    expect(document.querySelector(".activity-segmented-control")).toBeNull();
+    expect(document.querySelector(".activity-segment")).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Activity views" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("form", { name: "Task activity composer" })).toHaveLength(1);
     expect(screen.queryByText(/^Steering comment$/)).not.toBeInTheDocument();
     expect(screen.queryByText("Send operational guidance to the active task through steering comments.")).not.toBeInTheDocument();
@@ -88,18 +94,18 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
     expect(screen.queryByRole("heading", { name: "Feed" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-log-viewer")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    await user.selectOptions(activitySelector(), "feed");
 
-    expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+    expect(activitySelector().value).toBe("feed");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Feed" })).toBeInTheDocument();
     expect(screen.getByText("Posted update")).toBeInTheDocument();
     expect(screen.queryByText("Existing steering guidance")).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-log-viewer")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    await user.selectOptions(activitySelector(), "raw-logs");
 
-    expect(screen.getByRole("tab", { name: "Raw Logs" })).toHaveAttribute("aria-selected", "true");
+    expect(activitySelector().value).toBe("raw-logs");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Feed" })).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
@@ -124,7 +130,7 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
 
     expect(topLevelTabLabels().slice(0, 2)).toEqual(["Chat", "Activity"]);
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+    expect(activitySelector().value).toBe("current");
     expect(screen.queryByTestId("task-planner-chat-panel")).not.toBeInTheDocument();
 
     rerender(
@@ -161,7 +167,7 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
 
     expect(topLevelTabLabels().slice(0, 2)).toEqual(["Chat", "Activity"]);
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+    expect(activitySelector().value).toBe("feed");
     expect(screen.getByRole("heading", { name: "Feed" })).toBeInTheDocument();
   });
 
@@ -188,12 +194,11 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
 
       expect(topLevelTabLabels().slice(0, 3)).toEqual(["Activity", "Chat", "Summary"]);
       expect(screen.getByRole("button", { name: "Summary" })).toHaveClass("detail-tab-active");
-      expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Activity view" })).not.toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Activity" }));
-      const segmentGroup = screen.getByRole("tablist", { name: "Activity views" });
-      expect(within(segmentGroup).getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(["Live", "Feed", "Raw Logs"]);
-      expect(within(segmentGroup).getAllByRole("tab")).toHaveLength(3);
+      expect(activitySelectorLabels()).toEqual(["Live", "Feed", "Raw"]);
+      expect(screen.queryByRole("tablist", { name: "Activity views" })).not.toBeInTheDocument();
       expect(screen.getByText("No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.")).toBeInTheDocument();
       expect(screen.getAllByRole("form", { name: "Task refinement composer" })).toHaveLength(1);
       expect(screen.queryByRole("form", { name: "Refinement request" })).not.toBeInTheDocument();

@@ -30,9 +30,17 @@ FNXC:TaskDetailTabs 2026-06-17-08:20:
 FN-7306 labels the stable internal `chat` tab as Activity, while later Chat-first detail work keeps that legacy `chat` id only for explicit Activity requests. Definition-tab regression coverage must prove omitted non-done task details now land on planner Chat, Activity remains selectable, and explicit `initialTab="definition"` still opens the Definition surface for prompt, GitHub tracking, and dependency sections.
 
 FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
-Omitted non-done TaskDetailModal renders open the top-level planner Chat first/default. Activity controls (`Live`, `Feed`, `Raw Logs`, and the activity expand toggle) are intentionally mounted only after selecting Activity or using an explicit legacy Activity tab request.
+Omitted non-done TaskDetailModal renders open the top-level planner Chat first/default. Activity controls (`Live`, `Feed`, `Raw`, and the activity expand toggle) are intentionally mounted only after selecting Activity or using an explicit legacy Activity tab request.
 */
 setupTaskDetailModalHooks();
+
+function activitySelector(): HTMLSelectElement {
+  return screen.getByRole("combobox", { name: "Activity view" }) as HTMLSelectElement;
+}
+
+function selectActivityView(value: "current" | "feed" | "raw-logs") {
+  fireEvent.change(activitySelector(), { target: { value } });
+}
 
 describe("TaskDetailModal", () => {
   describe("paste image upload", () => {
@@ -381,7 +389,7 @@ describe("TaskDetailModal", () => {
 
     // Select Activity before asserting its segmented controls
     fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
     const activityList = container.querySelector(".detail-activity-list");
     expect(activityList).toBeTruthy();
@@ -472,21 +480,23 @@ describe("TaskDetailModal", () => {
       expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse planner chat");
       expect(container.querySelector(".task-detail-content")).toHaveClass("task-detail-content--planner-chat-expanded");
       expect(container.querySelector(".activity-segmented-control")).toBeNull();
+      expect(container.querySelector(".activity-segment")).toBeNull();
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
       expect(screen.queryByText("Agent Log")).toBeNull();
-      expect(screen.queryByRole("tab", { name: "Live" })).toBeNull();
-      expect(screen.queryByRole("tab", { name: "Current" })).toBeNull();
+      expect(screen.queryByRole("combobox", { name: "Activity view" })).toBeNull();
       expect(container.querySelector(".detail-section--chat")).toBeNull();
       expect(container.querySelector("[data-testid='task-chat-tab']")).toBeNull();
       expect(container.querySelector(".detail-activity")).toBeNull();
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      expect(container.querySelector(".activity-segmented-control")).toBeTruthy();
-      expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+      expect(container.querySelector(".activity-segmented-control")).toBeNull();
+      expect(container.querySelector(".activity-segment")).toBeNull();
+      expect(Array.from(activitySelector().options).map((option) => option.textContent?.trim())).toEqual(["Live", "Feed", "Raw"]);
+      expect(activitySelector().value).toBe("current");
+      selectActivityView("feed");
       expect(container.querySelector(".detail-activity")).toBeTruthy();
-      expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+      expect(activitySelector().value).toBe("feed");
     });
 
     it("switches to Feed segment via Activity tab and shows activity feed", () => {
@@ -509,7 +519,7 @@ describe("TaskDetailModal", () => {
 
       // Select Activity before asserting its segmented controls
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
       // Activity section should be visible
       expect(container.querySelector(".detail-activity")).toBeTruthy();
@@ -540,7 +550,7 @@ describe("TaskDetailModal", () => {
 
       // Select Activity before asserting its segmented controls
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
       const activityList = container.querySelector(".detail-activity-list");
       expect(activityList).toBeTruthy();
@@ -577,7 +587,7 @@ describe("TaskDetailModal", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
       const actions = Array.from(container.querySelectorAll(".detail-log-action")).map((entry) => entry.textContent);
       const outcomes = Array.from(container.querySelectorAll(".detail-log-outcome")).map((entry) => entry.textContent);
@@ -604,7 +614,7 @@ describe("TaskDetailModal", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
       const actions = container.querySelectorAll(".detail-log-action");
       const outcomes = container.querySelectorAll(".detail-log-outcome");
@@ -644,7 +654,7 @@ describe("TaskDetailModal", () => {
 
       // Select Activity before asserting its segmented controls
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
 
       // Activity section should be visible
       expect(container.querySelector(".detail-activity")).toBeTruthy();
@@ -678,17 +688,17 @@ describe("TaskDetailModal", () => {
 
       // Select Activity, then Feed segment
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
       expect(container.querySelector(".detail-activity")).toBeTruthy();
       expect(container.querySelector(".markdown-body")).toBeNull();
 
       // Switch to Raw Activity segment within Activity tab
-      fireEvent.click(screen.getByText("Raw Logs"));
+      selectActivityView("raw-logs");
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
 
       // Switch back to Feed segment within Activity tab.
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
       expect(container.querySelector(".detail-activity")).toBeTruthy();
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
 
@@ -722,8 +732,8 @@ describe("TaskDetailModal", () => {
 
       // Click Activity tab, then Raw Activity segment
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
-      fireEvent.click(screen.getByText("Raw Logs"));
+    selectActivityView("feed");
+      selectActivityView("raw-logs");
 
       // Agent log viewer should appear
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
@@ -761,12 +771,12 @@ describe("TaskDetailModal", () => {
 
       // Select Activity and Feed — Raw Logs fetching stays disabled
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
       const afterLogsClick = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
       expect(afterLogsClick[1]).toBe(false);
 
       // Switch to Raw Activity segment — enabled should become true
-      fireEvent.click(screen.getByText("Raw Logs"));
+      selectActivityView("raw-logs");
       const afterAgentLog = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
       expect(afterAgentLog[1]).toBe(true);
     });
@@ -941,20 +951,20 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+      expect(activitySelector().value).toBe("current");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand activity to full modal");
 
       fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
       expect(content).toHaveClass("task-detail-content--chat-expanded");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse activity");
 
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
       expect(content).toHaveClass("task-detail-content--chat-expanded");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByText("Expanded feed entry")).toBeInTheDocument();
       expect(container.querySelector(".detail-activity-list")).toBeTruthy();
 
-      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      selectActivityView("raw-logs");
       expect(content).toHaveClass("task-detail-content--chat-expanded");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
@@ -989,7 +999,7 @@ describe("TaskDetailModal", () => {
       );
 
       expect(container.querySelector(".task-detail-content")).not.toHaveClass("task-detail-content--chat-expanded");
-      expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+      expect(activitySelector().value).toBe("feed");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand activity to full modal");
     });
 
@@ -1177,7 +1187,7 @@ describe("TaskDetailModal", () => {
       );
 
       expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-      expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+      expect(activitySelector().value).toBe("feed");
       expect(container.querySelector(".detail-tabs .detail-tab:first-child")).toHaveTextContent("Chat");
       expect(container.querySelector(".detail-section--chat")).toBeNull();
       expect(container.querySelector(".detail-activity")).toBeTruthy();
@@ -1238,8 +1248,8 @@ describe("TaskDetailModal", () => {
       expect(chatBody).not.toHaveClass("detail-body--agent-log");
       expect(chatSection).toBeTruthy();
       expect(chatSection!.querySelector("[data-testid='task-chat-tab']")).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
-      fireEvent.click(screen.getByText("Raw Logs"));
+    selectActivityView("feed");
+      selectActivityView("raw-logs");
       expect(container.querySelector(".detail-body--chat")).toBeNull();
       expect(container.querySelector(".detail-section--chat")).toBeNull();
       expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
@@ -1286,10 +1296,10 @@ describe("TaskDetailModal", () => {
 
       // Switch to Activity tab, then Raw Activity segment
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+    selectActivityView("feed");
       expect(container.querySelector(".detail-body--agent-log")).toBeNull(); // Feed segment default
 
-      fireEvent.click(screen.getByText("Raw Logs"));
+      selectActivityView("raw-logs");
 
       // detail-body should now have the agent-log modifier class
       expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
@@ -1316,8 +1326,8 @@ describe("TaskDetailModal", () => {
 
       // Switch to Activity tab, then Raw Activity segment
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
-      fireEvent.click(screen.getByText("Raw Logs"));
+    selectActivityView("feed");
+      selectActivityView("raw-logs");
 
       // The section wrapping AgentLogViewer should have the full-height class
       const section = container.querySelector(".detail-section--agent-log");
@@ -1340,8 +1350,8 @@ describe("TaskDetailModal", () => {
 
       // Switch to Activity tab, then Raw Activity segment first
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
-      fireEvent.click(screen.getByText("Raw Logs"));
+    selectActivityView("feed");
+      selectActivityView("raw-logs");
       expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
 
       // Now enter edit mode via the pencil button in the header

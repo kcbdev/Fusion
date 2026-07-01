@@ -1,5 +1,5 @@
 import "./TaskDetailModal.css";
-import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -213,6 +213,9 @@ The first Activity segment keeps the stable internal `current` id for legacy seg
 
 FNXC:TaskDetailActivity 2026-06-30-23:55:
 The first Activity segment is user-facing Live while legacy internals remain `current` and explicit `initialTab="chat"` continues landing there for compatibility.
+
+FNXC:TaskDetailActivity 2026-06-30-15:50:
+Activity view switching uses one dropdown labeled for Live, Feed, and Raw while retaining the internal `current`, `feed`, and `raw-logs` segment ids. Legacy `chat` and `logs` initial-tab routing remains compatible so older links still open Activity → Live or Activity → Feed.
 */
 function resolveDefaultTab(initialTab: TabId | undefined, column: ColumnId, taskDetailChatFirst = false): TabId {
   if (initialTab === "retries") {
@@ -548,6 +551,7 @@ export function TaskDetailContent({
   workflowFieldDefs: workflowFieldDefsProp,
 }: TaskDetailContentProps) {
   const { t } = useTranslation("app");
+  const activitySelectorId = useId();
   const columnLabel = useColumnLabel();
   const fileBrowser = useFileBrowser();
   const [activeTab, setActiveTab] = useState<TabId>(() => resolveDefaultTab(initialTab, task.column, taskDetailChatFirst));
@@ -3412,41 +3416,29 @@ export function TaskDetailContent({
             <div className={`detail-section detail-section--activity${activitySegment === "current" || isActivityExpanded ? " detail-section--chat" : ""}${activitySegment === "raw-logs" ? " detail-section--agent-log" : ""}`}>
               {/*
                 FNXC:TaskDetailPlannerChat 2026-06-30-22:30:
-                Activity owns the existing steering/current view, Feed, and Raw Logs inside one segmented control. The stable Activity tab id remains `chat`, legacy `logs` callers land on Feed, and Raw Logs is the only segment that enables raw agent-log fetching. Planner-model conversation belongs to the separate `planner-chat` tab and must not route into steering comments.
+                Activity owns the existing steering/current view, Feed, and raw agent logs inside one compact selector. The stable Activity tab id remains `chat`, legacy `logs` callers land on Feed, and Raw is the only selector option that enables raw agent-log fetching. Planner-model conversation belongs to the separate `planner-chat` tab and must not route into steering comments.
 
                 FNXC:TaskDetailActivity 2026-06-30-23:55:
-                The first Activity segment is user-facing Live but keeps the legacy `current` segment id. Activity expansion is segment-wide, so the same reachable toggle must remain present on Live, Feed, and Raw Logs without fetching Raw Logs outside the Raw Logs segment.
+                The first Activity segment is user-facing Live but keeps the legacy `current` segment id. Activity expansion is segment-wide, so the same reachable toggle must remain present on Live, Feed, and Raw without fetching Raw outside the Raw segment.
+
+                FNXC:TaskDetailActivity 2026-06-30-15:50:
+                Replacing the in-content subtabs with a native dropdown removes the horizontal tab shell on mobile while preserving keyboard operation and the legacy Activity segment ids (`current`, `feed`, `raw-logs`).
               */}
               <div className="activity-toolbar">
-                <div className="activity-segmented-control" role="tablist" aria-label={t("taskDetail.activity.segmentsLabel", "Activity views")}>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activitySegment === "current"}
-                    className={`activity-segment${activitySegment === "current" ? " activity-segment-active" : ""}`}
-                    onClick={() => setActivitySegment("current")}
-                  >
-                    {t("taskDetail.activity.current", "Live")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activitySegment === "feed"}
-                    className={`activity-segment${activitySegment === "feed" ? " activity-segment-active" : ""}`}
-                    onClick={() => setActivitySegment("feed")}
-                  >
-                    {t("taskDetail.activity.feed", "Feed")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activitySegment === "raw-logs"}
-                    className={`activity-segment${activitySegment === "raw-logs" ? " activity-segment-active" : ""}`}
-                    onClick={() => setActivitySegment("raw-logs")}
-                  >
-                    {t("taskDetail.activity.rawLogs", "Raw Logs")}
-                  </button>
-                </div>
+                <label className="visually-hidden" htmlFor={activitySelectorId}>
+                  {t("taskDetail.activity.selectorLabel", "Activity view")}
+                </label>
+                <select
+                  id={activitySelectorId}
+                  className="select activity-view-select"
+                  value={activitySegment}
+                  onChange={(event) => setActivitySegment(event.target.value as ActivitySegment)}
+                  aria-label={t("taskDetail.activity.selectorLabel", "Activity view")}
+                >
+                  <option value="current">{t("taskDetail.activity.current", "Live")}</option>
+                  <option value="feed">{t("taskDetail.activity.feed", "Feed")}</option>
+                  <option value="raw-logs">{t("taskDetail.activity.raw", "Raw")}</option>
+                </select>
                 <button
                   type="button"
                   className="btn btn-icon btn-sm activity-expand-toggle"

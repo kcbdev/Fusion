@@ -35,6 +35,10 @@ vi.mock("../BranchGroupCard", () => ({
 
 setupTaskDetailModalHooks();
 
+async function selectActivityView(user: ReturnType<typeof userEvent.setup>, value: "current" | "feed" | "raw-logs") {
+  await user.selectOptions(screen.getByRole("combobox", { name: "Activity view" }), value);
+}
+
 function renderSummarizeTitleModal(overrides: Parameters<typeof makeTask>[0] = {}, props: Partial<ComponentProps<typeof TaskDetailModal>> = {}) {
   const addToast = props.addToast ?? vi.fn();
   const onTaskUpdated = props.onTaskUpdated ?? vi.fn();
@@ -123,7 +127,7 @@ describe("TaskDetailModal planner Chat tab", () => {
     renderTask("in-progress", "chat");
 
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "Activity view" })).toHaveValue("current");
   });
 
   it("routes explicit planner-chat requests to the new Chat tab", () => {
@@ -461,7 +465,7 @@ describe("TaskDetailModal Activity feed loading", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Activity" }));
-    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    await selectActivityView(user, "feed");
     expect(await screen.findByRole("status")).toHaveTextContent("Loading activity…");
     expect(screen.queryByText("(no activity)")).not.toBeInTheDocument();
   });
@@ -542,20 +546,20 @@ describe("TaskDetailModal Chat task merge", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "Activity view" })).toHaveValue("current");
     expect(screen.getAllByRole("form", { name: "Task activity composer" })).toHaveLength(1);
     expect(screen.queryByText(/^Steering comment$/)).not.toBeInTheDocument();
     expect(screen.queryByText("Send operational guidance to the active task through steering comments.")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    await selectActivityView(user, "feed");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
     expect(screen.getByText("Started work")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    await selectActivityView(user, "raw-logs");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Live" }));
+    await selectActivityView(user, "current");
     const input = screen.getByLabelText("Message active agent session");
     await user.type(input, "Please keep the current approach");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -586,11 +590,11 @@ describe("TaskDetailModal Chat task merge", () => {
     expect(screen.getAllByRole("form", { name: "Task activity composer" })).toHaveLength(1);
     expect(screen.getByText("No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Feed" }));
+    await selectActivityView(user, "feed");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
     expect(screen.getByText("(no activity)")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    await selectActivityView(user, "raw-logs");
     expect(screen.queryByRole("form", { name: "Task activity composer" })).not.toBeInTheDocument();
   });
 
@@ -679,8 +683,8 @@ describe("TaskDetailModal Raw Logs agent loading", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Activity" }));
-    await user.click(screen.getByRole("tab", { name: "Feed" }));
-    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    await selectActivityView(user, "feed");
+    await selectActivityView(user, "raw-logs");
 
     expect(screen.getByText("Loading agent logs…")).toBeInTheDocument();
     expect(screen.queryByText("No agent output yet.")).not.toBeInTheDocument();
@@ -720,7 +724,7 @@ describe("TaskDetailModal Raw Logs agent loading", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Activity" }));
-    await user.click(screen.getByRole("tab", { name: "Raw Logs" }));
+    await selectActivityView(user, "raw-logs");
 
     expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
     expect(screen.getByTestId("agent-log-summary")).toHaveTextContent("Showing 2 of 5 entries");
@@ -974,7 +978,7 @@ describe("TaskDetailModal in-review stall diagnostics", () => {
 
     await user.click(screen.getByRole("button", { name: "View activity log" }));
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("combobox", { name: "Activity view" })).toHaveValue("feed");
     const highlighted = document.querySelector(".detail-log-entry--stall-highlight .detail-log-action");
     expect(highlighted?.textContent).toContain("In-review stall surfaced [merge-blocker]");
   });

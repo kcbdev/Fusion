@@ -23,6 +23,10 @@ import { TaskDetailModal, TaskDetailContent } from "../TaskDetailModal";
 
 setupTaskDetailModalHooks();
 
+function selectActivityView(value: "current" | "feed" | "raw-logs") {
+  fireEvent.change(screen.getByRole("combobox", { name: "Activity view" }), { target: { value } });
+}
+
 describe("TaskDetailModal", () => {
   describe("Raw Logs model resolution", () => {
     // AgentLogViewer only renders the model header when entries.length > 0,
@@ -101,7 +105,7 @@ describe("TaskDetailModal", () => {
 
     async function openAgentLogAndExpandModelDetails(container: HTMLElement) {
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      selectActivityView("raw-logs");
 
       await waitFor(() => {
         const header = container.querySelector("[data-testid='agent-log-model-header']");
@@ -575,7 +579,7 @@ describe("TaskDetailModal", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      selectActivityView("raw-logs");
       await waitFor(() => {
         const header = container.querySelector("[data-testid='agent-log-model-header']");
         expect(header).toBeTruthy();
@@ -632,7 +636,7 @@ describe("TaskDetailModal", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      selectActivityView("raw-logs");
       await waitFor(() => {
         const header = container.querySelector("[data-testid='agent-log-model-header']");
         expect(header).toBeTruthy();
@@ -896,7 +900,7 @@ describe("TaskDetailModal", () => {
 
       // Switch to Activity tab, then Raw Logs segment
       fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      selectActivityView("raw-logs");
 
       // Should not be visible in Raw Logs segment
       expect(container.querySelector(".detail-step-progress")).toBeNull();

@@ -308,34 +308,23 @@ describe("TaskDetailModal", () => {
       expect(detailBodyBlock).not.toContain("overflow: hidden;");
     });
 
-    it("keeps Activity segment tabs equal-height and horizontally reachable", () => {
+    it("keeps the Activity dropdown compact and reachable on mobile", () => {
       const css = readDashboardStylesSource();
-      const controlBlock = getExactCssRuleBlock(css, ".activity-segmented-control");
-      const segmentBlock = getExactCssRuleBlock(css, ".activity-segment");
-      const activeSegmentBlock = getExactCssRuleBlock(css, ".activity-segment-active");
-      const mobileBlock = getCssAtRuleBlockContainingExactRule(css, "@media (max-width: 768px)", ".activity-segmented-control");
-      const mobileControlBlock = getExactCssRuleBlock(mobileBlock, ".activity-segmented-control");
+      const selectorBlock = getExactCssRuleBlock(css, ".activity-view-select");
+      const mobileBlock = getCssAtRuleBlockContainingExactRule(css, "@media (max-width: 768px)", ".activity-view-select");
+      const mobileSelectorBlock = getExactCssRuleBlock(mobileBlock, ".activity-view-select");
 
-      expectHorizontalTabScroller(controlBlock, "base .activity-segmented-control");
-      expectTabTouchAction(segmentBlock, "base .activity-segment");
-      expect(segmentBlock).toContain("box-sizing: border-box;");
-      expect(segmentBlock).toContain("flex: 0 0 auto;");
-      expect(segmentBlock).toContain("min-block-size: var(--space-2xl);");
-      expect(segmentBlock).toContain("font-size: var(--font-size-xs);");
-      expect(segmentBlock).toContain("line-height: var(--line-height-tight);");
-      expect(segmentBlock).toContain("padding: calc(var(--space-xs) / 2) var(--space-md);");
-      expect(segmentBlock).toContain("border: none;");
-      expect(activeSegmentBlock).toContain("color: var(--text);");
-      expect(activeSegmentBlock).toContain("background: var(--surface);");
-      expect(activeSegmentBlock).toContain("box-shadow: var(--shadow-sm);");
-      expect(activeSegmentBlock).not.toContain("padding:");
-      expect(activeSegmentBlock).not.toContain("min-block-size:");
-      expect(activeSegmentBlock).not.toContain("line-height:");
-      expect(activeSegmentBlock).not.toContain("font-size:");
-      expect(activeSegmentBlock).not.toContain("font-weight:");
-      expect(activeSegmentBlock).not.toContain("border:");
-      expect(mobileControlBlock).toContain("flex: 1 1 auto;");
-      expect(css).not.toMatch(/\.task-detail-content--embedded\s+\.activity-segment(?:ed-control)?\s*\{/);
+      expect(selectorBlock).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-xl) + var(--space-lg));");
+      expect(selectorBlock).toContain("min-block-size: var(--space-2xl);");
+      expect(selectorBlock).toContain("padding-block: calc(var(--space-xs) / 2);");
+      expect(selectorBlock).toContain("padding-inline: var(--space-sm) var(--space-xl);");
+      expect(selectorBlock).toContain("font-size: var(--font-size-sm);");
+      expect(selectorBlock).toContain("line-height: var(--line-height-tight);");
+      expect(mobileSelectorBlock).toContain("flex: 1 1 auto;");
+      expect(mobileSelectorBlock).toContain("min-inline-size: 0;");
+      expect(css).not.toContain(".activity-segmented-control");
+      expect(css).not.toContain(".activity-segment");
+      expect(css).not.toMatch(/\.task-detail-content--embedded\s+\.activity-view-select\s*\{/);
     });
 
     it("renders responsive structural classes (modal-lg, overlay, spacer, tabs, detail-body)", () => {
