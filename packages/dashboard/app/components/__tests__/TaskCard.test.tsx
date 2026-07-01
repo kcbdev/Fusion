@@ -233,6 +233,49 @@ describe("TaskCard", () => {
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
+  it("shows refine for a done card context menu and routes to the refinement opener", () => {
+    const onOpenDetail = vi.fn();
+    const onOpenRefine = vi.fn();
+    render(
+      <TaskCard
+        task={makeTask({ column: "done", status: "done" as any })}
+        onOpenDetail={onOpenDetail}
+        onOpenRefine={onOpenRefine}
+        addToast={noop}
+        onDeleteTask={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(document.querySelector(".card")!, { clientX: 24, clientY: 28 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
+
+    expect(onOpenRefine).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("shows refine for custom complete cards on touch long-press", () => {
+    vi.useFakeTimers();
+    const onOpenRefine = vi.fn();
+    render(
+      <TaskCard
+        task={makeTask({ column: "complete" as any, status: "done" as any })}
+        taskColumnFlags={{ complete: true }}
+        onOpenDetail={noop}
+        onOpenRefine={onOpenRefine}
+        addToast={noop}
+        onDeleteTask={vi.fn()}
+      />,
+    );
+
+    const card = document.querySelector(".card") as HTMLElement;
+    fireEvent.pointerDown(card, { pointerType: "touch", pointerId: 1, clientX: 16, clientY: 16 });
+    act(() => vi.advanceTimersByTime(550));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
+    expect(onOpenRefine).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+  });
+
   it("confirms preserving progress before moving from the board context menu", async () => {
     const onMoveTask = vi.fn(async () => makeTask({ column: "todo" }));
     mockConfirm.mockResolvedValueOnce(true);

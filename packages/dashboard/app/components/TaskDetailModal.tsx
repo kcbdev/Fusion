@@ -68,6 +68,7 @@ import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
 import { ACTIVE_STATUSES, resolveEffectiveExecutor, resolveEffectivePlanning, resolveEffectiveValidator, type ModelSelection } from "./effective-model-resolution";
 import { TaskContextMenu, buildTaskActionMenuModel, getTaskPrAutomationLabel } from "./TaskContextMenu";
 import { useFileBrowser } from "../context/FileBrowserContext";
+import type { DetailTaskInitialActionRequest } from "../hooks/useModalManager";
 
 const STALE_PAUSED_REVIEW_LOG_REGEX = /^Stale paused review surfaced \[([^\]]+)\]/;
 const EMPTY_MARKDOWN_CHILD_SEPARATOR = "";
@@ -326,6 +327,8 @@ export interface TaskDetailModalProps {
   onOpenWorkflowEditor?: () => void;
   /** Open the modal with this tab active instead of the default done-aware landing view. */
   initialTab?: TabId;
+  /** One-shot action the detail surface should perform after opening. */
+  initialAction?: DetailTaskInitialActionRequest | null;
   /** Mobile-only header affordance mode. */
   mobileHeaderMode?: "close" | "back";
   /** Project setting: true restores Chat-first tab order/default; false or missing uses Activity-first. */
@@ -542,6 +545,7 @@ export function TaskDetailContent({
    * The Activity tab is still addressed as `chat` internally so existing callers and deep links do not break; the visible Chat tab uses `planner-chat` and only becomes the omitted non-done default when taskDetailChatFirst is true.
    */
   initialTab,
+  initialAction,
   taskDetailChatFirst = false,
   mobileHeaderMode = "close",
   embedded = false,
@@ -2276,6 +2280,15 @@ export function TaskDetailContent({
     setShowRefineModal(true);
     setRefineFeedback("");
   }, []);
+
+  useEffect(() => {
+    if (initialAction?.action !== "refine") return;
+    /*
+    FNXC:DoneTaskRefine 2026-07-01-00:00:
+    Done-task card/list right-click and long-press menus route Refine through Task Detail so operators get the existing feedback composer, validation, toasts, and refineTask submission instead of a dead menu item or an immediate API call.
+    */
+    handleOpenRefineModal();
+  }, [handleOpenRefineModal, initialAction?.action, initialAction?.requestId]);
 
   // Helper to close dropdown menus after action
   const closeMenus = useCallback(() => {

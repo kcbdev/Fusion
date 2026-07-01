@@ -28,6 +28,7 @@ import { computeWorkflowStatusCounts } from "./workflowStatusCounts";
 import { writeBoardWorkflowsCache } from "../utils/boardWorkflowsCache";
 import { useBoardWorkflows } from "../hooks/useBoardWorkflows";
 import { TaskContextMenu, buildTaskActionMenuModel, getTaskPrAutomationLabel, type TaskContextMenuColumnMetadata, type TaskMenuActionDescriptor } from "./TaskContextMenu";
+import type { DetailTaskOpenOptions } from "../hooks/useModalManager";
 
 const COLUMN_COLOR_MAP: Record<Column, string> = {
   triage: "var(--triage)",
@@ -222,7 +223,7 @@ interface ListViewProps {
   onMergeTask: (id: string) => Promise<MergeResult>;
   onResetTask?: (id: string) => Promise<Task>;
   onDuplicateTask?: (id: string) => Promise<Task>;
-  onOpenDetail: (task: Task | TaskDetail, options?: { origin?: "list-mobile" }) => void;
+  onOpenDetail: (task: Task | TaskDetail, options?: DetailTaskOpenOptions) => void;
   /*
   FNXC:FloatingWindow 2026-06-22-20:45:
   onPopOut pops the split-pane task detail into a movable, resizable, non-blocking FloatingWindow managed at App level. Wired to the Maximize2 "Pop out" button in TaskDetailContent's header.
@@ -1586,7 +1587,7 @@ export function ListView({
           addToast(getErrorMessage(err), "error");
         }
       } : undefined,
-      onOpenRefine: undefined,
+      onOpenRefine: () => onOpenDetail(task, { origin: isMobile ? "list-mobile" : undefined, initialAction: "refine" }),
       onRespecify: async () => {
         const shouldRebuild = await confirm({
           title: t("taskDetail.plan.rebuildTitle", "Rebuild Plan"),
@@ -1660,7 +1661,7 @@ export function ListView({
       actions.push({ id: model.reviewAction.id, label: model.reviewAction.label, disabled: model.reviewAction.disabled, onSelect: model.reviewAction.onSelect });
     }
     return actions.filter((action) => action.tone === "note" || action.disabled === true || Boolean(action.onSelect));
-  }, [addToast, autoMerge, columnFlagsById, confirm, getListColumnLabel, handleListContextCheckPrStatus, handleListContextMove, handleListTaskArchive, handleListTaskDelete, listContextMenuColumns, mergeStrategy, onDuplicateTask, onMergeTask, onPauseTask, onResetTask, onRetryTask, onUnpauseTask, onArchiveTask, projectId, t]);
+  }, [addToast, autoMerge, columnFlagsById, confirm, getListColumnLabel, handleListContextCheckPrStatus, handleListContextMove, handleListTaskArchive, handleListTaskDelete, isMobile, listContextMenuColumns, mergeStrategy, onDuplicateTask, onMergeTask, onOpenDetail, onPauseTask, onResetTask, onRetryTask, onUnpauseTask, onArchiveTask, projectId, t]);
 
   const contextMenuActions = useMemo(
     () => (contextMenuState ? buildListContextMenuActions(contextMenuState.task) : []),

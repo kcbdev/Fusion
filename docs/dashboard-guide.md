@@ -139,9 +139,9 @@ Features:
 - GitHub provenance marker on task cards imported from GitHub (`sourceType: github_import`), shown in the footer with other external-source metadata
 - Task card header meta badges group priority, fast mode, agent-created provenance, workflow identity, and elapsed/created-time chips into one wrapping row; agent labels prefer `sourceMetadata.agentName` over raw agent IDs
 - Task detail surfaces show the selected/effective workflow identity near the task's workflow controls so individual cards remain understandable when Board is in **All workflows** or another aggregate/mixed context.
-- Board task cards support a context menu from right-click, keyboard context menu / Shift+F10, or touch long-press for detail-aligned lifecycle actions without changing normal card clicks. Actions that require additional detail-only UI, such as opening the refinement feedback modal, remain available from task detail.
+- Board task cards support a context menu from right-click, keyboard context menu / Shift+F10, or touch long-press for detail-aligned lifecycle actions without changing normal card clicks. Completed card context menus include **Refine**, which opens the existing task-detail refinement feedback modal for the same task.
 <!-- FNXC:BoardCardActions 2026-06-29-00:00: Board card context menus are documented as alternate entry points only; normal click still opens task detail, and mobile long-press must not trigger detail behind the menu.
-FNXC:BoardCardActions 2026-06-30-13:12: Card context menus must not label an action as Refine unless the card surface can open the real task-detail refinement feedback modal. Keep refinement documented as detail-only until a proper modal/deep-link callback is wired. -->
+FNXC:DoneTaskRefine 2026-07-01-00:00: Completed Board card context menus must label Refine only because they now route to the real task-detail refinement feedback modal instead of a dead row or direct API call. -->
 <!-- FNXC:WorkflowBadges 2026-06-30-09:10: Task cards and task detail need workflow-name badges wherever mixed-workflow board contexts can hide the selected lane, especially the Board-only All workflows aggregate. -->
 <!-- FNXC:BoardDoneSorting 2026-06-29-00:00: The Done board column exposes a local descending sort selector so operators can review either latest completions or highest task IDs without changing other lifecycle columns. -->
 <!-- FNXC:BoardDoneSorting 2026-06-29-20:28: Document both Done sort modes as descending-only and Done-column-only so legacy Done and workflow complete-lane operators understand the selector does not change other lifecycle columns. -->
@@ -174,9 +174,10 @@ Features:
 - Bulk selection + batch model updates
 - Bulk Pause / Unpause / Archive actions from the selection toolbar (`Pause selected`, `Unpause selected`, `Archive selected`) for fast batch task state management.
 - Bulk delete from the selection toolbar (`Delete selected`): archived selections are skipped automatically, and dependency-conflict failures can be force-deleted per task after a danger confirmation that removes dependency references.
-- List rows and mobile cards support the same task context menu as Board cards from right-click, keyboard context menu / Shift+F10, or touch long-press without changing ordinary row selection or tap-to-open behavior.
+- List rows and mobile cards support the same task context menu as Board cards from right-click, keyboard context menu / Shift+F10, or touch long-press without changing ordinary row selection or tap-to-open behavior, including **Refine** for completed tasks.
 <!-- FNXC:ListContextMenu 2026-06-29-00:00: List context menus are alternate action entry points only; desktop left-click still selects the split-pane detail and mobile tap still opens detail while long-press suppresses the follow-up tap.
-FNXC:ListContextMenu 2026-06-30-00:20: Keyboard access is part of the Board/List context-menu contract, so docs must include the context-menu key and Shift+F10 alongside pointer and touch entry points. -->
+FNXC:ListContextMenu 2026-06-30-00:20: Keyboard access is part of the Board/List context-menu contract, so docs must include the context-menu key and Shift+F10 alongside pointer and touch entry points.
+FNXC:DoneTaskRefine 2026-07-01-00:00: Completed List row/card context menus route Refine to the existing task-detail feedback modal so desktop right-click and mobile long-press share the same refinement flow. -->
 
 ![List view](./screenshots/list-view.png)
 

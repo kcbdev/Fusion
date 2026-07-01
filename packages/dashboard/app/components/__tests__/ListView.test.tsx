@@ -673,15 +673,18 @@ describe("ListView", () => {
 
     fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-003"]') as HTMLElement, { clientX: 40, clientY: 50 });
     expect(screen.getByRole("menuitem", { name: "Merge & Close" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Refine" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Refine" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Back to In Progress" })).toBeInTheDocument();
 
     fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-006"]') as HTMLElement, { clientX: 40, clientY: 50 });
     expect(screen.getByRole("menuitem", { name: "Merge & Close" })).toBeInTheDocument();
 
     fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-004"]') as HTMLElement, { clientX: 40, clientY: 50 });
-    expect(screen.queryByRole("menuitem", { name: "Refine" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Refine" })).toBeInTheDocument();
     expect(onOpenDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-004" }), { origin: undefined, initialAction: "refine" });
 
     fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-004"]') as HTMLElement, { clientX: 40, clientY: 50 });
     expect(screen.getByRole("menuitem", { name: "Archive" })).toBeInTheDocument();
@@ -696,6 +699,7 @@ describe("ListView", () => {
     reviewRow.focus();
     fireEvent.keyDown(reviewRow, { key: "ContextMenu" });
     expect(screen.getByRole("menuitem", { name: "Merge & Close" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Refine" })).toBeInTheDocument();
 
     mockConfirm.mockResolvedValueOnce(true);
     fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-007"]') as HTMLElement, { clientX: 40, clientY: 50 });
@@ -707,6 +711,39 @@ describe("ListView", () => {
     expect(onPauseTask).not.toHaveBeenCalled();
     expect(onRetryTask).not.toHaveBeenCalled();
     expect(onArchiveTask).not.toHaveBeenCalled();
+    viewportSpy.mockRestore();
+  });
+
+  it("shows refine for custom workflow complete-column rows", async () => {
+    const viewportSpy = mockDesktopViewport();
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "wf-custom",
+      workflows: [
+        {
+          id: "wf-custom",
+          name: "Custom",
+          columns: [
+            { id: "backlog", name: "Backlog", flags: { intake: true } },
+            { id: "complete", name: "Complete", flags: { complete: true } },
+            { id: "cold-storage", name: "Cold Storage", flags: { archived: true } },
+          ],
+        },
+      ],
+      taskWorkflowIds: { "FN-012": "wf-custom" },
+    });
+    const onOpenDetail = vi.fn();
+    const tasks = [createMockTask({ id: "FN-012", title: "Custom complete", column: "complete" as any, status: "done" })];
+
+    renderListView({ tasks, onOpenDetail, workflowColumnsEnabled: true, settingsLoaded: true });
+
+    await screen.findByText("Custom complete");
+    const row = document.querySelector('.list-row[data-id="FN-012"]') as HTMLElement;
+    expect(row).toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 40, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
+
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-012" }), { origin: undefined, initialAction: "refine" });
     viewportSpy.mockRestore();
   });
 
@@ -787,6 +824,27 @@ describe("ListView", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Pause" }));
     expect(onPauseTask).toHaveBeenCalledWith("FN-001");
+    viewportSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("opens refine from a mobile done-card long-press", () => {
+    vi.useFakeTimers();
+    const viewportSpy = mockMobileViewport();
+    const onOpenDetail = vi.fn();
+    const tasks = [createMockTask({ id: "FN-011", title: "Mobile done", column: "done", status: "done" })];
+
+    renderListView({ tasks, onOpenDetail, onDeleteTask: vi.fn(async () => createMockTask()) });
+
+    const card = document.querySelector('.list-card[data-id="FN-011"]') as HTMLElement;
+    fireEvent.pointerDown(card, { pointerType: "touch", pointerId: 1, clientX: 24, clientY: 32 });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refine" }));
+
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-011" }), { origin: "list-mobile", initialAction: "refine" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     viewportSpy.mockRestore();
     vi.useRealTimers();
   });

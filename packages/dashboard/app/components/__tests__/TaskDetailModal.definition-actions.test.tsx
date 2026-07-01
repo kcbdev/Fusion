@@ -1341,6 +1341,24 @@ describe("TaskDetailModal", () => {
       expect(refineTask).not.toHaveBeenCalled();
     });
 
+    it("opens the refine composer from an initial action request", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "done" })}
+          initialAction={{ action: "refine", requestId: 1 }}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Refine", { selector: "h3" })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Enter your feedback here...")).toBeInTheDocument();
+    });
+
     it("calls refineTask and closes modal on successful submission", async () => {
       const { refineTask } = await import("../../api");
       vi.mocked(refineTask).mockResolvedValue({ id: "FN-002", column: "triage" } as Task);

@@ -377,6 +377,7 @@ interface TaskCardProps {
   projectId?: string;
   queued?: boolean;
   onOpenDetail: (task: Task | TaskDetail) => void;
+  onOpenRefine?: (task: Task | TaskDetail) => void;
   onOpenGroupModal?: (groupId: string) => void;
   addToast: (message: string, type?: ToastType) => void;
   globalPaused?: boolean;
@@ -615,6 +616,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.onDuplicateTask === next.onDuplicateTask &&
     previous.onMergeTask === next.onMergeTask &&
     previous.onOpenDetailWithTab === next.onOpenDetailWithTab &&
+    previous.onOpenRefine === next.onOpenRefine &&
     previous.onOpenMission === next.onOpenMission &&
     previous.onMoveTask === next.onMoveTask &&
     previous.onPromote === next.onPromote &&
@@ -717,6 +719,7 @@ function TaskCardComponent({
   projectId,
   queued,
   onOpenDetail,
+  onOpenRefine,
   onOpenGroupModal,
   addToast,
   globalPaused,
@@ -1865,7 +1868,7 @@ function TaskCardComponent({
   Board cards expose the same lifecycle actions as Task Detail from right-click, keyboard context menu, and touch long-press so operators can act without opening detail. Dock/plugin TaskCard users stay unchanged because the menu only mounts when Board/List owners pass action handlers.
 
   FNXC:BoardCardActions 2026-06-30-00:30:
-  Context-menu moves reuse the Task Detail preserve/reset progress confirmation path before moving back to Todo or Triage, because those transitions can reset completed steps. Refine stays hidden outside Task Detail until card surfaces can open the actual refine modal, while manual PR entries open the existing PR flows instead of silently dropping unavailable actions.
+  Context-menu moves reuse the Task Detail preserve/reset progress confirmation path before moving back to Todo or Triage, because those transitions can reset completed steps. Refine opens the existing Task Detail feedback modal from card right-click/long-press when the board host supplies that route, while manual PR entries open the existing PR flows instead of silently dropping unavailable actions.
 
   FNXC:BoardCardActions 2026-06-30-00:42:
   Board context menus must receive the project merge strategy, not infer pull-request mode from existing PR data, so manual PR projects show Start PR Review before the PR entity is created.
@@ -1896,7 +1899,7 @@ function TaskCardComponent({
     prAutomationLabel: getTaskPrAutomationLabel(t, task.status),
     onDelete: onDeleteTask ? handleTaskActionDelete : undefined,
     onDuplicate: onDuplicateTask ? handleTaskActionDuplicate : undefined,
-    onOpenRefine: undefined,
+    onOpenRefine: onOpenRefine ? () => onOpenRefine(task) : undefined,
     onRespecify: handleTaskActionRespecify,
     onRetry: onRetryTask ? handleTaskActionRetry : undefined,
     onReset: onResetTask ? handleTaskActionReset : undefined,
@@ -1930,6 +1933,7 @@ function TaskCardComponent({
     onDeleteTask,
     onMergeTask,
     onOpenDetail,
+    onOpenRefine,
     onPauseTask,
     onUnpauseTask,
     task,
@@ -1938,7 +1942,7 @@ function TaskCardComponent({
     task.prInfo,
   ]);
   const contextMenuActions = useMemo<TaskMenuActionDescriptor[]>(() => {
-    if (!onDeleteTask && !onArchiveTask && !onUnarchiveTask && !onDuplicateTask && !onRetryTask && !onResetTask && !onPauseTask && !onUnpauseTask && !onMergeTask && !onMoveTask) {
+    if (!onDeleteTask && !onArchiveTask && !onUnarchiveTask && !onDuplicateTask && !onRetryTask && !onResetTask && !onPauseTask && !onUnpauseTask && !onMergeTask && !onMoveTask && !onOpenRefine) {
       return [];
     }
     const actions = [...taskActionMenuModel.actions];
@@ -1961,7 +1965,7 @@ function TaskCardComponent({
       }
     }
     return actions.filter((action) => action.tone === "note" || action.disabled === true || Boolean(action.onSelect));
-  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionUnarchive, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onPauseTask, onResetTask, onRetryTask, onUnarchiveTask, onUnpauseTask, t, task.column, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
+  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionUnarchive, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onOpenRefine, onPauseTask, onResetTask, onRetryTask, onUnarchiveTask, onUnpauseTask, t, task.column, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
   const hasContextMenuActions = contextMenuActions.length > 0;
 
   const closeContextMenu = useCallback(() => {

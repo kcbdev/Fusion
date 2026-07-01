@@ -101,6 +101,7 @@ interface ColumnProps {
   onDuplicateTask?: (id: string) => Promise<Task>;
   onMergeTask?: (id: string) => Promise<MergeResult>;
   onOpenDetail: (task: Task | TaskDetail) => void;
+  onOpenRefine?: (task: Task | TaskDetail) => void;
   onOpenGroupModal?: (groupId: string) => void;
   addToast: (message: string, type?: ToastType) => void;
   onQuickCreate?: (input: TaskCreateInput) => Promise<Task | void>;
@@ -194,7 +195,7 @@ interface ColumnProps {
   getDraggingTaskId?: () => string | null;
 }
 
-function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
+function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
   const { t } = useTranslation("app");
   // Anchor the board.rejection.* catalog keys for the i18next extractor (it
   // scopes `t` to the useTranslation binding, so the shared translateRejection
@@ -805,6 +806,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
                   queuedTasks={group.queuedTasks}
                   projectId={projectId}
                   onOpenDetail={onOpenDetail}
+                  onOpenRefine={onOpenRefine}
                   onMoveTask={onMoveTask}
                   addToast={addToast}
                   globalPaused={globalPaused}
@@ -844,6 +846,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
                   task={task}
                   projectId={projectId}
                   onOpenDetail={onOpenDetail}
+                  onOpenRefine={onOpenRefine}
                   onOpenGroupModal={onOpenGroupModal}
                   addToast={addToast}
                   globalPaused={globalPaused}

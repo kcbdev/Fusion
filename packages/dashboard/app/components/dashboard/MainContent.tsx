@@ -689,6 +689,7 @@ export function MainContent({
             onMoveTask={moveTask}
             onPauseTask={pauseTask}
             onOpenDetail={openBoardTaskDetail}
+            onOpenRefine={(task) => openDetailTask(task, undefined, { initialAction: "refine" })}
             onOpenGroupModal={openGroupModalWithNav}
             addToast={addToast}
             onQuickCreate={handleBoardQuickCreate}
@@ -791,6 +792,7 @@ export function MainContent({
           onMoveTask={moveTask}
           onPauseTask={pauseTask}
           onOpenDetail={openBoardTaskDetail}
+          onOpenRefine={(task) => openDetailTask(task, undefined, { initialAction: "refine" })}
           onOpenGroupModal={openGroupModalWithNav}
           addToast={addToast}
           onQuickCreate={handleBoardQuickCreate}

@@ -29,7 +29,7 @@ import type {
   ProjectInfoWithSource,
 } from "../../api";
 import type { FusionShellApi } from "../../types/native-shell";
-import type { DetailTaskOrigin, DetailTaskTab, ModalManager } from "../../hooks/useModalManager";
+import type { DetailTaskOpenOptions, DetailTaskTab, ModalManager } from "../../hooks/useModalManager";
 import type { PluginTaskView, TaskView, ViewMode } from "../../hooks/useViewState";
 import type { ToastType } from "../../hooks/useToast";
 import type { QuickChatButtonMode } from "../../hooks/useAppSettings";
@@ -106,7 +106,7 @@ export interface MainContentProps {
   openDetailTask: (
     task: Task | TaskDetail,
     initialTab?: DetailTaskTab,
-    options?: { origin?: DetailTaskOrigin },
+    options?: DetailTaskOpenOptions,
   ) => void;
   openFileInBrowser: (path: string, opts?: { workspace?: string; line?: number; col?: number }) => void;
   prAuthAvailable: boolean;

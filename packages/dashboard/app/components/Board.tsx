@@ -36,6 +36,7 @@ interface BoardProps {
   onDuplicateTask?: (id: string) => Promise<Task>;
   onMergeTask?: (id: string) => Promise<MergeResult>;
   onOpenDetail: (task: Task | TaskDetail) => void;
+  onOpenRefine?: (task: Task | TaskDetail) => void;
   onOpenGroupModal?: (groupId: string) => void;
   addToast: (message: string, type?: ToastType) => void;
   onQuickCreate?: (input: TaskCreateInput) => Promise<Task | void>;
@@ -155,7 +156,7 @@ function BoardWorkflowSkeleton({ empty = false }: { empty?: boolean }) {
   );
 }
 
-export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
+export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   /*
   FNXC:DoneColumnSorting 2026-06-29-16:57:
@@ -832,6 +833,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
                   onDuplicateTask={onDuplicateTask}
                   onMergeTask={onMergeTask}
                   onOpenDetail={onOpenDetail}
+                  onOpenRefine={onOpenRefine}
                   onOpenGroupModal={onOpenGroupModal}
                   addToast={addToast}
                   globalPaused={globalPaused}
@@ -912,6 +914,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
                 onDuplicateTask={onDuplicateTask}
                 onMergeTask={onMergeTask}
                 onOpenDetail={onOpenDetail}
+                onOpenRefine={onOpenRefine}
                 onOpenGroupModal={onOpenGroupModal}
                 addToast={addToast}
                 globalPaused={globalPaused}
@@ -966,6 +969,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
               onDuplicateTask={onDuplicateTask}
               onMergeTask={onMergeTask}
               onOpenDetail={onOpenDetail}
+              onOpenRefine={onOpenRefine}
               onOpenGroupModal={onOpenGroupModal}
               addToast={addToast}
               globalPaused={globalPaused}
@@ -1016,6 +1020,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
             onDuplicateTask={onDuplicateTask}
             onMergeTask={onMergeTask}
             onOpenDetail={onOpenDetail}
+            onOpenRefine={onOpenRefine}
             onOpenGroupModal={onOpenGroupModal}
             addToast={addToast}
             globalPaused={globalPaused}
