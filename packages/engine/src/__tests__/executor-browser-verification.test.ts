@@ -18,12 +18,15 @@ import {
 
 type CapturedSession = {
   skillSelection?: { requestedSkillNames?: string[]; projectRootDir?: string; sessionPurpose?: string };
+  tools?: "coding" | "readonly";
+  systemPrompt?: string;
+  customTools?: Array<{ name?: string }>;
 };
 
 function captureSession(output = '{"verdict":"APPROVE","notes":""}') {
   const holder: { last?: CapturedSession } = {};
   mockedCreateFnAgent.mockImplementation(async (opts: any) => {
-    holder.last = { skillSelection: opts.skillSelection };
+    holder.last = { skillSelection: opts.skillSelection, tools: opts.tools, systemPrompt: opts.systemPrompt, customTools: opts.customTools };
     const listeners: Array<(event: any) => void> = [];
     return {
       session: {
@@ -108,6 +111,24 @@ function planReviewStep(overrides: Record<string, unknown> = {}) {
     enabled: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function codeReviewStep(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "graph:code-review-step",
+    name: "Code Review",
+    description: "",
+    mode: "prompt",
+    phase: "pre-merge",
+    gateMode: "gate",
+    prompt: "Review the code.",
+    toolMode: "readonly",
+    enabled: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    optionalGroupId: "code-review",
     ...overrides,
   };
 }
@@ -310,5 +331,58 @@ describe("browser-verification workflow-step browser capability", () => {
       "FN-7130",
       expect.stringContaining("Plan Review deterministic external-integration evidence check requested revision"),
     );
+  });
+
+  it("lets review-type workflow steps fix inline by default and respects the off switch", async () => {
+    const store = createMockStore();
+    const executor = makeExecutor(store);
+    const cap = captureSession();
+
+    const enabledResult = await (executor as any).executeWorkflowStep(
+      baseTask(),
+      codeReviewStep(),
+      "/tmp/wt",
+      { reviewerInlineFixes: true },
+      undefined,
+      undefined,
+    );
+
+    expect(enabledResult.success).toBe(true);
+    expect(cap.last?.tools).toBe("coding");
+    expect(cap.last?.systemPrompt).toContain("Same-Session Fix Policy");
+
+    const offCap = captureSession();
+    const disabledResult = await (executor as any).executeWorkflowStep(
+      baseTask(),
+      codeReviewStep(),
+      "/tmp/wt",
+      { reviewerInlineFixes: false },
+      undefined,
+      undefined,
+    );
+
+    expect(disabledResult.success).toBe(true);
+    expect(offCap.last?.tools).toBe("readonly");
+    expect(offCap.last?.systemPrompt).not.toContain("Same-Session Fix Policy");
+  });
+
+  it("keeps Plan Review readonly while allowing PROMPT.md inline repair", async () => {
+    const store = createMockStore();
+    const executor = makeExecutor(store);
+    const cap = captureSession();
+
+    const result = await (executor as any).executeWorkflowStep(
+      baseTask(),
+      planReviewStep(),
+      "/tmp/wt",
+      { reviewerInlineFixes: true },
+      undefined,
+      undefined,
+    );
+
+    expect(result.success).toBe(true);
+    expect(cap.last?.tools).toBe("readonly");
+    expect(cap.last?.customTools?.map((tool) => tool.name)).toContain("fn_task_prompt_write");
+    expect(cap.last?.systemPrompt).toContain("fn_task_prompt_write");
   });
 });

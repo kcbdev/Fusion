@@ -1996,6 +1996,7 @@ export class TriageProcessor {
         rootDir: this.rootDir,
         agentStore: this.options.agentStore,
         pluginRunner: this.options.pluginRunner,
+        allowInlineFixes: (settings as Settings & { reviewerInlineFixes?: boolean }).reviewerInlineFixes !== false,
         onSessionCreated: (session) => this.registerSubagentSession(task.id, session),
         onSessionEnded: (session) => this.unregisterSubagentSession(task.id, session),
       },

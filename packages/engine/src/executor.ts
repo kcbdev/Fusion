@@ -203,6 +203,7 @@ import {
   createTaskCreateTool as sharedCreateTaskCreateTool,
   createTaskDocumentReadTool as sharedCreateTaskDocumentReadTool,
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
+  createTaskPromptWriteTool as sharedCreateTaskPromptWriteTool,
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
   createWorkflowGetTool as sharedCreateWorkflowGetTool,
@@ -7072,13 +7073,34 @@ export class TaskExecutor {
     const rawCliCommand = executorKind === "cli" && typeof cfg.cliCommand === "string" && cfg.cliCommand.trim()
       ? cfg.cliCommand.trim()
       : undefined;
+    const nodeNameForReviewDetection = typeof cfg.name === "string" && cfg.name.trim() ? cfg.name.trim() : node.id;
+    const isPlanReviewNode =
+      node.id === "plan-review-step"
+      || nodeNameForReviewDetection === "Plan Review"
+      || optionalGroupId === "plan-review";
+    const inlineFixesEnabledForNode = (settings as Settings & { reviewerInlineFixes?: boolean }).reviewerInlineFixes !== false;
+    const reviewTypeNode =
+      isPlanReviewNode
+      || cfg.reviewCanFixInline === true
+      || /(?:^|\b)(?:review|verification)(?:\b|$)/i.test(nodeNameForReviewDetection)
+      || optionalGroupId === "code-review"
+      || optionalGroupId === "browser-verification";
+    const inlineFixesMakeNodeWriteCapable =
+      inlineFixesEnabledForNode
+      && executorKind !== "cli"
+      && reviewTypeNode
+      && !isPlanReviewNode;
 
     // Isolation guard: write-capable nodes must run inside a task worktree, not
     // the shared repo root. Before the execute seam runs, live.worktree is unset
     // — a coding/script/CLI node falling back to this.rootDir would mutate the
     // main checkout and cross-contaminate other tasks. Reject such nodes until a
     // worktree exists. Read-only nodes (default toolMode) are safe against root.
-    const writeCapable = cfg.toolMode === "coding" || node.kind === "script" || Boolean(scriptName) || Boolean(rawCliCommand);
+    /*
+    FNXC:WorkflowReviewers 2026-07-01-13:28:
+    Inline-fix Code Review, Browser Verification, and custom review nodes become write-capable even when the workflow definition says `toolMode: readonly`, so the isolation guard must see that before selecting a worktree. Plan Review is excluded because it uses the narrow PROMPT.md writer instead of source-file write tools.
+    */
+    const writeCapable = cfg.toolMode === "coding" || inlineFixesMakeNodeWriteCapable || node.kind === "script" || Boolean(scriptName) || Boolean(rawCliCommand);
     const executionTarget = writeCapable ? await this.store.getTask(live.id) : live;
     if (writeCapable && !executionTarget.worktree && !this.workspaceConfig) {
       return { outcome: "failure", value: "no-worktree-for-write-node" };
@@ -7250,6 +7272,12 @@ export class TaskExecutor {
     }
     if (cfg.requireExternalIntegrationEvidence === true) {
       (step as WorkflowStep & { requireExternalIntegrationEvidence?: boolean }).requireExternalIntegrationEvidence = true;
+    }
+    if (optionalGroupId) {
+      (step as WorkflowStep & { optionalGroupId?: string }).optionalGroupId = optionalGroupId;
+    }
+    if (cfg.reviewCanFixInline === true) {
+      (step as WorkflowStep & { reviewCanFixInline?: boolean }).reviewCanFixInline = true;
     }
 
     // (U8a) Thread the plugin-injected runtime env (FUSION_CE_SKILLS_DIR /
@@ -11765,6 +11793,10 @@ export class TaskExecutor {
     return sharedCreateTaskDocumentReadTool(this.store, taskId);
   }
 
+  private createTaskPromptWriteTool(taskId: string): ToolDefinition {
+    return sharedCreateTaskPromptWriteTool(this.store, taskId, this.getRunContextFor(taskId));
+  }
+
   private createArtifactRegisterTool(authorId: string): ToolDefinition {
     return sharedCreateArtifactRegisterTool(this.store, authorId, this.options.messageStore);
   }
@@ -14023,14 +14055,37 @@ ${scopeGuard}
     taskEnv?: NodeJS.ProcessEnv,
     stepOptions?: { unattended?: boolean },
   ): Promise<WorkflowStepOutcome> {
-    const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
+    let toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
     // (U3) Genuinely-unattended run — set FUSION_HEADLESS=1 below so skills record
     // assumptions and proceed instead of parking on a question. Explicit opt-in
     // only (default false = board run); see runGraphCustomNode / KTD-3.
     const unattended = stepOptions?.unattended === true;
     const isPlanReviewStep = workflowStep.id === "graph:plan-review-step" || workflowStep.name === "Plan Review";
+    const workflowStepMetadata = workflowStep as WorkflowStep & {
+      optionalGroupId?: string;
+      reviewCanFixInline?: boolean;
+      requireExternalIntegrationEvidence?: boolean;
+    };
+    const optionalGroupId = workflowStepMetadata.optionalGroupId;
+    const isReviewTypeWorkflowStep =
+      isPlanReviewStep
+      || workflowStepMetadata.reviewCanFixInline === true
+      || /(?:^|\b)(?:review|verification)(?:\b|$)/i.test(workflowStep.name)
+      || optionalGroupId === "plan-review"
+      || optionalGroupId === "code-review"
+      || optionalGroupId === "browser-verification";
+    const reviewerInlineFixesEnabled = (settings as Settings & { reviewerInlineFixes?: boolean }).reviewerInlineFixes !== false;
+    const allowReviewerInlineFixes = reviewerInlineFixesEnabled && isReviewTypeWorkflowStep && workflowStep.mode === "prompt";
+    const allowPlanReviewPromptWrite = allowReviewerInlineFixes && isPlanReviewStep;
+    if (allowReviewerInlineFixes && !isPlanReviewStep) {
+      /*
+       * FNXC:WorkflowReviewers 2026-07-01-12:36:
+       * Review-type workflow nodes can now repair their own findings when the workflow setting `reviewerInlineFixes` is on. Use coding tools for implementation review sessions so Code Review, Browser Verification, and custom review/verification gates do not have to bounce through executor remediation for issues they can safely fix inline. Plan Review stays on a narrow PROMPT.md writer because it runs before implementation.
+       */
+      toolMode = "coding";
+    }
     const requireExternalIntegrationEvidence =
-      (workflowStep as WorkflowStep & { requireExternalIntegrationEvidence?: boolean }).requireExternalIntegrationEvidence === true;
+      workflowStepMetadata.requireExternalIntegrationEvidence === true;
 
     if (isPlanReviewStep && requireExternalIntegrationEvidence) {
       /*
@@ -14151,6 +14206,18 @@ verdict JSON object — this step does not gate merge. If you need to ask the us
 a question, emit a single ===FUSION_AWAIT_INPUT=== block and stop (see the
 workflow-step conventions in your instructions).`;
 
+    const inlineFixBlock = allowReviewerInlineFixes
+      ? `
+
+## Same-Session Fix Policy
+
+This review-type node may fix issues it finds before returning a final verdict.
+- If you find an in-scope issue you can fix safely, edit the relevant files in this same session, run the smallest relevant verification, and then return APPROVE or APPROVE_WITH_NOTES.
+- Return REVISE only when the issue is still present, cannot be safely fixed in this reviewer session, needs broader executor remediation, or needs user input.
+- Plan Review may use fn_task_prompt_write to replace the task's PROMPT.md with the complete revised plan. Do not implement product code from Plan Review.
+- Code Review and Browser Verification may fix implementation issues inside the assigned task worktree and should mention the fix in notes.`
+      : "";
+
     const systemPrompt = `You are a workflow step agent executing: ${workflowStep.name}
 
 Task Context:
@@ -14168,7 +14235,7 @@ Your role:
 Your Instructions:
 ${workflowStep.prompt}
 
-You have access to the file system to review changes.${verdictBlock}`;
+You have access to the file system to review changes.${inlineFixBlock}${verdictBlock}`;
 
     const agentLogger = new AgentLogger({
       store: this.store,
@@ -14331,12 +14398,18 @@ You have access to the file system to review changes.${verdictBlock}`;
       // (a dedicated readonly-plus-spawn tool mode) is deferred; this is a
       // knowingly-accepted gap, not a closed one — re-evaluate before enabling the
       // CE workflow for genuinely-unattended (FUSION_HEADLESS) LFG/pipeline runs.
+      const planReviewPromptTools: ToolDefinition[] = allowPlanReviewPromptWrite
+        ? [this.createTaskPromptWriteTool(task.id)]
+        : [];
       const codingCustomTools: ToolDefinition[] = toolMode === "coding"
         ? [this.createSpawnAgentTool(task.id, worktreePath, settings, stepEnv)]
         : [];
+      const workflowCustomTools = [...planReviewPromptTools, ...codingCustomTools];
       const readonlyCustomTools = toolMode === "readonly"
-        ? filterCustomToolsForReadonly(codingCustomTools)
-        : { allowed: codingCustomTools, denied: [] as string[] };
+        ? filterCustomToolsForReadonly(workflowCustomTools, {
+            allowTool: (tool) => allowPlanReviewPromptWrite && tool.name === "fn_task_prompt_write",
+          })
+        : { allowed: workflowCustomTools, denied: [] as string[] };
       if (toolMode === "readonly" && readonlyCustomTools.denied.length > 0) {
         await this.store.logEntry(
           task.id,

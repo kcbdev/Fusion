@@ -54,9 +54,18 @@ describe("workflow-native built-in workflow settings", () => {
     const movedKeyIds = new Set(MOVED_SETTINGS_KEYS);
 
     expect(BUILTIN_REVIEW_REVISION_SETTINGS.map((setting) => setting.id)).toEqual([
+      "reviewerInlineFixes",
       "planReviewMaxRevisions",
       "codeReviewMaxRevisions",
     ]);
+    const inlineFixes = revisionById.get("reviewerInlineFixes");
+    expect(inlineFixes).toMatchObject({
+      type: "boolean",
+      default: true,
+    });
+    expect(fullIds.has("reviewerInlineFixes")).toBe(true);
+    expect(movedIds.has("reviewerInlineFixes")).toBe(false);
+    expect(movedKeyIds.has("reviewerInlineFixes")).toBe(false);
     for (const id of ["planReviewMaxRevisions", "codeReviewMaxRevisions"]) {
       const setting = revisionById.get(id);
       expect(setting, `${id} should be declared`).toBeDefined();

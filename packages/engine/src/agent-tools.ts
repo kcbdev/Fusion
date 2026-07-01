@@ -95,6 +95,10 @@ export const taskDocumentReadParams = Type.Object({
   ),
 });
 
+export const taskPromptWriteParams = Type.Object({
+  content: Type.String({ description: "Complete replacement content for this task's PROMPT.md." }),
+});
+
 export const chatTaskDocumentWriteParams = Type.Object({
   task_id: Type.String({ description: "Task ID to write the document to (e.g. 'FN-001')." }),
   key: Type.String({
@@ -1286,6 +1290,39 @@ export function createTaskDocumentReadTool(store: TaskStore, taskId: string): To
       "Read a named document for this task, or list all documents when no key is provided.",
     parameters: taskDocumentReadParams,
     execute: async (_id: string, params: Static<typeof taskDocumentReadParams>) => readTaskDocuments(store, taskId, params.key),
+  };
+}
+
+/**
+ * FNXC:WorkflowReviewers 2026-07-01-13:22:
+ * Plan Review inline fixes must be able to rewrite the task's authoritative PROMPT.md, but that pre-execution reviewer should not need general source-file write tools. Route the write through TaskStore so existing PROMPT.md validation, task directory placement, and task.json sync remain the single persistence path.
+ */
+export function createTaskPromptWriteTool(store: TaskStore, taskId: string, runContext?: RunMutationContext): ToolDefinition {
+  return {
+    name: "fn_task_prompt_write",
+    label: "Write PROMPT.md",
+    description:
+      "Replace this task's PROMPT.md with revised plan/spec content. " +
+      "Use only during Plan Review/spec repair; provide the complete final PROMPT.md content.",
+    parameters: taskPromptWriteParams,
+    execute: async (_id: string, params: Static<typeof taskPromptWriteParams>) => {
+      try {
+        await store.updateTask(taskId, { prompt: params.content }, runContext);
+        return {
+          content: [{ type: "text" as const, text: `Updated PROMPT.md for ${taskId}.` }],
+          details: {},
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `ERROR: Failed to update PROMPT.md for ${taskId}: ${err.message}`,
+          }],
+          details: {},
+        };
+      }
+    },
   };
 }
 
@@ -4229,4 +4266,3 @@ export function createAcquireRepoWorktreeTool(opts: {
     },
   };
 }
-

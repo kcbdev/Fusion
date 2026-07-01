@@ -377,6 +377,18 @@ export const BUILTIN_TRIAGE_POLICY_SETTINGS: WorkflowSettingDefinition[] = [
 
 export const BUILTIN_REVIEW_REVISION_SETTINGS: WorkflowSettingDefinition[] = [
   {
+    id: "reviewerInlineFixes",
+    name: "Reviewer inline fixes",
+    type: "boolean",
+    default: true,
+    /*
+     * FNXC:WorkflowReviewers 2026-07-01-12:33:
+     * Default Coding reviewers should fix issues in the same review session when possible instead of always returning REVISE and bouncing the task back through executor remediation. Operators can turn this off per workflow to restore the old review-only behavior.
+     */
+    description:
+      "Allow review-type workflow nodes to fix issues in their own reviewer session before returning a final verdict. Turn off to route findings back to executor remediation.",
+  },
+  {
     id: "planReviewMaxRevisions",
     name: "Plan Review revision cap",
     type: "number",

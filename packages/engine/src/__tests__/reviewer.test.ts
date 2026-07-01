@@ -276,6 +276,47 @@ describe("reviewStep — spec review type", () => {
     expect(opts.systemPrompt).toContain("Mission clarity");
   });
 
+  it("allows same-session reviewer fixes when requested", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nFixed the plan."),
+    );
+    const store = {
+      updateTask: vi.fn().mockResolvedValue(undefined),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      appendAgentLog: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await reviewStep(
+      "/tmp/worktree", "FN-050", 0, "Plan Review", "plan", "# Task: KB-050",
+      undefined,
+      { allowInlineFixes: true, store: store as any, taskId: "FN-050" },
+    );
+
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateFnAgent.mock.calls[0][0];
+    expect(opts.tools).toBe("readonly");
+    expect(opts.customTools?.map((tool: any) => tool.name)).toContain("fn_task_prompt_write");
+    expect(mockedPromptWithFallback.mock.calls[0][1]).toContain("Same-Session Fix Policy");
+    expect(mockedPromptWithFallback.mock.calls[0][1]).toContain("fn_task_prompt_write");
+  });
+
+  it("uses coding tools for same-session code review fixes", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nFixed the code."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-051", 1, "Code Review", "code", "# Task: KB-051",
+      undefined,
+      { allowInlineFixes: true },
+    );
+
+    expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+    const opts = mockedCreateFnAgent.mock.calls[0][0];
+    expect(opts.tools).toBe("coding");
+    expect(opts.customTools?.map((tool: any) => tool.name)).not.toContain("fn_task_prompt_write");
+  });
+
   it("appends reviewer plugin prompt contributions when provided", async () => {
     mockedCreateFnAgent.mockResolvedValue(
       createMockSession("### Verdict: APPROVE\n### Summary\nGood spec."),
@@ -540,7 +581,7 @@ describe("reviewStep — context-limit retry", () => {
       "code",
       promptContent,
       "abc123",
-      { store: store as any, taskId: "FN-4082", userComments },
+      { store: store as any, taskId: "FN-4082", userComments, allowInlineFixes: true },
     );
 
     expect(result.verdict).toBe("APPROVE");
@@ -554,6 +595,8 @@ describe("reviewStep — context-limit retry", () => {
     expect(secondRequest).toContain("### Step 1: Compact prompt");
     expect(secondRequest).toContain("## User Comments");
     expect(secondRequest).toContain("User says compact retry must keep this requirement.");
+    expect(firstRequest).toContain("Same-Session Fix Policy");
+    expect(secondRequest).toContain("Same-Session Fix Policy");
     expect(secondRequest.match(/## User Comments/g)).toHaveLength(1);
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-4082",
