@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-summary: Make Planner Chat collapsed by default with a floating expand control that takes over the detail view.
+summary: Compact Planner Chat chrome and align Activity Live with the same plain composer row.
 category: fix
-dev: Planner Chat expansion now mirrors Activity's overlay control and hides most task-detail chrome while preserving title/workflow context.
+dev: Planner Chat removes its redundant header, moves the provider icon to the empty state, and Activity Live drops its card-wrapped composer shell.

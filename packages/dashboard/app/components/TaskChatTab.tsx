@@ -937,7 +937,7 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
         ) : null}
       </div>
 
-      <form className="task-chat-composer card" onSubmit={handleSubmit} aria-label={composerFormLabel}>
+      <form className="task-chat-composer" onSubmit={handleSubmit} aria-label={composerFormLabel}>
         <div className="task-chat-composer-row">
           <textarea
             ref={textareaRef}

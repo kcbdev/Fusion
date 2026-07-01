@@ -7,30 +7,14 @@
   min-height: 0;
 }
 
-.task-planner-chat-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-md);
-}
-
-.task-planner-chat-header > :first-child {
-  min-width: 0;
-}
-
-.task-planner-chat-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-sm);
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
+/*
+FNXC:TaskDetailPlannerChat 2026-07-02-00:28:
+Planner Chat should not render a redundant in-panel title/header. The transcript starts at the top of the chat area, the expand button floats over the view, and the planning model/provider icon appears only as a small empty-state affordance.
+*/
 .task-planner-chat-expand-toggle {
   flex: 0 0 auto;
-  min-inline-size: var(--space-2xl);
-  min-block-size: var(--space-2xl);
+  min-inline-size: calc(var(--space-2xl) - var(--space-xs));
+  min-block-size: calc(var(--space-2xl) - var(--space-xs));
   padding: 0;
 }
 
@@ -40,42 +24,29 @@ Planner Chat expansion should use the same in-view floating affordance as Activi
 */
 .task-planner-chat-expand-toggle--overlay {
   position: absolute;
-  top: var(--space-md);
-  right: var(--space-md);
+  top: var(--space-sm);
+  right: var(--space-sm);
   z-index: 3;
   background: var(--surface);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
 }
 
-.task-planner-chat-header h4 {
-  margin: 0;
-  color: var(--text);
-}
-
-.task-planner-chat-header p {
-  margin: var(--space-xs) 0 0;
-  color: var(--text-muted);
-}
-
-.task-planner-chat-model {
+.task-planner-chat-empty-model {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  inline-size: calc(var(--space-2xl) + var(--space-sm));
-  block-size: calc(var(--space-2xl) + var(--space-sm));
+  inline-size: calc(var(--space-2xl) - var(--space-xs));
+  block-size: calc(var(--space-2xl) - var(--space-xs));
   border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius);
   padding: 0;
   color: var(--text-muted);
   background: var(--surface-subtle);
-}
-
-.task-planner-chat-model .provider-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .task-planner-chat-error {
@@ -110,10 +81,12 @@ Planner Chat expansion should use the same in-view floating affordance as Activi
 }
 
 .task-planner-chat-empty {
+  position: relative;
   flex-direction: column;
   width: 100%;
   max-width: 42rem;
   gap: var(--space-lg);
+  padding-top: var(--space-md);
 }
 
 .task-planner-chat-empty-copy {
@@ -273,25 +246,9 @@ Mobile Planner Chat should match regular task chat: keep the composer as a singl
     min-height: 0;
   }
 
-  .task-planner-chat-header {
-    align-items: flex-start;
-    gap: var(--space-sm);
-    padding-right: calc(var(--space-2xl) + var(--space-lg));
-  }
-
-  .task-planner-chat-header-actions {
-    flex: 0 1 auto;
-    justify-content: flex-end;
-  }
-
-  .task-planner-chat-model {
-    inline-size: calc(var(--space-2xl) + var(--space-sm));
-    block-size: calc(var(--space-2xl) + var(--space-sm));
-  }
-
   .task-planner-chat-expand-toggle {
-    min-inline-size: calc(var(--space-2xl) + var(--space-sm));
-    min-block-size: calc(var(--space-2xl) + var(--space-sm));
+    min-inline-size: var(--space-2xl);
+    min-block-size: var(--space-2xl);
   }
 
   .task-planner-chat-expand-toggle--overlay {

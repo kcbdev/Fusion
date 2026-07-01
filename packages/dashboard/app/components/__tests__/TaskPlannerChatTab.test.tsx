@@ -110,7 +110,8 @@ describe("TaskPlannerChatTab", () => {
 
     const emptyState = await screen.findByTestId("task-planner-chat-empty");
     expect(emptyState).toHaveTextContent("Start a task-aware chat");
-    expect(document.querySelector(".task-planner-chat-header p")).toBeNull();
+    expect(document.querySelector(".task-planner-chat-header")).toBeNull();
+    expect(screen.queryByText("Planner Chat")).toBeNull();
     expect(emptyState).toHaveTextContent("Ask planning questions about this task's current status, recent activity, blockers, next steps, or definition.");
     expect(emptyState).toHaveTextContent("Starter prompts send as normal chat messages.");
     expect(mockFetchTaskPlannerChatSession).toHaveBeenCalledWith(
@@ -124,6 +125,8 @@ describe("TaskPlannerChatTab", () => {
     expect(modelBadge).toHaveAccessibleName("anthropic/claude-plan");
     expect(modelBadge).toHaveAttribute("title", "anthropic/claude-plan");
     expect(modelBadge).toHaveTextContent("");
+    expect(emptyState).toContainElement(modelBadge);
+    expect(modelBadge).toHaveClass("task-planner-chat-empty-model");
     expect(modelBadge.querySelector(".provider-icon[data-provider='anthropic']")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Summarize recent activity/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Explain status and blockers/ })).toBeInTheDocument();
@@ -184,7 +187,7 @@ describe("TaskPlannerChatTab", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(toggle).toHaveClass("task-planner-chat-expand-toggle--overlay");
     expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(toggle);
-    expect(modelBadge).toBeInTheDocument();
+    expect(screen.getByTestId("task-planner-chat-empty")).toContainElement(modelBadge);
     expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByLabelText("Message planner chat"));
     expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByRole("button", { name: "Send" }));
 

@@ -104,9 +104,7 @@ describe("TaskDetailModal", () => {
   describe("mobile responsive structure", () => {
     it("keeps planner chat composer usable on narrow task-detail layouts", () => {
       const css = readDashboardStylesSource();
-      const headerBlock = getExactCssRuleBlock(css, ".task-planner-chat-header");
-      const headerActionsBlock = getExactCssRuleBlock(css, ".task-planner-chat-header-actions");
-      const modelBlock = getExactCssRuleBlock(css, ".task-planner-chat-model");
+      const modelBlock = getExactCssRuleBlock(css, ".task-planner-chat-empty-model");
       const expandOverlayBlock = getExactCssRuleBlock(css, ".task-planner-chat-expand-toggle--overlay");
       const composerBlock = getExactCssRuleBlock(css, ".task-planner-chat-composer");
       const inputBlock = getExactCssRuleBlock(css, ".task-planner-chat-input");
@@ -121,13 +119,14 @@ describe("TaskDetailModal", () => {
       expectBaseRule(css, ".task-planner-chat-transcript", "overflow: auto;");
       expectBaseRule(css, ".task-planner-chat-transcript", "min-height: 0;");
       expect(expandOverlayBlock).toContain("position: absolute;");
-      expect(expandOverlayBlock).toContain("top: var(--space-md);");
-      expect(expandOverlayBlock).toContain("right: var(--space-md);");
-      expect(headerBlock).toContain("justify-content: space-between;");
-      expect(headerActionsBlock).toContain("justify-content: flex-end;");
-      expect(headerActionsBlock).not.toContain("flex-wrap: wrap;");
+      expect(expandOverlayBlock).toContain("top: var(--space-sm);");
+      expect(expandOverlayBlock).toContain("right: var(--space-sm);");
+      expect(css).not.toContain(".task-planner-chat-header");
       expect(modelBlock).toContain("display: inline-flex;");
-      expect(modelBlock).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm));");
+      expect(modelBlock).toContain("position: absolute;");
+      expect(modelBlock).toContain("top: 0;");
+      expect(modelBlock).toContain("left: 0;");
+      expect(modelBlock).toContain("inline-size: calc(var(--space-2xl) - var(--space-xs));");
       expect(modelBlock).not.toContain("text-overflow: ellipsis;");
       expect(composerBlock).toContain("display: flex;");
       expect(composerBlock).toContain("flex-wrap: wrap;");

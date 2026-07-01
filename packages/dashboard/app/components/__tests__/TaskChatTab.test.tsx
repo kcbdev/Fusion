@@ -2471,6 +2471,7 @@ describe("TaskChatTab", () => {
     expect(transcriptRule).toContain("overflow-y: auto");
     expect(transcriptRule).not.toContain("max-height");
     expect(composerRule).toContain("flex: 0 0 auto");
+    expect(composerRule).toContain("padding: 0");
     expect(mobileTranscriptRule).toContain("flex: 1 1 auto");
     expect(mobileTranscriptRule).toContain("min-height: 0");
     expect(mobileTranscriptRule).not.toContain("max-height");

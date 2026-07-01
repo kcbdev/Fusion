@@ -513,24 +513,6 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
         </button>
       )}
-      <div className="task-planner-chat-header">
-        <div>
-          <h4>{t("taskDetail.plannerChat.heading", "Planner Chat")}</h4>
-        </div>
-        <div className="task-planner-chat-header-actions">
-          {isUsableModel(planningModel) && (
-            <span
-              className="task-planner-chat-model"
-              data-testid="task-planner-chat-model"
-              title={planningModelLabel}
-              aria-label={planningModelLabel}
-            >
-              <ProviderIcon provider={planningModel.provider} size="md" />
-            </span>
-          )}
-        </div>
-      </div>
-
       <div className="task-planner-chat-transcript" ref={transcriptRef} data-testid="task-planner-chat-transcript">
         {error && <div className="task-planner-chat-error" role="alert">{error}</div>}
         {loading ? (
@@ -540,6 +522,16 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           </div>
         ) : showEmptyState ? (
           <div className="task-planner-chat-empty" data-testid="task-planner-chat-empty">
+            {isUsableModel(planningModel) && (
+              <span
+                className="task-planner-chat-empty-model"
+                data-testid="task-planner-chat-model"
+                title={planningModelLabel}
+                aria-label={planningModelLabel}
+              >
+                <ProviderIcon provider={planningModel.provider} size="sm" />
+              </span>
+            )}
             <div className="task-planner-chat-empty-copy">
               <h5>{t("taskDetail.plannerChat.emptyTitle", "Start a task-aware chat")}</h5>
               <p>{t("taskDetail.plannerChat.emptyBody", "Ask planning questions about this task's current status, recent activity, blockers, next steps, or definition. Starter prompts send as normal chat messages.")}</p>

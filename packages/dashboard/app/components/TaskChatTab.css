@@ -477,8 +477,11 @@ FN-7241 adds timestamps inside individual task-detail transcript blocks. Keep bl
   flex: 0 0 auto;
   flex-direction: column;
   gap: var(--space-sm);
-  /* FNXC:TaskDetailChat 2026-06-13-19:55: Chat box should sit in the chat view without excess vertical spacing around the composer (FN-6418), while preserving readable horizontal inset for the input row. */
-  padding: var(--space-sm) var(--space-md);
+  /*
+  FNXC:TaskDetailChat 2026-07-02-00:32:
+  Activity Live and Planner Chat composers should share the same plain input-row treatment. Do not wrap Activity steering in a card shell or add extra composer padding around the input; the surrounding chat surface already owns the spacing.
+  */
+  padding: 0;
 }
 
 .task-chat-composer-row {
@@ -615,7 +618,7 @@ FN-6660 corrects the repeated mobile sizing misses from FN-6507, FN-6604, and FN
   }
 
   .task-chat-composer {
-    padding: var(--space-xs) var(--space-sm);
+    padding: 0;
   }
 
   .task-chat-composer-row {
