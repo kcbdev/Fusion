@@ -2503,6 +2503,9 @@ FNXC:TaskDetailTabs 2026-06-26-00:35:
 /*
 FNXC:TaskDetailActivity 2026-06-30-23:59:
 The Activity tab itself is the Live/Feed/Raw dropdown trigger. Keep it in the `.detail-tabs` scroller with the same tab sizing and active underline, and keep the Activity panel toolbar only for the expand affordance so no duplicate in-content selector or empty mobile shell remains.
+
+FNXC:TaskDetailActivity 2026-07-01-00:00:
+The Activity view menu is portaled to the document body and fixed-positioned because `.detail-tabs` uses overflow scrolling on mobile. Keep overflow containment on the tab strip and move only the menu overlay out of that clipping chain.
 */
 .detail-tab-dropdown {
   position: relative;
@@ -2522,12 +2525,8 @@ The Activity tab itself is the Live/Feed/Raw dropdown trigger. Keep it in the `.
 }
 
 .activity-view-menu {
-  position: absolute;
-  inset-block-start: 100%;
-  inset-inline-start: 0;
-  z-index: 20;
-  min-inline-size: 100%;
-  margin-block-start: var(--space-xs);
+  position: fixed;
+  z-index: 1000;
   padding: var(--space-xs);
   display: flex;
   flex-direction: column;
@@ -2536,6 +2535,8 @@ The Activity tab itself is the Live/Feed/Raw dropdown trigger. Keep it in the `.
   border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .activity-view-menu-item {
@@ -2596,7 +2597,7 @@ The Activity tab itself is the Live/Feed/Raw dropdown trigger. Keep it in the `.
   }
 
   .activity-view-menu {
-    min-inline-size: calc(100% + var(--space-xl));
+    max-inline-size: calc(100vw - (var(--space-md) * 2));
   }
 
   .activity-expand-toggle {

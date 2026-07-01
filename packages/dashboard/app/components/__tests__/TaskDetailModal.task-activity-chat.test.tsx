@@ -137,6 +137,67 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
     expect(screen.getByText("raw executor line")).toBeInTheDocument();
   });
 
+  it("portals the mobile Activity view menu outside the tab scroller while keeping tabs and content visible", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 844 });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.classList.contains("detail-tab--activity")) {
+        return { x: 24, y: 96, top: 96, right: 116, bottom: 132, left: 24, width: 92, height: 36, toJSON: () => ({}) } as DOMRect;
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      mockRawLogs([
+        { timestamp: "2026-06-30T20:03:00.000Z", taskId: "FN-7315", type: "text", agent: "executor", text: "raw executor line" },
+      ] as AgentLogEntry[]);
+      renderModal();
+
+      const tabs = document.querySelector(".detail-tabs");
+      expect(tabs).not.toBeNull();
+      expect(screen.getByText("Existing steering guidance")).toBeInTheDocument();
+
+      const menu = openActivityViewMenu();
+      expect(menu.parentElement).toBe(document.body);
+      expect(tabs).not.toContainElement(menu);
+      expect(document.querySelector(".detail-tab-dropdown")?.contains(menu)).toBe(false);
+      expect(menu).toHaveStyle({ position: "fixed" });
+      expect(menu.style.top).not.toBe("");
+      expect(menu.style.left).not.toBe("");
+      expect(activityViewLabels()).toEqual(["Live", "Feed", "Raw"]);
+      expect(topLevelTabLabels()).toEqual(expect.arrayContaining(["Activity", "Chat", "Plan", "Changes", "Review"]));
+      expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Plan" })).toBeInTheDocument();
+      expect(screen.getByText("Existing steering guidance")).toBeInTheDocument();
+
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(screen.queryByRole("menu", { name: "Activity views" })).not.toBeInTheDocument();
+      expect(topLevelTabLabels()).toEqual(expect.arrayContaining(["Activity", "Chat", "Plan", "Changes", "Review"]));
+      expect(screen.getByText("Existing steering guidance")).toBeInTheDocument();
+
+      selectActivityView("feed");
+      expect(screen.getByRole("heading", { name: "Feed" })).toBeInTheDocument();
+      expect(screen.getByText("Posted update")).toBeInTheDocument();
+      expect(topLevelTabLabels()).toEqual(expect.arrayContaining(["Activity", "Chat", "Plan", "Changes", "Review"]));
+
+      selectActivityView("raw-logs");
+      expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
+      expect(screen.getByText("raw executor line")).toBeInTheDocument();
+
+      selectActivityView("current");
+      expect(screen.getByText("Existing steering guidance")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Feed" })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("agent-log-viewer")).not.toBeInTheDocument();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+    }
+  });
+
   it("restores Chat-first ordering and omitted non-done default when the project setting is enabled", () => {
     mockRawLogs([]);
 

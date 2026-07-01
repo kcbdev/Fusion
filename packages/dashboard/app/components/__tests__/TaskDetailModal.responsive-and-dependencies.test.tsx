@@ -361,7 +361,7 @@ describe("TaskDetailModal", () => {
       expect(detailBodyBlock).not.toContain("overflow: hidden;");
     });
 
-    it("keeps the Activity tab dropdown compact and reachable on mobile", () => {
+    it("keeps the Activity tab dropdown portal-safe and reachable on mobile", () => {
       const css = readDashboardStylesSource();
       const tabDropdownBlock = getExactCssRuleBlock(css, ".detail-tab-dropdown");
       const activityTabBlock = getExactCssRuleBlock(css, ".detail-tab--activity");
@@ -373,9 +373,15 @@ describe("TaskDetailModal", () => {
       expect(tabDropdownBlock).toContain("flex-shrink: 0;");
       expect(activityTabBlock).toContain("display: inline-flex;");
       expect(activityTabBlock).toContain("gap: var(--space-xs);");
-      expect(menuBlock).toContain("min-inline-size: 100%;");
+      expect(menuBlock).toContain("position: fixed;");
+      expect(menuBlock).toContain("z-index: 1000;");
       expect(menuBlock).toContain("padding: var(--space-xs);");
-      expect(mobileMenuBlock).toContain("min-inline-size: calc(100% + var(--space-xl));");
+      expect(menuBlock).toContain("overflow-y: auto;");
+      expect(menuBlock).not.toContain("position: absolute;");
+      expect(menuBlock).not.toContain("inset-block-start");
+      expect(menuBlock).not.toContain("inset-inline-start");
+      expect(menuBlock).not.toContain("min-inline-size: 100%;");
+      expect(mobileMenuBlock).toContain("max-inline-size: calc(100vw - (var(--space-md) * 2));");
       expect(css).not.toContain(".activity-view-select");
       expect(css).not.toContain(".activity-segmented-control");
       expect(css).not.toContain(".activity-segment");

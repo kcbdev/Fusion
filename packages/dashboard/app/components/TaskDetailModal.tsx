@@ -1,5 +1,6 @@
 import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -73,6 +74,18 @@ import type { DetailTaskInitialActionRequest } from "../hooks/useModalManager";
 const STALE_PAUSED_REVIEW_LOG_REGEX = /^Stale paused review surfaced \[([^\]]+)\]/;
 const EMPTY_MARKDOWN_CHILD_SEPARATOR = "";
 const STRING_OBJECT_TAG = "[object String]";
+const ACTIVITY_VIEW_MENU_VIEWPORT_PADDING = 16;
+const ACTIVITY_VIEW_MENU_TRIGGER_GAP = 4;
+const ACTIVITY_VIEW_MENU_MIN_WIDTH = 160;
+const ACTIVITY_VIEW_MENU_MIN_HEIGHT = 120;
+const ACTIVITY_VIEW_MENU_MAX_HEIGHT = 320;
+
+type ActivityViewMenuPosition = {
+  top: number;
+  left: number;
+  minWidth: number;
+  maxHeight: number;
+};
 
 function isStringValue(value: unknown): value is string {
   return Object.prototype.toString.call(value) === STRING_OBJECT_TAG;
@@ -922,6 +935,7 @@ export function TaskDetailContent({
   const [showMoveMenu, setShowMoveMenu] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showActivityViewMenu, setShowActivityViewMenu] = useState(false);
+  const [activityViewMenuPosition, setActivityViewMenuPosition] = useState<ActivityViewMenuPosition | null>(null);
   const [sourceIssueExpanded, setSourceIssueExpanded] = useState(false);
   const [retriesExpanded, setRetriesExpanded] = useState(initialTab === "retries");
   const [githubTrackingExpanded, setGithubTrackingExpanded] = useState(false);
@@ -934,6 +948,7 @@ export function TaskDetailContent({
   const activityListRef = useRef<HTMLDivElement>(null);
   const moveButtonRef = useRef<HTMLButtonElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const activityViewDropdownRef = useRef<HTMLDivElement>(null);
   const activityViewMenuRef = useRef<HTMLDivElement>(null);
   const activityViewButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -1278,7 +1293,7 @@ export function TaskDetailContent({
       const target = e.target as Node;
       const inMoveMenu = moveMenuRef.current?.contains(target);
       const inActionsMenu = actionsMenuRef.current?.contains(target);
-      const inActivityViewMenu = activityViewMenuRef.current?.contains(target);
+      const inActivityViewMenu = activityViewMenuRef.current?.contains(target) || activityViewButtonRef.current?.contains(target);
 
       if (!inMoveMenu && showMoveMenu) {
         setShowMoveMenu(false);
@@ -2819,6 +2834,68 @@ export function TaskDetailContent({
     closeMoveMenuAndFocusTrigger();
   }, [closeMoveMenuAndFocusTrigger]);
 
+  const closeActivityViewMenuAndFocusTrigger = useCallback(() => {
+    setShowActivityViewMenu(false);
+    setActivityViewMenuPosition(null);
+    activityViewButtonRef.current?.focus();
+  }, []);
+
+  const getEffectiveViewport = useCallback(() => {
+    const visualViewport = window.visualViewport;
+    if (visualViewport && visualViewport.width > 0 && visualViewport.height > 0) {
+      return {
+        width: visualViewport.width,
+        height: visualViewport.height,
+        offsetTop: visualViewport.offsetTop,
+        offsetLeft: visualViewport.offsetLeft,
+      };
+    }
+
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetTop: 0,
+      offsetLeft: 0,
+    };
+  }, []);
+
+  const updateActivityViewMenuPosition = useCallback(() => {
+    const trigger = activityViewButtonRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const horizontalPadding = ACTIVITY_VIEW_MENU_VIEWPORT_PADDING;
+    const verticalPadding = ACTIVITY_VIEW_MENU_VIEWPORT_PADDING;
+    const gap = ACTIVITY_VIEW_MENU_TRIGGER_GAP;
+    const preferredWidth = Math.max(rect.width, ACTIVITY_VIEW_MENU_MIN_WIDTH);
+    const width = Math.min(preferredWidth, Math.max(viewportWidth - horizontalPadding * 2, ACTIVITY_VIEW_MENU_MIN_WIDTH));
+    const triggerTop = rect.top - offsetTop;
+    const triggerBottom = rect.bottom - offsetTop;
+    const triggerLeft = rect.left - offsetLeft;
+    const spaceBelow = viewportHeight - triggerBottom;
+    const spaceAbove = triggerTop;
+    const availableBelow = Math.max(spaceBelow - verticalPadding - gap, ACTIVITY_VIEW_MENU_MIN_HEIGHT);
+    const availableAbove = Math.max(spaceAbove - verticalPadding - gap, ACTIVITY_VIEW_MENU_MIN_HEIGHT);
+    const openUpward = spaceBelow < ACTIVITY_VIEW_MENU_MIN_HEIGHT && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(
+      Math.min(openUpward ? availableAbove : availableBelow, ACTIVITY_VIEW_MENU_MAX_HEIGHT),
+      ACTIVITY_VIEW_MENU_MIN_HEIGHT,
+    );
+    const left = Math.min(
+      Math.max(triggerLeft, horizontalPadding),
+      viewportWidth - horizontalPadding - width,
+    ) + offsetLeft;
+    const top = openUpward
+      ? Math.max(verticalPadding + offsetTop, triggerTop - maxHeight - gap + offsetTop)
+      : Math.min(
+          triggerBottom + gap + offsetTop,
+          viewportHeight + offsetTop - verticalPadding - maxHeight,
+        );
+
+    setActivityViewMenuPosition({ top, left, minWidth: width, maxHeight });
+  }, [getEffectiveViewport]);
+
   const activityViewOptions = useMemo<Array<{ value: ActivitySegment; label: string }>>(() => [
     { value: "current", label: t("taskDetail.activity.current", "Live") },
     { value: "feed", label: t("taskDetail.activity.feed", "Feed") },
@@ -2830,6 +2907,8 @@ export function TaskDetailContent({
     setActiveTab("chat");
     setActivitySegment(value);
     setShowActivityViewMenu(false);
+    setActivityViewMenuPosition(null);
+    requestAnimationFrame(() => activityViewButtonRef.current?.focus());
   }, []);
 
   const handleActivityTabKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -2850,9 +2929,8 @@ export function TaskDetailContent({
 
     event.preventDefault();
     event.stopPropagation();
-    setShowActivityViewMenu(false);
-    activityViewButtonRef.current?.focus();
-  }, []);
+    closeActivityViewMenuAndFocusTrigger();
+  }, [closeActivityViewMenuAndFocusTrigger]);
 
   useEffect(() => {
     if (!showMoveMenu) {
@@ -2863,21 +2941,100 @@ export function TaskDetailContent({
     firstMenuItem?.focus();
   }, [showMoveMenu]);
 
+  useLayoutEffect(() => {
+    if (!showActivityViewMenu) {
+      setActivityViewMenuPosition(null);
+      return;
+    }
+
+    updateActivityViewMenuPosition();
+  }, [showActivityViewMenu, updateActivityViewMenuPosition]);
+
   useEffect(() => {
     if (!showActivityViewMenu) {
+      return;
+    }
+
+    const handleViewportChange = () => {
+      setShowActivityViewMenu(false);
+      setActivityViewMenuPosition(null);
+    };
+
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("orientationchange", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener("resize", handleViewportChange);
+    visualViewport?.addEventListener("scroll", handleViewportChange);
+
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("orientationchange", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      visualViewport?.removeEventListener("resize", handleViewportChange);
+      visualViewport?.removeEventListener("scroll", handleViewportChange);
+    };
+  }, [showActivityViewMenu]);
+
+  useEffect(() => {
+    setShowActivityViewMenu(false);
+    setActivityViewMenuPosition(null);
+  }, [task.id]);
+
+  useEffect(() => {
+    if (!showActivityViewMenu || !activityViewMenuPosition) {
       return;
     }
 
     const selectedMenuItem = activityViewMenuRef.current?.querySelector<HTMLButtonElement>(".activity-view-menu-item[aria-current='true']");
     const firstMenuItem = activityViewMenuRef.current?.querySelector<HTMLButtonElement>(".activity-view-menu-item");
     (selectedMenuItem ?? firstMenuItem)?.focus();
-  }, [showActivityViewMenu]);
+  }, [showActivityViewMenu, activityViewMenuPosition]);
+
+  const renderActivityViewMenu = () => {
+    if (!showActivityViewMenu || !activityViewMenuPosition || typeof document === "undefined") {
+      return null;
+    }
+
+    return createPortal(
+      <div
+        ref={activityViewMenuRef}
+        className="activity-view-menu"
+        role="menu"
+        aria-label={t("taskDetail.activity.menuLabel", "Activity views")}
+        onKeyDown={handleActivityViewMenuKeyDown}
+        style={{
+          top: activityViewMenuPosition.top,
+          left: activityViewMenuPosition.left,
+          minWidth: activityViewMenuPosition.minWidth,
+          maxHeight: activityViewMenuPosition.maxHeight,
+        }}
+      >
+        {activityViewOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className="activity-view-menu-item"
+            role="menuitem"
+            aria-current={activitySegment === option.value ? "true" : undefined}
+            onClick={() => selectActivityView(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>,
+      document.body,
+    );
+  };
 
   const renderActivityTab = () => (
-    <div className="detail-tab-dropdown" ref={activityViewMenuRef}>
+    <div className="detail-tab-dropdown" ref={activityViewDropdownRef}>
       {/*
         FNXC:TaskDetailActivity 2026-06-30-23:59:
         The top-level Activity tab is the only Activity view dropdown trigger. Keep the stable internal `chat` tab id and `current`/`feed`/`raw-logs` segment ids, but remove the in-panel Activity view select so desktop, embedded, and mobile tab strips have one canonical view switcher.
+
+        FNXC:TaskDetailActivity 2026-07-01-00:00:
+        Mobile task-detail tabs intentionally overflow-scroll horizontally, so the Activity view menu must be root-portaled and viewport-positioned instead of rendered inside `.detail-tabs` where overflow clipping can blank adjacent tabs and content.
       */}
       <button
         ref={activityViewButtonRef}
@@ -2896,22 +3053,7 @@ export function TaskDetailContent({
         <span>{t("taskDetail.tabs.activity", "Activity")}</span>
         <ChevronDown className="detail-tab-chevron" aria-hidden="true" />
       </button>
-      {showActivityViewMenu && (
-        <div className="activity-view-menu" role="menu" aria-label={t("taskDetail.activity.menuLabel", "Activity views")} onKeyDown={handleActivityViewMenuKeyDown}>
-          {activityViewOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="activity-view-menu-item"
-              role="menuitem"
-              aria-current={activitySegment === option.value ? "true" : undefined}
-              onClick={() => selectActivityView(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {renderActivityViewMenu()}
     </div>
   );
 
