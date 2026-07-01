@@ -226,7 +226,7 @@ describe("TaskDetailModal summarize title action", () => {
     renderSummarizeTitleModal({ column: "todo" as any });
 
     expect(screen.getByTestId("summarize-title-btn")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Summarize as title" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Summarize" })).toBeEnabled();
   });
 
   it("hides while the task is in edit mode", async () => {
@@ -322,7 +322,7 @@ describe("TaskDetailModal summarize title action", () => {
 
     const button = screen.getByTestId("summarize-title-btn");
     expect(button).toBeVisible();
-    expect(button).toHaveAccessibleName("Summarize as title");
+    expect(button).toHaveAccessibleName("Summarize");
   });
 });
 

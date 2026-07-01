@@ -2941,7 +2941,7 @@ export function TaskDetailContent({
                       data-testid="summarize-title-btn"
                     >
                       {isSummarizingTitle ? <Loader2 size={14} className="spinner" /> : <Sparkles size={14} />}
-                      <span>{t("taskDetail.title.summarize", "Summarize as title")}</span>
+                      <span>{t("taskDetail.title.summarize", "Summarize")}</span>
                     </button>
                   )}
                 </div>

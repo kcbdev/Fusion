@@ -7653,7 +7653,7 @@ export default interface Resources {
       },
       "timingEvents": "Timing events",
       "title": {
-        "summarize": "Summarize as title",
+        "summarize": "Summarize",
         "summarizeFailed": "Failed to summarize title: {{error}}",
         "summarizeSuccess": "Title updated from description"
       },
