@@ -7592,6 +7592,14 @@ export class TaskExecutor {
       || normalized.includes("max retries");
   }
 
+  private isRetryableMergePauseAbortStatus(status: string | null | undefined): boolean {
+    /*
+    FNXC:WorkflowMerge 2026-07-01-22:05:
+    FN-7335 surfaced a merge-node pause/resume abort while the row was legitimately `in-review` with status="reviewing" from the AI merge reviewer. That status is merge activity, not a pre-existing terminal failure; keep the retry classifier strict on real errors while allowing transient merge/review statuses to re-enter bounded merge retry.
+    */
+    return status == null || status === "reviewing" || status === "merging" || status === "merging-pr";
+  }
+
   private async isRetryableBenignMergePauseAbort(
     live: TaskDetail,
     result: WorkflowGraphTaskRunResult,
@@ -7605,7 +7613,7 @@ export class TaskExecutor {
     if (!pausedAborted) return false;
     if (abortProvenance === "global-pause" || live.userPaused === true) return false;
     if (abortProvenance === "completion-finalize") return false;
-    if (live.column !== "in-review" || live.status != null || live.error != null) return false;
+    if (live.column !== "in-review" || !this.isRetryableMergePauseAbortStatus(live.status) || live.error != null) return false;
     if (live.mergeDetails?.mergeConfirmed === true) return false;
     if (this.isTerminalMergeGraphFailureValue(this.graphFailureValue(result))) return false;
     const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
