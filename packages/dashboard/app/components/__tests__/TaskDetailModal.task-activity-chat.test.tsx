@@ -198,6 +198,57 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
     }
   });
 
+  // FN-7375 regression: the position:fixed Activity menu is anchored to the layout viewport, so a
+  // diverging window.visualViewport (pinch-zoom / open mobile keyboard: smaller width, nonzero
+  // offsetLeft) must NOT shift the menu away from the trigger. Symptom was the popup rendering
+  // detached to the far left of the modal instead of under the "Activity" tab.
+  it("anchors the Activity menu under the trigger regardless of a diverging visual viewport", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const documentElement = document.documentElement;
+
+    // Layout viewport is 1280x800 (wide desktop); the Activity trigger sits well inside it.
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+    Object.defineProperty(documentElement, "clientWidth", { configurable: true, value: 1280 });
+    Object.defineProperty(documentElement, "clientHeight", { configurable: true, value: 800 });
+    // A pinch-zoomed visual viewport: much smaller and panned. The old code fed this into a fixed
+    // element's clamp and shoved it to the left edge.
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: { width: 320, height: 480, offsetLeft: 240, offsetTop: 120, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.classList.contains("detail-tab--activity")) {
+        return { x: 700, y: 96, top: 96, right: 792, bottom: 132, left: 700, width: 92, height: 36, toJSON: () => ({}) } as DOMRect;
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+
+    try {
+      renderModal();
+      const menu = openActivityViewMenu();
+      // Left edge anchored under the trigger (rect.left = 700), NOT clamped to a shrunken visual
+      // viewport and NOT displaced by visualViewport.offsetLeft.
+      expect(menu.style.left).toBe("700px");
+      // Opens below the trigger (rect.bottom = 132) + gap, unaffected by visualViewport.offsetTop.
+      expect(menu.style.top).toBe("136px");
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      if (originalVisualViewport) {
+        Object.defineProperty(window, "visualViewport", originalVisualViewport);
+      } else {
+        delete (window as unknown as { visualViewport?: unknown }).visualViewport;
+      }
+      delete (documentElement as unknown as { clientWidth?: number }).clientWidth;
+      delete (documentElement as unknown as { clientHeight?: number }).clientHeight;
+    }
+  });
+
   it("restores Chat-first ordering and omitted non-done default when the project setting is enabled", () => {
     mockRawLogs([]);
 

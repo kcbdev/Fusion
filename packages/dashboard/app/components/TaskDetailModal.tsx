@@ -2845,41 +2845,26 @@ export function TaskDetailContent({
     activityViewButtonRef.current?.focus();
   }, []);
 
-  const getEffectiveViewport = useCallback(() => {
-    const visualViewport = window.visualViewport;
-    if (visualViewport && visualViewport.width > 0 && visualViewport.height > 0) {
-      return {
-        width: visualViewport.width,
-        height: visualViewport.height,
-        offsetTop: visualViewport.offsetTop,
-        offsetLeft: visualViewport.offsetLeft,
-      };
-    }
-
-    return {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      offsetTop: 0,
-      offsetLeft: 0,
-    };
-  }, []);
-
+  /*
+    FNXC:TaskDetailActivity 2026-07-01-12:20:
+    The Activity view menu is `position: fixed` and portaled to <body>, so it is anchored to the LAYOUT viewport, and `getBoundingClientRect()` returns layout-viewport-relative coordinates that a fixed element consumes directly.
+    Position it purely from the layout viewport (`document.documentElement.clientWidth/clientHeight`) and never mix in `window.visualViewport` width/height/offset: under pinch-zoom or an open mobile keyboard the visual viewport diverges from the layout viewport (smaller width, nonzero offsetLeft/Top), and combining a shrunken visual-viewport width with a layout-viewport `getBoundingClientRect()` clamped `left` far off the trigger, so the popup rendered detached to the left of the modal instead of under the "Activity" tab.
+  */
   const updateActivityViewMenuPosition = useCallback(() => {
     const trigger = activityViewButtonRef.current;
     if (!trigger) return;
 
     const rect = trigger.getBoundingClientRect();
-    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const docEl = document.documentElement;
+    const viewportWidth = docEl?.clientWidth || window.innerWidth;
+    const viewportHeight = docEl?.clientHeight || window.innerHeight;
     const horizontalPadding = ACTIVITY_VIEW_MENU_VIEWPORT_PADDING;
     const verticalPadding = ACTIVITY_VIEW_MENU_VIEWPORT_PADDING;
     const gap = ACTIVITY_VIEW_MENU_TRIGGER_GAP;
     const preferredWidth = Math.max(rect.width, ACTIVITY_VIEW_MENU_MIN_WIDTH);
     const width = Math.min(preferredWidth, Math.max(viewportWidth - horizontalPadding * 2, ACTIVITY_VIEW_MENU_MIN_WIDTH));
-    const triggerTop = rect.top - offsetTop;
-    const triggerBottom = rect.bottom - offsetTop;
-    const triggerLeft = rect.left - offsetLeft;
-    const spaceBelow = viewportHeight - triggerBottom;
-    const spaceAbove = triggerTop;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
     const availableBelow = Math.max(spaceBelow - verticalPadding - gap, ACTIVITY_VIEW_MENU_MIN_HEIGHT);
     const availableAbove = Math.max(spaceAbove - verticalPadding - gap, ACTIVITY_VIEW_MENU_MIN_HEIGHT);
     const openUpward = spaceBelow < ACTIVITY_VIEW_MENU_MIN_HEIGHT && spaceAbove > spaceBelow;
@@ -2887,19 +2872,17 @@ export function TaskDetailContent({
       Math.min(openUpward ? availableAbove : availableBelow, ACTIVITY_VIEW_MENU_MAX_HEIGHT),
       ACTIVITY_VIEW_MENU_MIN_HEIGHT,
     );
-    const left = Math.min(
-      Math.max(triggerLeft, horizontalPadding),
-      viewportWidth - horizontalPadding - width,
-    ) + offsetLeft;
+    // Anchor the menu's left edge under the trigger, shifting left only enough to stay on-screen, and never past the left padding.
+    const left = Math.max(
+      horizontalPadding,
+      Math.min(rect.left, viewportWidth - horizontalPadding - width),
+    );
     const top = openUpward
-      ? Math.max(verticalPadding + offsetTop, triggerTop - maxHeight - gap + offsetTop)
-      : Math.min(
-          triggerBottom + gap + offsetTop,
-          viewportHeight + offsetTop - verticalPadding - maxHeight,
-        );
+      ? Math.max(verticalPadding, rect.top - maxHeight - gap)
+      : Math.min(rect.bottom + gap, viewportHeight - verticalPadding - maxHeight);
 
     setActivityViewMenuPosition({ top, left, minWidth: width, maxHeight });
-  }, [getEffectiveViewport]);
+  }, []);
 
   const activityViewOptions = useMemo<Array<{ value: ActivitySegment; label: string }>>(() => [
     { value: "current", label: t("taskDetail.activity.current", "Live") },
