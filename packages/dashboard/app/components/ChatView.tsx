@@ -2151,6 +2151,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
     })
     : null;
   const showMobileSessionSwitcher = isChatMobile && chatScope === "direct" && !!activeSession;
+  const showMobileDirectThreadHeaderControls = isChatMobile && chatScope === "direct" && hasThreadInView;
 
   const agentName =
     agentsMap.get(activeSession?.agentId ?? "")?.name ||
@@ -2578,6 +2579,71 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
   FNXC:ChatHeader 2026-06-22-18:44:
   Very narrow chat headers collapse Direct/Rooms to icons while retaining aria-selected tabs and text labels for wider headers. The segmented control must stay height-aligned with the ViewHeader action row, so icon+label markup is stable and CSS hides only the label.
   */
+  const mobileDirectSessionSwitcher = showMobileSessionSwitcher ? (
+    <div className="chat-mobile-session-menu" ref={mobileSessionMenuRef}>
+      <button
+        type="button"
+        className="btn chat-mobile-session-trigger"
+        data-testid="chat-mobile-session-trigger"
+        aria-haspopup="menu"
+        aria-expanded={mobileSessionMenuOpen}
+        onClick={() => setMobileSessionMenuOpen((open) => !open)}
+      >
+        {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
+        <span className="chat-thread-header-title">{threadHeaderTitle}</span>
+        {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      {mobileSessionMenuOpen && (
+        <div className="chat-mobile-session-dropdown" role="menu" data-testid="chat-mobile-session-dropdown">
+          {filteredSessions.map((session) => (
+            <div
+              key={session.id}
+              className={`chat-mobile-session-option-row${activeSession?.id === session.id ? " chat-mobile-session-option-row--active" : ""}`}
+              role="none"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className={`chat-mobile-session-option${activeSession?.id === session.id ? " chat-mobile-session-option--active" : ""}`}
+                data-testid={`chat-mobile-session-option-${session.id}`}
+                onClick={() => handleSessionClick(session.id)}
+              >
+                <span className="chat-mobile-session-option-title">{session.title || t("chat.untitledSession", "Untitled")}</span>
+              </button>
+              <button
+                type="button"
+                className="btn-icon chat-mobile-session-rename"
+                data-testid={`chat-mobile-session-rename-${session.id}`}
+                aria-label={t("chat.renameConversationAria", "Rename conversation {{title}}", { title: session.title || t("chat.untitledSession", "Untitled") })}
+                onClick={() => openRenameDialog(session.id)}
+              >
+                <Pencil size={14} />
+              </button>
+            </div>
+          ))}
+          {/*
+          FNXC:Chat 2026-06-27-00:00:
+          Mobile Direct-scope quick session switching must let users start a new chat without leaving the open thread. Route this affordance through the same setShowNewDialog(true) / NewChatDialog path as the header and sidebar-footer controls.
+          */}
+          <button
+            type="button"
+            role="menuitem"
+            className="chat-mobile-session-new"
+            data-testid="chat-mobile-session-new"
+            onClick={() => {
+              setMobileSessionMenuOpen(false);
+              setShowNewDialog(true);
+            }}
+          >
+            <Plus size={16} aria-hidden="true" />
+            <span>{t("chat.newChat", "New Chat")}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const scopeToggle = chatRoomsEnabled ? (
     <div className="chat-sidebar-scope-toggle chat-view-header-scope-toggle" role="tablist" data-testid="chat-sidebar-scope-toggle">
       <button
@@ -2610,13 +2676,26 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
     FNXC:Chat 2026-06-22-12:55:
     Chat uses the shared ViewHeader so its page chrome matches the other main-content views. The height-sensitive two-pane chat layout remains isolated in .chat-view__body beneath that header, preserving sidebar resize, thread scrolling, and mobile keyboard compensation while moving the desktop New Chat action into the canonical header actions cluster.
     */
-    <div ref={chatViewRef} className={`chat-view${floating ? " chat-view--floating" : ""}${isChatMobile ? " chat-view--narrow" : ""}`}>
+    <div ref={chatViewRef} className={`chat-view${floating ? " chat-view--floating" : ""}${isChatMobile ? " chat-view--narrow" : ""}${showMobileDirectThreadHeaderControls ? " chat-view--mobile-direct-thread" : ""}`}>
       <ViewHeader
         icon={MessageSquare}
         title={t("chat.title", "Chat")}
         actions={
           <>
-            {scopeToggle}
+            {showMobileDirectThreadHeaderControls ? (
+              <>
+                {/*
+                FNXC:ChatHeader 2026-07-02-00:00:
+                Mobile direct-thread view has a single top row: move back navigation and the active conversation switcher into ViewHeader so the transcript gains the height formerly consumed by a second thread header. The ViewHeader still owns the accessible Chat title; CSS only hides its visible text in this direct-thread mobile state.
+                */}
+                <button className="btn-icon chat-back-btn" onClick={handleBack} data-testid="chat-back-btn" aria-label={t("chat.backToConversations", "Back to conversations")}>
+                  <ChevronLeft size={16} />
+                </button>
+                {mobileDirectSessionSwitcher}
+              </>
+            ) : (
+              scopeToggle
+            )}
             {!isChatMobile ? (
               <button
                 className="btn btn-sm btn-primary chat-view-header-new-chat"
@@ -3283,95 +3362,23 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
         </div>
       ) : (
       <div ref={chatThreadRef} className="chat-thread">
-        {/* Header - always rendered in desktop/tablet, only rendered in mobile when viewing a thread */}
-        {(hasThreadInView || !isChatMobile) && (
+        {/* Header - desktop/tablet keeps the thread identity row; mobile direct-thread controls move into ViewHeader. */}
+        {!isChatMobile && (hasThreadInView || !isChatMobile) && (
           <div className="chat-thread-header">
-            {isChatMobile && hasThreadInView && (
-              <button className="btn-icon" onClick={handleBack} data-testid="chat-back-btn">
-                <ChevronLeft size={16} />
-              </button>
-            )}
             <div className="chat-thread-header-identity" data-testid="chat-thread-header-identity">
-              {showMobileSessionSwitcher ? (
-                <div className="chat-mobile-session-menu" ref={mobileSessionMenuRef}>
-                  <button
-                    type="button"
-                    className="btn chat-mobile-session-trigger"
-                    data-testid="chat-mobile-session-trigger"
-                    aria-haspopup="menu"
-                    aria-expanded={mobileSessionMenuOpen}
-                    onClick={() => setMobileSessionMenuOpen((open) => !open)}
-                  >
-                    {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
-                    <span className="chat-thread-header-title">{threadHeaderTitle}</span>
-                    {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-                    <ChevronDown size={16} aria-hidden="true" />
-                  </button>
-                  {mobileSessionMenuOpen && (
-                    <div className="chat-mobile-session-dropdown" role="menu" data-testid="chat-mobile-session-dropdown">
-                      {filteredSessions.map((session) => (
-                        <div
-                          key={session.id}
-                          className={`chat-mobile-session-option-row${activeSession?.id === session.id ? " chat-mobile-session-option-row--active" : ""}`}
-                          role="none"
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className={`chat-mobile-session-option${activeSession?.id === session.id ? " chat-mobile-session-option--active" : ""}`}
-                            data-testid={`chat-mobile-session-option-${session.id}`}
-                            onClick={() => handleSessionClick(session.id)}
-                          >
-                            <span className="chat-mobile-session-option-title">{session.title || t("chat.untitledSession", "Untitled")}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-icon chat-mobile-session-rename"
-                            data-testid={`chat-mobile-session-rename-${session.id}`}
-                            aria-label={t("chat.renameConversationAria", "Rename conversation {{title}}", { title: session.title || t("chat.untitledSession", "Untitled") })}
-                            onClick={() => openRenameDialog(session.id)}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        </div>
-                      ))}
-                      {/*
-                      FNXC:Chat 2026-06-27-00:00:
-                      Mobile Direct-scope quick session switching must let users start a new chat without leaving the open thread. Route this affordance through the same setShowNewDialog(true) / NewChatDialog path as the header and sidebar-footer controls.
-                      */}
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="chat-mobile-session-new"
-                        data-testid="chat-mobile-session-new"
-                        onClick={() => {
-                          setMobileSessionMenuOpen(false);
-                          setShowNewDialog(true);
-                        }}
-                      >
-                        <Plus size={16} aria-hidden="true" />
-                        <span>{t("chat.newChat", "New Chat")}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
-                  <span className="chat-thread-header-title">{threadHeaderTitle}</span>
-                  {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-                  {showThreadHeaderContextWindow && threadHeaderContextTotal && threadHeaderContextLabel ? (
-                    <span
-                      className="chat-thread-header-context"
-                      data-testid="chat-thread-context-window"
-                      title={threadHeaderContextLabel}
-                      aria-label={threadHeaderContextLabel}
-                    >
-                      {threadHeaderContextUsed} / {threadHeaderContextTotal}
-                    </span>
-                  ) : null}
-                </>
-              )}
+              {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
+              <span className="chat-thread-header-title">{threadHeaderTitle}</span>
+              {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+              {showThreadHeaderContextWindow && threadHeaderContextTotal && threadHeaderContextLabel ? (
+                <span
+                  className="chat-thread-header-context"
+                  data-testid="chat-thread-context-window"
+                  title={threadHeaderContextLabel}
+                  aria-label={threadHeaderContextLabel}
+                >
+                  {threadHeaderContextUsed} / {threadHeaderContextTotal}
+                </span>
+              ) : null}
             </div>
             {hasThreadInView && (
               <button
@@ -3385,6 +3392,18 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
               </button>
             )}
           </div>
+        )}
+
+        {isChatMobile && hasThreadInView && (
+          <button
+            type="button"
+            className={`chat-thread-header-render-toggle chat-thread-header-render-toggle--floating${showAllAsPlain ? " chat-thread-header-render-toggle--plain" : ""}`}
+            data-testid="chat-thread-render-toggle"
+            aria-label={showAllAsPlain ? t("chat.showRenderedMarkdown", "Show all messages as rendered Markdown") : t("chat.showPlainText", "Show all messages as plain text")}
+            onClick={toggleAllAsPlain}
+          >
+            {showAllAsPlain ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
         )}
 
         {/* Messages + composer. CLI-backed chat sessions delegate this

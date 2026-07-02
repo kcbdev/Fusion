@@ -768,6 +768,33 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
   min-width: 0;
 }
 
+/*
+FNXC:ChatHeader 2026-07-02-00:00:
+Mobile direct-chat detail uses ViewHeader as the only visible header row. Keep the Chat icon/title relationship available to assistive tech while visually collapsing only the text label, and let the moved session switcher consume the action row width without duplicating the old thread-header controls.
+*/
+.chat-view--mobile-direct-thread > .view-header .view-header__title span {
+  position: absolute;
+  inline-size: var(--btn-border-width);
+  block-size: var(--btn-border-width);
+  margin: calc(var(--btn-border-width) * -1);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.chat-view--mobile-direct-thread > .view-header .view-header__actions {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+
+.chat-view--mobile-direct-thread .chat-back-btn {
+  flex: 0 0 auto;
+}
+
+.chat-view--mobile-direct-thread .chat-mobile-session-menu {
+  flex: 1 1 auto;
+}
+
 @media (max-width: 768px), (max-height: 480px) {
   .chat-view-header-scope-toggle {
     flex-basis: clamp(112px, 42vw, 180px);
@@ -911,9 +938,10 @@ In the narrow/mobile chat layout there is no room for an expand/maximize afforda
   }
 }
 
-/* Single thread-wide markdown / plain-text toggle, anchored to the right of
- * the header next to "New Chat". Replaces the per-message eye toggle that
- * used to live inside every assistant bubble. */
+/*
+FNXC:ChatRenderMode 2026-07-02-00:00:
+Chat keeps one thread-wide Markdown/plain control: desktop/tablet anchors it in the thread identity header, while mobile direct-thread view floats the same button above the transcript/composer so it does not reintroduce a second header row or per-message toggles.
+*/
 .chat-thread-header-render-toggle {
   margin-left: auto;
   flex-shrink: 0;
@@ -946,6 +974,25 @@ In the narrow/mobile chat layout there is no room for an expand/maximize afforda
 
 .chat-thread-header-render-toggle--plain {
   color: var(--text);
+}
+
+.chat-thread-header-render-toggle--floating {
+  position: absolute;
+  right: var(--space-md);
+  bottom: calc((var(--space-lg) * 2.5) + (var(--space-md) * 2) + var(--space-sm));
+  z-index: 3;
+  width: calc(var(--space-lg) * 2.25);
+  height: calc(var(--space-lg) * 2.25);
+  min-width: calc(var(--space-lg) * 2.25);
+  min-height: calc(var(--space-lg) * 2.25);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.chat-thread-header-render-toggle--floating:hover {
+  background: var(--surface-hover);
 }
 
 /* Messages */

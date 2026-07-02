@@ -220,14 +220,17 @@ describe("ChatView mobile behavior", () => {
 
       // Thread header should not be rendered when there's no active session
       expect(document.querySelector(".chat-thread-header")).not.toBeInTheDocument();
-      // Back button should not be visible
+      // Back/session controls should not appear before a direct thread is selected; ordinary Chat header remains visible.
       expect(screen.queryByTestId("chat-back-btn")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("chat-mobile-session-trigger")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
+      expect(document.querySelector(".chat-view--mobile-direct-thread")).not.toBeInTheDocument();
     } finally {
       restoreMatchMedia.mockRestore();
     }
   });
 
-  it("mobile mode: renders thread header with back button when session is active", async () => {
+  it("mobile mode: collapses direct thread controls into the top ViewHeader row", async () => {
     const restoreMatchMedia = mockMobileViewport();
     try {
       setupMockChat({
@@ -237,10 +240,51 @@ describe("ChatView mobile behavior", () => {
 
       await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-      // Thread header should be rendered when there's an active session
-      expect(document.querySelector(".chat-thread-header")).toBeInTheDocument();
-      // Back button should be visible in mobile thread view
-      expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
+      expect(document.querySelector(".chat-thread-header")).not.toBeInTheDocument();
+      expect(document.querySelector(".chat-view--mobile-direct-thread")).toBeInTheDocument();
+
+      const viewHeader = document.querySelector(".view-header") as HTMLElement;
+      const backButton = screen.getByTestId("chat-back-btn");
+      const sessionTrigger = screen.getByTestId("chat-mobile-session-trigger");
+      const renderToggle = screen.getByTestId("chat-thread-render-toggle");
+
+      expect(viewHeader).toContainElement(backButton);
+      expect(viewHeader).toContainElement(sessionTrigger);
+      expect(viewHeader).not.toContainElement(renderToggle);
+      expect(renderToggle).toHaveClass("chat-thread-header-render-toggle--floating");
+      expect(screen.getAllByTestId("chat-back-btn")).toHaveLength(1);
+      expect(screen.getAllByTestId("chat-mobile-session-trigger")).toHaveLength(1);
+      expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: floating render toggle flips persisted and streaming assistant output", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    try {
+      setupMockChat({
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "**Persisted** reply", createdAt: "2026-04-08T00:00:00.000Z" }],
+        isStreaming: true,
+        streamingText: "**Live** reply",
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const toggle = screen.getByTestId("chat-thread-render-toggle");
+      const persistedBubble = screen.getByTestId("chat-message-msg-001");
+      const streamingBubble = document.querySelector(".chat-message--streaming") as HTMLElement;
+
+      expect(toggle).toHaveClass("chat-thread-header-render-toggle--floating");
+      expect(screen.queryAllByTestId("chat-message-render-toggle")).toHaveLength(0);
+      expect(within(persistedBubble).getByText("Persisted", { selector: "strong" })).toBeInTheDocument();
+      expect(within(streamingBubble).getByText("Live", { selector: "strong" })).toBeInTheDocument();
+
+      await userEvent.click(toggle);
+
+      expect(within(persistedBubble).getByText(/\*\*Persisted\*\* reply/)).toBeInTheDocument();
+      expect(within(streamingBubble).getByText(/\*\*Live\*\* reply/)).toBeInTheDocument();
     } finally {
       restoreMatchMedia.mockRestore();
     }
@@ -340,7 +384,7 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
-  it("mobile mode: thread header title opens quick session switcher and closes after selection", async () => {
+  it("mobile mode: ViewHeader session trigger opens quick session switcher and closes after selection", async () => {
     const restoreMatchMedia = mockMobileViewport();
     const selectSession = vi.fn();
     try {
@@ -1877,10 +1921,20 @@ describe("ChatView mobile CSS contract", () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message\s*\{[^}]*max-width:\s*100%/);
   });
 
-  it("mobile keeps thread-header identity and render toggle inline", async () => {
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread-header\s*\{[^}]*flex-wrap:\s*nowrap/);
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread-header-identity\s*\{[^}]*flex:\s*1\s+1\s+auto[^}]*white-space:\s*nowrap/);
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread-header-render-toggle\s*\{[^}]*flex-shrink:\s*0/);
+  it("mobile direct thread collapses header text and floats the render toggle with tokenized sizing", async () => {
+    const directTitleRule = css.match(/\.chat-view--mobile-direct-thread\s*>\s*\.view-header\s+\.view-header__title\s+span\s*\{([^}]*)\}/)?.[1] ?? "";
+    const actionsRule = css.match(/\.chat-view--mobile-direct-thread\s*>\s*\.view-header\s+\.view-header__actions\s*\{([^}]*)\}/)?.[1] ?? "";
+    const floatingToggleRule = css.match(/\.chat-thread-header-render-toggle--floating\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(directTitleRule).toContain("inline-size: var(--btn-border-width)");
+    expect(directTitleRule).toContain("clip-path: inset(50%)");
+    expect(actionsRule).toContain("flex: 1 1 auto");
+    expect(floatingToggleRule).toContain("position: absolute");
+    expect(floatingToggleRule).toContain("right: var(--space-md)");
+    expect(floatingToggleRule).toContain("bottom: calc((var(--space-lg) * 2.5) + (var(--space-md) * 2) + var(--space-sm))");
+    expect(floatingToggleRule).toContain("min-width: calc(var(--space-lg) * 2.25)");
+    expect(floatingToggleRule).toContain("min-height: calc(var(--space-lg) * 2.25)");
+    expect(floatingToggleRule).toContain("box-shadow: var(--shadow-md)");
   });
 
   it("FN-4352: response copy action stays compact on mobile", async () => {
