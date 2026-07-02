@@ -1,5 +1,16 @@
 # @runfusion/fusion
 
+## 0.53.1
+
+### Patch Changes
+
+- bb1de8a: summary: Fix the Windows CLI binary failing to build in release.
+  category: fix
+  dev: The bun `--conditions=source` compile of the CLI could not resolve @fusion-plugin-examples/hermes-runtime and openclaw-runtime (statically imported by dashboard routes.ts) because those plugin packages lacked a `source` export condition and fell through to `import`→`dist/index.js`, which is absent on the Windows runner. Added `"source": "./src/index.ts"` to both plugins' exports (matching @fusion/core|dashboard|engine|plugin-sdk) so bun bundles their TS source directly, independent of dist. Verified locally by cross-compiling bun-windows-x64 with plugin dist removed; a negative control reproduced the exact "Could not resolve" error.
+- 3aef6dd: summary: Fix desktop app crashing on "Local" mode startup with a missing-module error.
+  category: fix
+  dev: The desktop build now compiles @fusion/core and @fusion/engine tsc dist (both gitignored) so the packaged embedded Local runtime's `import("@fusion/engine")` resolves. Previously only release.yml's root `pnpm build` produced these; desktop-windows.yml packaged an empty engine/dist and crashed with ERR_MODULE_NOT_FOUND for app.asar/node_modules/@fusion/engine. `@fusion/desktop build` is now self-contained (build.ts → ensureEmbeddedRuntimeBuild), and desktop-windows.yml gained the `pnpm build` parity step.
+
 ## 0.53.0
 
 ### Minor Changes
