@@ -5,7 +5,16 @@
  * subprocess using stream-json NDJSON protocol.
  */
 
-import { getModels } from "@earendil-works/pi-ai";
+/*
+ * FNXC:ModelCatalog 2026-07-01-17:30:
+ * pi-ai 0.80 restructured its static catalog API: the top-level `getModels`
+ * export moved to the deprecated `/compat` shim, and the canonical accessor is
+ * `getBuiltinModels` from `@earendil-works/pi-ai/providers/all`. pi-claude-cli
+ * now pins `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` to
+ * `^0.80.3` (matching cli/engine) so the whole extension resolves one pi-ai
+ * version and the ExtensionAPI stream types stay compatible.
+ */
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { streamViaCli } from "./src/provider.js";
 import { streamViaAcp } from "./src/acp-driver.js";
@@ -175,7 +184,7 @@ export default function (pi: ExtensionAPI) {
     // `claude` subprocess in streamViaCli still reports hard errors on send.
     void runCliValidationOnce();
 
-    const catalogModels = getModels("anthropic").map((model) => ({
+    const catalogModels = getBuiltinModels("anthropic").map((model) => ({
       id: model.id,
       name: model.name,
       reasoning: model.reasoning,

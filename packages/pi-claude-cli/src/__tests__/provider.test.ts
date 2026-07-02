@@ -59,13 +59,18 @@ const { MockAssistantMessageEventStream } = vi.hoisted(() => {
 });
 
 vi.mock("@earendil-works/pi-ai", () => ({
-  getModels: vi.fn(() => mockModels),
   AssistantMessageEventStream: MockAssistantMessageEventStream,
   calculateCost: vi.fn(),
 }));
 
+// pi-ai 0.80 moved the static catalog read to `getBuiltinModels` in the
+// `/providers/all` subpath (see index.ts). Mock it there.
+vi.mock("@earendil-works/pi-ai/providers/all", () => ({
+  getBuiltinModels: vi.fn(() => mockModels),
+}));
+
 import { spawn } from "node:child_process";
-import { getModels } from "@earendil-works/pi-ai";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { streamViaCli } from "../provider";
 
 describe("provider registration (default export)", () => {
@@ -148,7 +153,7 @@ describe("provider registration (default export)", () => {
   it("deduplicates extra models when catalog already includes them", async () => {
     const registerProvider = vi.fn();
     const mockPi = { registerProvider, on: vi.fn() } as any;
-    const getModelsMock = vi.mocked(getModels);
+    const getModelsMock = vi.mocked(getBuiltinModels);
     const upstreamSonnet5 = {
       id: "claude-sonnet-5",
       name: "Claude Sonnet 5 Upstream",
