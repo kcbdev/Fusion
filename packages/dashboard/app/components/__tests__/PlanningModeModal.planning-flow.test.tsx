@@ -2818,6 +2818,162 @@ describe("PlanningModeModal", () => {
       });
       expect(screen.queryByText("No active question in session")).toBeNull();
     });
+
+    it.each(["desktop", "mobile"] as const)("keeps resumed Refine Further single-flight on rapid %s activation", async (viewportMode) => {
+      mockViewport(viewportMode);
+      const resumedSummary: PlanningSummary = {
+        title: "Populated summary for duplicate refine",
+        description: "Recovered summary with edited details before refine",
+        suggestedSize: "M",
+        suggestedDependencies: ["FN-001"],
+        keyDeliverables: ["Keep edits", "Ask follow-up"],
+      };
+      const refinedQuestion: PlanningQuestion = {
+        id: `q-refine-${viewportMode}`,
+        type: "text",
+        question: `What should we refine next on ${viewportMode}?`,
+        description: "Follow-up from the original refine stream",
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: `session-complete-refine-${viewportMode}`,
+        type: "planning",
+        status: "complete",
+        title: resumedSummary.title,
+        inputPayload: JSON.stringify({ initialPlan: "Recover and refine without duplicate generation" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      let streamHandlers: any;
+      let streamClosed = false;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(() => {
+            streamClosed = true;
+          }),
+          isConnected: vi.fn(() => !streamClosed),
+        };
+      });
+      mockRespondToPlanning.mockImplementation(async () => {
+        setTimeout(() => {
+          if (!streamClosed) {
+            streamHandlers?.onQuestion?.(refinedQuestion);
+          }
+        }, 10);
+        return { type: "question", data: refinedQuestion };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId={`session-complete-refine-${viewportMode}`}
+        />
+      );
+
+      const refineButton = await screen.findByRole("button", { name: "Refine Further" });
+      fireEvent.click(refineButton);
+      fireEvent.click(refineButton);
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledTimes(1);
+      });
+      expect(mockRespondToPlanning).toHaveBeenCalledWith(
+        `session-complete-refine-${viewportMode}`,
+        { refine: true },
+        undefined,
+        expect.any(String),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(`What should we refine next on ${viewportMode}?`)).toBeDefined();
+      });
+      expect(screen.queryByText(/generation already in progress/i)).toBeNull();
+      expect(screen.queryByText(/generation in progress/i)).toBeNull();
+    });
+
+    it("keeps the refine stream alive when the accepted turn reports generation already in progress", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Backend conflict refine",
+        description: "Summary that was already accepted for refinement",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Continue stream"],
+      };
+      const refinedQuestion: PlanningQuestion = {
+        id: "q-refine-conflict",
+        type: "text",
+        question: "What detail should the already-running refine turn clarify?",
+        description: "Follow-up from the active refine generation",
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-complete-refine-conflict",
+        type: "planning",
+        status: "complete",
+        title: resumedSummary.title,
+        inputPayload: JSON.stringify({ initialPlan: "Refine active conflict" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      let streamHandlers: any;
+      let streamClosed = false;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(() => {
+            streamClosed = true;
+          }),
+          isConnected: vi.fn(() => !streamClosed),
+        };
+      });
+      mockRespondToPlanning.mockImplementationOnce(async () => {
+        setTimeout(() => {
+          if (!streamClosed) {
+            streamHandlers?.onQuestion?.(refinedQuestion);
+          }
+        }, 10);
+        throw new Error("Generation already in progress for this response");
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-complete-refine-conflict"
+        />
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "Refine Further" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("What detail should the already-running refine turn clarify?")).toBeDefined();
+      });
+      expect(streamClosed).toBe(false);
+      expect(screen.queryByText(/generation already in progress/i)).toBeNull();
+      expect(screen.queryByText(/generation in progress/i)).toBeNull();
+    });
   });
 
   describe("Conversation history", () => {

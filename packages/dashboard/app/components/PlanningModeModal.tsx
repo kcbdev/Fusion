@@ -316,6 +316,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [isStartingBreakdown, setIsStartingBreakdown] = useState(false);
   const [isCreatingFromBreakdown, setIsCreatingFromBreakdown] = useState(false);
+  const [isRefiningSummary, setIsRefiningSummary] = useState(false);
   const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -334,6 +335,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const modalRef = useRef<HTMLDivElement>(null);
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
+  /*
+  FNXC:PlanningMode 2026-07-02-07:56:
+  Refine Further is a single-flight completed-summary turn. Guard synchronously with a ref so duplicate click, touch, or keyboard activations cannot submit a second refine request or close the active stream with a generation-in-progress error before React renders the disabled state.
+  */
+  const refineSummaryInFlightRef = useRef(false);
   const draftSessionIdRef = useRef<string | null>(null);
   /*
   FNXC:PlanningMode 2026-07-01-00:00:
@@ -606,6 +612,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setStreamingOutput("");
     setIsReconnecting(false);
     setIsRetrying(false);
+    setIsRefiningSummary(false);
+    refineSummaryInFlightRef.current = false;
     setPlanningModelProvider(undefined);
     setPlanningModelId(undefined);
     setPlanningDepth("medium");
@@ -717,6 +725,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           const normalizedQuestion = normalizeQuestionOptions(question);
           setIsReconnecting(false);
           setIsRetrying(false);
+          setIsRefiningSummary(false);
+          refineSummaryInFlightRef.current = false;
           clearPlanningDescription(projectId);
 
           // Preserve reasoning accumulated during the loading turn as a
@@ -756,6 +766,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           const normalizedSummary = normalizePlanningSummary(summary);
           setIsReconnecting(false);
           setIsRetrying(false);
+          setIsRefiningSummary(false);
+          refineSummaryInFlightRef.current = false;
           clearPlanningDescription(projectId);
 
           // Preserve reasoning accumulated during the loading turn.
@@ -811,6 +823,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
             setIsReconnecting(false);
             setIsRetrying(false);
+            setIsRefiningSummary(false);
+            refineSummaryInFlightRef.current = false;
             setError(null);
             setView((prev) => {
               if (prev.type === "question" || prev.type === "summary" || prev.type === "error") {
@@ -840,6 +854,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         onComplete: () => {
           setIsReconnecting(false);
           setIsRetrying(false);
+          setIsRefiningSummary(false);
+          refineSummaryInFlightRef.current = false;
           currentSessionIdRef.current = null;
           broadcastCompleted({ sessionId, status: "complete" });
         },
@@ -862,6 +878,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setConversationHistory([]);
     setResponseHistory([]);
     setIsReconnecting(false);
+    setIsRefiningSummary(false);
+    refineSummaryInFlightRef.current = false;
     setView({ type: "loading" });
 
     try {
@@ -966,6 +984,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setConversationHistory([]);
       setEditedSummary(null);
       setIsRetrying(false);
+      setIsRefiningSummary(false);
+      refineSummaryInFlightRef.current = false;
       setView({ type: "loading" });
 
       try {
@@ -1573,6 +1593,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     streamConnectionRef.current = null;
     setIsReconnecting(false);
     setIsRetrying(false);
+    setIsRefiningSummary(false);
+    refineSummaryInFlightRef.current = false;
     resetMobileViewportAfterClose();
     onClose();
   }, [flushDraftAndSummarize, initialPlan, onClose, projectId, resetMobileViewportAfterClose, view.type]);
@@ -1647,7 +1669,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   );
 
   const handleRefineFurther = useCallback(async () => {
-    if (view.type !== "summary") {
+    if (view.type !== "summary" || refineSummaryInFlightRef.current) {
       return;
     }
 
@@ -1656,6 +1678,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     currentSessionIdRef.current = sessionId;
     setLockSessionId(sessionId);
 
+    refineSummaryInFlightRef.current = true;
+    setIsRefiningSummary(true);
     setError(null);
     setIsRetrying(false);
     setStreamingOutput("");
@@ -1666,9 +1690,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     try {
       await respondToPlanning(sessionId, { refine: true }, projectId, sessionTabId);
     } catch (err) {
+      const message = getErrorMessage(err) || t("planning.failedRefinePlan", "Failed to refine plan");
+      if (/generation already in progress/i.test(message)) {
+        return;
+      }
+      refineSummaryInFlightRef.current = false;
+      setIsRefiningSummary(false);
       streamConnectionRef.current?.close();
       streamConnectionRef.current = null;
-      setError(getErrorMessage(err) || t("planning.failedRefinePlan", "Failed to refine plan"));
+      setError(message);
       setView({ type: "summary", session, summary: editedSummary ?? summary });
     }
   }, [connectToPlanningStream, editedSummary, projectId, sessionTabId, view]);
@@ -1689,6 +1719,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     streamConnectionRef.current = null;
     setIsReconnecting(false);
     setIsRetrying(false);
+    setIsRefiningSummary(false);
+    refineSummaryInFlightRef.current = false;
     setView({
       type: "error",
       session: { sessionId, currentQuestion: null, summary: null },
@@ -2376,6 +2408,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               }}
               isCreatingTask={isCreatingTask}
               isStartingBreakdown={isStartingBreakdown}
+              isRefiningSummary={isRefiningSummary}
             />
           )}
 
@@ -2811,6 +2844,7 @@ interface SummaryViewProps {
   onRefine: () => void;
   isCreatingTask: boolean;
   isStartingBreakdown: boolean;
+  isRefiningSummary: boolean;
 }
 
 function SummaryView({
@@ -2829,6 +2863,7 @@ function SummaryView({
   onRefine,
   isCreatingTask,
   isStartingBreakdown,
+  isRefiningSummary,
 }: SummaryViewProps) {
   const { t } = useTranslation("app");
   const summary = normalizePlanningSummary(rawSummary);
@@ -2846,7 +2881,7 @@ function SummaryView({
   const selectedPriority = normalizeTaskPriority(summary.priority);
   const isBranchNameRequired = branchMode === "existing" || branchMode === "custom-new";
   const hasInvalidBranchSelection = isBranchNameRequired && !branchName.trim();
-  const isLoading = isCreatingTask || isStartingBreakdown;
+  const isLoading = isCreatingTask || isStartingBreakdown || isRefiningSummary;
 
   const handleDependencyToggle = (taskId: string) => {
     const newDeps = selectedDependencies.includes(taskId)
