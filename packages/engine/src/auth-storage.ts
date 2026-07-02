@@ -514,19 +514,43 @@ export function createFusionAuthStorage(): AuthStorage {
 
   const resolveAnthropicRuntimeApiKey = async (): Promise<string | undefined> => {
     const rawProviderLoggedOut = isAnthropicRawProviderLoggedOut();
+
+    /*
+    FNXC:ProviderAuth 2026-07-01-14:55:
+    Anthropic runtime auth (`getApiKey("anthropic")`) resolves in precedence order: (1) raw API key, (2) legacy `anthropic` OAuth, (3) separated `anthropic-subscription` OAuth, (4) models.json / ModelRegistry fallback raw key. Raw key wins so an explicit `ANTHROPIC_API_KEY` keeps using x-api-key; subscription/OAuth tokens must resolve here so the built-in provider runs them on `/v1` with Claude Code impersonation. Do NOT gate OAuth behind the CLI or reroute it to an `/v1` `anthropic-subscription` provider — that reintroduced the #1857 regression (FN-7391/FN-7396).
+    */
     if (!rawProviderLoggedOut) {
       const anthropicApiKeyCredential = selectStoredCredentialByType(ANTHROPIC_PROVIDER_ID, "api_key");
       if (anthropicApiKeyCredential) {
         return resolveStoredCredentialApiKey(ANTHROPIC_PROVIDER_ID, anthropicApiKeyCredential);
       }
+    }
 
+    const subscriptionLoggedOut = loggedOutProviders.has(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID);
+    const legacyAnthropicOAuthCredential = rawProviderLoggedOut
+      ? undefined
+      : selectStoredCredentialByType(ANTHROPIC_PROVIDER_ID, "oauth");
+    if (!subscriptionLoggedOut && legacyAnthropicOAuthCredential) {
+      const legacyKey = await resolveRefreshableCredentialApiKey(ANTHROPIC_PROVIDER_ID, legacyAnthropicOAuthCredential);
+      if (legacyKey) return legacyKey;
+    }
+
+    if (!subscriptionLoggedOut) {
+      const subscriptionCredential = selectStoredCredential(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID);
+      if (subscriptionCredential?.type === "oauth") {
+        /*
+        FNXC:ProviderAuth 2026-06-30-11:26:
+        The separated subscription login stores OAuth material under `anthropic-subscription` so the API-key card stays raw-key-only, but Anthropic model execution still requests provider `anthropic`. Resolve and refresh the subscription credential (persisting rotated tokens back to `anthropic-subscription`) so a subscription user's `anthropic/<model>` selection runs on their OAuth token.
+        */
+        const subscriptionKey = await resolveRefreshableCredentialApiKey(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, subscriptionCredential);
+        if (subscriptionKey) return subscriptionKey;
+      }
+    }
+
+    if (!rawProviderLoggedOut) {
       /*
-      FNXC:ProviderAuth 2026-07-01-11:55:
-      Subscription/OAuth Anthropic tokens must never authenticate the direct `api.anthropic.com/v1` provider because Anthropic blocks Claude Pro/Max OAuth material on that public API surface. Keep provider `anthropic` raw-key-only here; the `anthropic-subscription` OAuth getter below remains available for Claude CLI and usage endpoints that intentionally consume subscription OAuth.
-
       FNXC:ProviderAuth 2026-06-30-13:28:
-      Logging out of the raw Anthropic provider must suppress raw-key sources consistently across status and runtime resolution.
-      Treat models.json Anthropic keys and ModelRegistry fallback resolver keys as raw-key fallback material, while subscription OAuth remains governed by the separate `anthropic-subscription` logout state.
+      Logging out of the raw Anthropic provider must suppress raw-key sources consistently across status and runtime resolution. Treat models.json Anthropic keys and ModelRegistry fallback resolver keys as raw-key fallback material; subscription OAuth stays governed by the separate `anthropic-subscription` logout state above.
       */
       const modelsJsonApiKey = modelsJsonApiKeys.get(ANTHROPIC_PROVIDER_ID);
       if (modelsJsonApiKey) return modelsJsonApiKey;

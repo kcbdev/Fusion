@@ -59,9 +59,11 @@ function addAuthStorageConfiguredProviders(authStorage: AuthStorageLike | undefi
     }
   }
 
-  const anthropicCredential = authStorage.get?.(ANTHROPIC_PROVIDER_ID);
-  const anthropicApiKeyCredential = authStorage.get?.(ANTHROPIC_API_KEY_PROVIDER_ID);
-  if (isRawAnthropicApiKeyCredential(anthropicCredential) || isRawAnthropicApiKeyCredential(anthropicApiKeyCredential)) {
+  /*
+  FNXC:ProviderAuth 2026-07-01-15:10:
+  Advertise the direct `anthropic` provider whenever auth storage reports usable anthropic auth — raw API key, subscription OAuth, legacy OAuth, or fallback. Restored v0.51.0 behavior (issue #1857): a subscription/OAuth token executes on the built-in `anthropic` provider via pi-ai's Claude Code impersonation, so OAuth-only users must be able to pick Claude models. `hasAuth("anthropic")` already unifies these sources.
+  */
+  if (authStorage.hasAuth?.(ANTHROPIC_PROVIDER_ID) || authStorage.hasAuth?.(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID)) {
     providers.add(ANTHROPIC_PROVIDER_ID);
   }
 }
@@ -85,13 +87,19 @@ async function getConfiguredProviderNames(authStorage?: AuthStorageLike): Promis
       const parsed = JSON.parse(await readFile(authPath, "utf-8")) as Record<string, unknown>;
       for (const [key, credential] of Object.entries(parsed)) {
         if (key === ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) {
+          // A separated subscription OAuth row makes the direct `anthropic` provider usable.
+          providers.add(ANTHROPIC_PROVIDER_ID);
           continue;
         }
         if (key !== ANTHROPIC_PROVIDER_ID) {
           providers.add(key);
           continue;
         }
-        if (credential && typeof credential === "object" && (credential as { type?: unknown }).type === "api_key") {
+        // Raw API key OR OAuth (legacy subscription) both configure the direct `anthropic` provider.
+        const credType = credential && typeof credential === "object"
+          ? (credential as { type?: unknown }).type
+          : undefined;
+        if (credType === "api_key" || credType === "oauth") {
           providers.add(key);
         }
       }
@@ -101,14 +109,11 @@ async function getConfiguredProviderNames(authStorage?: AuthStorageLike): Promis
   }
 
   /*
-  FNXC:ProviderAuth 2026-07-01-12:06:
-  The model picker must not advertise direct `anthropic` rows for OAuth-only Claude subscription setups. Only raw API-key material (auth.json `type: api_key`, models.json apiKey, or ANTHROPIC_API_KEY) configures the direct api.anthropic.com/v1 provider.
-
-  FNXC:ProviderAuth 2026-07-01-12:18:
-  Keep Anthropic's three surfaces distinct in discovery: raw API-key auth configures direct `anthropic`, subscription OAuth stays an auth/usage credential (`anthropic-subscription`) and is not a model provider row, and Claude CLI models appear only as `pi-claude-cli` when the CLI picker toggle is enabled.
+  FNXC:ProviderAuth 2026-07-01-15:10:
+  Anthropic's three surfaces in discovery (restored v0.51.0 behavior, issue #1857): the direct `anthropic` provider is advertised for raw API-key auth (auth.json `type: api_key`, models.json apiKey, `ANTHROPIC_API_KEY`) AND for subscription/legacy OAuth (which executes on the built-in `anthropic` provider via pi-ai's Claude Code impersonation to /v1). `anthropic-subscription` is an auth/usage credential id, never its own picker row. Claude CLI models appear as `pi-claude-cli` only when the CLI picker toggle is enabled.
 
   FNXC:ModelCatalog 2026-07-01-13:41:
-  `/api/models` must follow the same connected-state source as Settings/auth status when ServerOptions.authStorage is injected. Use auth storage first for OAuth/API-key surfaces, keep OAuth-only Anthropic out of direct `anthropic/*`, and then fall back to legacy files/env so v0.50-style local API-key discovery still works.
+  `/api/models` must follow the same connected-state source as Settings/auth status when ServerOptions.authStorage is injected. Use auth storage first for OAuth/API-key surfaces, then fall back to legacy files/env so v0.50-style local API-key discovery still works.
   */
   if (process.env.ANTHROPIC_API_KEY) {
     providers.add(ANTHROPIC_PROVIDER_ID);
