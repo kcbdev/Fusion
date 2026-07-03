@@ -1133,6 +1133,82 @@ describe("SettingsModal", () => {
       });
     });
 
+    it("keeps polling Anthropic Subscription OAuth until authenticated without false incomplete toast", async () => {
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const addToast = vi.fn();
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({
+          providers: [{ id: "anthropic-subscription", name: "Anthropic Subscription", authenticated: false, type: "oauth" }],
+        })
+        .mockResolvedValueOnce({
+          providers: [{ id: "anthropic-subscription", name: "Anthropic Subscription", authenticated: false, type: "oauth", loginInProgress: true }],
+        })
+        .mockResolvedValueOnce({
+          providers: [{ id: "anthropic-subscription", name: "Anthropic Subscription", authenticated: true, type: "oauth", loginInProgress: false }],
+        });
+      mockLoginProvider.mockResolvedValueOnce({ url: "https://claude.ai/oauth/authorize" });
+
+      render(<SettingsModal onClose={noop} addToast={addToast} />);
+      await waitForSettingsModalReady();
+      await settingsModalUser.click(screen.getByRole("button", { name: "Authentication" }));
+      vi.useFakeTimers();
+
+      try {
+        const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic-subscription").closest(".auth-provider-card") as HTMLElement;
+        fireEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(openSpy).toHaveBeenCalledWith("https://claude.ai/oauth/authorize", "_blank");
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(addToast).toHaveBeenCalledWith("Login successful", "success");
+        expect(addToast).not.toHaveBeenCalledWith("Login did not complete. Please try again.", "error");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shows incomplete toast when Anthropic Subscription OAuth stops without authentication", async () => {
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const addToast = vi.fn();
+      mockFetchAuthStatus
+        .mockResolvedValueOnce({
+          providers: [{ id: "anthropic-subscription", name: "Anthropic Subscription", authenticated: false, type: "oauth" }],
+        })
+        .mockResolvedValueOnce({
+          providers: [{ id: "anthropic-subscription", name: "Anthropic Subscription", authenticated: false, type: "oauth", loginInProgress: false }],
+        });
+      mockLoginProvider.mockResolvedValueOnce({ url: "https://claude.ai/oauth/authorize" });
+
+      render(<SettingsModal onClose={noop} addToast={addToast} />);
+      await waitForSettingsModalReady();
+      await settingsModalUser.click(screen.getByRole("button", { name: "Authentication" }));
+      vi.useFakeTimers();
+
+      try {
+        const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic-subscription").closest(".auth-provider-card") as HTMLElement;
+        fireEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(openSpy).toHaveBeenCalledWith("https://claude.ai/oauth/authorize", "_blank");
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+
+        expect(addToast).toHaveBeenCalledWith("Login did not complete. Please try again.", "error");
+        expect(addToast).not.toHaveBeenCalledWith("Login successful", "success");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("renders Anthropic pasted-code form when login response includes manualCode", async () => {
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       mockFetchAuthStatus.mockResolvedValueOnce({

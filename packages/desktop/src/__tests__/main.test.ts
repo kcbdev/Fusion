@@ -42,7 +42,12 @@ const mocks = vi.hoisted(() => {
     hide: vi.fn(),
     close: vi.fn(),
     maximize: vi.fn(),
-    webContents: { reload: vi.fn() },
+    webContents: {
+      reload: vi.fn(),
+      setWindowOpenHandler: vi.fn((handler: (details: { url: string }) => unknown) => {
+        browserWindowHandlers.set("window-open", handler as (...args: unknown[]) => void);
+      }),
+    },
   };
 
   const BrowserWindow = vi.fn(function () {
@@ -324,6 +329,53 @@ describe("main process", () => {
 
     expect(mocks.browserWindowInstance.loadFile).toHaveBeenCalledWith("/path/to/dist/client/index.html");
     expect(mocks.browserWindowInstance.loadURL).not.toHaveBeenCalled();
+  });
+
+  it("macOS Anthropic Subscription OAuth denies Claude app-like popup and opens system browser", async () => {
+    const authUrl = "https://claude.ai/oauth/authorize?client_id=fusion&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fcallback";
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+    const handler = mocks.browserWindowHandlers.get("window-open") as
+      | ((details: { url: string }) => { action: "allow" | "deny" })
+      | undefined;
+
+    expect(handler).toBeTypeOf("function");
+    const result = handler?.({ url: authUrl });
+
+    expect(result).toEqual({ action: "deny" });
+    expect(mocks.shell.openExternal).toHaveBeenCalledTimes(1);
+    expect(mocks.shell.openExternal).toHaveBeenCalledWith(authUrl);
+  });
+
+  it("keeps same-origin Fusion renderer popups inside the desktop app", async () => {
+    rendererMocks.isUrlRenderer.mockReturnValue(true);
+    rendererMocks.getRendererUrl.mockReturnValue("http://localhost:5173");
+    rendererMocks.getRendererFilePath.mockReturnValue("");
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+    const handler = mocks.browserWindowHandlers.get("window-open") as
+      | ((details: { url: string }) => { action: "allow" | "deny" })
+      | undefined;
+
+    const result = handler?.({ url: "http://localhost:5173/settings?section=auth" });
+
+    expect(result).toEqual({ action: "allow" });
+    expect(mocks.shell.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("does not externalize Fusion deep links or unsafe custom window-open schemes", async () => {
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+    const handler = mocks.browserWindowHandlers.get("window-open") as
+      | ((details: { url: string }) => { action: "allow" | "deny" })
+      | undefined;
+
+    expect(handler?.({ url: "fusion://task/FN-7473" })).toEqual({ action: "deny" });
+    expect(handler?.({ url: "claude://oauth/callback?code=abc" })).toEqual({ action: "deny" });
+    expect(mocks.shell.openExternal).not.toHaveBeenCalled();
   });
 
   it("exports initializeApp for lifecycle orchestration", async () => {

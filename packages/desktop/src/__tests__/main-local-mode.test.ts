@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => {
     show: vi.fn(),
     focus: vi.fn(),
     maximize: vi.fn(),
-    webContents: { send: vi.fn() },
+    webContents: { send: vi.fn(), setWindowOpenHandler: vi.fn() },
   };
 
   const BrowserWindow = vi.fn(function () {
@@ -70,6 +70,7 @@ vi.mock("electron", () => ({
   Tray: mocks.Tray,
   nativeImage: { createEmpty: vi.fn(() => ({})) },
   screen: mocks.screen,
+  shell: { openExternal: vi.fn(() => Promise.resolve()) },
 }));
 
 vi.mock("../renderer.js", () => ({ isUrlRenderer: vi.fn(() => true), getRendererUrl: vi.fn(() => "http://localhost"), getRendererFilePath: vi.fn(() => "index.html") }));

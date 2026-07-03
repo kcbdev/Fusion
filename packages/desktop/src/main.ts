@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, nativeImage, screen, shell, Tray } from "electron";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -99,6 +99,37 @@ export function getCurrentDesktopLaunchMode(): DesktopLaunchMode {
   return currentDesktopLaunchMode;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+}
+
+function getDesktopRendererOrigin(launchTargetUrl?: string): string | null {
+  const candidateUrl = launchTargetUrl ?? (isUrlRenderer() ? getRendererUrl() : `file://${getRendererFilePath()}`);
+  try {
+    return new URL(candidateUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isInternalDesktopNavigation(url: URL, rendererOrigin: string | null): boolean {
+  if (url.protocol === "file:") {
+    return true;
+  }
+
+  if ((url.protocol === "http:" || url.protocol === "https:") && rendererOrigin && url.origin === rendererOrigin) {
+    return true;
+  }
+
+  // Local runtime/dev dashboard URLs represent Fusion app navigation, not external OAuth destinations.
+  if ((url.protocol === "http:" || url.protocol === "https:") && isLoopbackHost(url.hostname)) {
+    return true;
+  }
+
+  return false;
+}
+
 async function resetLaunchModeAndReload(window: BrowserWindow): Promise<void> {
   try {
     const settings = await readShellSettings();
@@ -146,6 +177,33 @@ export function createMainWindow(state?: WindowState, launchTargetUrl?: string):
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  const rendererOrigin = getDesktopRendererOrigin(launchTargetUrl);
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return { action: "deny" };
+    }
+
+    if (isInternalDesktopNavigation(parsedUrl, rendererOrigin)) {
+      return { action: "allow" };
+    }
+
+    if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+      /*
+      FNXC:DesktopOAuth 2026-07-03-15:55:
+      macOS Anthropic Subscription login must leave the Electron popup path and open in the user's system browser instead of a child BrowserWindow or Claude Code app handoff. Keep Fusion polling in the renderer while denying the popup so the OAuth callback can complete the existing login state.
+      */
+      void shell.openExternal(url).catch((error: unknown) => {
+        console.error(`[desktop/main] Failed to open external URL: ${url}`, error);
+      });
+      return { action: "deny" };
+    }
+
+    return { action: "deny" };
   });
 
   if (launchTargetUrl) {
