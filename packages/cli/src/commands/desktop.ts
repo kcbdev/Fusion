@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import * as os from "node:os";
 import { CentralCore, TaskStore } from "@fusion/core";
 import { createServer } from "@fusion/dashboard";
 import { ProjectEngineManager } from "@fusion/engine";
@@ -177,7 +178,16 @@ export async function runDesktop(options: RunDesktopOptions = {}): Promise<void>
   const runtime = await startDashboardRuntime(rootDir, Boolean(options.paused), Boolean(options.noAuth));
 
   const electronBinary = resolveElectronBinary();
-  const electronArgs = ["--enable-source-maps", desktopEntry, ...(options.dev ? ["--dev"] : [])];
+  const electronArgs = [
+    "--enable-source-maps",
+    desktopEntry,
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disable-gpu-sandbox",
+    "--disable-software-rasterizer",
+    "--no-sandbox",
+    ...(options.dev ? ["--dev"] : []),
+  ];
 
   // Build environment for Electron process
   const electronEnv: NodeJS.ProcessEnv = {

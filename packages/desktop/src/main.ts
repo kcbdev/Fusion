@@ -1,6 +1,18 @@
 import { app, BrowserWindow, nativeImage, screen, Tray } from "electron";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
+
+const fusionUserDataDir = join(os.homedir(), ".fusion", "desktop-user-data");
+try {
+  app.commandLine.appendSwitch("user-data-dir", fusionUserDataDir);
+  app.setPath("userData", fusionUserDataDir);
+  app.setPath("cache", join(fusionUserDataDir, "cache"));
+  app.setPath("crashDumps", join(fusionUserDataDir, "crashes"));
+} catch {
+  // Path already locked after app is ready; not a fatal error.
+}
+
 import { setupDeepLinkHandler, registerDeepLinkProtocol } from "./deep-link.js";
 import { registerIpcHandlers } from "./ipc.js";
 import { buildAppMenu } from "./menu.js";
@@ -199,7 +211,7 @@ export async function initializeApp(): Promise<void> {
     }
   }
 
-  if (rememberedLaunchMode === "local") {
+  if (rememberedLaunchMode === "local" && !process.env.FUSION_SERVER_PORT) {
     try {
       await startLocalRuntimeOnce();
     } catch (error) {
@@ -213,6 +225,12 @@ export async function initializeApp(): Promise<void> {
 
   if (currentDesktopLaunchMode === "choose" && process.env.FUSION_DESKTOP_MODE === "local") {
     await startLocalRuntimeOnce();
+    currentDesktopLaunchMode = "local";
+  }
+
+  if (currentDesktopLaunchMode === "choose" && process.env.FUSION_SERVER_PORT) {
+    // The CLI already started a dashboard server; use it without spawning an
+    // embedded local runtime. The shell state will report external-cli running.
     currentDesktopLaunchMode = "local";
   }
 
