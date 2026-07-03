@@ -2668,7 +2668,15 @@ export function ModelOnboardingModal({
                   <div className="model-onboarding-github-optional__actions">
                     <button
                       className="btn btn-primary btn-sm"
-                      onClick={() => setStep("project-setup")}
+                      /*
+                       * FNXC:Onboarding 2026-07-03-08:00:
+                       * Advance via handleNext/handleSkip (not a raw setStep) so the GitHub step's
+                       * status is recorded. When GitHub is ready via the gh CLI, "Continue with gh CLI
+                       * auth" must COMPLETE the step (handleNext) — previously it jumped to project-setup
+                       * without adding "github" to completedSteps, so step 2 never checked off. When
+                       * GitHub isn't connected, "Continue without GitHub" is a SKIP (handleSkip).
+                       */
+                      onClick={isGitHubReadyViaCli ? handleNext : handleSkip}
                     >
                       {isGitHubReadyViaCli
                         ? t("setup.continueWithGhCli", "Continue with gh CLI auth →")
