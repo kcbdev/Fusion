@@ -793,6 +793,8 @@ Memory view provides a multi-file editor for project and daily memory files. Its
 
 ## Setup Wizard Project Registration
 
+First-run setup checks the **GitHub (Optional)** step for the `git` executable on the Fusion server host before users continue into repository setup. If Git is installed, the step shows a low-noise prerequisite-ready note. If Git is missing, the step shows platform-aware install guidance for macOS, Windows, and Linux plus a Git downloads link, while still allowing users to skip optional GitHub authentication. The check reflects the machine or service container running Fusion, not the browser device.
+
 First-run setup and embedded project setup both expose a **Repository setup** section before path entry:
 
 - **Use Existing Directory** registers an existing git repository or workspace root. Workspace detection and the workspace-mode checkbox only appear in this mode.

@@ -1740,6 +1740,93 @@ describe("ModelOnboardingModal", () => {
       expect(screen.getByText(/task creation works without it/i)).toBeTruthy();
     });
 
+    it("shows a low-noise installed Git prerequisite note without replacing GitHub auth state", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github", name: "GitHub", authenticated: false, type: "oauth" },
+        ],
+        gitCli: { available: true, version: "2.45.1", installUrl: "https://git-scm.com/downloads" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      const prerequisite = screen.getByTestId("onboarding-git-prerequisite");
+      expect(prerequisite).toHaveClass("onboarding-github-git-prerequisite--ready");
+      expect(prerequisite).toHaveTextContent("Git prerequisite ready");
+      expect(prerequisite).toHaveTextContent("2.45.1");
+      expect(screen.getByTestId("github-status-badge")).toHaveTextContent("Not connected");
+      expect(screen.getByRole("button", { name: /Connect/ })).toBeTruthy();
+    });
+
+    it("shows platform-aware install guidance when Git is missing on the Fusion host", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github", name: "GitHub", authenticated: false, type: "oauth" },
+        ],
+        gitCli: { available: false, installUrl: "https://git-scm.com/downloads" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      const prerequisite = screen.getByTestId("onboarding-git-prerequisite");
+      expect(prerequisite).toHaveAttribute("role", "alert");
+      expect(prerequisite).toHaveClass("onboarding-github-git-prerequisite--missing");
+      expect(prerequisite).toHaveTextContent("Install Git before project setup");
+      expect(prerequisite).toHaveTextContent("server host running Fusion");
+      expect(prerequisite).toHaveTextContent("macOS");
+      expect(prerequisite).toHaveTextContent("Windows");
+      expect(prerequisite).toHaveTextContent("Linux");
+      expect(screen.getByRole("link", { name: "Open Git install downloads" })).toHaveAttribute("href", "https://git-scm.com/downloads");
+      expect(screen.getByRole("button", { name: /Connect/ })).toBeTruthy();
+      expect(screen.getByText("No worries if you're not ready — connect GitHub anytime from Settings → Authentication.")).toBeTruthy();
+    });
+
+    it("keeps legacy auth status responses without gitCli free of empty prerequisite shells", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github", name: "GitHub", authenticated: false, type: "oauth" },
+        ],
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.queryByTestId("onboarding-git-prerequisite")).toBeNull();
+      expect(screen.getByTestId("github-status-badge")).toHaveTextContent("Not connected");
+    });
+
+    it("preserves missing-Git guidance when GitHub OAuth provider is absent and gh CLI is ready", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [],
+        ghCli: { available: true, authenticated: true },
+        gitCli: { available: false, installUrl: "https://git-scm.com/downloads" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.getByTestId("onboarding-git-prerequisite")).toHaveTextContent("Install Git before project setup");
+      expect(screen.getByRole("button", { name: "Continue with gh CLI auth →" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Connect OAuth/ })).toBeTruthy();
+    });
+
+    it("does not show a Git prerequisite shell when auth status fails to load", async () => {
+      mockFetchAuthStatus.mockRejectedValueOnce(new Error("auth unavailable"));
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.queryByTestId("onboarding-git-prerequisite")).toBeNull();
+      expect(screen.getByRole("button", { name: "Continue without GitHub →" })).toBeTruthy();
+    });
+
     it("GitHub step shows connected state when already authenticated", async () => {
       mockFetchAuthStatus.mockResolvedValueOnce({
         providers: [

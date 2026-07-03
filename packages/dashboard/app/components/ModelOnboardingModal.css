@@ -717,6 +717,61 @@
 }
 
 /* === Onboarding GitHub Step === */
+.onboarding-github-git-prerequisite {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.onboarding-github-git-prerequisite--ready {
+  border-color: color-mix(in srgb, var(--color-success) 35%, var(--border));
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+}
+
+.onboarding-github-git-prerequisite--missing {
+  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--border));
+  border-left: var(--space-xs) solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.onboarding-github-git-prerequisite__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text);
+}
+
+.onboarding-github-git-prerequisite__heading svg {
+  flex: 0 0 auto;
+  color: var(--color-info);
+}
+
+.onboarding-github-git-prerequisite--missing .onboarding-github-git-prerequisite__heading svg {
+  color: var(--color-warning);
+}
+
+.onboarding-github-git-prerequisite p,
+.onboarding-github-git-prerequisite ul {
+  margin: 0;
+}
+
+.onboarding-github-git-prerequisite a {
+  align-self: flex-start;
+}
+
+.onboarding-github-git-install-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  padding-left: var(--space-xl);
+}
+
 .onboarding-github-benefits {
   margin: 0;
   padding-left: var(--space-xl);
@@ -1258,6 +1313,10 @@
   .onboarding-github-feedback-actions .btn,
   .onboarding-github-feedback-actions .onboarding-skip-step-link {
     min-height: 36px;
+  }
+
+  .onboarding-github-git-prerequisite a {
+    align-self: stretch;
   }
 
   /* Compact provider card on mobile.

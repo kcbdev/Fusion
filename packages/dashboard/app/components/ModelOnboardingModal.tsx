@@ -20,6 +20,7 @@ import {
   fetchCustomProviders,
   createCustomProvider,
   type AgentOnboardingSummary,
+  type GitCliStatus,
 } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -594,6 +595,8 @@ interface GhCliStatus {
   authenticated: boolean;
 }
 
+const GIT_INSTALL_URL = "https://git-scm.com/downloads";
+
 /** Maximum number of poll cycles before timing out (150 × 2s = 5 minutes) */
 const MAX_POLL_CYCLES = 150;
 
@@ -658,6 +661,7 @@ export function ModelOnboardingModal({
   const [isAgentInterviewOpen, setIsAgentInterviewOpen] = useState(false);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [ghCliStatus, setGhCliStatus] = useState<GhCliStatus | undefined>(undefined);
+  const [gitCliStatus, setGitCliStatus] = useState<GitCliStatus | undefined>(undefined);
   const [authLoading, setAuthLoading] = useState(true);
   const [authActionInProgress, setAuthActionInProgress] = useState<string | null>(null);
   const [loginInstructions, setLoginInstructions] = useState<Record<string, string>>({});
@@ -819,10 +823,11 @@ export function ModelOnboardingModal({
   // Load auth providers
   const loadAuthStatus = useCallback(async () => {
     try {
-      const { providers, ghCli } = await fetchAuthStatus();
+      const { providers, ghCli, gitCli } = await fetchAuthStatus();
       const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
       setAuthProviders(visibleProviders);
       setGhCliStatus(ghCli);
+      setGitCliStatus(gitCli);
       setLoginInstructions((prev) => {
         const next: Record<string, string> = {};
         for (const [providerId, instructions] of Object.entries(prev)) {
@@ -916,6 +921,10 @@ export function ModelOnboardingModal({
   const isGithubAuthenticated = githubProvider?.authenticated ?? false;
   const isGithubLoginInProgress = githubProvider?.loginInProgress ?? false;
   const isGithubCliAuthenticated = ghCliStatus?.authenticated ?? false;
+  const gitInstallUrl = gitCliStatus?.installUrl ?? GIT_INSTALL_URL;
+  const gitVersionLabel = gitCliStatus?.version
+    ? t("setup.gitPrerequisiteInstalledVersion", "Git is installed on the Fusion host ({{version}}).", { version: gitCliStatus.version })
+    : t("setup.gitPrerequisiteInstalled", "Git is installed on the Fusion host.");
   // Effective GitHub readiness (matches useSetupReadiness): OAuth OR authenticated gh CLI session.
   const isGitHubReady = isGithubAuthenticated || isGithubCliAuthenticated;
   const isGitHubReadyViaCli = !isGithubAuthenticated && isGithubCliAuthenticated;
@@ -1331,10 +1340,11 @@ export function ModelOnboardingModal({
           }
 
           try {
-            const { providers, ghCli } = await fetchAuthStatus();
+            const { providers, ghCli, gitCli } = await fetchAuthStatus();
             const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
             setAuthProviders(visibleProviders);
             setGhCliStatus(ghCli);
+            setGitCliStatus(gitCli);
             const provider = visibleProviders.find((p) => p.id === providerId);
             if (provider?.authenticated) {
               if (pollIntervalRef.current) {
@@ -2675,6 +2685,45 @@ export function ModelOnboardingModal({
                   {t("setup.githubConnectionDescription", "Connecting GitHub unlocks issue imports and pull request tracking. You can skip this — task creation works without it.")}
                 </p>
               )}
+              {/*
+                FNXC:Onboarding 2026-07-03-00:00:
+                The GitHub step must surface missing `git` on the Fusion server host before users reach project clone/init workflows.
+                This prerequisite warning is separate from GitHub OAuth/gh readiness so users can still skip optional GitHub auth.
+              */}
+              {gitCliStatus && (
+                <div
+                  className={`onboarding-github-git-prerequisite ${gitCliStatus.available ? "onboarding-github-git-prerequisite--ready" : "onboarding-github-git-prerequisite--missing"}`}
+                  data-testid="onboarding-git-prerequisite"
+                  role={gitCliStatus.available ? "status" : "alert"}
+                >
+                  <div className="onboarding-github-git-prerequisite__heading">
+                    <GitPullRequest size={16} aria-hidden="true" />
+                    <strong>
+                      {gitCliStatus.available
+                        ? t("setup.gitPrerequisiteReadyTitle", "Git prerequisite ready")
+                        : t("setup.gitPrerequisiteMissingTitle", "Install Git before project setup")}
+                    </strong>
+                  </div>
+                  {gitCliStatus.available ? (
+                    <p>{gitVersionLabel}</p>
+                  ) : (
+                    <>
+                      <p>
+                        {t("setup.gitPrerequisiteMissingBody", "Fusion could not find `git` on the server host running Fusion. Install Git there before cloning repositories, initializing projects, or registering Git-backed workspaces.")}
+                      </p>
+                      <ul className="onboarding-github-git-install-list">
+                        <li>{t("setup.gitPrerequisiteMac", "macOS: install Xcode Command Line Tools with `xcode-select --install`, Homebrew with `brew install git`, or the Git installer.")}</li>
+                        <li>{t("setup.gitPrerequisiteWindows", "Windows: install Git for Windows and restart the Fusion host shell or service.")}</li>
+                        <li>{t("setup.gitPrerequisiteLinux", "Linux: install with your package manager, for example `sudo apt install git`, `sudo dnf install git`, or `sudo pacman -S git`.")}</li>
+                      </ul>
+                      <a href={gitInstallUrl} target="_blank" rel="noreferrer">
+                        {t("setup.gitPrerequisiteInstallLink", "Open Git install downloads")}
+                      </a>
+                    </>
+                  )}
+                </div>
+              )}
+
               {!isGitHubReady && (
                 <div className="onboarding-feature-list">
                   <ul>

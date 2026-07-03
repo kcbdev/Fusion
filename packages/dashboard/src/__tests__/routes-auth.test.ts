@@ -118,8 +118,10 @@ vi.mock("@fusion/core", async (importOriginal) => {
   const { createCoreMock } = await import("../test/mockCoreEngine.js");
   return createCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
     resolveGlobalDir: vi.fn().mockReturnValue("/tmp/fusion-test"),
+    GIT_INSTALL_URL: "https://git-scm.com/downloads",
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
+    probeGitCliStatus: vi.fn(),
     isQmdAvailable: vi.fn().mockResolvedValue(false),
     CentralCore: vi.fn().mockImplementation(function () { return {
       init: mockCentralInit,
@@ -175,11 +177,12 @@ vi.mock("@fusion/engine", async () => {
   });
 });
 
-import { AgentStore, Database, RoutineStore, isGhAvailable, isGhAuthenticated } from "@fusion/core";
+import { AgentStore, Database, RoutineStore, isGhAvailable, isGhAuthenticated, probeGitCliStatus } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
+const mockProbeGitCliStatus = vi.mocked(probeGitCliStatus);
 
 function createMockGlobalSettingsStore() {
   return {
@@ -864,6 +867,14 @@ describe("GET /auth/status", () => {
   });
 
   beforeEach(() => {
+    mockProbeGitCliStatus.mockResolvedValue({
+      available: true,
+      version: "2.45.1",
+      installUrl: "https://git-scm.com/downloads",
+    });
+    mockIsGhAvailable.mockReturnValue(false);
+    mockIsGhAuthenticated.mockReturnValue(false);
+
     vi.spyOn(claudeCliProbeModule, "probeClaudeCli").mockResolvedValue({
       available: false,
       reason: "mocked unavailable",
@@ -927,6 +938,55 @@ describe("GET /auth/status", () => {
       { id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" },
     ]);
     expect(authStorage.reload).toHaveBeenCalled();
+  });
+
+  it("includes git CLI status while preserving gh CLI status", async () => {
+    mockIsGhAvailable.mockReturnValue(true);
+    mockIsGhAuthenticated.mockReturnValue(true);
+    mockProbeGitCliStatus.mockResolvedValue({
+      available: true,
+      version: "2.45.1",
+      installUrl: "https://git-scm.com/downloads",
+    });
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.ghCli).toEqual({ available: true, authenticated: true });
+    expect(res.body.gitCli).toEqual({
+      available: true,
+      version: "2.45.1",
+      installUrl: "https://git-scm.com/downloads",
+    });
+  });
+
+  it("reports missing git CLI without changing provider readiness", async () => {
+    mockProbeGitCliStatus.mockResolvedValue({
+      available: false,
+      installUrl: "https://git-scm.com/downloads",
+    });
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.gitCli).toEqual({
+      available: false,
+      installUrl: "https://git-scm.com/downloads",
+    });
+    expect(res.body.providers).toEqual(expect.any(Array));
+    expect(res.body.ghCli).toEqual({ available: false, authenticated: false });
+  });
+
+  it("degrades git CLI probe errors to an unavailable status", async () => {
+    mockProbeGitCliStatus.mockRejectedValue(new Error("probe failed"));
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.gitCli).toEqual({
+      available: false,
+      installUrl: "https://git-scm.com/downloads",
+    });
   });
 
   it("includes GitHub Copilot as oauth when auth storage reports it", async () => {

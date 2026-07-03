@@ -2338,14 +2338,22 @@ export async function probeProviderModels(params: ProbeModelsParams): Promise<Pr
   });
 }
 
+export interface GitCliStatus {
+  available: boolean;
+  version?: string;
+  installUrl?: string;
+}
+
 /** Fetch authentication status for all OAuth providers */
 export function fetchAuthStatus(options?: FetchOptions): Promise<{
   providers: AuthProvider[];
   ghCli?: { available: boolean; authenticated: boolean };
+  gitCli?: GitCliStatus;
 }> {
   return dedupe("/auth/status", () => api<{
     providers: AuthProvider[];
     ghCli?: { available: boolean; authenticated: boolean };
+    gitCli?: GitCliStatus;
   }>("/auth/status"), options);
 }
 

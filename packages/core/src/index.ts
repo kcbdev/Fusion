@@ -937,6 +937,13 @@ export {
   type StructuredGhError,
 } from "./gh-cli.js";
 export {
+  DEFAULT_GIT_CLI_STATUS_TIMEOUT_MS,
+  GIT_INSTALL_URL,
+  probeGitCliStatus,
+  type GitCliStatus,
+  type ProbeGitCliStatusOptions,
+} from "./git-cli-status.js";
+export {
   parseRepoSlug,
   isValidRepoSlug,
   resolveTaskGithubTracking,

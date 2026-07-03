@@ -6916,7 +6916,16 @@
     "repositorySetupDescription": "Choose how Fusion should prepare the project directory before registration.",
     "repositorySetupTitle": "Repository setup",
     "useExistingDirectoryHint": "Register a folder that is already a git repository or workspace root.",
-    "connectGithub": "Connect GitHub"
+    "connectGithub": "Connect GitHub",
+    "gitPrerequisiteInstalled": "Git is installed on the Fusion host.",
+    "gitPrerequisiteInstalledVersion": "Git is installed on the Fusion host ({{version}}).",
+    "gitPrerequisiteInstallLink": "Open Git install downloads",
+    "gitPrerequisiteLinux": "Linux: install with your package manager, for example `sudo apt install git`, `sudo dnf install git`, or `sudo pacman -S git`.",
+    "gitPrerequisiteMac": "macOS: install Xcode Command Line Tools with `xcode-select --install`, Homebrew with `brew install git`, or the Git installer.",
+    "gitPrerequisiteMissingBody": "Fusion could not find `git` on the server host running Fusion. Install Git there before cloning repositories, initializing projects, or registering Git-backed workspaces.",
+    "gitPrerequisiteMissingTitle": "Install Git before project setup",
+    "gitPrerequisiteReadyTitle": "Git prerequisite ready",
+    "gitPrerequisiteWindows": "Windows: install Git for Windows and restart the Fusion host shell or service."
   },
   "shell": {
     "activePill": "Activo",
@@ -7565,7 +7574,9 @@
       "none": "(ninguna)",
       "provider": "Proveedor",
       "repository": "Repositorio",
-      "url": "URL"
+      "url": "URL",
+      "gitlabAriaLabel": "",
+      "gitlabBadge": ""
     },
     "spec": {
       "aiReviseHeading": "Pedir revisión a la IA",
@@ -7666,6 +7677,35 @@
       "totalTokens": "Total",
       "unknownModel": "(unknown)",
       "workflowResults": "Workflow results"
+    },
+    "gitlabTracking": {
+      "collapse": "",
+      "expand": "",
+      "instance": "",
+      "item": "",
+      "itemUnlinked": "",
+      "kind": "",
+      "kindGroupIssue": "",
+      "kindMergeRequest": "",
+      "kindProjectIssue": "",
+      "label": "",
+      "lastSynced": "",
+      "namespace": "",
+      "openAriaLabel": "",
+      "openBtn": "",
+      "stale": "",
+      "staleUnknown": "",
+      "state": "",
+      "stateUnknown": "",
+      "statusAriaLabel": "",
+      "statusLinked": "",
+      "statusStale": "",
+      "statusUnlinked": "",
+      "unlinkBtn": "",
+      "unlinkConfirm": "",
+      "unlinkMessage": "",
+      "unlinkTitle": "",
+      "unlinked": ""
     }
   },
   "taskDocuments": {

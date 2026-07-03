@@ -2,7 +2,7 @@ import type { Request } from "express";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { isGhAvailable, isGhAuthenticated } from "@fusion/core";
+import { GIT_INSTALL_URL, isGhAvailable, isGhAuthenticated, probeGitCliStatus } from "@fusion/core";
 import { probeClaudeCli } from "../claude-cli-probe.js";
 import { probeDroidCli } from "../droid-cli-probe.js";
 import { probeCursorCliProvider } from "../runtime-provider-probes.js";
@@ -315,7 +315,8 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
    * Includes both OAuth-backed and API-key-backed providers.
    * Response: {
    *   providers: [{ id, name, authenticated, type, keyHint? }],
-   *   ghCli: { available: boolean, authenticated: boolean }
+   *   ghCli: { available: boolean, authenticated: boolean },
+   *   gitCli: { available: boolean, version?: string, installUrl: string }
    * }
    */
   router.get("/auth/status", async (req, res) => {
@@ -471,8 +472,14 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         available: isGhAvailable(),
         authenticated: isGhAuthenticated(),
       };
+      let gitCli: Awaited<ReturnType<typeof probeGitCliStatus>>;
+      try {
+        gitCli = await probeGitCliStatus();
+      } catch {
+        gitCli = { available: false, installUrl: GIT_INSTALL_URL };
+      }
 
-      res.json({ providers, ghCli });
+      res.json({ providers, ghCli, gitCli });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
