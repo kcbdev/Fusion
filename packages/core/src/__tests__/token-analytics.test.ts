@@ -52,6 +52,48 @@ function insertTask(db: Database, t: TaskSeed): void {
   );
 }
 
+function insertChatTokenUsage(db: Database, t: {
+  id: string;
+  sourceKind?: string;
+  chatSessionId?: string | null;
+  roomId?: string | null;
+  messageId?: string | null;
+  projectId?: string | null;
+  agentId?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+  modelProvider?: string | null;
+  modelId?: string | null;
+  createdAt: string;
+}): void {
+  db.prepare(
+    `INSERT INTO chat_token_usage
+       (id, sourceKind, chatSessionId, roomId, messageId, projectId, agentId,
+        modelProvider, modelId, inputTokens, outputTokens, cachedTokens,
+        cacheWriteTokens, totalTokens, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    t.id,
+    t.sourceKind ?? "chat",
+    t.chatSessionId ?? null,
+    t.roomId ?? null,
+    t.messageId ?? null,
+    t.projectId ?? null,
+    t.agentId ?? null,
+    t.modelProvider ?? null,
+    t.modelId ?? null,
+    t.inputTokens ?? 0,
+    t.outputTokens ?? 0,
+    t.cachedTokens ?? 0,
+    t.cacheWriteTokens ?? 0,
+    t.totalTokens ?? ((t.inputTokens ?? 0) + (t.outputTokens ?? 0) + (t.cachedTokens ?? 0) + (t.cacheWriteTokens ?? 0)),
+    t.createdAt,
+  );
+}
+
 describe("token-analytics", () => {
   let tmpDir: string;
   let db: Database;
@@ -156,11 +198,11 @@ describe("token-analytics", () => {
     expect([...modelGroups.values()].reduce((sum, group) => sum + group.nTasks, 0)).toBe(2);
     expect(byModel.totals.nTasks).toBe(1);
 
-    const expectedTaskCost = costFor(
-      { inputTokens: 950, outputTokens: 450, cachedTokens: 0, cacheWriteTokens: 0 },
-      { provider: "openai", model: "gpt-5" },
+    expect(byModel.cost.usd).toBeCloseTo(
+      (modelGroups.get("claude-sonnet-4-5")?.cost.usd ?? 0) + (modelGroups.get("gpt-5")?.cost.usd ?? 0),
+      10,
     );
-    expect(byModel.cost).toEqual(expectedTaskCost);
+    expect(byModel.cost.unavailable).toBe(false);
 
     const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
     expect(byProvider.totals).toEqual(byModel.totals);
@@ -169,6 +211,121 @@ describe("token-analytics", () => {
     );
     expect(byProvider.groups.reduce((sum, group) => sum + group.totalTokens, 0)).toBe(byProvider.totals.totalTokens);
     expect(byProvider.totals.nTasks).toBe(1);
+  });
+
+  it("filters Last 30 days model groups by durable per-model bucket timestamps", () => {
+    const from = "2026-06-02T00:00:00.000Z";
+    const to = "2026-07-02T00:00:00.000Z";
+    insertTask(db, {
+      id: "last-30-multi",
+      inputTokens: 1_520,
+      outputTokens: 730,
+      cachedTokens: 110,
+      cacheWriteTokens: 40,
+      totalTokens: 2_400,
+      lastUsedAt: "2026-07-05T00:00:00.000Z",
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-5",
+      tokenUsagePerModel: [
+        {
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          inputTokens: 700,
+          outputTokens: 300,
+          cachedTokens: 20,
+          cacheWriteTokens: 0,
+          totalTokens: 1_020,
+          firstUsedAt: "2026-06-02T00:00:00.000Z",
+          lastUsedAt: "2026-06-02T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 250,
+          outputTokens: 150,
+          cachedTokens: 10,
+          cacheWriteTokens: 0,
+          totalTokens: 410,
+          firstUsedAt: "2026-06-15T00:00:00.000Z",
+          lastUsedAt: "2026-06-15T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 50,
+          outputTokens: 50,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 100,
+          firstUsedAt: "2026-07-02T00:00:00.000Z",
+          lastUsedAt: "2026-07-02T00:00:00.000Z",
+        },
+        {
+          inputTokens: 25,
+          outputTokens: 25,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 50,
+          firstUsedAt: "2026-06-20T00:00:00.000Z",
+          lastUsedAt: "2026-06-20T00:00:00.000Z",
+        },
+        {
+          modelProvider: "zai",
+          modelId: "glm-outside",
+          inputTokens: 495,
+          outputTokens: 205,
+          cachedTokens: 80,
+          cacheWriteTokens: 40,
+          totalTokens: 820,
+          firstUsedAt: "2026-07-03T00:00:00.000Z",
+          lastUsedAt: "2026-07-03T00:00:00.000Z",
+        },
+      ],
+    });
+    insertTask(db, {
+      id: "malformed-fallback",
+      inputTokens: 40,
+      outputTokens: 10,
+      totalTokens: 50,
+      lastUsedAt: "2026-06-18T00:00:00.000Z",
+      tokenUsageModelProvider: "anthropic",
+      tokenUsageModelId: "claude-haiku-3-5",
+      tokenUsagePerModel: "not-json",
+    });
+    insertTask(db, {
+      id: "legacy-missing-per-model",
+      inputTokens: 30,
+      outputTokens: 20,
+      totalTokens: 50,
+      lastUsedAt: "2026-06-19T00:00:00.000Z",
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-4o-mini",
+    });
+
+    const byModel = aggregateTokenAnalytics(db, { from, to, groupBy: "model", granularity: "day" });
+    const groups = new Map(byModel.groups.map((group) => [group.key, group]));
+
+    expect(groups.get("claude-sonnet-4-5")).toMatchObject({ totalTokens: 1_020, inputTokens: 700, nTasks: 1 });
+    expect(groups.get("gpt-5")).toMatchObject({ totalTokens: 510, inputTokens: 300, nTasks: 1 });
+    expect(groups.get(null)).toMatchObject({ totalTokens: 50, inputTokens: 25, nTasks: 1 });
+    expect(groups.get("claude-haiku-3-5")).toMatchObject({ totalTokens: 50, nTasks: 1 });
+    expect(groups.get("gpt-4o-mini")).toMatchObject({ totalTokens: 50, nTasks: 1 });
+    expect(groups.has("glm-outside")).toBe(false);
+    expect(byModel.totals).toMatchObject({ inputTokens: 1_095, outputTokens: 555, cachedTokens: 30, cacheWriteTokens: 0, totalTokens: 1_680, nTasks: 3 });
+    expect(byModel.series?.map((point) => [point.bucket, point.totalTokens])).toEqual([
+      ["2026-06-02", 1_020],
+      ["2026-06-15", 410],
+      ["2026-06-18", 50],
+      ["2026-06-19", 50],
+      ["2026-06-20", 50],
+      ["2026-07-02", 100],
+    ]);
+    expect(byModel.cost.unavailable).toBe(true);
+
+    const byProvider = aggregateTokenAnalytics(db, { from, to, groupBy: "provider" });
+    expect(new Map(byProvider.groups.map((group) => [group.key, group.totalTokens]))).toEqual(
+      new Map([["anthropic", 1_070], ["openai", 560], [null, 50]]),
+    );
   });
 
   it("marks unpriced per-model buckets as cost unavailable instead of zero", () => {
@@ -199,10 +356,7 @@ describe("token-analytics", () => {
 
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]).toMatchObject({ key: "unknown-model", totalTokens: 100, cost: { usd: null, unavailable: true } });
-    expect(result.cost).toEqual(costFor(
-      { inputTokens: 60, outputTokens: 40, cachedTokens: 0, cacheWriteTokens: 0 },
-      { provider: "openai", model: "gpt-5" },
-    ));
+    expect(result.cost).toEqual({ usd: null, unavailable: true, stale: false });
   });
 
   it("falls back to the legacy snapshot when per-model JSON is malformed", () => {
@@ -289,8 +443,111 @@ describe("token-analytics", () => {
     );
   });
 
+  it("includes chat token usage in mixed task and chat totals exactly once", () => {
+    insertTask(db, {
+      id: "task-usage",
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 10,
+      cacheWriteTokens: 5,
+      totalTokens: 165,
+      lastUsedAt: "2026-03-01T01:00:00.000Z",
+      tokenUsageModelProvider: "anthropic",
+      tokenUsageModelId: "claude-sonnet-4-5",
+      agentId: "executor-agent",
+    });
+    insertChatTokenUsage(db, {
+      id: "chat-1",
+      chatSessionId: "chat-a",
+      messageId: "msg-a",
+      agentId: "agent-chat",
+      inputTokens: 20,
+      outputTokens: 10,
+      cachedTokens: 3,
+      cacheWriteTokens: 2,
+      totalTokens: 35,
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      createdAt: "2026-03-01T02:00:00.000Z",
+    });
+    insertChatTokenUsage(db, {
+      id: "planner-1",
+      sourceKind: "task-planner-chat",
+      chatSessionId: "chat-planner",
+      messageId: "msg-planner",
+      agentId: "task-planner:task-usage",
+      inputTokens: 5,
+      outputTokens: 7,
+      totalTokens: 12,
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      createdAt: "2026-03-01T03:00:00.000Z",
+    });
+
+    const result = aggregateTokenAnalytics(db, {
+      from: "2026-03-01T00:00:00.000Z",
+      to: "2026-03-01T23:59:59.999Z",
+      groupBy: "model",
+      granularity: "day",
+    });
+
+    expect(result.totals).toMatchObject({
+      inputTokens: 125,
+      outputTokens: 67,
+      cachedTokens: 13,
+      cacheWriteTokens: 7,
+      totalTokens: 212,
+      nTasks: 1,
+      nChatMessages: 2,
+    });
+    expect(result.series).toHaveLength(1);
+    expect(result.series?.[0]).toMatchObject({ bucket: "2026-03-01", totalTokens: 212, nTasks: 1, nChatMessages: 2 });
+    const groups = new Map(result.groups.map((group) => [group.key, group]));
+    expect(groups.get("claude-sonnet-4-5")).toMatchObject({ totalTokens: 165, nTasks: 1, nChatMessages: 0 });
+    expect(groups.get("gpt-4o")).toMatchObject({ totalTokens: 47, nTasks: 0, nChatMessages: 2 });
+    expect(result.groups.reduce((sum, group) => sum + group.totalTokens, 0)).toBe(result.totals.totalTokens);
+  });
+
+  it("groups chat token usage by provider and agent without inflating task counts", () => {
+    insertChatTokenUsage(db, {
+      id: "room-a",
+      sourceKind: "room-chat",
+      roomId: "room-1",
+      messageId: "room-msg-a",
+      agentId: "agent-a",
+      inputTokens: 8,
+      outputTokens: 4,
+      totalTokens: 12,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      createdAt: "2026-03-01T00:00:00.000Z",
+    });
+    insertChatTokenUsage(db, {
+      id: "room-b",
+      sourceKind: "room-chat",
+      roomId: "room-1",
+      messageId: "room-msg-b",
+      agentId: "agent-b",
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      createdAt: "2026-03-01T00:01:00.000Z",
+    });
+
+    const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
+    expect(byProvider.totals).toMatchObject({ totalTokens: 27, nTasks: 0, nChatMessages: 2 });
+    expect(byProvider.groups).toHaveLength(1);
+    expect(byProvider.groups[0]).toMatchObject({ key: "anthropic", totalTokens: 27, nTasks: 0, nChatMessages: 2 });
+
+    const byAgent = aggregateTokenAnalytics(db, { groupBy: "agent" });
+    expect(new Map(byAgent.groups.map((group) => [group.key, group.totalTokens]))).toEqual(new Map([["agent-b", 15], ["agent-a", 12]]));
+  });
+
   it("empty range returns zeroed structures, not nulls", () => {
     insertTask(db, { id: "t1", inputTokens: 100, totalTokens: 100, lastUsedAt: "2026-03-01T00:00:00.000Z", modelId: "model-A" });
+    insertChatTokenUsage(db, { id: "chat-out", inputTokens: 100, totalTokens: 100, createdAt: "2026-03-01T00:00:00.000Z" });
 
     const result = aggregateTokenAnalytics(db, {
       from: "2027-01-01T00:00:00.000Z",
@@ -304,6 +561,7 @@ describe("token-analytics", () => {
       cacheWriteTokens: 0,
       totalTokens: 0,
       nTasks: 0,
+      nChatMessages: 0,
     });
     expect(result.groups).toEqual([]);
   });

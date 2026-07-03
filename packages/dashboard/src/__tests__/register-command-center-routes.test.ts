@@ -197,6 +197,44 @@ function seedGithubIssueMetrics(db: Database, opts: { prefix: string; repo: stri
   }
 }
 
+function seedGitlabIssueMetrics(db: Database, opts: { prefix: string; project: string; filed: number; fixed: number }): void {
+  for (let i = 0; i < opts.filed; i += 1) {
+    db.prepare(
+      `INSERT INTO tasks (id, description, "column", createdAt, updatedAt, gitlabTracking)
+       VALUES (?, 'desc', 'todo', '2026-03-02T00:00:00.000Z', '2026-03-02T00:00:00.000Z', ?)`,
+    ).run(
+      `${opts.prefix}-gitlab-filed-${i}`,
+      JSON.stringify({
+        item: {
+          kind: "project_issue",
+          iid: i + 1,
+          projectPath: opts.project,
+          url: `https://gitlab.example.test/${opts.project}/-/issues/${i + 1}`,
+          createdAt: "2026-03-02T00:00:00.000Z",
+        },
+      }),
+    );
+  }
+  for (let i = 0; i < opts.fixed; i += 1) {
+    db.prepare(
+      `INSERT INTO tasks (
+         id, title, description, "column", createdAt, updatedAt,
+         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId,
+         sourceIssueNumber, sourceIssueUrl, sourceIssueClosedAt
+       ) VALUES (?, ?, 'desc', 'done', '2026-03-03T00:00:00.000Z', '2026-03-03T00:00:00.000Z',
+                 'gitlab', ?, ?, ?, ?, ?)`,
+    ).run(
+      `${opts.prefix}-gitlab-fixed-${i}`,
+      `Resolve ${opts.project}#${i + 100}`,
+      opts.project,
+      String(i + 100),
+      i + 100,
+      `https://gitlab.example.test/${opts.project}/-/issues/${i + 100}`,
+      "2026-03-03T12:00:00.000Z",
+    );
+  }
+}
+
 /**
  * Build an express app with the registrar mounted, backed by per-project real
  * DBs. The `getScopedStore` resolves the DB by the `projectId` query param,
@@ -326,6 +364,92 @@ describe("register-command-center-routes", () => {
     expect(body).not.toHaveProperty("series");
     expect(body.groupBy).toBe("model");
     expect((body.totals as { totalTokens: number }).totalTokens).toBe(200);
+  });
+
+  it("returns every Last 30 days per-model bucket in JSON and CSV token analytics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T00:00:00.000Z"));
+    dbA.prepare(
+      `INSERT INTO tasks
+         (id, description, "column", modelProvider, modelId,
+          tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens, tokenUsageCacheWriteTokens, tokenUsageTotalTokens,
+          tokenUsageLastUsedAt, tokenUsageModelProvider, tokenUsageModelId, tokenUsagePerModel, createdAt, updatedAt)
+       VALUES (?, 'desc', 'todo', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "FN-last-30-multi",
+      950,
+      450,
+      0,
+      0,
+      1_400,
+      "2026-07-05T00:00:00.000Z",
+      "openai",
+      "gpt-5",
+      JSON.stringify([
+        {
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          inputTokens: 700,
+          outputTokens: 300,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 1_000,
+          firstUsedAt: "2026-06-15T00:00:00.000Z",
+          lastUsedAt: "2026-06-15T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 250,
+          outputTokens: 150,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 400,
+          firstUsedAt: "2026-06-20T00:00:00.000Z",
+          lastUsedAt: "2026-06-20T00:00:00.000Z",
+        },
+        {
+          modelProvider: "zai",
+          modelId: "glm-outside",
+          inputTokens: 10,
+          outputTokens: 10,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 20,
+          firstUsedAt: "2026-07-03T00:00:00.000Z",
+          lastUsedAt: "2026-07-03T00:00:00.000Z",
+        },
+      ]),
+      "2026-06-15T00:00:00.000Z",
+      "2026-07-05T00:00:00.000Z",
+    );
+
+    const json = await request(
+      app,
+      "GET",
+      "/api/command-center/tokens?from=2026-06-02T00%3A00%3A00.000Z&groupBy=model&granularity=day&projectId=proj-a",
+    );
+    expect(json.status).toBe(200);
+    expect(json.body).toMatchObject({ from: "2026-06-02T00:00:00.000Z", to: "2026-07-02T00:00:00.000Z", groupBy: "model" });
+    const groups = new Map((json.body as { groups: { key: string | null; totalTokens: number }[] }).groups.map((group) => [group.key, group.totalTokens]));
+    expect(groups.get("claude-sonnet-4-5")).toBe(1_000);
+    expect(groups.get("gpt-5")).toBe(400);
+    expect(groups.has("glm-outside")).toBe(false);
+    expect((json.body as { totals: { totalTokens: number; nTasks: number } }).totals).toMatchObject({ totalTokens: 1_400, nTasks: 1 });
+    expect((json.body as { series: { bucket: string; totalTokens: number }[] }).series.map((point) => [point.bucket, point.totalTokens])).toEqual([
+      ["2026-06-15", 1_000],
+      ["2026-06-20", 400],
+    ]);
+
+    const csv = await request(
+      app,
+      "GET",
+      "/api/command-center/tokens?from=2026-06-02T00%3A00%3A00.000Z&groupBy=model&projectId=proj-a&format=csv",
+    );
+    expect(csv.status).toBe(200);
+    expect(csv.body as string).toContain("claude-sonnet-4-5");
+    expect(csv.body as string).toContain("gpt-5");
+    expect(csv.body as string).not.toContain("glm-outside");
   });
 
   it("returns token time-series buckets when granularity is requested", async () => {
@@ -610,6 +734,18 @@ describe("register-command-center-routes", () => {
       },
     ]);
 
+    seedGitlabIssueMetrics(dbA, { prefix: "FN-A", project: "platform/api", filed: 3, fixed: 2 });
+    const gitlab = await request(app, "GET", `/api/command-center/gitlab?${range}&projectId=proj-a`);
+    expect(gitlab.status).toBe(200);
+    expect(gitlab.body).toMatchObject({ filed: 3, fixed: 2, net: 1 });
+    expect(gitlab.body).toHaveProperty("daily");
+    expect(gitlab.body).toHaveProperty("byProject");
+    expect(gitlab.body).toHaveProperty("resolved");
+    expect((gitlab.body as { resolved: unknown[] }).resolved).toEqual([
+      expect.objectContaining({ taskId: "FN-A-gitlab-fixed-0", project: "platform/api", issueNumber: 100 }),
+      expect.objectContaining({ taskId: "FN-A-gitlab-fixed-1", project: "platform/api", issueNumber: 101 }),
+    ]);
+
     process.env.FUSION_SIGNAL_SENTRY_SECRET = "configured-sentry";
     process.env.FUSION_SIGNAL_WEBHOOK_SECRET = "configured-webhook";
     process.env.FUSION_SIGNAL_GITLAB_SECRET = "configured-gitlab";
@@ -665,6 +801,7 @@ describe("register-command-center-routes", () => {
       "team",
       "workflows",
       "github",
+      "gitlab",
       "signals",
       "plugin-activations",
     ];
@@ -1229,6 +1366,7 @@ describe("vite /api proxy negative-lookahead (proxy verification)", () => {
     expect(PROXY_RE.test("/api/command-center/workflows")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/live")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/github")).toBe(true);
+    expect(PROXY_RE.test("/api/command-center/gitlab")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/signals")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/signals/connectors")).toBe(true);
     expect(PROXY_RE.test("/api/command-center/activity?from=x&to=y")).toBe(true);

@@ -37,6 +37,8 @@ const cliPrintingPressPluginSrc = join(__dirname, "..", "..", "plugins", "fusion
 const cliPrintingPressPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-cli-printing-press");
 const compoundEngineeringPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-compound-engineering");
 const compoundEngineeringPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-compound-engineering");
+const linearImportPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-linear-import");
+const linearImportPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-linear-import");
 const dashboardClientStub = `<!doctype html>
 <html lang="en">
   <head>
@@ -399,6 +401,12 @@ const cliBuildConfig = {
       pluginId: "fusion-plugin-compound-engineering",
       srcDir: compoundEngineeringPluginSrc,
       destDir: compoundEngineeringPluginDest,
+    });
+
+    await bundlePluginEntry({
+      pluginId: "fusion-plugin-linear-import",
+      srcDir: linearImportPluginSrc,
+      destDir: linearImportPluginDest,
     });
 
     if (existsSync(reportsPluginDest)) {

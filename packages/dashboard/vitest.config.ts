@@ -510,6 +510,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-compound-engineering/src/index.ts",
       ),
+      "@fusion-plugin-examples/linear-import/dashboard-view": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-linear-import/src/dashboard-view.tsx",
+      ),
+      "@fusion-plugin-examples/linear-import": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-linear-import/src/index.ts",
+      ),
     },
   },
   test: {

@@ -50,6 +50,7 @@ const ROADMAP_PLUGIN_ID = "fusion-plugin-roadmap";
 const REPORTS_PLUGIN_ID = "fusion-plugin-reports";
 const CLI_PRINTING_PRESS_PLUGIN_ID = "fusion-plugin-cli-printing-press";
 const COMPOUND_ENGINEERING_PLUGIN_ID = "fusion-plugin-compound-engineering";
+const LINEAR_IMPORT_PLUGIN_ID = "fusion-plugin-linear-import";
 
 function makeManifest(overrides?: Partial<{ id: string; version: string; name: string }>) {
   return {
@@ -346,6 +347,10 @@ describe("ensureBundledDependencyGraphPluginInstalled", () => {
   it("includes compound engineering plugin in bundled plugin ids", () => {
     expect(BUNDLED_PLUGIN_IDS).toContain(COMPOUND_ENGINEERING_PLUGIN_ID);
   });
+
+  it("includes Linear import plugin in bundled plugin ids", () => {
+    expect(BUNDLED_PLUGIN_IDS).toContain(LINEAR_IMPORT_PLUGIN_ID);
+  });
   it("fresh install: registers and loads the plugin when not in DB", async () => {
     setupBundleExists();
     const store = makePluginStore();
@@ -555,6 +560,30 @@ describe("ensureBundledDependencyGraphPluginInstalled", () => {
     expect(result).toBe("installed");
     expect(store.registerPlugin).toHaveBeenCalledWith(
       expect.objectContaining({ manifest: expect.objectContaining({ id: CURSOR_PLUGIN_ID }) }),
+    );
+  });
+
+  it("registers Linear import plugin via generic bundled installer", async () => {
+    const manifest = makeManifest({ id: LINEAR_IMPORT_PLUGIN_ID, name: "Linear Import" });
+    mockExistsSync.mockImplementation((p: string) => {
+      if (p.endsWith("manifest.json") && p.includes(LINEAR_IMPORT_PLUGIN_ID)) return true;
+      if (p.endsWith("/bundled.js") && p.includes(LINEAR_IMPORT_PLUGIN_ID)) return true;
+      return false;
+    });
+    mockReadFile.mockResolvedValue(JSON.stringify(manifest));
+    mockValidatePluginManifest.mockReturnValue({ valid: true, errors: [] });
+
+    const store = makePluginStore();
+    const loader = makePluginLoader();
+    const result = await ensureBundledPluginInstalled(
+      store as unknown as import("@fusion/core").PluginStore,
+      loader as unknown as import("@fusion/core").PluginLoader,
+      LINEAR_IMPORT_PLUGIN_ID,
+    );
+
+    expect(result).toBe("installed");
+    expect(store.registerPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({ manifest: expect.objectContaining({ id: LINEAR_IMPORT_PLUGIN_ID }) }),
     );
   });
 
