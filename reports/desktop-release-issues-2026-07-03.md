@@ -10,6 +10,26 @@ This document collects the issues we found while trying to run the official Fusi
 
 ---
 
+## Resolution status (PR #1883)
+
+| # | Issue | Status |
+|---|-------|--------|
+| 1 | `electron` only a devDependency | **Fixed** — `electron` added to `@runfusion/fusion` runtime deps; lockfile synced. |
+| 2 | Ancestor-dir walk crashes on unrelated JSON | **Already handled** — the desktop launcher uses `process.cwd()` (CLI) / `$HOME` (Electron main), never an ancestor walk (`desktop.ts:175`, `main.ts` `resolveLocalRuntimeRoot`), and every JSON parse on the shared discovery path is already `try/catch`-guarded, so unrelated JSON no longer throws. |
+| 3 | Manage Projects opens Settings | **Fixed** — `handleViewAllProjects` now resets `taskView` to `command-center`. |
+| 4 | Windows Terminal "Help" dialogs | **Fixed** — frontend auto-create of the first terminal tab is skipped on Windows. |
+| 5 | Packaged build can miss `preload`/assets | **Fixed** — `scripts/build.ts` now verifies `main.js`, `preload.js`, and `client/index.html` exist in both `dist/` and the staged `deploy/dist/` before packaging, failing the build otherwise. (In this repo the preload ships as `dist/preload.js` inside `app.asar`, not `preload.cjs`.) |
+| 6 | Desktop port drift / collision | **Already handled** — the embedded runtime binds an ephemeral port (`app.listen(0)`, `desktop.ts:78`), so fixed-port collision is structurally impossible; the CLI passes it via `FUSION_SERVER_PORT` and the desktop reuses it instead of double-binding (Issue 9), and a single-instance lock (`deep-link.ts`) quits a duplicate window. A fixed 9119/8643 would *reintroduce* collisions, so we deliberately did not pin one. |
+| 7 | GPU/sandbox instability on Windows | **Fixed** — GPU/sandbox-disabling flags applied on Windows only (`os.platform() === "win32"`); macOS/Linux keep hardware acceleration and the sandbox. |
+| 8 | User-data not isolated | **Fixed** — desktop profile relocated under `~/.fusion/desktop-user-data`, with a one-time copy migrating an existing operator's previous profile (window geometry/session) so upgrades don't lose state. |
+| 9 | Desktop doesn't reuse a running server | **Fixed** — when `FUSION_SERVER_PORT` is set the desktop attaches to the CLI's dashboard instead of spawning an embedded runtime. |
+
+Recommendation #2 (verify packaged Windows layout before publishing) is now **enforced in CI**: `desktop-windows.yml` asserts the shipped `app.asar` contains `dist/main.js`, `dist/preload.js`, and `dist/client/index.html`, on top of `scripts/build.ts`'s pre-package staging check.
+
+Remaining as future team work (deliberately not attempted here): recommendation #1's full GUI-launch smoke (launch `Fusion.exe` and assert the window is visible/responsive) — reliably asserting a rendered Electron window on a CI runner is flaky, which the project's standing anti-flaky rule forbids adding; and the port/process auditing docs for Issue 6.
+
+---
+
 ## Issue 1: `fusion desktop` fails to launch on Windows 0.52.0
 
 ### Symptom

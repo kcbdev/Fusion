@@ -2,12 +2,22 @@ import { app, BrowserWindow, nativeImage, screen, Tray } from "electron";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
+import { migratePreviousUserData } from "./user-data-migration.js";
 
 /*
 FNXC:DesktopUserDataIsolation 2026-07-03-14:40:
 Isolate Electron desktop user-data/cache/crash artifacts under ~/.fusion/desktop-user-data so the packaged desktop does not share (or collide with) the default per-app Chromium profile across installs and Fusion versions (field report Issue 8). setPath must run before app "ready"; once locked it throws, which is non-fatal here.
+
+FNXC:DesktopUserDataMigration 2026-07-03-15:10:
+Migrate the previous default profile into the new location BEFORE `setPath` overrides it, so upgrading operators keep their window geometry/session. `app.getPath("userData")` returns the default `<appData>/<productName>` path until overridden, so capture it first. See user-data-migration.ts for the one-time-copy gating.
 */
 const fusionUserDataDir = join(os.homedir(), ".fusion", "desktop-user-data");
+
+const migratedUserData = migratePreviousUserData(app.getPath("userData"), fusionUserDataDir);
+if (migratedUserData) {
+  console.log(`[desktop/main] Migrated previous desktop profile into ${fusionUserDataDir}`);
+}
+
 try {
   app.commandLine.appendSwitch("user-data-dir", fusionUserDataDir);
   app.setPath("userData", fusionUserDataDir);
