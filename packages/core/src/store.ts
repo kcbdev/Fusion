@@ -5060,15 +5060,13 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     if (this.isWatching) this.taskCache.set(id, { ...task });
 
     /*
-    FNXC:CodingIdeasWorkflow 2026-07-04-10:10:
-    A freshly created task has no specification yet regardless of which intake/planning column it lands in (triage, ideas, or a merged todo). Use the bootstrap stub for every pre-execution column so the spec-detection helpers (isBootstrapPromptStub) treat the card as unplanned until triage replaces it with a real PROMPT.md. Execution/review/done/archived columns keep the generated specified prompt for the legacy direct-create paths.
+    FNXC:CodingIdeasWorkflow 2026-07-04-10:10 (revised):
+    A freshly created task needs the bootstrap stub only when it lands in a column the triage service will plan from — the legacy "triage" intake or a workflow's resolved manual intake (e.g. Coding (Ideas) → "ideas"). Gate on those two ids so legacy direct-create callers that pass an explicit column like "todo" still get the generated specified prompt. A task whose column is neither the entry column nor "triage" (custom hold/backlog columns, direct todo creates) keeps generateSpecifiedPrompt.
     */
-    const isPrePlanningColumn = task.column !== "in-progress"
-      && task.column !== "in-review"
-      && task.column !== "done"
-      && task.column !== "archived";
+    const isIntakeColumn = task.column === "triage"
+      || (options?.resolvedEntryColumn !== undefined && task.column === options.resolvedEntryColumn);
     const prompt = options?.promptOverride
-      ?? (isPrePlanningColumn
+      ?? (isIntakeColumn
         ? buildBootstrapPrompt(id, task.title, task.description)
         : this.generateSpecifiedPrompt(task));
     const validation = validateFileScopeInPromptContent(prompt);

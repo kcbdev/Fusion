@@ -336,8 +336,13 @@ export class TriageProcessor {
   }
 
   private async clearStaleSpecifyingStatuses(): Promise<void> {
-    const tasks = await this.store.listTasks({ column: "triage", slim: true });
-    const stale = tasks.filter(
+    /*
+    FNXC:CodingIdeasWorkflow 2026-07-04-12:00:
+    In the merged planner/capacity "todo" column a task can carry status "planning" when the triage service is specifying it in place. A crash/restart before planning completes leaves that status set, so the startup sweep must clear it from BOTH triage and todo — otherwise a stale planning todo task permanently occupies a maxTriageConcurrent slot and blocks new triage work.
+    */
+    const triageTasks = await this.store.listTasks({ column: "triage", slim: true });
+    const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
+    const stale = [...triageTasks, ...todoTasks].filter(
       (t) => t.status === "planning" && !this.processing.has(t.id),
     );
     for (const t of stale) {

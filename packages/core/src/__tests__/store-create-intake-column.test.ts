@@ -48,4 +48,16 @@ describe("createTask intake-column wiring (Coding (Ideas))", () => {
     );
     expect(prompt).toBe(`# ${task.id}\n\n${task.description}\n`);
   });
+
+  it("keeps generateSpecifiedPrompt for a direct create into todo (not bootstrap)", async () => {
+    const store = harness.store();
+    const task = await store.createTask({ description: "direct todo create", column: "todo" });
+    expect(task.column).toBe("todo");
+    const prompt = await readFile(
+      join(harness.rootDir(), ".fusion", "tasks", task.id, "PROMPT.md"),
+      "utf-8",
+    );
+    // A direct todo create is NOT an intake column, so it must NOT get the bootstrap stub.
+    expect(prompt).not.toBe(`# ${task.id}\n\n${task.description}\n`);
+  });
 });

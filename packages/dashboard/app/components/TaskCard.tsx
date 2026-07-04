@@ -1407,7 +1407,7 @@ function TaskCardComponent({
     || Boolean(task.blockedBy)
     || Boolean(task.overlapBlockedBy)
     || Boolean(fanout && fanout.totalCount > 0);
-  const showStartAction = task.column === "ideas" && Boolean(onMoveTask);
+  const showStartAction = taskColumnFlags?.intake === true && task.column !== "triage" && Boolean(onMoveTask);
   const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || showAddressPrFeedbackAction || showStartAction || (showInReviewMoveControl && !metaRowVisible);
 
   const renderInReviewMoveControl = () => (

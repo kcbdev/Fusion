@@ -2252,6 +2252,24 @@ export class Scheduler {
         reserveSlot: async (task): Promise<SlotReservation | null> => {
           let reservedScope = false;
 
+          /*
+          FNXC:CodingIdeasWorkflow 2026-07-04-12:10:
+          The workflow-column dispatch path is the only dispatcher when the flag is on, so the planning/bootstrap guards from the legacy todo filter must also apply here. A todo task being specified in place (status "planning") or still carrying the bootstrap stub PROMPT.md must not be released into an execution slot.
+          */
+          if (task.status === "planning") {
+            return null;
+          }
+          if (task.column === "todo") {
+            try {
+              const promptContent = await readFile(getPromptPath(this.store.getTasksDir(), task.id), "utf-8");
+              if (promptContent === buildBootstrapPrompt(task.id, task.title, task.description)) {
+                return null;
+              }
+            } catch {
+              // Missing prompt handled by filesystem validation below.
+            }
+          }
+
           const unmetDeps = getUnmetSchedulingDependencies(task, tasks, schedulingDependencyOptions);
           if (unmetDeps.length > 0) {
             await this.store.updateTask(task.id, {
