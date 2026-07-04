@@ -837,8 +837,13 @@ automatic large-task splitting guidance for oversized M/L work. Set it to `false
 in a workflow's Values tab when triage should keep large tasks whole unless the
 task explicitly has `breakIntoSubtasks: true`; explicit subtask requests still
 follow the mandatory split flow. Planner oversight uses `plannerOversightLevel`
-(default `autonomous`) with `off`, `observe`, `steer`, and `autonomous` values;
-per-task override and engine runtime behavior are follow-up work. See
+(default `autonomous`) with `off`, `observe`, `steer`, and `autonomous` values —
+full steering/control is ON for every workflow unless explicitly changed. Tasks
+may set a nullable `Task.plannerOversightLevel` override that wins over the
+workflow value when present; `resolveEffectivePlannerOversightLevel` in
+`@fusion/core` resolves the effective level as task override → workflow
+effective value → `autonomous`. The overseer runtime/monitoring behavior that
+acts on this level is still follow-up work (FN-7511+). See
 [Settings Reference → Workflow Settings](./settings-reference.md#workflow-settings)
 for the full moved-key catalog, the editor walkthrough, and the export/sync posture.
 
