@@ -26,6 +26,7 @@ vi.mock("lucide-react", () => ({
   Zap: () => <svg data-testid="icon-zap" />,
   AlertTriangle: () => null,
   ArrowUpRight: () => null,
+  Eye: () => null,
 }));
 
 vi.mock("../ProviderIcon", () => ({
@@ -85,6 +86,11 @@ vi.mock("../../api", () => ({
   fetchAgents: vi.fn(),
   rebuildTaskSpec: vi.fn(),
   refreshPrStatus: vi.fn(),
+  // FNXC:PlannerOversight 2026-07-04-13:00: tests that pass a `workflowBadge`
+  // prop trigger the FN-7516 workflow-effective-oversight fetch effect; mock
+  // it so those tests don't hit an unmocked API export. Resolves an empty
+  // effective map (no workflow-level override) by default.
+  fetchWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
 }));
 
 const mockConfirm = vi.fn<(options: ConfirmOptions) => Promise<boolean>>();
@@ -2354,10 +2360,14 @@ describe("TaskCard", () => {
     expect(timer?.closest(".card-meta-badges")).toBeNull();
     expect(timer?.closest(".card-footer-row-right")).not.toBeNull();
 
+    // FNXC:PlannerOversight 2026-07-04-00:00: an unset per-task oversight override
+    // resolves to the schema default ("autonomous") via the FN-7516 card badge,
+    // so it now appears alongside the other opt-in meta badges (FN-7516).
     expect(Array.from(group?.children ?? []).map((child) => child.className)).toEqual([
       "card-priority-badge card-priority-badge--high",
       "card-execution-mode-badge card-execution-mode-badge--fast",
       "card-agent-created-badge",
+      "card-oversight-badge card-oversight-badge--autonomous",
 
 
     ]);
@@ -2400,6 +2410,11 @@ describe("TaskCard", () => {
           column: "in-progress",
           columnMovedAt: "2026-04-25T12:00:00.000Z",
           updatedAt: "2026-04-25T12:00:00.000Z",
+          // FNXC:PlannerOversight 2026-07-04-00:00: pin the oversight level "off" so
+          // the FN-7516 oversight/overseer-state badges don't populate
+          // .card-meta-badges here — this test is specifically about the
+          // lone-time-chip footer placement, not the oversight badges.
+          plannerOversightLevel: "off",
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -2431,6 +2446,12 @@ describe("TaskCard", () => {
           priority: "normal",
           executionMode: "standard",
           sourceType: "dashboard_ui",
+          // FNXC:PlannerOversight 2026-07-04-00:00: an unset oversight override now
+          // resolves to the schema default ("autonomous") and renders a badge
+          // (FN-7516) — pin the level explicitly "off" here so this test keeps
+          // asserting the ORIGINAL affordance set (priority/fast-mode/agent-created)
+          // is what determines the wrapper's presence.
+          plannerOversightLevel: "off",
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -3405,6 +3426,11 @@ describe("TaskCard", () => {
           },
           executionStartedAt: "2026-04-25T12:00:00.000Z",
           updatedAt: "2026-04-25T12:12:00.000Z",
+          // FNXC:PlannerOversight 2026-07-04-00:00: pin the oversight level "off" so
+          // the FN-7516 oversight/overseer-state badges don't populate
+          // .card-meta-badges here — this test is specifically about the footer
+          // right-cluster grouping, not the oversight badges.
+          plannerOversightLevel: "off",
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -5414,7 +5440,11 @@ describe("TaskCard workflow badges", () => {
   it("renders a compact accessible workflow badge only when metadata is present", () => {
     const { container, rerender } = render(
       <TaskCard
-        task={makeTask()}
+        // FNXC:PlannerOversight 2026-07-04-00:00: pin the oversight level "off" so
+        // the FN-7516 oversight/overseer-state badges don't populate
+        // .card-meta-badges here — this test is specifically about workflow-badge
+        // placement, not the oversight badges.
+        task={makeTask({ plannerOversightLevel: "off" })}
         onOpenDetail={noop}
         addToast={noop}
         workflowBadge={{ workflowId: "wf-custom", workflowName: "Custom Flow", workflowIcon: "⚙️" }}

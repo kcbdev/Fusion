@@ -3,17 +3,23 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight } from "lucide-react";
-import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, MergeResult } from "@fusion/core";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight, Eye } from "lucide-react";
+import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, MergeResult, PlannerOversightLevel } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
   HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
+  PLANNER_OVERSIGHT_LEVELS,
   TASK_PRIORITIES,
   VALID_TRANSITIONS,
   getErrorMessage,
 } from "@fusion/core";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { addressPrFeedback, fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, rebuildTaskSpec, refreshPrStatus, type WorkflowFieldDefinition } from "../api";
+// FNXC:PlannerOversight 2026-07-04-00:00: the dashboard's vite alias for "@fusion/core"
+// resolves only to ../core/src/types.ts (see packages/dashboard/vite.config.ts), so this
+// resolver — like resolveEffectiveAutoMerge above — must be imported from its source module
+// directly rather than the package barrel.
+import { resolveEffectivePlannerOversightLevel } from "../../../core/src/workflow-settings-resolver";
+import { addressPrFeedback, fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, rebuildTaskSpec, refreshPrStatus, fetchWorkflowSettingValues, type WorkflowFieldDefinition } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { GitLabBadge } from "./GitLabBadge";
 import { PrCreateModal } from "./PrCreateModal";
@@ -103,6 +109,80 @@ async function getAgentName(agentId: string, projectId?: string): Promise<string
   }
 }
 
+// ── Workflow-effective planner-oversight-level caching ─────────────────────
+
+/*
+ * FNXC:PlannerOversight 2026-07-04-12:30:
+ * Code review (FN-7516) flagged that always resolving with an `undefined`
+ * workflow tier makes every task without a per-task override display
+ * "Autonomous recovery", even when the task's workflow was explicitly
+ * configured to Off/Observe/Steer (FN-7508). The workflow's effective
+ * `plannerOversightLevel` setting value is NOT present on the Task payload
+ * (verified: no such field exists in packages/core/src/types.ts or in any
+ * task-list/detail serialization path), so the card cannot read it via
+ * `task.*` alone. Rather than plumb a new prop through the five card call
+ * sites (out of this task's scope; see PROMPT.md File Scope note) or thread a
+ * new field through the task-store/API contract (a bigger, separate change),
+ * this mirrors the established card-local caching pattern already used for
+ * mission titles/agent names above: a module-level cache keyed by
+ * `(projectId, workflowId)`, populated by a self-contained fetch to the
+ * existing `GET /api/workflows/:id/setting-values` route (already used by the
+ * workflow editor's Values tab), with in-flight de-duplication so many cards
+ * sharing one workflow trigger a single network call. Round-2 code review:
+ * the very first render before the fetch resolves must NOT show a guessed
+ * schema-default badge — see `workflowOversightResolved` near the effect
+ * below, which gates both oversight badges until the workflow tier is known
+ * (or a synchronous per-task override makes the wait moot). Threading this
+ * value onto the task payload directly for zero-latency display remains a
+ * possible follow-up (see FN-7516 delivery notes) but is no longer required
+ * for correctness.
+ */
+const workflowOversightEffectiveCache = new Map<string, PlannerOversightLevel | undefined>();
+const workflowOversightInflight = new Map<string, Promise<void>>();
+
+/** @internal Test helper to reset the workflow-effective-oversight cache between tests */
+export function __test_clearWorkflowOversightEffectiveCache(): void {
+  workflowOversightEffectiveCache.clear();
+  workflowOversightInflight.clear();
+}
+
+function getWorkflowOversightCacheKey(workflowId: string, projectId?: string): string {
+  return `${projectId ?? "default"}::${workflowId}`;
+}
+
+function isPlannerOversightLevelValue(value: unknown): value is PlannerOversightLevel {
+  return typeof value === "string" && (PLANNER_OVERSIGHT_LEVELS as readonly string[]).includes(value);
+}
+
+/** Fetch (with in-flight de-dup) and cache the workflow's effective
+ *  `plannerOversightLevel` setting value for a given `(workflowId, projectId)`.
+ *  Never throws — an error caches `undefined` so the resolver falls through to
+ *  the schema default rather than retrying every render. */
+async function loadWorkflowOversightEffectiveLevel(workflowId: string, projectId: string | undefined): Promise<PlannerOversightLevel | undefined> {
+  const key = getWorkflowOversightCacheKey(workflowId, projectId);
+  if (workflowOversightEffectiveCache.has(key)) {
+    return workflowOversightEffectiveCache.get(key);
+  }
+
+  let inflight = workflowOversightInflight.get(key);
+  if (!inflight) {
+    inflight = fetchWorkflowSettingValues(workflowId, projectId)
+      .then((payload) => {
+        const raw = payload.effective?.plannerOversightLevel;
+        workflowOversightEffectiveCache.set(key, isPlannerOversightLevelValue(raw) ? raw : undefined);
+      })
+      .catch(() => {
+        workflowOversightEffectiveCache.set(key, undefined);
+      })
+      .finally(() => {
+        workflowOversightInflight.delete(key);
+      });
+    workflowOversightInflight.set(key, inflight);
+  }
+  await inflight;
+  return workflowOversightEffectiveCache.get(key);
+}
+
 function normalizeTaskPriorityValue(priority: Task["priority"]): TaskPriority {
   return typeof priority === "string" && (TASK_PRIORITIES as readonly string[]).includes(priority)
     ? (priority as TaskPriority)
@@ -112,6 +192,116 @@ function normalizeTaskPriorityValue(priority: Task["priority"]): TaskPriority {
 function abbreviateBadge(text: string, max: number): string {
   if (text.length <= max) return text;
   return text.slice(0, max - 3) + "...";
+}
+
+/*
+ * FNXC:PlannerOversight 2026-07-04-00:00:
+ * Short card-badge labels + CSS modifier suffixes for each non-"off" effective
+ * oversight level (FN-7516). Kept short to preserve the badge-wrap/badge-height
+ * invariants asserted by TaskCard.badge-wrap.test.tsx.
+ */
+const OVERSIGHT_BADGE_LABEL: Record<Exclude<PlannerOversightLevel, "off">, string> = {
+  observe: "Observe",
+  steer: "Steer",
+  autonomous: "Auto-recovery",
+};
+const OVERSIGHT_BADGE_MODIFIER: Record<Exclude<PlannerOversightLevel, "off">, string> = {
+  observe: "observe",
+  steer: "steer",
+  autonomous: "autonomous",
+};
+
+/*
+ * FNXC:PlannerOversight 2026-07-04-00:00:
+ * FN-7516 active-overseer-state indicator. The real FN-7511/FN-7512 monitor/
+ * recovery state lives only in-memory on the engine (`PlannerOverseerMonitor`,
+ * `PlannerRecoveryController`) with no persistence onto `Task` or dashboard API
+ * route today, and `@fusion/engine` is a server-only package the client bundle
+ * must not import (dashboard's `app/` tree has no existing `@fusion/engine`
+ * import; only `src/` server routes use it). Rather than render nothing, this
+ * card derives a display-only proxy for "is the overseer actively watching this
+ * task" from the SAME already-on-`Task` fields the engine's own stage resolver
+ * (`resolveWatchedStage` in packages/engine/src/planner-overseer.ts) reads —
+ * `column`, `paused`, `pausedReason`, `prInfo`, `reviewState`, and
+ * `workflowTransitionNotification` — mirroring its precedence exactly:
+ * workflow-gate > pull-request > merger > reviewer > executor. This keeps the
+ * badge card-local (no new engine plumbing, no new props through the five
+ * `<TaskCard>` call sites) while giving operators a real, stage-accurate signal
+ * instead of a permanently-deferred stub.
+ */
+const OVERSEER_STATE_LABEL: Record<OverseerCardWatchedStage, string> = {
+  executor: "Executor",
+  reviewer: "Reviewer",
+  merger: "Merger",
+  "pull-request": "Pull request",
+  "workflow-gate": "Workflow gate",
+};
+const OVERSEER_STATE_MODIFIER: Record<OverseerCardWatchedStage, string> = {
+  executor: "executor",
+  reviewer: "reviewer",
+  merger: "merger",
+  "pull-request": "pull-request",
+  "workflow-gate": "workflow-gate",
+};
+
+type OverseerCardWatchedStage = "executor" | "reviewer" | "merger" | "pull-request" | "workflow-gate";
+
+/** The minimal task shape {@link deriveOverseerCardWatchedStage} reads. */
+type OverseerCardTaskRef = Pick<
+  Task,
+  "column" | "paused" | "pausedReason" | "prInfo" | "reviewState" | "workflowTransitionNotification"
+>;
+
+/**
+ * FNXC:PlannerOversight 2026-07-04-00:00:
+ * Card-local mirror of the engine's `resolveWatchedStage` (see block comment
+ * above `OVERSEER_STATE_LABEL`). Never throws — missing/partial fields degrade
+ * to `null` ("not currently monitorable").
+ */
+function deriveOverseerCardWatchedStage(task: Partial<OverseerCardTaskRef> | null | undefined): OverseerCardWatchedStage | null {
+  try {
+    if (!task) return null;
+
+    if (task.paused === true && typeof task.pausedReason === "string") {
+      if (task.pausedReason.startsWith("workflow-cli-approval:") || task.pausedReason.startsWith("workflow-input:")) {
+        return "workflow-gate";
+      }
+    }
+    if (task.paused === true) {
+      return null;
+    }
+
+    const column = task.column;
+    if (column !== "in-progress" && column !== "in-review") {
+      return null;
+    }
+
+    if (column === "in-progress") {
+      return "executor";
+    }
+
+    const prInfo = task.prInfo;
+    if (prInfo && typeof prInfo === "object" && prInfo.status !== "merged" && prInfo.status !== "closed") {
+      return "pull-request";
+    }
+
+    const marker = task.workflowTransitionNotification;
+    if (marker && marker.kind === "manual-merge-hold") {
+      return "merger";
+    }
+    if (prInfo && typeof prInfo === "object" && typeof prInfo.lastMergeError === "string" && prInfo.lastMergeError.length > 0) {
+      return "merger";
+    }
+
+    const reviewState = task.reviewState;
+    if (reviewState && typeof reviewState === "object") {
+      return "reviewer";
+    }
+
+    return "merger";
+  } catch {
+    return null;
+  }
 }
 
 function getResolvedAgentNameFromMap(
@@ -673,6 +863,25 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.planningModelProvider === nextTask.planningModelProvider &&
     previousTask.planningModelId === nextTask.planningModelId &&
     previousTask.reviewLevel === nextTask.reviewLevel &&
+    // FNXC:PlannerOversight 2026-07-04-00:00: repaint when the per-task oversight
+    // override changes so the card-oversight-badge stays in sync (FN-7516).
+    previousTask.plannerOversightLevel === nextTask.plannerOversightLevel &&
+    // FNXC:PlannerOversight 2026-07-04-12:30: repaint when the board-supplied
+    // `workflowBadge.workflowId` changes so the card re-fetches/re-reads the
+    // correct workflow's effective oversight tier from the cache (FN-7516
+    // code-review fix). `Task` itself has no `workflowId` field — workflow
+    // selection lives in a separate `task_workflow_selection` table — so this
+    // reuses the already-compared `workflowBadge` prop above rather than a
+    // nonexistent task field.
+    // FNXC:PlannerOversight 2026-07-04-00:00: repaint when any field the card-local
+    // overseer-watched-stage derivation (`deriveOverseerCardWatchedStage`) reads
+    // changes, so the card-overseer-state-badge stays in sync (FN-7516). `column`
+    // and `paused` are already compared above; `prInfo` is compared via
+    // `areTaskBadgeInfosEqual` below.
+    previousTask.pausedReason === nextTask.pausedReason &&
+    JSON.stringify(previousTask.workflowTransitionNotification ?? null) ===
+      JSON.stringify(nextTask.workflowTransitionNotification ?? null) &&
+    JSON.stringify(previousTask.reviewState ?? null) === JSON.stringify(nextTask.reviewState ?? null) &&
     previousTask.missionId === nextTask.missionId &&
     previousTask.assignedAgentId === nextTask.assignedAgentId &&
     previousTask.mergeRetries === nextTask.mergeRetries &&
@@ -875,6 +1084,67 @@ function TaskCardComponent({
     });
     return () => { cancelled = true; };
   }, [agentsMap, task.assignedAgentId, projectId]);
+
+  /*
+   * FNXC:PlannerOversight 2026-07-04-16:00:
+   * Fetch (and cache, see loadWorkflowOversightEffectiveLevel above) the
+   * workflow's effective plannerOversightLevel setting so the card can
+   * resolve the TRUE effective oversight tier for tasks with no per-task
+   * override, rather than always falling through to the schema default
+   * (FN-7516 code-review fix). `Task` has no `workflowId` field (workflow
+   * selection lives in the separate `task_workflow_selection` table, not on
+   * the task payload — verified against packages/core/src/types.ts), so this
+   * reads the workflow id from the already-existing `workflowBadge` prop
+   * (populated by Column/WorktreeGroup board callers). Only fires when a
+   * workflowBadge.workflowId is present; synchronous cache hits skip the
+   * state churn entirely. Surfaces that don't pass `workflowBadge` (dock,
+   * MainContent) fall back to the resolver's schema default immediately
+   * (treated as "resolved" — there is no pending fetch to gate on for those
+   * surfaces).
+   *
+   * Second code-review fix (this pass): while the workflow-tier fetch is
+   * in flight, `workflowOversightEffectiveLevel` was `undefined`, which the
+   * resolver treats identically to "no workflow setting exists" and falls
+   * back to `DEFAULT_PLANNER_OVERSIGHT_LEVEL` ("autonomous"). That rendered
+   * a wrong default badge for tasks inheriting a workflow explicitly
+   * configured to Off/Observe/Steer, for the whole window before the fetch
+   * resolved (and forever on fetch failure, since failures also cache
+   * `undefined`). Track resolution explicitly via `workflowOversightResolved`
+   * and gate the badges (`showOversightBadge`/`showOverseerStateBadge` below)
+   * so nothing renders from the unresolved workflow tier — only a task-level
+   * override (known synchronously from the task payload) can show a badge
+   * before the workflow tier is known.
+   */
+  const workflowIdForOversight = workflowBadge?.workflowId;
+  const [workflowOversightState, setWorkflowOversightState] = useState<{ level: PlannerOversightLevel | undefined; resolved: boolean }>(() => {
+    if (!workflowIdForOversight) return { level: undefined, resolved: true };
+    const key = getWorkflowOversightCacheKey(workflowIdForOversight, projectId);
+    return workflowOversightEffectiveCache.has(key)
+      ? { level: workflowOversightEffectiveCache.get(key), resolved: true }
+      : { level: undefined, resolved: false };
+  });
+  useEffect(() => {
+    if (!workflowIdForOversight) {
+      setWorkflowOversightState({ level: undefined, resolved: true });
+      return;
+    }
+
+    const workflowId = workflowIdForOversight;
+    const key = getWorkflowOversightCacheKey(workflowId, projectId);
+    if (workflowOversightEffectiveCache.has(key)) {
+      setWorkflowOversightState({ level: workflowOversightEffectiveCache.get(key), resolved: true });
+      return;
+    }
+
+    setWorkflowOversightState({ level: undefined, resolved: false });
+    let cancelled = false;
+    void loadWorkflowOversightEffectiveLevel(workflowId, projectId).then((level) => {
+      if (!cancelled) setWorkflowOversightState({ level, resolved: true });
+    });
+    return () => { cancelled = true; };
+  }, [workflowIdForOversight, projectId]);
+  const workflowOversightEffectiveLevel = workflowOversightState.level;
+  const workflowOversightResolved = workflowOversightState.resolved;
 
   // Auto-focus and auto-resize description textarea when entering edit mode
   useEffect(() => {
@@ -1402,6 +1672,71 @@ function TaskCardComponent({
 
   const showInReviewMoveControl = task.column === "in-review" && Boolean(onMoveTask);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled ?? false });
+  /*
+   * FNXC:PlannerOversight 2026-07-04-12:30:
+   * FN-7516 card-surface slice of the planner-oversight feature: show a read-only
+   * effective oversight-level badge. Reuse the FN-7515/FN-7508 resolver verbatim
+   * rather than re-deriving tier precedence here.
+   *
+   * Code review flagged (round 1) that always passing `undefined` for the
+   * workflow tier made every task without a per-task override show
+   * "Autonomous recovery", even when the task's WORKFLOW was explicitly
+   * configured to Off/Observe/Steer. Fixed: `workflowOversightEffectiveLevel`
+   * (see the effect above) is the workflow's real effective
+   * `plannerOversightLevel` setting value, fetched/cached per
+   * `(workflowId, projectId)` via the existing workflow setting-values route
+   * — this is the true workflow tier, not a guess. The resolver keeps its own
+   * default-fallback policy: only when NEITHER the task override NOR the
+   * workflow tier resolves does it fall back to the schema default
+   * ("autonomous", `DEFAULT_PLANNER_OVERSIGHT_LEVEL"`).
+   *
+   * Code review flagged (round 2) that the fallback above still fires WHILE
+   * the workflow-tier fetch is in flight (or after it fails), because an
+   * in-flight/unresolved `workflowOversightEffectiveLevel` is `undefined` —
+   * indistinguishable, to the resolver, from "the workflow has no oversight
+   * setting". That rendered the schema default badge for a beat (or
+   * permanently on fetch failure) before the true workflow tier arrived.
+   * Fix: a known per-task override renders immediately (it's synchronous,
+   * from the task payload); otherwise the badge is withheld entirely until
+   * `workflowOversightResolved` is true, so an inherited task never shows a
+   * default/guessed level. Only an effective level that resolves to "off"
+   * renders no badge either (no empty shell) — see the
+   * `hasCardMetaBadges`/render guard below.
+   */
+  const hasTaskOversightOverride = isPlannerOversightLevelValue(task.plannerOversightLevel);
+  const effectiveOversightLevel: PlannerOversightLevel = resolveEffectivePlannerOversightLevel(
+    task.plannerOversightLevel,
+    workflowOversightEffectiveLevel,
+  );
+  const showOversightBadge =
+    (hasTaskOversightOverride || workflowOversightResolved) && effectiveOversightLevel !== "off";
+
+  /*
+   * FNXC:PlannerOversight 2026-07-04-00:00:
+   * Step 3 of FN-7516 ("active overseer state" indicator). See the FNXC block
+   * above `OVERSEER_STATE_LABEL` for why this is a card-local derivation rather
+   * than data read from a new engine-plumbed field. Gated on: effective
+   * oversight level not "off" (mirrors `PlannerOverseerMonitor.observeTask`,
+   * which records nothing when the level is "off"), the task not explicitly
+   * user-paused, and not done / not archived (mirrors `isDoneColumn`,
+   * `isArchived` used elsewhere in this component). A paused task only remains
+   * visible when `deriveOverseerCardWatchedStage` classifies the pause as a
+   * workflow input/approval gate; other agent-side pauses are not active
+   * overseer stages and render no state badge. Only an explicit user-initiated
+   * pause (`task.userPaused`) hides even a workflow-gate indicator.
+   *
+   * Also gated on the same `hasTaskOversightOverride || workflowOversightResolved`
+   * condition as `showOversightBadge` above (round-2 code-review fix): the
+   * overseer indicator derives from `effectiveOversightLevel`, so it must not
+   * render from an unresolved/guessed workflow tier either.
+   */
+  const overseerWatchedStage = deriveOverseerCardWatchedStage(task);
+  const showOverseerStateBadge = (hasTaskOversightOverride || workflowOversightResolved)
+    && effectiveOversightLevel !== "off"
+    && !task.userPaused
+    && !isDoneColumn
+    && !isArchived
+    && overseerWatchedStage != null;
   const showCreatePrQuickAction =
     task.column === "in-review"
     && !effectiveAutoMerge
@@ -2344,7 +2679,12 @@ function TaskCardComponent({
     && workflowBadge.workflowName.trim().length > 0;
   const hasCardMetaBadges = showPriorityBadge
     || task.executionMode === "fast"
-    || isAgentCreated;
+    || isAgentCreated
+    // FNXC:PlannerOversight 2026-07-04-00:00: the oversight badge is opt-in
+    // metadata (absent for the common "off" default) — include it in the wrapper
+    // guard so `.card-meta-badges` only renders when it has a real child.
+    || showOversightBadge
+    || showOverseerStateBadge;
 
   if (isEditing) {
     return (
@@ -2619,6 +2959,27 @@ function TaskCardComponent({
                 <Bot size={11} aria-hidden="true" />
                 <span className="visually-hidden">{agentCreatedTitle}</span>
                 <span aria-hidden="true">{agentCreatedVisibleLabel}</span>
+              </span>
+            )}
+            {showOversightBadge && (
+              <span
+                className={`card-oversight-badge card-oversight-badge--${OVERSIGHT_BADGE_MODIFIER[effectiveOversightLevel as Exclude<PlannerOversightLevel, "off">]}`}
+                data-testid="card-oversight-badge"
+                title={t("tasks.oversightBadgeTitle", "Oversight: {{level}}", { level: OVERSIGHT_BADGE_LABEL[effectiveOversightLevel as Exclude<PlannerOversightLevel, "off">] })}
+                aria-label={t("tasks.oversightBadgeTitle", "Oversight: {{level}}", { level: OVERSIGHT_BADGE_LABEL[effectiveOversightLevel as Exclude<PlannerOversightLevel, "off">] })}
+              >
+                {abbreviateBadge(OVERSIGHT_BADGE_LABEL[effectiveOversightLevel as Exclude<PlannerOversightLevel, "off">], 14)}
+              </span>
+            )}
+            {showOverseerStateBadge && overseerWatchedStage && (
+              <span
+                className={`card-overseer-state-badge card-overseer-state-badge--${OVERSEER_STATE_MODIFIER[overseerWatchedStage]}`}
+                data-testid="card-overseer-state-badge"
+                title={t("tasks.overseerStateBadgeTitle", "Overseer: {{state}}", { state: OVERSEER_STATE_LABEL[overseerWatchedStage] })}
+                aria-label={t("tasks.overseerStateBadgeTitle", "Overseer: {{state}}", { state: OVERSEER_STATE_LABEL[overseerWatchedStage] })}
+              >
+                <Eye size={11} aria-hidden="true" />
+                {abbreviateBadge(OVERSEER_STATE_LABEL[overseerWatchedStage], 14)}
               </span>
             )}
           </div>
