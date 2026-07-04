@@ -214,7 +214,7 @@ describe("SessionTerminal", () => {
     ["non-mac", "Win32", { ctrlKey: true }],
   ] as const)("preserves physical copy/paste terminal semantics on %s", async (_name, platform, modifier) => {
     const writeText = vi.fn().mockResolvedValue(undefined);
-    const readText = vi.fn().mockResolvedValue("ignored because xterm handles paste");
+    const readText = vi.fn().mockResolvedValue("pasted once");
     Object.defineProperty(navigator, "platform", {
       value: platform,
       configurable: true,
@@ -237,12 +237,45 @@ describe("SessionTerminal", () => {
     expect(sessionKeyEventHandler?.(new KeyboardEvent("keydown", { key: "c", ...modifier }))).toBe(true);
 
     const beforePasteFrames = FakeWS.instances[0].sent.length;
-    expect(sessionKeyEventHandler?.(new KeyboardEvent("keydown", { key: "v", ...modifier }))).toBe(true);
-    expect(readText).not.toHaveBeenCalled();
-    const inputHandler = mockTerm.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
-    inputHandler?.("pasted once");
+    expect(sessionKeyEventHandler?.(new KeyboardEvent("keydown", { key: "v", ...modifier }))).toBe(false);
+    await waitFor(() => expect(readText).toHaveBeenCalledTimes(1));
     expect(FakeWS.instances[0].sent.slice(beforePasteFrames)).toEqual([
       JSON.stringify({ type: "input", data: "pasted once" }),
+    ]);
+  });
+
+  it.each([
+    ["missing clipboard", undefined],
+    ["rejected clipboard", { readText: vi.fn().mockRejectedValue(new DOMException("denied")) }],
+    ["empty clipboard", { readText: vi.fn().mockResolvedValue("") }],
+  ] as const)("fails safely for %s physical paste while preserving xterm input", async (_label, clipboard) => {
+    Object.defineProperty(navigator, "platform", {
+      value: "Win32",
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      value: clipboard,
+      configurable: true,
+    });
+
+    render(<SessionTerminal sessionId="s1" />);
+    await waitFor(() => expect(FakeWS.instances.length).toBe(1));
+    await waitFor(() => expect(sessionKeyEventHandler).not.toBeNull());
+
+    const beforePasteFrames = FakeWS.instances[0].sent.length;
+    expect(sessionKeyEventHandler?.(new KeyboardEvent("keydown", { key: "v", ctrlKey: true }))).toBe(false);
+    if (clipboard?.readText) {
+      await waitFor(() => expect(clipboard.readText).toHaveBeenCalledTimes(1));
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(FakeWS.instances[0].sent.slice(beforePasteFrames)).toEqual([]);
+
+    const inputHandler = mockTerm.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
+    inputHandler?.("typed input");
+    expect(FakeWS.instances[0].sent.slice(beforePasteFrames)).toEqual([
+      JSON.stringify({ type: "input", data: "typed input" }),
     ]);
   });
 

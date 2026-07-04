@@ -513,7 +513,10 @@ export function SessionTerminal({
 
       /*
       FNXC:Terminal 2026-06-30-00:10:
-      FN-7262 root cause: the embedded SessionTerminal attach surface forwarded raw xterm data but never installed the copy/paste key filter already used by TerminalModal, so physical Ctrl/Cmd+C with a selection could be swallowed by xterm/browser routing inconsistently while replay states still accepted input. Register exactly one handler with the xterm instance for live writable sessions: platform copy+C copies selected text, copy+C without selection stays on the PTY/SIGINT path, and paste is left to xterm's native onData flow so it is delivered once.
+      FN-7262 root cause: the embedded SessionTerminal attach surface forwarded raw xterm data but never installed the copy/paste key filter already used by TerminalModal, so physical Ctrl/Cmd+C with a selection could be swallowed by xterm/browser routing inconsistently while replay states still accepted input. Register exactly one handler with the xterm instance for live writable sessions: platform copy+C copies selected text, copy+C without selection stays on the PTY/SIGINT path, and replay states never receive input hooks.
+
+      FNXC:Terminal 2026-07-04-10:25:
+      GitHub #1902 showed that relying only on xterm's helper-textarea paste can swallow physical Ctrl/Cmd+V before clipboard text reaches embedded CLI attach channels. Own platform paste here, then return false so the browser/xterm native paste path cannot also emit a duplicate WebSocket input frame.
       */
       if (ticketCanAcceptInput) {
         term.onData((data: string) => {
@@ -546,7 +549,24 @@ export function SessionTerminal({
           }
 
           if (key === "v") {
-            return true;
+            const readText = navigator.clipboard?.readText;
+            if (!readText) {
+              return false;
+            }
+            readText.call(navigator.clipboard)
+              .then((text) => {
+                if (!text) {
+                  return;
+                }
+                const ws = wsRef.current;
+                if (ws?.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: "input", data: text }));
+                }
+              })
+              .catch(() => {
+                // Ignore clipboard permission/errors so terminal input stays responsive.
+              });
+            return false;
           }
 
           return true;

@@ -6171,7 +6171,7 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
     ["mac", "MacIntel", { metaKey: true }],
     ["non-mac", "Win32", { ctrlKey: true }],
   ] as const)(
-    "delivers keyboard paste exactly once via xterm native paste on %s",
+    "delivers physical keyboard paste exactly once from clipboard on %s",
     async (_name, platform, modifier) => {
       const readText = vi.fn().mockResolvedValue("npm test\n");
       Object.defineProperty(navigator, "platform", {
@@ -6193,16 +6193,54 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
       const handled = terminalKeyEventHandler?.(
         new KeyboardEvent("keydown", { key: "v", ...modifier }),
       );
-      act(() => {
-        terminalDataHandler?.("npm test\n");
-      });
 
-      expect(handled).toBe(true);
-      expect(readText).not.toHaveBeenCalled();
+      expect(handled).toBe(false);
+      await waitFor(() => expect(readText).toHaveBeenCalledTimes(1));
       expect(mockSendInput).toHaveBeenCalledTimes(1);
       expect(mockSendInput).toHaveBeenCalledWith("npm test\n");
     },
   );
+
+  it.each([
+    ["missing clipboard", undefined],
+    ["rejected clipboard", { readText: vi.fn().mockRejectedValue(new DOMException("denied")) }],
+    ["empty clipboard", { readText: vi.fn().mockResolvedValue("") }],
+  ] as const)("fails safely for %s physical paste while preserving xterm input", async (_label, clipboard) => {
+    Object.defineProperty(navigator, "platform", {
+      value: "Win32",
+      configurable: true,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      value: clipboard,
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(terminalKeyEventHandler).not.toBeNull();
+      expect(terminalDataHandler).not.toBeNull();
+    });
+
+    const handled = terminalKeyEventHandler?.(
+      new KeyboardEvent("keydown", { key: "v", ctrlKey: true }),
+    );
+
+    expect(handled).toBe(false);
+    if (clipboard?.readText) {
+      await waitFor(() => expect(clipboard.readText).toHaveBeenCalledTimes(1));
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockSendInput).not.toHaveBeenCalled();
+
+    act(() => {
+      terminalDataHandler?.("typed input");
+    });
+    expect(mockSendInput).toHaveBeenCalledTimes(1);
+    expect(mockSendInput).toHaveBeenCalledWith("typed input");
+  });
 
   it("delivers native helper-textarea paste exactly once without the shortcut handler", async () => {
     render(<TerminalModal isOpen={true} onClose={mockOnClose} />);

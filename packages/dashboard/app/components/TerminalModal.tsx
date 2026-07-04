@@ -1500,10 +1500,25 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           }
 
           if (key === "v") {
-            // Let xterm's helper textarea handle paste natively. Reading the
-            // clipboard here and also allowing the browser paste path causes
-            // duplicate PTY input on Cmd/Ctrl+V.
-            return true;
+            /*
+            FNXC:Terminal 2026-07-04-10:24:
+            GitHub #1902 showed that relying only on xterm's helper-textarea paste can swallow physical Ctrl/Cmd+V before clipboard text reaches the PTY. Own platform paste here, then return false so the browser/xterm native paste path cannot also emit duplicate input.
+            */
+            const readText = navigator.clipboard?.readText;
+            if (!readText) {
+              return false;
+            }
+            readText.call(navigator.clipboard)
+              .then((text) => {
+                if (!text || xtermInitializedRef.current !== currentSessionId) {
+                  return;
+                }
+                sendInputRef.current(text);
+              })
+              .catch(() => {
+                // Ignore clipboard permission/errors so terminal input stays responsive.
+              });
+            return false;
           }
 
           return true;
