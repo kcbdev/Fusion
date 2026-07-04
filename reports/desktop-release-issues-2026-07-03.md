@@ -17,7 +17,7 @@ This document collects the issues we found while trying to run the official Fusi
 | 1 | `electron` only a devDependency | **Fixed** — `electron` added to `@runfusion/fusion` runtime deps; lockfile synced. |
 | 2 | Ancestor-dir walk crashes on unrelated JSON | **Already handled** — the desktop launcher uses `process.cwd()` (CLI) / `$HOME` (Electron main), never an ancestor walk (`desktop.ts:175`, `main.ts` `resolveLocalRuntimeRoot`), and every JSON parse on the shared discovery path is already `try/catch`-guarded, so unrelated JSON no longer throws. |
 | 3 | Manage Projects opens Settings | **Fixed** — `handleViewAllProjects` now resets `taskView` to `command-center`. |
-| 4 | Windows Terminal "Help" dialogs | **Fixed** — frontend auto-create of the first terminal tab is skipped on Windows. |
+| 4 | Windows Terminal "Help" dialogs | **Fixed (real root cause found)** — the trigger was NOT the embedded terminal (already guarded) but the **worktrunk integration**: worktrunk's CLI is named `wt`, which collides with Windows Terminal (`wt.exe`) on PATH, so `wt --version` launched Windows Terminal. Fixed by (a) not auto-probing worktrunk status on Settings/dashboard mount — only when the integration is enabled (user opt-in), and (b) an engine-level guard in `probeWorktrunk` that refuses to exec the Windows Terminal alias. The 1882 frontend terminal-auto-create guard is retained as defense-in-depth. |
 | 5 | Packaged build can miss `preload`/assets | **Fixed** — `scripts/build.ts` now verifies `main.js`, `preload.js`, and `client/index.html` exist in both `dist/` and the staged `deploy/dist/` before packaging, failing the build otherwise. (In this repo the preload ships as `dist/preload.js` inside `app.asar`, not `preload.cjs`.) |
 | 6 | Desktop port drift / collision | **Already handled** — the embedded runtime binds an ephemeral port (`app.listen(0)`, `desktop.ts:78`), so fixed-port collision is structurally impossible; the CLI passes it via `FUSION_SERVER_PORT` and the desktop reuses it instead of double-binding (Issue 9), and a single-instance lock (`deep-link.ts`) quits a duplicate window. A fixed 9119/8643 would *reintroduce* collisions, so we deliberately did not pin one. |
 | 7 | GPU/sandbox instability on Windows | **Fixed** — GPU/sandbox-disabling flags applied on Windows only (`os.platform() === "win32"`); macOS/Linux keep hardware acceleration and the sandbox. |
@@ -90,16 +90,21 @@ Windows Terminal
 1.24.11321.0
 ```
 
-### Root cause
-The dashboard’s `useTerminalSessions` hook auto-creates the first terminal tab once session validation completes. On Windows, spawning a PTY can end up invoking `wt.exe` (Windows Terminal) or otherwise triggering its built-in version/help dialog. The backend `terminal-service.ts` already has an FNXC guard (FNXC:WindowsTerminalStartup) to avoid probing `wt.exe`, but the frontend auto-create path still triggers a PTY spawn on Windows before the user has asked for a terminal.
+### Root cause (corrected)
+The initial hypothesis blamed the embedded terminal's PTY auto-create. That path was already fully guarded (`terminal-service.ts` excludes `wt.exe`, ignores `SHELL` on win32, defaults to `cmd.exe`, maps the version-only spawn to an actionable error), so the dialog persisted after the 1882 frontend guard. The **actual** trigger is the **worktrunk integration**: worktrunk's CLI binary is named `wt` (`WORKTRUNK_BINARY_NAME = "wt"`), which is the same executable name as Windows Terminal (`wt.exe`, an App Execution Alias under `%LOCALAPPDATA%\Microsoft\WindowsApps`, on PATH by default on Windows 11). Worktrunk resolution runs `where wt` → finds Windows Terminal → runs `"wt.exe" --version` to probe it → **launches Windows Terminal**, which shows the native "Windows Terminal 1.24.11321.0" version dialog. This fired because the dashboard/Settings UI auto-fetched worktrunk status (`GET /api/worktrunk/status`) on mount, even when worktrunk was not in use.
 
-### What we tried
-- Confirmed `terminal-service.ts` skips Windows Terminal for `SHELL` on `win32`.
-- Confirmed tests already assert `wt.exe` should not be selected.
-- Disabled the auto-create path on Windows in `useTerminalSessions.ts` so the failure cannot recur automatically. Manual terminal creation still works and surfaces the inline error UI.
+### Fix
+1. **Don't probe worktrunk automatically.** `useWorktrunkInstallStatus` now only auto-fetches status when the worktrunk integration is enabled (user opt-in / explicit request); a plain Settings/dashboard mount no longer probes.
+2. **Engine invariant guard.** `probeWorktrunk` refuses to `exec` a resolved `wt` that is the Windows Terminal alias (basename `wt` under `WindowsApps` / a `WindowsTerminal` package dir), returning an actionable error instead of launching it. This covers every resolution surface (cached / override / PATH / install / settings-route).
+3. The 1882 frontend terminal-auto-create guard is retained as defense-in-depth.
 
-### Proposed fix
-Merge the frontend guard from PR #1882, or move the platform check server-side so no terminal session is auto-created for Windows users unless the platform has a verified embedded shell.
+### Symptom Verification
+- **Original symptom:** Opening the dashboard / Settings on Windows pops native "Windows Terminal 1.24.11321.0" Help dialogs.
+- **Exact reproduction:** On Windows 11 (Windows Terminal on PATH), worktrunk resolution runs `where wt` → `wt.exe` → `"wt.exe" --version` → GUI dialog; auto-triggered by the Settings worktrunk-status fetch on mount.
+- **Assertion it is gone:** `probeWorktrunk` returns `{ ok: false }` for a `WindowsApps\wt.exe` path **without** calling `exec` (`worktrunk-installer.test.ts`); `resolveWorktrunkBinary` never execs `--version` against a Windows Terminal PATH hit; and `useWorktrunkInstallStatus` does not fetch `/api/worktrunk/status` on mount unless enabled (`useWorktrunkInstallStatus.test.ts`).
+
+### Surface Enumeration
+Worktrunk resolution surfaces all funnel through `probeWorktrunk`, so the engine guard covers them uniformly: cached resolution, explicit `binaryPath` override, PATH auto-discovery (`worktree-pool.ts`), Fusion-managed install path, the Settings-save enable validation (`register-settings-memory-routes.ts`), and the `GET /worktrunk/status` route (`register-worktrunk-routes.ts`). The frontend auto-fetch (`useWorktrunkInstallStatus`, used by `SettingsModal`) is the only automatic client trigger and is now gated on `enabled`.
 
 ---
 

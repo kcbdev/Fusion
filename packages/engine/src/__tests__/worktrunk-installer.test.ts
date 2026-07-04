@@ -258,6 +258,104 @@ describe("worktrunk-installer", () => {
     expect(commands.some((command) => command.includes(" worktrunk"))).toBe(false);
   });
 
+  /*
+  FNXC:WindowsTerminalStartup 2026-07-03-16:10:
+  On Windows `wt` resolves to Windows Terminal (`wt.exe`, an App Execution Alias
+  under WindowsApps). Probing it with `--version` launches Windows Terminal and
+  pops its native version/Help dialog. probeWorktrunk must refuse to exec the
+  Windows Terminal alias, and resolveWorktrunkBinary must not probe a PATH hit
+  that is Windows Terminal — otherwise opening Settings on Windows pops the dialog.
+  */
+  it("probeWorktrunk refuses to launch the Windows Terminal alias without exec", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      execMock.mockClear();
+      const result = await probeWorktrunk(
+        "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe",
+      );
+      expect(result.ok).toBe(false);
+      expect(execMock).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it("probeWorktrunk still probes a genuine wt binary outside WindowsApps on Windows", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      mockExecSequence([{ stdout: "wt 0.4.2\n" }]);
+      const result = await probeWorktrunk("C:\\tools\\worktrunk\\wt.exe");
+      expect(result).toEqual({ ok: true, version: "0.4.2" });
+      expect(execMock).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it("resolveWorktrunkBinary never execs --version against a Windows Terminal PATH hit", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      // `where wt` returns Windows Terminal's alias; the Fusion install-path probe then misses.
+      mockExecSequence([
+        { stdout: "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe\n" },
+        { error: new Error("not found") },
+      ]);
+      await expect(resolveWorktrunkBinary({ settings: makeSettings() })).rejects.toThrow(
+        WorktrunkInstallFailedError,
+      );
+      const commands = execMock.mock.calls.map(([command]) => String(command));
+      // The Windows Terminal alias was never launched with --version.
+      expect(commands.some((c) => c.toLowerCase().includes("windowsapps") && c.includes("--version"))).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it("probeWorktrunk refuses a bare wt/wt.exe override on Windows (resolves to Windows Terminal via PATH)", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      for (const bare of ["wt", "wt.exe"]) {
+        execMock.mockClear();
+        const result = await probeWorktrunk(bare);
+        expect(result.ok).toBe(false);
+        expect(execMock).not.toHaveBeenCalled();
+      }
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it("probeWorktrunk refuses a forward-slash-normalized Windows Terminal path", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      execMock.mockClear();
+      const result = await probeWorktrunk("C:/Users/me/AppData/Local/Microsoft/WindowsApps/wt.exe");
+      expect(result.ok).toBe(false);
+      expect(execMock).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it("probeWorktrunk probes a genuine wt.exe under an unrelated windowsterminal-named folder", async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    try {
+      mockExecSequence([{ stdout: "wt 0.4.2\n" }]);
+      // "windowsterminal-tools" is an unrelated dir, not the Microsoft.WindowsTerminal package.
+      const result = await probeWorktrunk("C:\\tools\\windowsterminal-tools\\wt.exe");
+      expect(result).toEqual({ ok: true, version: "0.4.2" });
+      expect(execMock).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
+  });
+
   it("installer metadata points at canonical upstream", () => {
     const serialized = JSON.stringify(WORKTRUNK_PINNED_RELEASE);
     const fabricatedUpstream = ["worktrunk", "worktrunk"].join("/");
