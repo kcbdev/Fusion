@@ -2175,6 +2175,10 @@ Queued-message banners stack above the composer input with a capped scroll area,
        ancestor stays `transform: none` and the keyboard stays up. */
   }
 
+  .chat-thread--keyboard-active .chat-input-area {
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-accessory-clearance, 0px));
+  }
+
   /* On mobile, the active scope affordance uses a full-width pinned footer. */
   .chat-sidebar-footer {
     display: block;

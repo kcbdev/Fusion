@@ -208,6 +208,34 @@ describe("ChatView mobile behavior", () => {
     }));
   }
 
+  async function focusComposerAndOpenKeyboard({
+    listeners,
+    mockVV,
+    vvHeight,
+    offsetTop = 0,
+  }: {
+    listeners: Record<string, Array<() => void>>;
+    mockVV: VisualViewport;
+    vvHeight: number;
+    offsetTop?: number;
+  }) {
+    const textarea = screen.getByTestId("chat-input") as HTMLTextAreaElement;
+    await act(async () => {
+      textarea.focus();
+    });
+    act(() => {
+      document.dispatchEvent(new Event("focusin"));
+    });
+
+    Object.defineProperty(mockVV, "offsetTop", { value: offsetTop, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: vvHeight, writable: true, configurable: true });
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    return textarea;
+  }
+
   it("mobile mode: does not render thread header when no active session (list view)", async () => {
     const restoreMatchMedia = mockMobileViewport();
     try {
@@ -838,6 +866,164 @@ describe("ChatView mobile behavior", () => {
         expect(thread.style.getPropertyValue("--vv-height")).toBe("560px");
       });
     } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: keeps direct empty composer above iOS keyboard accessory chrome without a transform", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(true);
+    const { listeners, mockVV } = mockMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [],
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const thread = document.querySelector(".chat-thread") as HTMLDivElement;
+      const inputArea = document.querySelector(".chat-input-area") as HTMLDivElement;
+      const inputRow = document.querySelector(".chat-input-row") as HTMLDivElement;
+      expect(thread).toBeInTheDocument();
+      expect(inputArea).toBeInTheDocument();
+      expect(inputRow).toBeInTheDocument();
+      expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("0px");
+
+      const textarea = await focusComposerAndOpenKeyboard({ listeners, mockVV, vvHeight: 560 });
+
+      await waitFor(() => {
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+        expect(thread.style.getPropertyValue("--vv-height")).toBe("560px");
+        expect(thread.style.getPropertyValue("--keyboard-overlap")).toBe("284px");
+        expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("calc(var(--space-2xl) + var(--space-md))");
+        expect(thread.style.transform).toBe("");
+        expect(thread.style.willChange).toBe("");
+      });
+
+      await act(async () => {
+        textarea.blur();
+        document.dispatchEvent(new Event("focusout"));
+      });
+
+      await waitFor(() => {
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(false);
+        expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("0px");
+      });
+    } finally {
+      isIOSSpy.mockRestore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: keeps populated streaming direct composer above iOS accessory chrome", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(true);
+    const { listeners, mockVV } = mockMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [
+          { id: "msg-001", sessionId: "session-001", role: "assistant", content: "Loaded history", createdAt: "2026-04-08T00:00:00.000Z" },
+        ],
+        isStreaming: true,
+        streamingText: "Streaming response",
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const thread = document.querySelector(".chat-thread") as HTMLDivElement;
+      await focusComposerAndOpenKeyboard({ listeners, mockVV, vvHeight: 560 });
+
+      await waitFor(() => {
+        expect(screen.getByText("Loaded history")).toBeInTheDocument();
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+        expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("calc(var(--space-2xl) + var(--space-md))");
+      });
+    } finally {
+      isIOSSpy.mockRestore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: keeps room composer above iOS keyboard accessory chrome", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(true);
+    const { listeners, mockVV } = mockMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    try {
+      const room = createRoomFixture("general");
+      setupMockChat({ activeSession: null, messages: [] });
+      setupMockRooms({
+        activeRoom: room,
+        rooms: [room],
+        messages: [
+          {
+            id: "room-msg-001",
+            roomId: room.id,
+            role: "assistant",
+            content: "Room history",
+            thinkingOutput: null,
+            toolCalls: [],
+            createdAt: "2026-05-12T00:00:00.000Z",
+          },
+        ],
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const thread = document.querySelector(".chat-thread") as HTMLDivElement;
+      await focusComposerAndOpenKeyboard({ listeners, mockVV, vvHeight: 560 });
+
+      await waitFor(() => {
+        expect(screen.getByText("Room history")).toBeInTheDocument();
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+        expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("calc(var(--space-2xl) + var(--space-md))");
+      });
+    } finally {
+      localStorage.removeItem("fusion:chat-scope");
+      isIOSSpy.mockRestore();
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: does not reserve iOS accessory clearance on Android resizes-content keyboard samples", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const isIOSSpy = vi.spyOn(mobileScrollLock, "isIOS").mockReturnValue(false);
+    const { listeners, mockVV } = mockMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "Hello", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const thread = document.querySelector(".chat-thread") as HTMLDivElement;
+      await focusComposerAndOpenKeyboard({ listeners, mockVV, vvHeight: 560 });
+
+      await waitFor(() => {
+        expect(thread.classList.contains("chat-thread--keyboard-active")).toBe(true);
+        expect(thread.style.getPropertyValue("--chat-keyboard-accessory-clearance")).toBe("0px");
+      });
+    } finally {
+      isIOSSpy.mockRestore();
       restoreMatchMedia.mockRestore();
     }
   });
@@ -2009,6 +2195,11 @@ describe("ChatView mobile CSS contract", () => {
 
   it("mobile includes keyboard-aware chat-thread height rule", async () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread--keyboard-active\s*\{[^}]*--vv-height/);
+  });
+
+  it("mobile adds tokenized keyboard accessory clearance only to active composer padding", async () => {
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-thread--keyboard-active\s+\.chat-input-area\s*\{[^}]*padding-bottom:\s*calc\(var\(--space-md\) \+ env\(safe-area-inset-bottom, 0px\) \+ var\(--chat-keyboard-accessory-clearance, 0px\)\)/);
+    expect(css).toMatch(/\.chat-input-area\s*\{[^}]*padding:\s*var\(--space-md\) var\(--space-lg\)[^}]*\}/);
   });
 
   it("mobile makes chat bubbles full-width for narrow-column readability", async () => {
