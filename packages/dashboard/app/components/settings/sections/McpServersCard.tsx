@@ -547,7 +547,7 @@ export function McpServersCard({ scope, form, setForm, globalSettings, projectId
           <button type="button" className="btn btn-sm touch-target" onClick={() => void scanDiscoveredServers()} disabled={discoveryLoading}><RefreshCw aria-hidden="true" /> {discoveryLoading ? t("settings.mcp.scanning", "Scanning…") : t("settings.mcp.scanAgain", "Scan again")}</button>
         </div>
         {discoveryError ? <p className="form-error">{discoveryError}</p> : null}
-        {(discovered?.errors.length ?? 0) > 0 ? <div className="mcp-discovery__notes" role="note">{discovered?.errors.map((error) => <p key={error}>{error}</p>)}</div> : null}
+        {(discovered?.errors?.length ?? 0) > 0 ? <div className="mcp-discovery__notes" role="note">{discovered?.errors?.map((error) => <p key={error}>{error}</p>)}</div> : null}
         {!discoveryLoading && discoveredGroups.length === 0 ? <p className="mcp-empty" data-testid={`mcp-discovery-empty-${scope}`}>{t("settings.mcp.discoveryEmpty", "No MCP servers found in supported tool configs yet.")}</p> : null}
         {discoveredGroups.map(([label, entries]) => (
           <div className="mcp-discovery__group" key={label}>

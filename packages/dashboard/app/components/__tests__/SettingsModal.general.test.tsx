@@ -236,6 +236,61 @@ describe("SettingsModal", () => {
     expect(screen.getByRole("heading", { name: "Authentication" })).toBeInTheDocument();
   });
 
+  it("filters settings navigation by section and setting-level keywords without exposing hidden sections", async () => {
+    renderModal();
+    await waitForSettingsModalReady();
+
+    const search = screen.getByTestId("settings-search-input");
+    expect(screen.getByRole("button", { name: /^General$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Project General$/ })).toBeInTheDocument();
+
+    await settingsModalUser.type(search, "   ");
+    expect(screen.getByRole("button", { name: /^General$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Project General$/ })).toBeInTheDocument();
+
+    await settingsModalUser.clear(search);
+    await settingsModalUser.type(search, "completion documentation");
+
+    expect(screen.queryByRole("button", { name: /^General$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Project General$/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByText("1 matching sections")).toBeInTheDocument();
+
+    await settingsModalUser.clear(search);
+    await settingsModalUser.type(search, "Autonomy mode");
+
+    expect(screen.queryByRole("button", { name: /^Project General$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^CLI Agents$/ })).toBeInTheDocument();
+    expect(screen.getByTestId("cli-agents-settings")).toBeInTheDocument();
+
+    await settingsModalUser.clear(search);
+    await settingsModalUser.type(search, "research providers");
+
+    expect(screen.queryByRole("button", { name: /^Research Defaults$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Research$/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/No settings sections match/).length).toBeGreaterThan(0);
+  });
+
+  it("keeps duplicate global and project labels searchable while preserving no-results clearing", async () => {
+    renderModal();
+    await waitForSettingsModalReady();
+
+    const search = screen.getByTestId("settings-search-input");
+    await settingsModalUser.type(search, "mcp");
+
+    const matches = screen.getAllByRole("button", { name: /^MCP Servers$/ });
+    expect(matches).toHaveLength(2);
+    expect(screen.getByText("2 matching sections")).toBeInTheDocument();
+
+    await settingsModalUser.clear(search);
+    await settingsModalUser.type(search, "definitely not a setting");
+
+    expect(screen.queryByRole("button", { name: /^MCP Servers$/ })).not.toBeInTheDocument();
+    await settingsModalUser.click(screen.getAllByRole("button", { name: "Clear settings search" })[0]);
+    expect(screen.getByRole("button", { name: /^General$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Project General$/ })).toBeInTheDocument();
+  });
+
   it("keeps settings file pickers workspace-confined even when absolute browsing exists", async () => {
     renderModal({ initialSection: "worktrees" });
     await waitForSettingsModalReady();
@@ -283,6 +338,22 @@ describe("SettingsModal", () => {
 
       fireEvent.keyDown(document, { key: "Escape" });
       expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("renders settings search and clears Escape without closing embedded Settings", async () => {
+      const onClose = vi.fn();
+      renderModal({ presentation: "embedded", onClose });
+      await waitForSettingsModalReady();
+
+      const search = screen.getByTestId("settings-search-input");
+      await settingsModalUser.type(search, "model pricing");
+      expect(screen.getByRole("button", { name: /^Models$/ })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Project General$/ })).not.toBeInTheDocument();
+
+      fireEvent.keyDown(search, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(search).toHaveValue("");
+      expect(screen.getByRole("button", { name: /^Project General$/ })).toBeInTheDocument();
     });
 
     it("keeps the overlay and Escape-to-close in modal mode", async () => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type CSSProperties, type MouseEvent } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type MouseEvent } from "react";
 import { Globe, Folder, RefreshCw, Star, HelpCircle, Settings as SettingsIcon } from "lucide-react";
 import {
   getErrorMessage,
@@ -218,10 +218,82 @@ type SettingsSection = {
   scope: "global" | "project" | undefined;
   icon?: typeof Globe;
   isGroupHeader?: boolean;
+  searchableText?: string[];
+  searchableKeys?: string[];
 };
 
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 768px)";
 const DEFAULT_MEMORY_EDITOR_PATH = ".fusion/memory/DREAMS.md";
+
+function normalizeSettingsSearchText(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function sectionMatchesSettingsSearch(
+  section: SettingsSection,
+  query: string,
+  label: string,
+  translateSearchKey: (key: string) => string,
+): boolean {
+  if (!query || section.isGroupHeader) {
+    return true;
+  }
+
+  return [
+    label,
+    ...(section.searchableText ?? []),
+    ...(section.searchableKeys ?? []).map((key) => translateSearchKey(key)),
+  ]
+    .map(normalizeSettingsSearchText)
+    .some((candidate) => candidate.includes(query));
+}
+
+function filterSettingsSectionsForSearch(
+  sections: SettingsSection[],
+  query: string,
+  translateLabel: (section: SettingsSection) => string,
+  translateSearchKey: (key: string) => string,
+): SettingsSection[] {
+  if (!query) {
+    return sections;
+  }
+
+  const matchedIds = new Set(
+    sections
+      .filter((section) => !section.isGroupHeader && sectionMatchesSettingsSearch(section, query, translateLabel(section), translateSearchKey))
+      .map((section) => section.id),
+  );
+
+  return sections.filter((section, index) => {
+    if (!section.isGroupHeader) {
+      return matchedIds.has(section.id);
+    }
+
+    for (const candidate of sections.slice(index + 1)) {
+      if (candidate.isGroupHeader) {
+        return false;
+      }
+      if (matchedIds.has(candidate.id)) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+function resolveFirstSelectableSettingsSection(sections: SettingsSection[], fallback: string): string {
+  return sections.find((section) => !section.isGroupHeader)?.id ?? fallback;
+}
+
+function resolveSettingsSectionOptionLabel(section: SettingsSection, label: string): string {
+  if (section.scope === "global") {
+    return `Global — ${label}`;
+  }
+  if (section.scope === "project") {
+    return `Project — ${label}`;
+  }
+  return label;
+}
 
 function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetries?: unknown } | null): number {
   const configured = Number(settings?.maxAutoMergeRetries);
@@ -231,46 +303,78 @@ function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetr
 const SETTINGS_SECTIONS: SettingsSection[] = [
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
-  { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global" },
-  { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe },
-  { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global" },
-  { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global" },
-  { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global" },
-  { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global" },
-  { id: "global-mcp", label: "MCP Servers", labelKey: "settings.nav.globalMcp", scope: "global" },
-  { id: "cli-agents", label: "CLI Agents", labelKey: "settings.nav.cliAgents", scope: "global" },
-  { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
+  { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global", searchableText: ["global defaults", "modal outside dismiss", "agent logs", "persist tool output", "thinking logs", "GitLab instance URL", "global tracking repo"] },
+  { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe, searchableText: ["login", "OAuth", "API key", "custom providers", "Anthropic", "OpenAI", "provider credentials"] },
+  { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global", searchableText: ["theme", "color", "sidebar", "dock", "task popup", "open tasks as popups", "quick chat"] },
+  { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global", searchableText: ["ntfy", "webhook", "events", "failure notifications", "sticky", "toast"] },
+  { id: "node-sync", label: "Node Sync", labelKey: "settings.nav.nodeSync", scope: "global", searchableText: ["sync", "node", "distributed", "heartbeat", "coordination"] },
+  { id: "global-models", label: "Models", labelKey: "settings.nav.globalModels", scope: "global", searchableText: ["global models", "model presets", "favorite providers", "model pricing overrides", "LiteLLM pricing", "token pricing"] },
+  { id: "global-mcp", label: "MCP Servers", labelKey: "settings.nav.globalMcp", scope: "global", searchableText: ["global MCP servers", "shared MCP", "user MCP", "tool servers"] },
+  {
+    id: "cli-agents",
+    label: "CLI Agents",
+    labelKey: "settings.nav.cliAgents",
+    scope: "global",
+    searchableText: [
+      "Droid CLI",
+      "Cursor CLI",
+      "agent runtime",
+      "command line agents",
+      "Adapter",
+      "Command override",
+      "Path or name of the binary to launch",
+      "Extra arguments",
+      "Appended after the adapter's computed arguments",
+      "Environment variable additions",
+      "Comma-separated variable names forwarded",
+      "Autonomy mode",
+      "Elevated autonomy requires a per-project approval",
+    ],
+    searchableKeys: [
+      "settings.cliAgents.adapterLabel",
+      "settings.cliAgents.commandLabel",
+      "settings.cliAgents.commandHelp",
+      "settings.cliAgents.extraArgsLabel",
+      "settings.cliAgents.extraArgsHelp",
+      "settings.cliAgents.envLabel",
+      "settings.cliAgents.envHelp",
+      "settings.cliAgents.autonomyLabel",
+      "settings.cliAgents.autonomyHelp",
+      "settings.cliAgents.approvedNote",
+    ],
+  },
+  { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global", searchableText: ["research providers", "external search providers", "fetch limits", "global research defaults", "citations"] },
   /*
   FNXC:SettingsNavigation 2026-06-26-09:20:
   FN-7062 requires the remote settings nav entry to read "Remote Access" only. The stale "& Node Sync" suffix belongs to the separate Node Sync settings section, while this section body already uses the Remote Access heading.
   */
-  { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global" },
-  { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global" },
+  { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global", searchableText: ["cloudflared", "tunnel", "QR", "persistent token", "remote URL"] },
+  { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global", searchableText: ["feature flags", "experiments", "research view", "evals view", "sandbox", "subtask breakdown"] },
 
   // Runtimes group (plugin runtimes with their own settings)
   { id: "__runtimes_header", label: "Runtimes", labelKey: "settings.nav.runtimesHeader", scope: undefined, isGroupHeader: true },
-  { id: "hermes-runtime", label: "Hermes", labelKey: "settings.nav.hermesRuntime", scope: "global" },
-  { id: "openclaw-runtime", label: "OpenClaw", labelKey: "settings.nav.openclawRuntime", scope: "global" },
-  { id: "paperclip-runtime", label: "Paperclip", labelKey: "settings.nav.paperclipRuntime", scope: "global" },
+  { id: "hermes-runtime", label: "Hermes", labelKey: "settings.nav.hermesRuntime", scope: "global", searchableText: ["Hermes runtime", "plugin runtime", "printer runtime"] },
+  { id: "openclaw-runtime", label: "OpenClaw", labelKey: "settings.nav.openclawRuntime", scope: "global", searchableText: ["OpenClaw runtime", "plugin runtime", "open claw"] },
+  { id: "paperclip-runtime", label: "Paperclip", labelKey: "settings.nav.paperclipRuntime", scope: "global", searchableText: ["Paperclip runtime", "plugin runtime"] },
 
   // Project group (specific to this project)
   { id: "__project_header", label: "Project", labelKey: "settings.nav.projectHeader", scope: undefined, isGroupHeader: true },
-  { id: "general", label: "Project General", labelKey: "settings.nav.projectGeneral", scope: "project" },
-  { id: "commands", label: "Commands & Scripts", labelKey: "settings.nav.commands", scope: "project" },
-  { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project" },
-  { id: "scheduling", label: "Scheduling & Capacity", labelKey: "settings.nav.scheduling", scope: "project" },
-  { id: "scheduled-evals", label: "Scheduled Evals", labelKey: "settings.nav.scheduledEvals", scope: "project" },
-  { id: "node-routing", label: "Node Routing", labelKey: "settings.nav.nodeRouting", scope: "project" },
-  { id: "merge", label: "Merge", labelKey: "settings.nav.merge", scope: "project" },
-  { id: "agent-permissions", label: "Agents & Permissions", labelKey: "settings.nav.agentPermissions", scope: "project" },
-  { id: "memory", label: "Memory", labelKey: "settings.nav.memory", scope: "project" },
-  { id: "backups", label: "Backups", labelKey: "settings.nav.backups", scope: "project" },
-  { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project" },
-  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project" },
-  { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project" },
-  { id: "mcp", label: "MCP Servers", labelKey: "settings.nav.mcp", scope: "project" },
-  { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project" },
-  { id: "plugins", label: "Plugins", labelKey: "settings.nav.plugins", scope: "project" },
+  { id: "general", label: "Project General", labelKey: "settings.nav.projectGeneral", scope: "project", searchableText: ["project general", "Completion Documentation Automation", "Quick Chat launcher", "ephemeral task-worker agents", "GitHub tracking", "GitLab integration", "chat rooms", "auto-cleanup old chats"] },
+  { id: "commands", label: "Commands & Scripts", labelKey: "settings.nav.commands", scope: "project", searchableText: ["test command", "build command", "verification command", "workflow scripts", "commands"] },
+  { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project", searchableText: ["worktree directory", "copy files", "recycle worktrees", "branch naming", "sibling branch rename"] },
+  { id: "scheduling", label: "Scheduling & Capacity", labelKey: "settings.nav.scheduling", scope: "project", searchableText: ["max concurrent", "capacity", "stuck tasks", "poll interval", "parallel steps", "scheduler"] },
+  { id: "scheduled-evals", label: "Scheduled Evals", labelKey: "settings.nav.scheduledEvals", scope: "project", searchableText: ["scheduled evals", "evaluation schedule", "eval runs", "quality jobs"] },
+  { id: "node-routing", label: "Node Routing", labelKey: "settings.nav.nodeRouting", scope: "project", searchableText: ["node routing", "routing rules", "node selection", "execution nodes"] },
+  { id: "merge", label: "Merge", labelKey: "settings.nav.merge", scope: "project", searchableText: ["auto merge", "AI merge", "merge strategy", "plan approval", "direct merge", "integration branch", "push after merge"] },
+  { id: "agent-permissions", label: "Agents & Permissions", labelKey: "settings.nav.agentPermissions", scope: "project", searchableText: ["agent provisioning", "approval", "permissions", "policy", "agent creation"] },
+  { id: "memory", label: "Memory", labelKey: "settings.nav.memory", scope: "project", searchableText: ["memory backend", "Dreams", "long-term memory", "qmd", "memory file", "retrieval"] },
+  { id: "backups", label: "Backups", labelKey: "settings.nav.backups", scope: "project", searchableText: ["backup", "restore", "settings export", "settings import"] },
+  { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project", searchableText: ["project research", "research runs", "citations", "search limits", "fetch synthesis"] },
+  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project", searchableText: ["default provider", "default model", "workflow model lanes", "Plan/Triage", "Executor", "Reviewer", "summarization model"] },
+  { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project", searchableText: ["secrets", "secret storage", "environment", "credentials"] },
+  { id: "mcp", label: "MCP Servers", labelKey: "settings.nav.mcp", scope: "project", searchableText: ["project MCP servers", "workspace MCP", "project tool servers", "mcp config"] },
+  { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project", searchableText: ["prompt instructions", "PR title prompt", "PR description prompt", "custom prompts"] },
+  { id: "plugins", label: "Plugins", labelKey: "settings.nav.plugins", scope: "project", searchableText: ["Fusion plugins", "Pi extensions", "plugin manager", "extension marketplace"] },
 ];
 
 /** Well-known experimental feature flags with display labels.
@@ -812,6 +916,7 @@ export function SettingsModal({
       ? window.matchMedia(MOBILE_SETTINGS_MEDIA_QUERY)?.matches === true
       : false,
   );
+  const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null);
@@ -856,7 +961,7 @@ export function SettingsModal({
   const experimentalFeatures = form.experimentalFeatures ?? {};
   const researchViewEnabled = isExperimentalFeatureEnabled(experimentalFeatures, "researchView");
   const evalsViewEnabled = isExperimentalFeatureEnabled(experimentalFeatures, "evalsView");
-  const visibleSections = SETTINGS_SECTIONS.filter((section) => {
+  const visibleSections = useMemo(() => SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "research-global" || section.id === "research-project") {
       return researchViewEnabled;
     }
@@ -866,10 +971,25 @@ export function SettingsModal({
     }
 
     return true;
-  });
+  }), [researchViewEnabled, evalsViewEnabled]);
   const firstVisibleSectionId = visibleSections.some((section) => section.id === DEFAULT_SETTINGS_SECTION)
     ? DEFAULT_SETTINGS_SECTION
-    : (visibleSections.find((section) => !section.isGroupHeader)?.id ?? firstNonHeaderSection?.id ?? "general");
+    : resolveFirstSelectableSettingsSection(visibleSections, firstNonHeaderSection?.id ?? "general");
+  const normalizedSettingsSearchQuery = normalizeSettingsSearchText(settingsSearchQuery);
+  /*
+  FNXC:SettingsSearch 2026-07-04-00:00:
+  Operators need Settings search to find the section containing a setting without bypassing feature gates. Search filters only the already-visible section list, matches section labels plus real setting-label/help i18n keys and curated keywords, suppresses empty group headers, and keeps duplicate global/project labels distinguishable in the mobile picker.
+  */
+  const searchMatchedSections = useMemo(() => filterSettingsSectionsForSearch(
+    visibleSections,
+    normalizedSettingsSearchQuery,
+    (section) => t(section.labelKey, section.label),
+    (key) => t(key),
+  ), [normalizedSettingsSearchQuery, t, visibleSections]);
+  const searchableSectionOptions = searchMatchedSections.filter((section) => !section.isGroupHeader);
+  const hasSettingsSearchQuery = normalizedSettingsSearchQuery.length > 0;
+  const hasSettingsSearchResults = searchableSectionOptions.length > 0;
+  const firstSearchMatchedSectionId = resolveFirstSelectableSettingsSection(searchMatchedSections, firstVisibleSectionId);
 
   /** Get the scope of the currently active section */
   const activeSectionScope = visibleSections.find((s) => s.id === activeSection)?.scope;
@@ -887,8 +1007,13 @@ export function SettingsModal({
 
     if (!visibleSections.some((section) => section.id === activeSection)) {
       setActiveSection(firstVisibleSectionId);
+      return;
     }
-  }, [activeSection, researchViewEnabled, evalsViewEnabled, firstVisibleSectionId, visibleSections]);
+
+    if (hasSettingsSearchQuery && hasSettingsSearchResults && !searchMatchedSections.some((section) => section.id === activeSection)) {
+      setActiveSection(firstSearchMatchedSectionId);
+    }
+  }, [activeSection, researchViewEnabled, evalsViewEnabled, firstVisibleSectionId, firstSearchMatchedSectionId, hasSettingsSearchQuery, hasSettingsSearchResults, searchMatchedSections, visibleSections]);
 
   // Auth state (independent of the settings save flow)
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
@@ -3276,58 +3401,115 @@ export function SettingsModal({
           <div className="settings-empty-state settings-loading"><LoadingSpinner label={t("settings.loading", "Loading…")} /></div>
         ) : (
           <div className="settings-layout">
-            {showMobileSectionPicker && (
-              <div className="settings-mobile-section-picker">
-                <label htmlFor="settings-mobile-section">{t("settings.mobileNav.label", "Settings Section")}</label>
-                <select
-                  id="settings-mobile-section"
-                  className="select touch-target"
-                  value={activeSection}
-                  onChange={(event) => setActiveSection(event.target.value as SectionId)}
-                >
-                  {visibleSections.filter((section) => !section.isGroupHeader).map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {t(section.labelKey, section.label)}
-                    </option>
-                  ))}
-                </select>
+            <aside className="settings-navigation" aria-label={t("settings.search.navigationLabel", "Settings navigation")}> 
+              <div className="settings-search" data-testid="settings-search">
+                <label className="settings-search-label" htmlFor="settings-search-input">
+                  {t("settings.search.label", "Search settings")}
+                </label>
+                <div className="settings-search-input-wrap">
+                  <input
+                    id="settings-search-input"
+                    data-testid="settings-search-input"
+                    className="input settings-search-input"
+                    type="search"
+                    value={settingsSearchQuery}
+                    onChange={(event) => setSettingsSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && hasSettingsSearchQuery) {
+                        event.stopPropagation();
+                        setSettingsSearchQuery("");
+                      }
+                    }}
+                    placeholder={t("settings.search.placeholder", "Search by setting or section")}
+                    aria-describedby="settings-search-results"
+                  />
+                  {hasSettingsSearchQuery && (
+                    <button
+                      type="button"
+                      className="btn btn-sm settings-search-clear"
+                      onClick={() => setSettingsSearchQuery("")}
+                      aria-label={t("settings.search.clear", "Clear settings search")}
+                    >
+                      {t("actions.clear", "Clear")}
+                    </button>
+                  )}
+                </div>
+                <div id="settings-search-results" className="settings-search-results" aria-live="polite">
+                  {hasSettingsSearchQuery
+                    ? t("settings.search.resultCount", "{{count}} matching sections", { count: searchableSectionOptions.length })
+                    : t("settings.search.allSections", "Showing all settings sections")}
+                </div>
               </div>
-            )}
-            <nav className="settings-sidebar">
-              {visibleSections.map((section) => {
-                // Render group headers as non-clickable styled divs
-                if (section.isGroupHeader) {
+              {showMobileSectionPicker && (
+                <div className="settings-mobile-section-picker">
+                  <label htmlFor="settings-mobile-section">{t("settings.mobileNav.label", "Settings Section")}</label>
+                  {hasSettingsSearchResults ? (
+                    <select
+                      id="settings-mobile-section"
+                      className="select touch-target"
+                      value={activeSection}
+                      onChange={(event) => setActiveSection(event.target.value as SectionId)}
+                    >
+                      {searchableSectionOptions.map((section) => {
+                        const label = t(section.labelKey, section.label);
+                        return (
+                          <option key={section.id} value={section.id}>
+                            {resolveSettingsSectionOptionLabel(section, label)}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : (
+                    <p className="settings-search-empty-hint">{t("settings.search.noMobileOptions", "No sections match this search.")}</p>
+                  )}
+                </div>
+              )}
+              <nav className="settings-sidebar">
+                {hasSettingsSearchResults ? searchMatchedSections.map((section) => {
+                  // Render group headers as non-clickable styled divs
+                  if (section.isGroupHeader) {
+                    return (
+                      <div key={section.id} className="settings-group-header">
+                        {t(section.labelKey, section.label)}
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={section.id} className="settings-group-header">
+                    <button
+                      key={section.id}
+                      className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
+                      onClick={() => setActiveSection(section.id)}
+                      title={
+                        section.scope === "global"
+                          ? t("settings.nav.tooltip.global", "Shared across all projects")
+                          : section.scope === "project"
+                            ? t("settings.nav.tooltip.project", "Specific to this project")
+                            : undefined
+                      }
+                    >
+                      {section.scope === "global" && <Globe className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />}
+                      {section.scope === "project" && <Folder className="settings-scope-icon" aria-label={t("settings.nav.aria.project", "Project setting")} size={16} />}
+                      {section.icon && !section.scope && (
+                        <section.icon className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />
+                      )}
                       {t(section.labelKey, section.label)}
-                    </div>
+                    </button>
                   );
-                }
-                return (
-                  <button
-                    key={section.id}
-                    className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
-                    onClick={() => setActiveSection(section.id)}
-                    title={
-                      section.scope === "global"
-                        ? t("settings.nav.tooltip.global", "Shared across all projects")
-                        : section.scope === "project"
-                          ? t("settings.nav.tooltip.project", "Specific to this project")
-                          : undefined
-                    }
-                  >
-                    {section.scope === "global" && <Globe className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />}
-                    {section.scope === "project" && <Folder className="settings-scope-icon" aria-label={t("settings.nav.aria.project", "Project setting")} size={16} />}
-                    {section.icon && !section.scope && (
-                      <section.icon className="settings-scope-icon" aria-label={t("settings.nav.aria.global", "Global setting")} size={16} />
-                    )}
-                    {t(section.labelKey, section.label)}
-                  </button>
-                );
-              })}
-            </nav>
+                }) : (
+                  <div className="settings-search-empty" role="status">
+                    <p>{t("settings.search.noResults", "No settings sections match \"{{query}}\".", { query: settingsSearchQuery.trim() })}</p>
+                    <button type="button" className="btn btn-sm" onClick={() => setSettingsSearchQuery("")}>{t("settings.search.clear", "Clear settings search")}</button>
+                  </div>
+                )}
+              </nav>
+            </aside>
             <div className="settings-content" ref={settingsContentRef}>
-              {renderSectionFields()}
+              {hasSettingsSearchResults ? renderSectionFields() : (
+                <div className="settings-empty-state settings-search-content-empty" role="status">
+                  <p>{t("settings.search.noResults", "No settings sections match \"{{query}}\".", { query: settingsSearchQuery.trim() })}</p>
+                  <button type="button" className="btn" onClick={() => setSettingsSearchQuery("")}>{t("settings.search.clear", "Clear settings search")}</button>
+                </div>
+              )}
             </div>
           </div>
         )}

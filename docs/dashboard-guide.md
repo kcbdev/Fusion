@@ -8,6 +8,11 @@ The Fusion dashboard is the main control plane for tasks, agents, missions, sett
 
 When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, restart Fusion to apply the new version because the already-running dashboard server is unchanged until restart.
 
+## Settings discovery
+
+<!-- FNXC:SettingsSearchDocs 2026-07-04-00:00: Settings search is section-discovery, not a global command palette. Document that it filters visible Settings sections by section names and setting keywords while preserving feature-gated hidden sections. -->
+Use **Search settings** at the top of Settings to find the section that contains a setting by name or keyword. The same search works in the Settings modal and embedded Settings page, filters both the desktop section list and mobile section picker, and only searches sections currently visible for enabled feature flags.
+
 ## Mobile/PWA app icons
 
 The installed mobile/PWA home-screen icons are generated from `packages/dashboard/app/public/logo.svg` by the desktop icon generator. When the Fusion brand mark changes, run `pnpm --filter @fusion/desktop generate:icons` so `packages/dashboard/app/public/icons/icon-192.png` and `packages/dashboard/app/public/icons/icon-512.png` stay aligned with the canonical logo. Also bump `CACHE_NAME` in `packages/dashboard/app/public/sw.js` whenever those icon assets change so installed PWAs refresh the cached launcher images.

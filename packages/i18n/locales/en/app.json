@@ -5,6 +5,7 @@
     "back": "Back",
     "cancel": "Cancel",
     "close": "Close",
+    "clear": "Clear",
     "closeInsightsView": "Close insights view",
     "closeModal": "Close modal",
     "confirm": "Confirm",
@@ -5789,6 +5790,16 @@
       "version": "Version {{version}}",
       "checkUpdates": "Check for updates",
       "helpDiscussions": "Help and discussions"
+    },
+    "search": {
+      "allSections": "Showing all settings sections",
+      "clear": "Clear settings search",
+      "label": "Search settings",
+      "navigationLabel": "Settings navigation",
+      "noMobileOptions": "No sections match this search.",
+      "noResults": "No settings sections match \"{{query}}\".",
+      "placeholder": "Search by setting or section",
+      "resultCount": "{{count}} matching sections"
     },
     "general": {
       "25": "25",

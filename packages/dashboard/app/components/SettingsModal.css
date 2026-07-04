@@ -524,20 +524,84 @@ The embedded title reads like other embedded-view titles (Planning modal-header-
   overflow: hidden;
 }
 
+.settings-navigation {
+  width: calc(var(--space-xl) * 7 + var(--space-sm));
+  min-width: calc(var(--space-xl) * 7 + var(--space-sm));
+  border-right: var(--btn-border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.settings-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border-bottom: var(--btn-border-width) solid var(--border);
+}
+
+.settings-search-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.settings-search-input {
+  min-width: 0;
+  width: 100%;
+}
+
+.settings-search-clear {
+  flex-shrink: 0;
+}
+
+.settings-search-results,
+.settings-search-empty-hint {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.settings-search-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  color: var(--text-muted);
+}
+
+.settings-search-empty p,
+.settings-search-content-empty p {
+  margin: 0;
+}
+
+.settings-search-content-empty {
+  gap: var(--space-md);
+}
+
 .settings-mobile-section-picker {
   display: none;
 }
 
 .settings-sidebar {
-  width: 170px;
-  min-width: 170px;
-  border-right: 1px solid var(--border);
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-sm) var(--space-sm);
   gap: calc(var(--space-xs) / 2);
-  background: color-mix(in srgb, var(--text) 10%, transparent);
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
 }
@@ -2053,12 +2117,33 @@ The header row wraps so the badge drops below the heading on narrow widths inste
     min-height: 0;
   }
 
+  .settings-navigation {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: var(--btn-border-width) solid var(--border);
+    background: var(--surface);
+  }
+
+  .settings-search {
+    padding: var(--space-md) var(--space-lg) var(--space-sm);
+  }
+
+  .settings-search-input-wrap {
+    align-items: stretch;
+  }
+
+  .settings-search-input {
+    font-size: 16px;
+  }
+
   .settings-mobile-section-picker {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: var(--btn-border-width) solid var(--border);
+    padding: var(--space-sm) var(--space-lg) var(--space-md);
+    border-bottom: none;
     background: var(--surface);
   }
 
