@@ -462,19 +462,35 @@ describe("createServer health and headless mode", () => {
     });
   });
 
-  it("reports the engine unavailable when the manager has no running engines", async () => {
+  it("reports the engine unavailable when no engine manager can run automation", async () => {
     const store = createMockStore();
-    const app = createServer(store, {
-      engineManager: {
-        getAllEngines: vi.fn().mockReturnValue(new Map()),
-        getEngine: vi.fn(),
-      } as any,
-    });
+    const app = createServer(store);
 
     const res = await GET(app, "/api/health");
 
     expect(res.status).toBe(200);
     expect(res.body.engine).toEqual({ available: false });
+  });
+
+  it("keeps desktop embedded managers available while engines are still starting or lazily startable", async () => {
+    const store = createMockStore();
+    const app = createServer(store, {
+      engineManager: {
+        getAllEngines: vi.fn().mockReturnValue(new Map()),
+        hasRunningEngine: vi.fn().mockReturnValue(false),
+        getEngine: vi.fn(),
+        has: vi.fn((projectId: string) => projectId === "starting"),
+      } as any,
+    });
+
+    const health = await GET(app, "/api/health");
+    const startingStatus = await GET(app, "/api/engine/status?projectId=starting");
+    const lazilyStartableStatus = await GET(app, "/api/engine/status?projectId=missing");
+
+    expect(health.status).toBe(200);
+    expect(health.body.engine).toEqual({ available: true });
+    expect(startingStatus.body).toEqual({ connected: false, starting: true, canStart: true, projectId: "starting" });
+    expect(lazilyStartableStatus.body).toEqual({ connected: false, starting: false, canStart: true, projectId: "missing" });
   });
 
   it("reports the engine available when the manager has a running engine", async () => {

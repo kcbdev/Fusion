@@ -331,6 +331,24 @@ describe("DashboardBanners engine remediation visibility", () => {
     expect(screen.getAllByRole("button", { name: /start engine/i })).toHaveLength(2);
   });
 
+  it("does not mount the dashboard-only unavailable banner when desktop health reports a startable manager", () => {
+    render(
+      <DashboardBanners
+        {...buildProps({
+          authTokenRecoveryOpen: false,
+          dashboardHealth: {
+            ...unavailableEngineHealth(),
+            engine: { available: true },
+          } as DashboardBannersProps["dashboardHealth"],
+        })}
+      />,
+    );
+
+    expect(screen.queryByTestId("engine-unavailable-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("engine-status-banner")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /start engine/i })).toHaveLength(1);
+  });
+
   it("preserves the current project guard while auth recovery is closed", () => {
     render(<DashboardBanners {...buildProps({ authTokenRecoveryOpen: false, currentProject: null })} />);
 
