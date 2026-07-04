@@ -327,12 +327,16 @@ These groups moved out of project settings and into workflow settings (built-in
 <!--
 FNXC:WorkflowRouting 2026-06-22-12:00:
 Triage workflow defaults are policy inputs, not permission to reroute tasks autonomously. Prompt guidance allows workflow selection only for explicit user requests or tasks the agent created.
+
+FNXC:TriagePolicy 2026-07-04-00:00:
+`triageProactiveSubtaskSplittingEnabled` is workflow/project-scoped so operators can disable automatic oversized-task splitting without disabling explicit per-task `breakIntoSubtasks: true` requests.
 -->
 
 The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
 
 | Setting | Default | Purpose |
 |---|---:|---|
+| `triageProactiveSubtaskSplittingEnabled` | `true` | Enables automatic large-task splitting guidance for oversized M/L tasks. Set to `false` to keep tasks whole unless `breakIntoSubtasks: true` is explicitly requested. |
 | `triageSizeSmallMaxHours` | `2` | Size S upper hour boundary (`S (<2h)`). |
 | `triageSizeMediumMaxHours` | `4` | Size M upper hour boundary (`M (2-4h)`). |
 | `triageSizeLargeMaxHours` | `8` | Size L upper hour boundary; XL starts at `8h+`. |
@@ -349,6 +353,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `autoApproveSpec` | `false` | Legacy compatibility setting. Workflow Plan Review now owns optional pre-execution AI plan approval. |
 | `planReviewMaxRevisions` | unset | Workflow-native Plan Review/spec revision cap. Unset/empty means unbounded automatic replans; a non-negative integer caps attempts; `0` disables automatic Plan Review revision. |
 | `codeReviewMaxRevisions` | unset | Workflow-native Code Review remediation cap. Unset/empty means unbounded automatic code-fix passes; a non-negative integer caps attempts; `0` disables automatic Code Review remediation. |
+
+When `triageProactiveSubtaskSplittingEnabled` is `true` (the default), triage may proactively replace a large task with 2-5 child tasks when the size, step-count, package breadth, file-scope, or remediation-batch signals justify the coordination overhead. When it is `false`, those automatic oversized-task signals are advisory only for writing a realistic single-task spec; triage must not split solely because the task is large. The per-task `breakIntoSubtasks: true` flag is separate and remains mandatory: if a user explicitly asks for subtask breakdown, triage still evaluates and creates child tasks when the work is meaningfully decomposable.
 
 In the dashboard Settings modal, Project Models exposes Plan/Triage, Executor,
 Reviewer, and declared fallback dropdown controls for the default workflow. The

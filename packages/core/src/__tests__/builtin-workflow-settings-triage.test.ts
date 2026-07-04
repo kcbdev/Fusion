@@ -9,6 +9,7 @@ import {
 import { MOVED_SETTINGS_KEYS } from "../moved-settings.js";
 
 const expectedDefaults: Record<string, { type: string; default: unknown }> = {
+  triageProactiveSubtaskSplittingEnabled: { type: "boolean", default: true },
   triageSizeSmallMaxHours: { type: "number", default: 2 },
   triageSizeMediumMaxHours: { type: "number", default: 4 },
   triageSizeLargeMaxHours: { type: "number", default: 8 },
@@ -97,5 +98,27 @@ describe("workflow-native built-in workflow settings", () => {
     expect(rendered).toContain("verbs: Audit, Confirm");
     expect(rendered).not.toContain("{{");
     expect(() => renderTriagePolicyPlaceholders("{{unknownTriageToken}}", {})).toThrow(/Unresolved triage policy placeholder/);
+  });
+
+  it("renders proactive splitting policy as enabled by default", () => {
+    const rendered = renderTriagePolicyPlaceholders("{{triageProactiveSubtaskSplittingEnabled}}", {});
+
+    expect(rendered).toContain("For tasks you assess as Size M or L, consider whether splitting");
+    expect(rendered).toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
+    expect(rendered).toContain("MORE THAN 7 implementation steps");
+    expect(rendered).not.toContain("Proactive oversized-task splitting is DISABLED");
+    expect(rendered).not.toContain("{{");
+  });
+
+  it("renders disabled proactive policy without weakening explicit subtask requests", () => {
+    const rendered = renderTriagePolicyPlaceholders("{{triageProactiveSubtaskSplittingEnabled}}", {
+      triageProactiveSubtaskSplittingEnabled: false,
+    } as never);
+
+    expect(rendered).toContain("Proactive oversized-task splitting is DISABLED");
+    expect(rendered).toContain("Do NOT split solely because the task is Size M/L");
+    expect(rendered).toContain("Only create child tasks when `breakIntoSubtasks: true` is explicitly present");
+    expect(rendered).not.toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
+    expect(rendered).not.toContain("{{");
   });
 });

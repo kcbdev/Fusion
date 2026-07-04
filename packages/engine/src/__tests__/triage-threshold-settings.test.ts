@@ -75,6 +75,33 @@ describe("triage threshold workflow settings", () => {
     }
   });
 
+  it("uses stored disabled proactive splitting policy while retaining explicit split instructions", async () => {
+    const rootDir = makeTempDir("fn-7491-triage-root-");
+    const globalDir = makeTempDir("fn-7491-triage-global-");
+    const store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
+    await store.init();
+    try {
+      const projectId = store.getWorkflowSettingsProjectId();
+      await store.updateWorkflowSettingValues("builtin:coding", projectId, {
+        triageProactiveSubtaskSplittingEnabled: false,
+      });
+
+      const effective = await resolveEffectiveSettingsById(store, "builtin:coding", projectId);
+      expect(effective.triageProactiveSubtaskSplittingEnabled).toBe(false);
+
+      const rendered = renderTriagePolicyPlaceholders(builtinPlanningPrompt(), effective);
+      expect(rendered).toContain("## Triage subtask breakdown");
+      expect(rendered).toContain("When the task includes `breakIntoSubtasks: true`, first decide whether it should be split");
+      expect(rendered).toContain("Proactive oversized-task splitting is DISABLED");
+      expect(rendered).toContain("Do NOT split solely because the task is Size M/L");
+      expect(rendered).toContain("Only create child tasks when `breakIntoSubtasks: true` is explicitly present");
+      expect(rendered).not.toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
+      expect(rendered).not.toContain("{{");
+    } finally {
+      store.close();
+    }
+  });
+
   it("keeps migrated threshold numbers out of the triage prompt assembly code path", async () => {
     const source = await readFile(new URL("../triage.ts", import.meta.url), "utf8");
     const promptAssembly = source.slice(
@@ -84,6 +111,7 @@ describe("triage threshold workflow settings", () => {
 
     expect(promptAssembly).toContain("renderTriagePolicyPlaceholders");
     expect(promptAssembly).not.toMatch(/\b(?:7|9|12|20|30)\b/);
+    expect(promptAssembly).not.toMatch(/triageProactiveSubtaskSplittingEnabled\s*[:=]\s*(?:true|false)/);
     expect(promptAssembly).not.toMatch(/builtin:quick-fix|builtin:coding/);
     expect(promptAssembly).not.toMatch(/Decide|Evaluate|Verify|Confirm|Audit|Review whether|Investigate and report/);
   });

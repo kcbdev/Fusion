@@ -101,6 +101,16 @@ const DISPLAY: Record<string, WorkflowSettingDisplay> = {
      */
     description: "Leave empty for unbounded automatic Code Review remediation; set 0 to disable automatic revision.",
   },
+  triageProactiveSubtaskSplittingEnabled: {
+    group: "steps",
+    label: "Automatic large-task splitting",
+    /*
+     * FNXC:TriagePolicy 2026-07-04-00:00:
+     * Workflow Settings is the canonical operator surface for this workflow/project policy. The copy must make the default enabled state clear and preserve trust that explicit `breakIntoSubtasks: true` requests still split even when automatic large-task splitting is off.
+     */
+    description:
+      "Default enabled. When off, triage keeps oversized tasks whole unless breakIntoSubtasks: true is explicitly requested.",
+  },
   workflowStepTimeoutMs: {
     group: "steps",
     label: "Step timeout",
