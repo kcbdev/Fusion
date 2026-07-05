@@ -432,6 +432,10 @@ When quick-create task creation, Planning Mode, or Subtask Breakdown runs from a
 
 The **New Task** dialog's workflow selector also defaults to the current or last selected Board/List workflow lane for the current project. If no valid lane has been selected, or the remembered lane was deleted, the selector falls back to the project default workflow and task creation omits an explicit `workflowId`.
 
+<!-- FNXC:CodingIdeasWorkflow 2026-07-05-00:00: Every dashboard create surface (inline quick-create, quick-add box, New Task dialog, insight → task, todo → task) must omit an explicit `column` from the create request so the store resolves the landing column from the (selected or project-default) workflow's intake column instead of always forcing legacy `triage`. -->
+
+Create requests never send an explicit `column`. The task store resolves the landing column from the (selected or project-default) workflow's intake column, so most tasks still land in `triage` under the default Coding workflow, byte-identical to before. A workflow with a **manual intake column** — for example the built-in **Coding (Ideas)** workflow's `ideas` column (`autoTriage: false`) — parks new cards there instead: they wait for you to promote them into `todo` and are not auto-planned by the triage service until you do.
+
 Optional workflow steps declared by the active workflow are available from the quick-add action row and the **New Task** dialog's inline quick buttons. For example, the coding workflow's browser verification option appears as a quick drop-down when that workflow is active; each option is seeded from the workflow step's `defaultOn` setting and is sent with the task's `enabledWorkflowSteps` payload at creation time.
 
 <!-- FNXC:QuickAddAttachments 2026-06-30-00:00: Quick Add attachments use a compact icon-only paperclip while keeping the Attach action and pending image count in accessible labels. The same pending preview/upload path accepts image selection, paste, and direct drag/drop onto the Quick Add box. -->

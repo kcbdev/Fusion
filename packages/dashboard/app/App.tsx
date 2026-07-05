@@ -792,10 +792,13 @@ function AppInner() {
 
   const handleInsightTaskCreate = useCallback(
     async ({ insightId, title, description }: { insightId: string; title: string; description: string }) => {
+      /*
+      FNXC:CodingIdeasWorkflow 2026-07-05-00:00:
+      Do not hard-code `column: "triage"` — this surface has no workflow picker, so it inherits the project-default workflow, and the store resolves the landing column from that workflow's intake column (e.g. Coding (Ideas) → "ideas") instead of forcing triage.
+      */
       await createTask({
         title,
         description,
-        column: "triage",
         source: {
           sourceType: "dashboard_ui",
           sourceMetadata: {
