@@ -224,7 +224,7 @@ function formatDurationCompact(ageMs: number): string {
 }
 
 type TabId = "summary" | "definition" | "chat" | "planner-chat" | "logs" | "changes" | "review" | "pr" | "comments" | "model" | "workflow" | "documents" | "stats" | "routing" | "retries" | "terminal" | `plugin-${string}`;
-type ActivitySegment = "current" | "feed" | "raw-logs";
+type ActivitySegment = "current" | "feed" | "raw-logs" | "interventions";
 
 /*
 FNXC:TaskDetailActivityTab 2026-06-30-00:00:
@@ -3306,12 +3306,34 @@ export function TaskDetailContent({
     });
   }, []);
 
+  /*
+  FNXC:PlannerOversight 2026-07-04-19:00:
+  FN-7571 moves the FN-7519 Intervention Timeline out of the inline oversight
+  cluster and into the Activity view dropdown as a fourth `interventions`
+  segment, alongside Live/Feed/Raw. It is gated on the SAME oversight-active
+  expression the inline mount used to use (`hasTaskOversightOverride ||
+  workflowOversightResolved`, minus `oversightIsOff`) so the option never
+  appears — and never leaves an always-empty segment — when oversight is off
+  or unresolved for the task.
+  */
+  const oversightActive = (hasTaskOversightOverride || workflowOversightResolved) && !oversightIsOff;
+
   const activityViewOptions = useMemo<Array<{ value: ActivitySegment; label: string }>>(() => [
     { value: "current", label: t("taskDetail.activity.current", "Live") },
     { value: "feed", label: t("taskDetail.activity.feed", "Feed") },
     { value: "raw-logs", label: t("taskDetail.activity.raw", "Raw") },
-  ], [t]);
+    ...(oversightActive ? [{ value: "interventions" as const, label: t("taskDetail.activity.interventions", "Interventions") }] : []),
+  ], [t, oversightActive]);
   const selectedActivityViewLabel = activityViewOptions.find((option) => option.value === activitySegment)?.label ?? activityViewOptions[0]?.label ?? "Live";
+
+  // FNXC:PlannerOversight 2026-07-04-19:00: if oversight turns off (or was never active) while
+  // the Interventions segment is selected, fall back to Live so a hidden dropdown option never
+  // leaves a blank/selected segment behind.
+  useEffect(() => {
+    if (!oversightActive && activitySegment === "interventions") {
+      setActivitySegment("current");
+    }
+  }, [oversightActive, activitySegment]);
 
   const selectActivityView = useCallback((value: ActivitySegment) => {
     activityViewMenuViewportGuardUntilRef.current = 0;
@@ -4097,21 +4119,6 @@ export function TaskDetailContent({
                     )}
                   </div>
                 )}
-                {/*
-                FNXC:PlannerOversight 2026-07-04-18:00:
-                FN-7519 Intervention Timeline: rendered adjacent to the FN-7517
-                oversight cluster (no separate `.task-oversight-controls` class
-                exists in the merged FN-7517 code, so this attaches to the
-                closest existing seam — the same gating condition used by the
-                nudge/stop/explain controls above). Hidden entirely (no
-                leftover empty shell) when oversight is Off or unresolved, per
-                the Surface Enumeration gate.
-                */}
-                <PlannerInterventionTimeline
-                  taskId={task.id}
-                  projectId={projectId}
-                  hidden={!(hasTaskOversightOverride || workflowOversightResolved) || oversightIsOff}
-                />
                 {provenanceDisplay && (
                   <div className="detail-provenance">
                     <GitBranch aria-hidden="true" />
@@ -4474,6 +4481,14 @@ export function TaskDetailContent({
                   loadingMore={agentLogLoadingMore}
                   totalCount={agentLogTotal}
                 />
+              ) : activitySegment === "interventions" ? (
+                // FNXC:PlannerOversight 2026-07-04-19:00: FN-7571 relocates the FN-7519
+                // Intervention Timeline from the inline oversight cluster into this
+                // Activity segment. Reachable only via the dropdown, which already gates
+                // on oversightActive, so no `hidden` prop is needed here.
+                <div className="detail-activity" role="tabpanel">
+                  <PlannerInterventionTimeline taskId={task.id} projectId={projectId} />
+                </div>
               ) : (
                 <div className="detail-activity" role="tabpanel">
                   <button

@@ -477,3 +477,151 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, FN-
     expect(screen.queryByTestId("detail-overseer-explain")).not.toBeInTheDocument();
   });
 });
+
+/*
+FNXC:PlannerOversight 2026-07-04-19:00:
+FN-7571 coverage: the FN-7519 Intervention Timeline moved from an inline
+mount in the oversight cluster into the Activity view dropdown as a fourth
+"Interventions" segment, gated on the same oversight-active expression the
+inline mount used. These assertions cover: (a) no inline mount remains,
+(b) the dropdown option appears/renders the timeline when oversight is
+active, (c) the option is absent and nothing mounts when oversight is off,
+and (d) selecting Interventions then losing oversight falls back to Live
+with no blank panel. Runs at the default (desktop) breakpoint, matching the
+first describe block's setup rather than the FN-7521/FN-7545 mobile one.
+*/
+describe("Intervention Timeline relocation into the Activity dropdown (FN-7571)", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockConfirm.mockResolvedValue(true);
+    const api = await import("../../api");
+    vi.mocked(api.fetchBoardWorkflows).mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} });
+    vi.mocked(api.fetchWorkflowSettingValues).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
+    vi.mocked(api.nudgeOverseer).mockResolvedValue({ applied: false, reason: "oversight-off" });
+    vi.mocked(api.stopOverseer).mockResolvedValue({ applied: true, reason: "stopped" });
+    vi.mocked(api.explainOverseer).mockResolvedValue({ snapshot: null });
+  });
+
+    function openActivityViewMenu() {
+      const existingMenu = screen.queryByRole("menu", { name: "Activity views" });
+      if (!existingMenu) {
+        fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+      }
+      return screen.getByRole("menu", { name: "Activity views" });
+    }
+
+    it("never renders the timeline inline in the oversight cluster", async () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-210", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await screen.findByTestId("detail-overseer-nudge");
+      expect(screen.queryByTestId("planner-intervention-timeline")).not.toBeInTheDocument();
+    });
+
+    it("exposes an Interventions option in the Activity dropdown and renders the timeline when oversight is active", async () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-211", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await screen.findByTestId("detail-overseer-nudge");
+      openActivityViewMenu();
+      const option = screen.getByRole("menuitem", { name: "Interventions" });
+      fireEvent.click(option);
+
+      expect(await screen.findByTestId("planner-intervention-timeline")).toBeInTheDocument();
+    });
+
+    it("omits the Interventions option and mounts nothing when oversight is off", async () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-212", column: "in-progress", plannerOversightLevel: "off" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await screen.findByTestId("detail-oversight-level-select");
+      openActivityViewMenu();
+      expect(screen.queryByRole("menuitem", { name: "Interventions" })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("planner-intervention-timeline")).not.toBeInTheDocument();
+    });
+
+    it("falls back to Live with no blank panel if oversight turns off after Interventions was selected", async () => {
+      const { rerender } = render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-213", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await screen.findByTestId("detail-overseer-nudge");
+      openActivityViewMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: "Interventions" }));
+      expect(await screen.findByTestId("planner-intervention-timeline")).toBeInTheDocument();
+
+      rerender(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-213", column: "in-progress", plannerOversightLevel: "off" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("planner-intervention-timeline")).not.toBeInTheDocument();
+      });
+      openActivityViewMenu();
+      expect(screen.getByRole("menuitem", { name: "Live" })).toHaveAttribute("aria-current", "true");
+    });
+
+    it("still renders the empty state inside the Activity segment when there are no interventions", async () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-214", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      await screen.findByTestId("detail-overseer-nudge");
+      openActivityViewMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: "Interventions" }));
+
+      expect(await screen.findByTestId("planner-intervention-timeline-empty")).toBeInTheDocument();
+    });
+  });
+
