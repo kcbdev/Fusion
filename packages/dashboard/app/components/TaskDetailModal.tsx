@@ -3163,6 +3163,23 @@ export function TaskDetailContent({
   already uses — the server-side `evaluateOverseerHumanControl` guard is the
   real enforcement; this is a client-side disable heuristic only). Stop is
   hidden once oversight is already off — there is nothing left to stop.
+
+  FNXC:PlannerOversight 2026-07-05-00:00:
+  FN-7582: the original disabled-Nudge copy ("overseer is not actively
+  watching this task") read as a fault report — operators seeing it on a
+  healthy IN PROGRESS task assumed the overseer had broken, when the real
+  cause is benign: `pollPlannerOverseer` observes in-progress/in-review tasks
+  on a bounded ~45s poll, and `plannerOverseerState` is only populated once
+  that poll records a live observation for the current stage (FN-7531). The
+  reworded copy below differentiates two distinct disabled reasons instead of
+  one alarming message: (1) no observation yet — reassuring, periodic-poll
+  framing (`nudgeDisabledTitle`); (2) human-control suppressed — user-paused,
+  done/archived, or the `autoMerge:false` in-review human-review terminal —
+  which gets its own distinct copy (`nudgeSuppressedTitle`) naming manual
+  control as the reason instead of implying the overseer is idle. Neither
+  `canNudgeOverseer` nor any other enablement/gating boolean changed; this is
+  copy-only, selected via the already-computed `overseerHumanControlSuppressed`
+  / `overseerActive` booleans below.
   */
   const overseerSnapshot = task.plannerOverseerState ?? null;
   const overseerActive = Boolean(overseerSnapshot);
@@ -3173,6 +3190,18 @@ export function TaskDetailContent({
   const canNudgeOverseer = overseerActive && !oversightIsOff && !overseerHumanControlSuppressed;
   const canExplainOverseer = overseerActive && !oversightIsOff;
   const showStopOverseer = !oversightIsOff;
+  /*
+  FNXC:PlannerOversight 2026-07-05-00:00:
+  FN-7582 shared disabled-reason string, computed once and reused at all four
+  render sites (mobile menu title + helper, desktop inline title + helper) so
+  the two copies can never drift out of sync. Picks the human-control-suppressed
+  copy when suppression is the active cause even though `!overseerActive` may
+  also be true in that state (e.g. a paused task that never got observed) —
+  suppression is the more actionable/accurate explanation for the operator.
+  */
+  const nudgeDisabledReason = overseerHumanControlSuppressed
+    ? t("taskDetail.oversight.nudgeSuppressedTitle", "Nudge is paused while this task is under manual control.")
+    : t("taskDetail.oversight.nudgeDisabledTitle", "Nudge becomes available once the overseer is observing this task's current stage — it checks periodically.");
   const isActivityExpanded = activityExpanded && activeTab === "chat" && !isEditing;
   const isPlannerChatExpanded = plannerChatExpanded && activeTab === "planner-chat" && !isEditing;
   /*
@@ -4006,7 +4035,7 @@ export function TaskDetailContent({
                                 }}
                                 onKeyDown={handleOversightMenuKeyDown}
                                 disabled={!canNudgeOverseer || isNudgingOverseer}
-                                title={canNudgeOverseer ? t("taskDetail.oversight.nudgeTitle", "Inject steering guidance into the current stage now") : t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                                title={canNudgeOverseer ? t("taskDetail.oversight.nudgeTitle", "Inject steering guidance into the current stage now") : nudgeDisabledReason}
                                 aria-label={t("taskDetail.oversight.nudgeAriaLabel", "Manual nudge")}
                               >
                                 {isNudgingOverseer ? <Loader2 className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
@@ -4015,7 +4044,7 @@ export function TaskDetailContent({
                             )}
                             {!oversightIsOff && !canNudgeOverseer && (
                               <span className="detail-oversight-controls-helper" data-testid="detail-overseer-nudge-disabled-reason">
-                                {t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                                {nudgeDisabledReason}
                               </span>
                             )}
                             {showStopOverseer && (
@@ -4126,7 +4155,7 @@ export function TaskDetailContent({
                             void handleNudgeOverseer();
                           }}
                           disabled={!canNudgeOverseer || isNudgingOverseer}
-                          title={canNudgeOverseer ? t("taskDetail.oversight.nudgeTitle", "Inject steering guidance into the current stage now") : t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                          title={canNudgeOverseer ? t("taskDetail.oversight.nudgeTitle", "Inject steering guidance into the current stage now") : nudgeDisabledReason}
                           aria-label={t("taskDetail.oversight.nudgeAriaLabel", "Manual nudge")}
                         >
                           {isNudgingOverseer ? <Loader2 className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
@@ -4135,7 +4164,7 @@ export function TaskDetailContent({
                       )}
                       {(hasTaskOversightOverride || workflowOversightResolved) && !oversightIsOff && !canNudgeOverseer && (
                         <span className="detail-oversight-controls-helper" data-testid="detail-overseer-nudge-disabled-reason">
-                          {t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                          {nudgeDisabledReason}
                         </span>
                       )}
                       {(hasTaskOversightOverride || workflowOversightResolved) && showStopOverseer && (

@@ -140,7 +140,7 @@ describe("TaskDetailModal oversight controls", () => {
     expect(nudgeBtn).toBeDisabled();
   });
 
-  it("shows a visible group label and an in-DOM disabled-reason helper (not just a hover title) when Nudge is unavailable (FN-7546)", async () => {
+  it("shows a visible group label and an in-DOM disabled-reason helper (not just a hover title) when Nudge is unavailable (FN-7546, reworded copy FN-7582)", async () => {
     render(
       <TaskDetailModal
         task={makeTask({ id: "FN-111", column: "todo", plannerOversightLevel: "autonomous" })}
@@ -159,8 +159,57 @@ describe("TaskDetailModal oversight controls", () => {
     const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
     expect(nudgeBtn).toBeDisabled();
 
+    // FN-7582: the old copy ("Nudge unavailable: overseer is not actively
+    // watching this task") read as a fault report. The reworded copy must
+    // frame the no-observation state as periodic/benign instead.
     const reason = await screen.findByTestId("detail-overseer-nudge-disabled-reason");
-    expect(reason).toHaveTextContent("Nudge unavailable: overseer is not actively watching this task");
+    expect(reason).not.toHaveTextContent("not actively watching this task");
+    expect(reason).toHaveTextContent("Nudge becomes available once the overseer is observing this task's current stage");
+    expect(nudgeBtn).toHaveAttribute("title", expect.stringContaining("Nudge becomes available once the overseer is observing this task's current stage"));
+  });
+
+  it("desktop: shows the periodic-observation copy (not the old alarming phrase) for an in-progress task with no plannerOverseerState (FN-7582)", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-116", column: "in-progress", plannerOversightLevel: "autonomous" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    expect(nudgeBtn).toBeDisabled();
+
+    const reason = await screen.findByTestId("detail-overseer-nudge-disabled-reason");
+    expect(reason).not.toHaveTextContent("not actively watching this task");
+    expect(reason).toHaveTextContent("Nudge becomes available once the overseer is observing this task's current stage");
+    expect(nudgeBtn).toHaveAttribute("title", expect.stringContaining("Nudge becomes available once the overseer is observing this task's current stage"));
+  });
+
+  it("desktop: shows the human-control-suppressed copy (not the periodic-observation copy) when the task is user-paused (FN-7582)", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-117", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot, userPaused: true })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    expect(nudgeBtn).toBeDisabled();
+
+    const reason = await screen.findByTestId("detail-overseer-nudge-disabled-reason");
+    expect(reason).toHaveTextContent("Nudge is paused while this task is under manual control.");
+    expect(reason).not.toHaveTextContent("Nudge becomes available once the overseer is observing this task's current stage");
+    expect(nudgeBtn).toHaveAttribute("title", expect.stringContaining("Nudge is paused while this task is under manual control."));
   });
 
   it("does not show the disabled-reason helper when Nudge is enabled", async () => {
@@ -451,6 +500,29 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, FN-
     expect(await screen.findByTestId("detail-overseer-nudge")).not.toBeDisabled();
     expect(await screen.findByTestId("detail-overseer-stop")).toBeTruthy();
     expect(await screen.findByTestId("detail-overseer-explain")).toBeTruthy();
+  });
+
+  it("still shows the reworded periodic-observation copy (not the old alarming phrase) behind the mobile overflow menu (FN-7582)", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-216", column: "in-progress", plannerOversightLevel: "autonomous" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await openOversightMenu();
+
+    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    expect(nudgeBtn).toBeDisabled();
+
+    const reason = await screen.findByTestId("detail-overseer-nudge-disabled-reason");
+    expect(reason).not.toHaveTextContent("not actively watching this task");
+    expect(reason).toHaveTextContent("Nudge becomes available once the overseer is observing this task's current stage");
   });
 
   it("still renders no oversight-control leftover shell behind the mobile overflow menu for the off+inactive default case", async () => {
