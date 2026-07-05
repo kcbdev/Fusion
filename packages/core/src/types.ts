@@ -4147,6 +4147,9 @@ export interface ProjectSettings {
   /**
    * FNXC:PlanApproval 2026-06-26-00:00:
    * Per-project setting to control plan approval for every task: workflow defers to the per-workflow requirePlanApproval setting, auto-approve-all bypasses approval for all tasks, and require-all parks every approved spec for manual approval.
+   *
+   * FNXC:PlanApproval 2026-07-04-00:00:
+   * FN-7557: default is now "auto-approve-all" (previously deferred to workflow via "workflow"). Unset/new projects bypass the manual awaiting-approval gate by default; projects with an explicit stored value are unaffected.
    */
   planApprovalMode?: "workflow" | "auto-approve-all" | "require-all";
   /** Controls task-worker execution mode.

@@ -321,7 +321,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   */
   allowAbsoluteFileBrowserPaths: false,
   autoMerge: true,
-  planApprovalMode: "workflow",
+  /*
+  FNXC:PlanApproval 2026-07-04-00:00:
+  FN-7557: plan auto-approval is the default project posture; unset projects bypass the manual awaiting-approval gate. Previously defaulted to "workflow" (deferring to each workflow's requirePlanApproval); projects with an explicit stored value are unaffected.
+  */
+  planApprovalMode: "auto-approve-all",
   // U18 (R15): the Review-response loop is default-on. Independent of `autoMerge` —
   // with this on but auto-merge off, review threads are resolved but the PR is not merged.
   autoResolveReviewComments: true,

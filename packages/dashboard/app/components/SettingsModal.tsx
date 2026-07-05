@@ -893,7 +893,8 @@ export function SettingsModal({
     overlapIgnorePaths: [],
     allowAbsoluteFileBrowserPaths: false,
     autoMerge: true,
-    planApprovalMode: "workflow",
+    // FNXC:PlanApproval 2026-07-04-00:00: FN-7557: local fallback mirrors DEFAULT_PROJECT_SETTINGS — auto-approve-all is now the default project posture.
+    planApprovalMode: "auto-approve-all",
     mergeStrategy: "direct",
     maxAutoMergeRetries: 3,
     mergeIntegrationWorktree: "reuse-task-worktree",

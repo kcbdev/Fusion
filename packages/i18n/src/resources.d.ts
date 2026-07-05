@@ -6129,7 +6129,7 @@ export default interface Resources {
         "personalAccessToken": "Personal access token",
         "pickALocalBranchFromTheDropdownCommon": "). Pick a local branch from the dropdown — common integration names like ",
         "planApprovalMode": "Plan approval mode",
-        "planApprovalModeAutoApproveAll": "Auto-approve all tasks",
+        "planApprovalModeAutoApproveAll": "Auto-approve all tasks (default)",
         "planApprovalModeHelp": "Project-wide override for the planning approval gate. Leave on workflow to use each workflow's Require plan approval setting, or force all approved specs to bypass or wait for manual approval.",
         "planApprovalModeRequireAll": "Require approval for all tasks",
         "planApprovalModeWorkflow": "Use workflow setting",
