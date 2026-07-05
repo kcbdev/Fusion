@@ -14,6 +14,7 @@ import type {
   DuplicateMatch,
   RunAuditEvent,
   ArtifactType,
+  PrInfo,
 } from "@fusion/core";
 import {
   COLUMNS,
@@ -47,6 +48,7 @@ import {
   type NearDuplicateCandidate,
 } from "@fusion/core";
 import { GitHubClient } from "../github.js";
+import { githubRateLimiter } from "../github-poll.js";
 import { createTrackingIssueForTask } from "../github-tracking-hook.js";
 import { parseGitHubBadgeUrl } from "./register-git-github.js";
 import {
@@ -56,7 +58,9 @@ import {
   revertWorkspaceTask,
   TaskRevertError,
   createAiUndoTask,
+  prepareRevertPrBranch,
   type AiUndoTaskResult,
+  type PrepareRevertPrBranchResult,
 } from "@fusion/engine";
 import { buildBoardWorkflowsPayload } from "./board-workflows.js";
 import { isBackwardMoveBlockedByOpenPr, PR_OPEN_BLOCKS_MOVE_BACK_MESSAGE } from "./register-pull-requests-routes.js";
@@ -1817,6 +1821,184 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           currentBranch,
           baseBranch,
         });
+      }
+
+      /*
+      FNXC:TaskRevert 2026-07-05-00:00 (FN-7554 — mode:"pr" contract, additive over FN-7523/24/47/48):
+      `performTaskRevert` refuses (`needsHuman`) whenever autoMerge is
+      effectively off, because it would otherwise force-write a revert commit
+      directly onto `baseBranch` — a branch this project has opted out of
+      automated writes to. Instead of stopping at that dead end, open a real
+      revert PR: `prepareRevertPrBranch` (engine) applies the revert commit(s)
+      onto a DEDICATED `fusion/revert-<id>` branch off `baseBranch` HEAD
+      (never mutating `baseBranch` itself), then this route pushes that branch
+      and opens a PR via `GitHubClient.createPr` — reusing the exact
+      owner/repo resolution, `githubRateLimiter` gate, `findPrForBranch`
+      idempotency, and `manual: true` handoff that `/pr/create` already uses.
+      This ONLY applies to the single-repo git path (workspace tasks already
+      returned above) and ONLY for `mode !== "ai"` (the `mode === "ai"` case
+      already returned earlier in this handler). Every existing
+      `{ mode: "git" | "ai", ... }` result shape is unchanged — this adds a
+      new `{ mode: "pr", ... }` variant. Graceful `needsHuman` degrade (NOT a
+      thrown error) covers: GitHub unconfigured, and GitHub rate-limited —
+      both leave the caller with the same actionable `needsHuman` contract
+      the `autoMerge:true` code path never has to think about.
+      PR-based revert of WORKSPACE (multi-repo) tasks under autoMerge:false is
+      explicitly deferred (would require per-sub-repo branches + multiple
+      PRs) — see the FN-7554 follow-up task; workspace tasks above still get
+      the existing `needsHuman` result from `revertWorkspaceTask`.
+      */
+      const effectiveAutoMerge = task.autoMerge ?? settings.autoMerge ?? true;
+      if (effectiveAutoMerge === false) {
+        let owner: string;
+        let repo: string;
+        const envRepo = process.env.GITHUB_REPOSITORY;
+        if (envRepo) {
+          const [o, r] = envRepo.split("/");
+          owner = o;
+          repo = r;
+        } else {
+          const gitRepo = getCurrentRepo(rootDir);
+          if (!gitRepo) {
+            res.json({
+              mode: "git",
+              needsHuman: true,
+              reason: "autoMerge is disabled and no GitHub repository is configured; cannot open a revert PR",
+            });
+            return;
+          }
+          owner = gitRepo.owner;
+          repo = gitRepo.repo;
+        }
+
+        const repoKey = `${owner}/${repo}`;
+        if (!githubRateLimiter.canMakeRequest(repoKey)) {
+          res.json({
+            mode: "git",
+            needsHuman: true,
+            reason: "GitHub API rate limit exceeded; try again later",
+          });
+          return;
+        }
+
+        const revertBranch = `fusion/revert-${task.id.toLowerCase()}`;
+        const client = new GitHubClient();
+        let existingPr: Awaited<ReturnType<typeof client.findPrForBranch>>;
+        try {
+          existingPr = await client.findPrForBranch({ head: revertBranch, state: "all", owner, repo });
+        } catch (error) {
+          // FNXC:TaskRevert 2026-07-05-00:00 (FN-7554): GitHub reachability failure
+          // (network down, auth rejected, 5xx, etc.) degrades to needsHuman with an
+          // explicit reason rather than bubbling up as a 500 — mirrors the
+          // no-remote-configured / rate-limited degrade paths above.
+          res.json({
+            mode: "git",
+            needsHuman: true,
+            reason: `GitHub is unavailable; could not check for an existing revert PR (${error instanceof Error ? error.message : String(error)})`,
+          });
+          return;
+        }
+
+        const persistPrInfo = async (prInfo: PrInfo): Promise<void> => {
+          const existingPrs = task.prInfos ?? (task.prInfo ? [task.prInfo] : []);
+          if (existingPrs.length > 0) {
+            await scopedStore.addPrInfo(task.id, prInfo);
+          } else {
+            await scopedStore.updatePrInfo(task.id, prInfo);
+          }
+        };
+
+        if (existingPr) {
+          // Idempotency — mirrors `/pr/create`: never re-prepare/re-push when an
+          // open (or all-state) PR already exists for this branch, just link it.
+          const prInfo: PrInfo = { ...existingPr, manual: true };
+          await persistPrInfo(prInfo);
+          await scopedStore.logEntry(task.id, "Linked existing revert PR", `PR #${prInfo.number}: ${prInfo.url}`);
+          res.json({
+            mode: "pr",
+            clean: true,
+            prUrl: prInfo.url,
+            prNumber: prInfo.number,
+            revertBranch,
+            existingPr: true,
+          });
+          return;
+        }
+
+        const prepared: PrepareRevertPrBranchResult = await prepareRevertPrBranch({
+          task,
+          worktreePath: rootDir,
+          baseBranch,
+          revertBranch,
+          commitAssociationSource: {
+            getTaskCommitAssociationsByLineageId: (lineageId: string) =>
+              scopedStore.getTaskCommitAssociationsByLineageId(lineageId),
+          },
+        });
+
+        if (!prepared.eligible) {
+          if ("alreadyReverted" in prepared && prepared.alreadyReverted) {
+            res.json({ mode: "git", clean: true, alreadyReverted: true });
+            return;
+          }
+          if ("classification" in prepared && prepared.classification === "conflicting") {
+            if (mode === "auto") {
+              res.json(await createAiUndoResult());
+              return;
+            }
+            res.json({ mode: "git", clean: false, conflicts: prepared.conflicts });
+            return;
+          }
+          if ("unsupported" in prepared && prepared.unsupported) {
+            if (mode === "auto") {
+              res.json(await createAiUndoResult());
+              return;
+            }
+            res.json({ mode: "git", unsupported: true, reason: prepared.reason });
+            return;
+          }
+        }
+
+        if (prepared.eligible) {
+          // FNXC:TaskRevert 2026-07-05-00:00 (FN-7554): push/create-PR failures
+          // (network down, auth rejected, remote rejects push, GitHub 5xx, etc.)
+          // degrade to needsHuman with an explicit reason instead of a thrown 500 —
+          // the revert branch/commit(s) already prepared locally are left in place
+          // (never force-written to `baseBranch`) so a retry can reuse them.
+          try {
+            await runGitCommand(["push", "-u", "origin", prepared.revertBranch], rootDir, 60_000);
+            const prTitle = `revert(${task.id}): undo landed work`;
+            const prBody =
+              `This PR reverts the work landed by task ${task.id}.\n\n` +
+`See \`GET /api/tasks/${task.id}/diff\` for the landed diff being reverted.\n`;
+            const created = await client.createPr({
+              owner,
+              repo,
+              title: prTitle,
+              body: prBody,
+              head: prepared.revertBranch,
+              base: baseBranch,
+            });
+            const prInfo: PrInfo = { ...created, manual: true };
+            await persistPrInfo(prInfo);
+            await scopedStore.logEntry(task.id, "Created revert PR", `PR #${prInfo.number}: ${prInfo.url}`);
+            res.json({
+              mode: "pr",
+              clean: true,
+              prUrl: prInfo.url,
+              prNumber: prInfo.number,
+              revertBranch: prepared.revertBranch,
+            });
+            return;
+          } catch (error) {
+            res.json({
+              mode: "git",
+              needsHuman: true,
+              reason: `GitHub is unavailable; could not push the revert branch or open the PR (${error instanceof Error ? error.message : String(error)})`,
+            });
+            return;
+          }
+        }
       }
 
       const result = await performTaskRevert({

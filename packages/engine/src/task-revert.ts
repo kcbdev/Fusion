@@ -756,6 +756,160 @@ async function applyAndCommitRevert(opts: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// FN-7554: PR-based revert for autoMerge:false projects.
+// ---------------------------------------------------------------------------
+
+export type PrepareRevertPrBranchResult =
+  | { eligible: true; revertBranch: string; revertCommitShas: string[] }
+  | { eligible: false; classification: "conflicting"; conflicts: TaskRevertConflict[] }
+  | { eligible: false; classification: "already-reverted"; alreadyReverted: true }
+  | { eligible: false; unsupported: true; reason: string };
+
+export interface PrepareRevertPrBranchOptions {
+  task: Pick<Task, "id" | "lineageId" | "column" | "mergeDetails" | "workspaceWorktrees">;
+  /** The shared checkout, verified on `baseBranch` by the caller before this is invoked. */
+  worktreePath: string;
+  /** Resolved mergeTargetBranch / integration branch. NEVER written to — see the doc comment below. */
+  baseBranch: string;
+  /** e.g. `fusion/revert-<task-id-lowercase>`. */
+  revertBranch: string;
+  execAsyncImpl?: ExecAsyncImpl;
+  commitAssociationSource?: TaskCommitAssociationSource;
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-05-00:00 (FN-7554 — PR-based revert for
+ * autoMerge:false projects):
+ *
+ * `performTaskRevert` refuses (`needsHuman`) whenever autoMerge is
+ * effectively off, because it commits directly onto `worktreePath`'s current
+ * HEAD branch (the base branch) and this project has opted that branch out
+ * of automated writes. This function gives that dead end an actionable path:
+ * it prepares a DEDICATED `revertBranch` off `baseBranch`'s HEAD, applies the
+ * revert commit(s) onto THAT branch only, and leaves `baseBranch` itself
+ * completely untouched — the caller (the API route) then pushes the branch
+ * and opens a real GitHub PR against `baseBranch`, so the change still lands
+ * through the project's normal human-review flow instead of a forced write.
+ *
+ * NEVER-WRITE-TO-BASE INVARIANT: this function only ever mutates
+ * `revertBranch`. `baseBranch`'s ref is never advanced, reset, or committed
+ * to. The shared checkout (`worktreePath`) is ALWAYS restored to the branch
+ * it was on when this function was called (`originalBranch`), in a `finally`
+ * — regardless of success, classification pass-through, or thrown failure —
+ * so a caller that shares this checkout across requests never observes it
+ * left mid-revert on `revertBranch`.
+ *
+ * REUSE, NOT REIMPLEMENTATION: commit application/message/trailer generation
+ * is delegated entirely to the shared `applyAndCommitRevert` helper (the same
+ * one `performTaskRevert`'s squash path and `revertWorkspaceTask` use) — this
+ * function only adds the branch-prep/checkout-restore choreography around it.
+ *
+ * WORKSPACE DEFERRAL: workspace (multi-repo) tasks are refused with
+ * `{ eligible: false, unsupported: true, reason: "workspace-task-pr-revert-unsupported" }`
+ * — a single PR against a single base branch cannot coherently represent a
+ * multi-repo, multi-branch revert. PR-based workspace revert is explicitly
+ * out of scope here (see the FN-7554 PROMPT's Step 6 follow-up task).
+ */
+export async function prepareRevertPrBranch(opts: PrepareRevertPrBranchOptions): Promise<PrepareRevertPrBranchResult> {
+  const { task, worktreePath, baseBranch, revertBranch } = opts;
+  const execImpl = opts.execAsyncImpl ?? defaultExecAsync;
+
+  if (isWorkspaceTask(task)) {
+    return { eligible: false, unsupported: true, reason: "workspace-task-pr-revert-unsupported" };
+  }
+
+  const resolved = await resolveTaskRevertCommits(task, {
+    worktreePath,
+    execAsyncImpl: execImpl,
+    commitAssociationSource: opts.commitAssociationSource,
+  });
+  if (!resolved.supported) {
+    return { eligible: false, unsupported: true, reason: resolved.reason };
+  }
+
+  const classification = await classifyTaskRevert({
+    worktreePath,
+    commits: resolved.shas,
+    execAsyncImpl: execImpl,
+  });
+
+  if (classification.classification === "already-reverted") {
+    return { eligible: false, classification: "already-reverted", alreadyReverted: true };
+  }
+  if (classification.classification === "conflicting") {
+    return { eligible: false, classification: "conflicting", conflicts: classification.conflicts ?? [] };
+  }
+
+  // classification === "clean" — prepare the dedicated revert branch.
+  let originalBranch: string;
+  try {
+    const { stdout } = await runGit(execImpl, "git rev-parse --abbrev-ref HEAD", worktreePath);
+    originalBranch = stdout.trim();
+  } catch (error) {
+    throw new TaskRevertError("failed to resolve current branch before preparing revert PR branch", "head-resolve-failed", error);
+  }
+
+  const { stdout: statusOut } = await runGit(execImpl, "git status --porcelain", worktreePath);
+  if (statusOut.trim().length > 0) {
+    throw new TaskRevertError(
+      "working tree is dirty; refusing to prepare a revert PR branch",
+      "dirty-working-tree",
+    );
+  }
+
+  let branchCreated = false;
+  try {
+    // FNXC:TaskRevert 2026-07-05-00:00: `-B` (create-or-reset) makes re-running
+    // this idempotent when a stale local `revertBranch` already exists from a
+    // prior failed/aborted attempt — it is reset off `baseBranch` HEAD rather
+    // than accumulating on top of whatever it previously pointed at. `baseBranch`
+    // itself is only ever read here (`git checkout -B <revertBranch> <baseBranch>`
+    // does not move `baseBranch`'s ref).
+    await runGit(
+      execImpl,
+      `git checkout -B ${quoteShellArg(revertBranch)} ${quoteShellArg(baseBranch)}`,
+      worktreePath,
+    );
+    branchCreated = true;
+
+    const applied = await applyAndCommitRevert({
+      worktreePath,
+      commits: resolved.shas,
+      taskId: task.id,
+      execAsyncImpl: execImpl,
+    });
+
+    if ("alreadyReverted" in applied) {
+      // Defensive: the branch moved between classify and apply. Nothing to
+      // commit on the fresh revertBranch — treat as already-reverted.
+      return { eligible: false, classification: "already-reverted", alreadyReverted: true };
+    }
+    if ("conflicts" in applied) {
+      // Late conflict — applyAndCommitRevert already rolled worktreePath back
+      // to the pre-apply HEAD (the tip of revertBranch, i.e. baseBranch's HEAD).
+      return { eligible: false, classification: "conflicting", conflicts: applied.conflicts };
+    }
+
+    return { eligible: true, revertBranch, revertCommitShas: [applied.revertCommitSha] };
+  } catch (error) {
+    // On any thrown failure after branch creation, never leave a dangling
+    // partial revert branch behind — best-effort restore + delete.
+    if (branchCreated) {
+      await runGit(execImpl, `git checkout ${quoteShellArg(originalBranch)}`, worktreePath).catch(() => undefined);
+      await runGit(execImpl, `git branch -D ${quoteShellArg(revertBranch)}`, worktreePath).catch(() => undefined);
+    }
+    throw error instanceof TaskRevertError ? error : new TaskRevertError("failed to prepare revert PR branch", "revert-pr-branch-prepare-failed", error);
+  } finally {
+    // FNXC:TaskRevert 2026-07-05-00:00: ALWAYS restore the shared checkout to
+    // the branch it was on when this function was called, so the checkout is
+    // left exactly where it started — on `baseBranch` (unmutated) in the
+    // documented caller contract — regardless of success/pass-through/failure
+    // above. The revert commit(s) live ONLY on `revertBranch`.
+    await runGit(execImpl, `git checkout ${quoteShellArg(originalBranch)}`, worktreePath).catch(() => undefined);
+  }
+}
+
 export interface WorkspaceRepoRevertCommits {
   commits: string[];
   source: TaskRevertCommitSource;

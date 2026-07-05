@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import type { Task, TaskStore } from "@fusion/core";
 import { createApiRoutes } from "../routes.js";
 import { request as performRequest } from "../test-request.js";
+import { githubRateLimiter } from "../github-poll.js";
 
 // FNXC:TaskRevert 2026-07-04-00:00: the route now guards against `rootDir`
 // (the shared user checkout) sitting on a branch other than the resolved
@@ -31,11 +32,18 @@ function makeGitRepoOnMain(): string {
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
   execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: dir });
+  // FN-7554: a local bare "origin" remote lets `mode:"pr"` tests exercise a
+  // REAL `git push -u origin <revertBranch>` without any network dependency.
+  const originDir = mkdtempSync(join(tmpdir(), "kb-task-revert-route-origin-"));
+  execFileSync("git", ["init", "--bare", "-b", "main"], { cwd: originDir });
+  execFileSync("git", ["remote", "add", "origin", originDir], { cwd: dir });
+  execFileSync("git", ["push", "-u", "origin", "main"], { cwd: dir });
   return dir;
 }
 
 const performTaskRevertMock = vi.fn();
 const revertWorkspaceTaskMock = vi.fn();
+const prepareRevertPrBranchMock = vi.fn();
 
 vi.mock("@fusion/engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@fusion/engine")>();
@@ -43,8 +51,24 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     ...actual,
     performTaskRevert: (...args: unknown[]) => performTaskRevertMock(...args),
     revertWorkspaceTask: (...args: unknown[]) => revertWorkspaceTaskMock(...args),
+    prepareRevertPrBranch: (...args: unknown[]) => prepareRevertPrBranchMock(...args),
   };
 });
+
+// FN-7554: stub GitHubClient at the route boundary — `findPrForBranch`/`createPr`
+// idempotency + push/create behavior is exercised here; real GitHubClient HTTP/gh-CLI
+// behavior is covered by github.test.ts.
+const findPrForBranchMock = vi.fn();
+const createPrMock = vi.fn();
+
+vi.mock("../github.js", () => ({
+  GitHubClient: vi.fn().mockImplementation(function (this: unknown) {
+    return {
+      findPrForBranch: (...args: unknown[]) => findPrForBranchMock(...args),
+      createPr: (...args: unknown[]) => createPrMock(...args),
+    };
+  }),
+}));
 
 // FNXC:TaskRevert 2026-07-04-00:00 (FN-7524): `createAiUndoTask` is NOT mocked —
 // these route tests exercise the real engine helper against a fake store
@@ -84,7 +108,7 @@ function makeWorkspaceTask(overrides: Partial<Task>): Task {
 
 function createMockStore(
   task: Task,
-  opts?: { openUndoTask?: Task | null; createdUndoTask?: Task },
+  opts?: { openUndoTask?: Task | null; createdUndoTask?: Task; autoMerge?: boolean },
 ): TaskStore {
   let nextId = 800;
   const createTask = vi.fn().mockImplementation(async (input: { description: string; source?: { sourceParentTaskId?: string; sourceMetadata?: Record<string, unknown> } }) => {
@@ -104,12 +128,15 @@ function createMockStore(
   const findOpenRevertTaskForSource = vi.fn().mockResolvedValue(opts?.openUndoTask ?? null);
   return {
     getSettings: vi.fn().mockResolvedValue({}),
-    getSettingsFast: vi.fn().mockResolvedValue({ autoMerge: true }),
+    getSettingsFast: vi.fn().mockResolvedValue({ autoMerge: opts?.autoMerge ?? true }),
     getRootDir: vi.fn().mockReturnValue(makeGitRepoOnMain()),
     getTask: vi.fn().mockResolvedValue(task),
     getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
     createTask,
     findOpenRevertTaskForSource,
+    updatePrInfo: vi.fn().mockResolvedValue(task),
+    addPrInfo: vi.fn().mockResolvedValue(task),
+    logEntry: vi.fn().mockResolvedValue(undefined),
     on: vi.fn(),
     off: vi.fn(),
   } as unknown as TaskStore;
@@ -457,5 +484,170 @@ describe("POST /tasks/:id/revert — FN-7524 mode + AI-undo fallback", () => {
     const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
     expect(res.status).toBe(200);
     expect(performTaskRevertMock.mock.calls[0]?.[0]).toMatchObject({ granularity: "squash" });
+  });
+});
+
+// FN-7554: mode:"pr" — PR-based revert for autoMerge:false projects.
+describe("POST /tasks/:id/revert — FN-7554 mode:'pr' (autoMerge:false)", () => {
+  const originalGithubRepository = process.env.GITHUB_REPOSITORY;
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    if (originalGithubRepository === undefined) {
+      delete process.env.GITHUB_REPOSITORY;
+    } else {
+      process.env.GITHUB_REPOSITORY = originalGithubRepository;
+    }
+  });
+
+  it("clean + autoMerge:false → mode:'pr', pushes and creates the PR with manual:true persistence", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-100", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+    const rootDir = (store.getRootDir as () => string)();
+    // `prepareRevertPrBranch` is mocked (real branch-prep behavior is proven by
+    // task-revert-pr.real-git.test.ts), so create the branch it would have
+    // created locally, so the route's REAL `git push -u origin <branch>` has
+    // something to push.
+    execFileSync("git", ["branch", "fusion/revert-fn-100"], { cwd: rootDir });
+    vi.spyOn(githubRateLimiter, "canMakeRequest").mockReturnValue(true);
+    findPrForBranchMock.mockResolvedValue(null);
+    prepareRevertPrBranchMock.mockResolvedValue({
+      eligible: true,
+      revertBranch: "fusion/revert-fn-100",
+      revertCommitShas: ["abc"],
+    });
+    createPrMock.mockResolvedValue({ number: 7, url: "https://github.com/o/r/pull/7" });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      mode: "pr",
+      clean: true,
+      prUrl: "https://github.com/o/r/pull/7",
+      prNumber: 7,
+      revertBranch: "fusion/revert-fn-100",
+    });
+    expect(createPrMock).toHaveBeenCalledTimes(1);
+    expect(createPrMock.mock.calls[0]?.[0]).toMatchObject({ head: "fusion/revert-fn-100" });
+    expect(typeof createPrMock.mock.calls[0]?.[0]?.body).toBe("string");
+    expect((createPrMock.mock.calls[0]?.[0]?.body as string).length).toBeGreaterThan(0);
+    expect(store.updatePrInfo as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({ manual: true, number: 7 }),
+    );
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+
+  it("existing PR idempotency: links the existing PR without re-preparing/re-pushing", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-100", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+    vi.spyOn(githubRateLimiter, "canMakeRequest").mockReturnValue(true);
+    findPrForBranchMock.mockResolvedValue({ number: 9, url: "https://github.com/o/r/pull/9" });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      mode: "pr",
+      clean: true,
+      prUrl: "https://github.com/o/r/pull/9",
+      prNumber: 9,
+      existingPr: true,
+    });
+    expect(prepareRevertPrBranchMock).not.toHaveBeenCalled();
+    expect(createPrMock).not.toHaveBeenCalled();
+  });
+
+  it("GitHub unconfigured degrade: no GITHUB_REPOSITORY and no git remote → needsHuman", async () => {
+    delete process.env.GITHUB_REPOSITORY;
+    const task = makeTask({ id: "FN-100", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", needsHuman: true });
+    expect(String((res.body as { reason?: string }).reason ?? "")).toMatch(/no GitHub repository/i);
+    expect(prepareRevertPrBranchMock).not.toHaveBeenCalled();
+    expect(createPrMock).not.toHaveBeenCalled();
+  });
+
+  it("rate-limited degrade: needsHuman without touching prepareRevertPrBranch/createPr", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-100", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+    vi.spyOn(githubRateLimiter, "canMakeRequest").mockReturnValue(false);
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", needsHuman: true });
+    expect(String((res.body as { reason?: string }).reason ?? "")).toMatch(/rate limit/i);
+    expect(prepareRevertPrBranchMock).not.toHaveBeenCalled();
+    expect(createPrMock).not.toHaveBeenCalled();
+  });
+
+  it("conflicting under autoMerge:false, mode:'git' → { mode: 'git', clean: false, conflicts } without a PR", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-100", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+    vi.spyOn(githubRateLimiter, "canMakeRequest").mockReturnValue(true);
+    findPrForBranchMock.mockResolvedValue(null);
+    prepareRevertPrBranchMock.mockResolvedValue({
+      eligible: false,
+      classification: "conflicting",
+      conflicts: [{ file: "foo.ts", status: "UU" }],
+    });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "git" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", clean: false, conflicts: [{ file: "foo.ts", status: "UU" }] });
+    expect(createPrMock).not.toHaveBeenCalled();
+  });
+
+  it("conflicting under autoMerge:false, mode:'auto' → falls back to the AI-undo task", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-960", column: "done" });
+    const store = createMockStore(task, { autoMerge: false });
+    vi.spyOn(githubRateLimiter, "canMakeRequest").mockReturnValue(true);
+    findPrForBranchMock.mockResolvedValue(null);
+    prepareRevertPrBranchMock.mockResolvedValue({
+      eligible: false,
+      classification: "conflicting",
+      conflicts: [{ file: "foo.ts", status: "UU" }],
+    });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "auto" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai" });
+    expect((res.body as { createdTaskId?: string }).createdTaskId).toBeTruthy();
+    expect(createPrMock).not.toHaveBeenCalled();
+  });
+
+  it("regression — autoMerge:true unchanged: still calls performTaskRevert and returns the existing shape", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-970", column: "done" });
+    const store = createMockStore(task, { autoMerge: true });
+    performTaskRevertMock.mockResolvedValue({ mode: "git", clean: true, revertCommitSha: "abc123", revertCommitShas: ["abc123"] });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", clean: true, revertCommitSha: "abc123" });
+    expect(prepareRevertPrBranchMock).not.toHaveBeenCalled();
+    expect(createPrMock).not.toHaveBeenCalled();
+    expect(performTaskRevertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("regression — non-done/archived guard unchanged: still 4xx before any engine/GitHub call", async () => {
+    process.env.GITHUB_REPOSITORY = "o/r";
+    const task = makeTask({ id: "FN-971", column: "in-progress" });
+    const store = createMockStore(task, { autoMerge: false });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(prepareRevertPrBranchMock).not.toHaveBeenCalled();
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+    expect(createPrMock).not.toHaveBeenCalled();
   });
 });

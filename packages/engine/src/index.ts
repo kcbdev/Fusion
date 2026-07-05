@@ -292,6 +292,9 @@ export {
   type WorkspaceRepoRevertResult,
   type WorkspaceTaskRevertResult,
   type RevertWorkspaceTaskOptions,
+  prepareRevertPrBranch,
+  type PrepareRevertPrBranchResult,
+  type PrepareRevertPrBranchOptions,
 } from "./task-revert.js";
 export {
   resolveBranchGroupMergeRouting,
