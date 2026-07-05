@@ -3353,12 +3353,13 @@ export function TaskDetailContent({
     firstMenuItem?.focus();
   }, [showMoveMenu]);
 
+  // FNXC:PlannerOversight 2026-07-04-00:00: FN-7562 — auto-focus the first actionable button menuitem, never the native oversight-level <select>; focusing the <select> surfaced its OS picker as a second menu overlapping the custom oversight popover on mobile.
   useEffect(() => {
     if (!showOversightMenu) {
       return;
     }
 
-    const firstMenuItem = oversightMenuRef.current?.querySelector<HTMLButtonElement | HTMLSelectElement>(".detail-oversight-menu-item");
+    const firstMenuItem = oversightMenuRef.current?.querySelector<HTMLButtonElement>("button.detail-oversight-menu-item");
     firstMenuItem?.focus();
   }, [showOversightMenu]);
 
