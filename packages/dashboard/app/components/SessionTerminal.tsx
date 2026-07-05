@@ -10,6 +10,7 @@ import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { isMobileViewport, MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
 import {
   TERMINAL_PREFERENCES_KEY,
+  forceTerminalFontRemeasure,
   readTerminalPreferences,
   resolveTerminalFontFamily,
   resolveTerminalGlyphFontFamily,
@@ -321,6 +322,9 @@ export function SessionTerminal({
 
     FNXC:Terminal 2026-06-30-22:47:
     Async font-metric waits can resolve out of order when a second terminal preference change lands first. Reapply only if the currently mounted xterm options still match the preference snapshot that scheduled this wait, preserving the latest small-font cell metrics instead of resurrecting stale spacing.
+
+    FNXC:Terminal 2026-07-04-09:40:
+    FN-7561 recurrence #3: when the snapshot already matches (preferences unchanged, the common case), reassigning `fontFamily` to the SAME value is a no-op against real xterm's OptionsService — CharSizeService/DomRenderer never remeasure the web font that only just finished loading. Use `forceTerminalFontRemeasure` so a genuine value transition always occurs on settle.
     */
     void waitForTerminalFontMetrics(terminalPreferences.fontSize, resolvedFontFamily).then(
       (fontMetricsSettled) => {
@@ -332,7 +336,7 @@ export function SessionTerminal({
         ) {
           return;
         }
-        terminal.options.fontFamily = resolvedFontFamily;
+        forceTerminalFontRemeasure(terminal, resolvedFontFamily);
         terminal.options.fontSize = terminalPreferences.fontSize;
         try {
           (fitAddonRef.current as { fit?: () => void } | null)?.fit?.();
@@ -500,8 +504,11 @@ export function SessionTerminal({
           /*
           FNXC:Terminal 2026-06-18-07:15:
           SessionTerminal shares TerminalModal's real-iOS DOM/canvas measurement path and the same user-selectable font presets. FN-6638 ruled out stack ordering with the 66.76px-identical diagnostic, so this attach surface must also reapply font options and refit after best-effort FontFaceSet settlement even when iOS rejects the multi-family shorthand; WebGL desktop remains safe because the same invalidation path refreshes renderer metrics without changing renderer selection.
+
+          FNXC:Terminal 2026-07-04-09:40:
+          FN-7561 recurrence #3: reassigning fontFamily to the SAME already-resolved value is a no-op against real xterm's OptionsService (no onOptionChange fires), so CharSizeService/DomRenderer never remeasure the web font that only just finished loading after xterm's initial pre-load measurement. Force a genuine value transition via `forceTerminalFontRemeasure`.
           */
-          term.options.fontFamily = resolvedFontFamily;
+          forceTerminalFontRemeasure(term, resolvedFontFamily);
           term.options.fontSize = terminalPreferences.fontSize;
           (fitAddon as unknown as { fit: () => void }).fit();
           sendResize(term.cols, term.rows);

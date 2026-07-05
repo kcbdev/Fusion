@@ -41,6 +41,7 @@ import {
   MIN_TERMINAL_FONT_SIZE,
   TERMINAL_FONT_FAMILY_PRESETS,
   clampTerminalFontSize,
+  forceTerminalFontRemeasure,
   readTerminalPreferences,
   resolveTerminalFontFamily,
   resolveTerminalGlyphFontFamily,
@@ -1250,8 +1251,11 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         /*
         FNXC:Terminal 2026-06-18-07:23:
         FN-6638 recurrence #4 showed the previous symbols-last stack-order fix was inert: the supplied diagnostic measured AGENTS.md at the same 66.76px for symbols-first, symbols-last, and system-mono stacks while real iOS Safari still widened ASCII cells. xterm measures cell geometry at open() time, so after best-effort FontFaceSet settlement we must always reapply the active preset's font options, fit, resize, and refresh; that invalidates stale DOM/canvas metrics on real iOS when the full shorthand is rejected and keeps desktop WebGL using the same renderer-neutral metric refresh.
+
+        FNXC:Terminal 2026-07-04-09:35:
+        FN-7561 recurrence #3: reassigning `fontFamily` to the SAME already-resolved value (the common case, since preferences are unchanged) is a no-op against real xterm's OptionsService — no `onOptionChange` fires, so CharSizeService/DomRenderer never remeasure the web font that only just finished loading. Force a genuine value transition via `forceTerminalFontRemeasure` so the character/cell metrics and `_setDefaultSpacing()` letter-spacing compensation are recomputed against the settled font on every settle, not just when the preference itself changed.
         */
-        terminal.options.fontFamily = resolvedFontFamilyRef.current;
+        forceTerminalFontRemeasure(terminal, resolvedFontFamilyRef.current);
         terminal.options.fontSize = fontSizeRef.current;
         fitAddon.fit();
         resizeRef.current?.(terminal.cols, terminal.rows);
@@ -1776,6 +1780,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     /*
     FNXC:Terminal 2026-06-30-13:18:
     The mobile screenshot recurrence happens at the visible 10px setting with the soft keyboard already open. A live font-size preference change must wait for the symbols-free measured stack to settle, then reapply xterm font options, refit, resize, and refresh; otherwise canvas/DOM metrics can keep the old wider cells until an unfold/orientation event forces a later measurement.
+
+    FNXC:Terminal 2026-07-04-09:35:
+    FN-7561 recurrence #3: the two equality checks below only guard against a STALE out-of-order settle (a newer preference change landed first); when the values already match the current snapshot (the common initial-load case: preferences did not actually change) a plain reassignment is a no-op against real xterm's OptionsService, so CharSizeService/DomRenderer never remeasure the font that just finished loading. Use `forceTerminalFontRemeasure` so a genuine value transition always occurs on settle, regardless of whether the resolved value already equals the terminal's current option value.
     */
     void waitForTerminalFontMetrics(terminalPreferences.fontSize, resolvedFontFamily).then(
       (fontMetricsSettled) => {
@@ -1788,7 +1795,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         ) {
           return;
         }
-        xtermRef.current.options.fontFamily = resolvedFontFamily;
+        forceTerminalFontRemeasure(xtermRef.current, resolvedFontFamily);
         xtermRef.current.options.fontSize = terminalPreferences.fontSize;
         scheduleRefit();
       },

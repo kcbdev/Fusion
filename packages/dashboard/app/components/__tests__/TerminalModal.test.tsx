@@ -65,6 +65,55 @@ const mockFitAddonFit = vi.fn();
 let terminalKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
 let terminalDataHandler: ((data: string) => void) | null = null;
 
+/*
+FNXC:Terminal 2026-07-04-09:15:
+Real xterm.js's OptionsService setter is a strict no-op (no onOptionChange fires,
+so CharSizeService/DomRenderer never remeasure) whenever a caller reassigns an
+option to a value that already equals the option's current value — see
+`@xterm/xterm` `common/services/OptionsService.ts` `setter()`. The plain object
+literal previously used for `mockTerminalInstance.options` could not model this
+no-op-on-unchanged-value behavior, which is why prior FN-7456/FN-7460 coverage
+could pass while the real recurrence (reassigning the SAME resolved font after
+an async web-font settle never forces a genuine remeasure) stayed uncaught.
+Track a `fontRemeasureCount` that only increments on a genuine (distinct-value)
+fontFamily/fontSize transition so tests can assert xterm's measurement pipeline
+was actually forced to recompute, not merely reassigned to an identical value.
+*/
+let fontRemeasureCount = 0;
+function resetFontRemeasureCount(): void {
+  fontRemeasureCount = 0;
+}
+function getFontRemeasureCount(): number {
+  return fontRemeasureCount;
+}
+function createMockTerminalOptions(): Record<string, unknown> {
+  const store: Record<string, unknown> = {
+    fontSize: 14,
+    fontFamily: undefined,
+    cursorStyle: undefined,
+    cursorBlink: undefined,
+  };
+  const options: Record<string, unknown> = {};
+  for (const key of Object.keys(store)) {
+    Object.defineProperty(options, key, {
+      enumerable: true,
+      configurable: true,
+      get(): unknown {
+        return store[key];
+      },
+      set(value: unknown): void {
+        if (store[key] !== value) {
+          store[key] = value;
+          if (key === "fontFamily" || key === "fontSize") {
+            fontRemeasureCount += 1;
+          }
+        }
+      },
+    });
+  }
+  return options;
+}
+
 const mockTerminalInstance = {
   loadAddon: vi.fn(),
   open: vi.fn(),
@@ -83,7 +132,7 @@ const mockTerminalInstance = {
   clear: vi.fn(),
   focus: vi.fn(),
   refresh: vi.fn(),
-  options: { fontSize: 14 },
+  options: createMockTerminalOptions(),
   cols: 80,
   rows: 24,
 };
@@ -236,6 +285,7 @@ describe("TerminalModal", () => {
     mockTerminalInstance.options.fontSize = 14;
     mockTerminalInstance.options.cursorStyle = "block";
     mockTerminalInstance.options.cursorBlink = true;
+    resetFontRemeasureCount();
     mockCreateTerminalSession.mockResolvedValue({
       sessionId: "test-session-123",
       shell: "/bin/bash",
@@ -6794,5 +6844,210 @@ describe("TerminalModal — project-context propagation (FN-1765)", () => {
     await waitFor(() => {
       expect(mockTerminalInstance.open).toHaveBeenCalled();
     });
+  });
+});
+
+/*
+FNXC:Terminal 2026-07-04-09:20:
+FN-7561 root cause: after FN-7456/FN-7460 disabled `text-size-adjust` and waited
+for `document.fonts.ready`, both the initial xterm-init settle path and the live
+preferences-apply settle path reapply `terminal.options.fontFamily`/`fontSize`
+by assigning the ALREADY-RESOLVED value back onto the option. Real xterm's
+OptionsService setter is a no-op when the new value strictly equals the current
+value (no `onOptionChange` fires), so CharSizeService's canvas/DOM character
+measurement and DomRenderer's `_setDefaultSpacing()` letter-spacing compensation
+are never actually recomputed against the web font that only finished loading
+AFTER xterm's initial (pre-load, fallback-font) measurement. The stale
+pre-load cell metrics + compensation persist as visible excess inter-character
+gaps until an unrelated event (resize/orientation/DPR change) happens to force
+a genuine value change. This suite proves the app now forces a genuine
+value-changing remeasure every time font metrics settle, not just a same-value
+reassignment.
+*/
+describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op remeasure)", () => {
+  const mockOnClose = vi.fn();
+  const mockSendInput = vi.fn();
+  const mockResize = vi.fn();
+  const mockReconnect = vi.fn();
+
+  const createMockTerminalState = (overrides = {}) => ({
+    connectionStatus: "connected" as const,
+    sendInput: mockSendInput,
+    resize: mockResize,
+    onData: vi.fn(() => vi.fn()),
+    onExit: vi.fn(() => vi.fn()),
+    onConnect: vi.fn(() => vi.fn()),
+    onScrollback: vi.fn(() => vi.fn()),
+    reconnect: mockReconnect,
+    onSessionInvalid: vi.fn(() => vi.fn()),
+    ...overrides,
+  });
+
+  let previousInnerWidth: number;
+  let previousOntouchstart: unknown;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFontRemeasureCount();
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    previousInnerWidth = window.innerWidth;
+    previousOntouchstart = window.ontouchstart;
+    // Real reported device: a narrow touch-primary mobile viewport.
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    Object.defineProperty(window, "ontouchstart", { value: null, configurable: true });
+    mockTerminalInstance.options.fontFamily = XTERM_FONT_FAMILY;
+    mockTerminalInstance.options.fontSize = 12;
+    mockTerminalInstance.options.cursorStyle = "block";
+    mockTerminalInstance.options.cursorBlink = true;
+    resetFontRemeasureCount();
+    mockUseTerminal.mockReturnValue(createMockTerminalState());
+    mockUseTerminalSessions.mockReturnValue(defaultSessionState);
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [],
+      loading: false,
+      error: null,
+    });
+    mockCreateTerminalSession.mockResolvedValue({
+      sessionId: "test-session-123",
+      shell: "/bin/bash",
+      cwd: "/project",
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    if (previousOntouchstart === undefined) {
+      delete (window as unknown as { ontouchstart?: unknown }).ontouchstart;
+    } else {
+      Object.defineProperty(window, "ontouchstart", { value: previousOntouchstart, configurable: true });
+    }
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("forces a genuine xterm character-metric remeasure after the mobile web font settles later than xterm's initial measurement", async () => {
+    // Model the font not being ready yet at xterm construction (the real
+    // recurrence: the custom web font loads asynchronously, AFTER xterm's
+    // initial fallback-font character measurement), then settling shortly
+    // after. `waitForTerminalFontMetrics` awaits exactly this `load`/`ready`
+    // pair before reapplying font options.
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    const load = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load,
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
+
+    // Nothing else has changed the resolved font/size at this point, so any
+    // remeasure count observed so far merely reflects the initial synchronous
+    // application done during xterm construction/effect setup — reset it and
+    // isolate exactly what happens once the deferred font-load settles.
+    resetFontRemeasureCount();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The resolved fontFamily/fontSize the app wants after settle is identical
+    // to what was already applied before the font finished loading (the user
+    // never touched terminal preferences). A naive "reassign the resolved
+    // value" is therefore a no-op against real xterm's OptionsService
+    // (identical-value assignments never fire onOptionChange), so
+    // CharSizeService/DomRenderer would silently keep stale pre-load cell
+    // metrics forever. The fix must force at least one genuine (distinct
+    // value) fontFamily/fontSize transition here so xterm actually
+    // remeasures against the now-loaded font — this is the invariant
+    // FN-7456/FN-7460's `text-size-adjust`/`--keyboard-overlap`/`--vv-height`
+    // assertions never covered.
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    // The terminal must still land on the correct, symbols-free, resolved
+    // font after the forced remeasure settles.
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
+    expect(mockTerminalInstance.options.fontFamily).toBe(XTERM_FONT_FAMILY);
+  });
+
+  it("also forces the remeasure when the mobile keyboard is already open at initial render", async () => {
+    const mockVV = {
+      width: 375,
+      height: 300,
+      offsetTop: 0,
+      offsetLeft: 0,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    Object.defineProperty(window, "visualViewport", {
+      value: mockVV,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", { value: 300, writable: true, configurable: true });
+
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveLoad = resolve;
+            }),
+        ),
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+    resetFontRemeasureCount();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
+
+    Object.defineProperty(window, "visualViewport", { value: undefined, writable: true, configurable: true });
   });
 });

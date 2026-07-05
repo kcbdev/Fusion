@@ -4,6 +4,48 @@ import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 // ── Mock xterm + addon dynamic imports (jsdom has no canvas/WebGL) ──────────
 const mockFitAddon = { fit: vi.fn() };
 let sessionKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
+
+/*
+FNXC:Terminal 2026-07-04-09:45:
+Real xterm.js's OptionsService setter is a strict no-op (no onOptionChange
+fires, so CharSizeService/DomRenderer never remeasure) whenever a caller
+reassigns an option to a value that already equals the option's current value.
+The previous plain `{ ...options }` spread on construction could not model this
+no-op-on-unchanged-value behavior, letting FN-7561's recurrence (reassigning
+the SAME resolved font after an async web-font settle never forces a genuine
+remeasure) go uncaught. Track a `fontRemeasureCount` that only increments on a
+genuine (distinct-value) fontFamily/fontSize transition.
+*/
+let fontRemeasureCount = 0;
+function resetFontRemeasureCount(): void {
+  fontRemeasureCount = 0;
+}
+function getFontRemeasureCount(): number {
+  return fontRemeasureCount;
+}
+function wrapMockTerminalOptions(initial: Record<string, unknown>): Record<string, unknown> {
+  const store: Record<string, unknown> = { ...initial };
+  const options: Record<string, unknown> = {};
+  for (const key of Object.keys(store)) {
+    Object.defineProperty(options, key, {
+      enumerable: true,
+      configurable: true,
+      get(): unknown {
+        return store[key];
+      },
+      set(value: unknown): void {
+        if (store[key] !== value) {
+          store[key] = value;
+          if (key === "fontFamily" || key === "fontSize") {
+            fontRemeasureCount += 1;
+          }
+        }
+      },
+    });
+  }
+  return options;
+}
+
 const mockTerm = {
   loadAddon: vi.fn(),
   open: vi.fn(),
@@ -21,7 +63,12 @@ const mockTerm = {
   cols: 80,
   rows: 24,
 };
-vi.mock("@xterm/xterm", () => ({ Terminal: vi.fn(function Terminal(options) { mockTerm.options = { ...options }; return mockTerm; }) }));
+vi.mock("@xterm/xterm", () => ({
+  Terminal: vi.fn(function Terminal(options) {
+    mockTerm.options = wrapMockTerminalOptions(options as Record<string, unknown>);
+    return mockTerm;
+  }),
+}));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: vi.fn(function FitAddon() { return mockFitAddon; }) }));
 vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: vi.fn(function Unicode11Addon() { return {}; }) }));
 vi.mock("@xterm/addon-webgl", () => ({
@@ -103,6 +150,7 @@ beforeEach(() => {
   mockTerm.refresh.mockClear();
   mockTerm.dispose.mockClear();
   mockTerm.options = {};
+  resetFontRemeasureCount();
   Object.defineProperty(document, "fonts", {
     value: undefined,
     configurable: true,
@@ -312,6 +360,64 @@ describe("SessionTerminal", () => {
       expect(mockFitAddon.fit.mock.calls.length).toBeGreaterThan(fitCallBaseline);
       expect(mockTerm.refresh).toHaveBeenCalledWith(0, mockTerm.rows - 1);
     });
+  });
+
+  /*
+  FNXC:Terminal 2026-07-04-09:50:
+  FN-7561 recurrence #3 root cause: reassigning `terminal.options.fontFamily`/`fontSize`
+  to the SAME already-resolved value (the common case, since preferences are
+  unchanged) is a no-op against real xterm's OptionsService — no `onOptionChange`
+  fires, so CharSizeService/DomRenderer never remeasure the web font that only
+  just finished loading after xterm's initial pre-load measurement. This proves
+  SessionTerminal forces a genuine value transition on settle too, not just
+  TerminalModal.
+  */
+  it("forces a genuine xterm character-metric remeasure after the mobile web font settles later than xterm's initial measurement", async () => {
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    const load = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load,
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<SessionTerminal sessionId="s1" />);
+
+    await waitFor(() => {
+      expect(FakeWS.instances.length).toBe(1);
+      expect(load).toHaveBeenCalled();
+    });
+    expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
+
+    // Isolate exactly what happens once the deferred font-load settles; the
+    // resolved fontFamily/fontSize never actually changed (the user never
+    // touched terminal preferences), so this must be a forced remeasure, not
+    // an incidental preference-driven one.
+    resetFontRemeasureCount();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
+    expect(mockTerm.options.fontFamily).toBe(resolveTerminalFontFamily("nerd-font"));
   });
 
   it("applies validated terminal preferences at xterm init", async () => {
