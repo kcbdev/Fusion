@@ -672,10 +672,10 @@ describe("built-in workflows", () => {
     expect(defaultEnabledBuiltinWorkflowIds().length).toBeGreaterThanOrEqual(5);
     expect(defaultEnabledBuiltinWorkflowIds().slice(0, 5)).toEqual([
       "builtin:coding",
+      "builtin:coding-ideas",
       "builtin:legacy-coding",
       "builtin:quick-fix",
       "builtin:review-heavy",
-      "builtin:marketing",
     ]);
     expect(defaultEnabledBuiltinWorkflowIds()).toContain("builtin:stepwise-coding");
   });
