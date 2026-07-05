@@ -289,7 +289,6 @@ describe("withRateLimitRetry", () => {
       "Invalid authentication credentials",
       "token_expired",
       "token expired",
-      "OAuth token does not meet scope requirements",
     ];
 
     for (const msg of patterns) {
@@ -304,5 +303,47 @@ describe("withRateLimitRetry", () => {
       expect(result).toBe("ok");
       expect(fn).toHaveBeenCalledTimes(2);
     }
+  });
+
+  it("does not retry OAuth scope errors even when wrapped in an authentication_error envelope", async () => {
+    const scopeErrors = [
+      "OAuth token does not meet scope requirements",
+      "insufficient_scope",
+      '{"type":"error","error":{"type":"authentication_error","message":"OAuth token does not meet scope requirements"}}',
+    ];
+
+    for (const msg of scopeErrors) {
+      const fn = vi.fn().mockRejectedValue(new Error(msg));
+      const onRetry = vi.fn();
+
+      await expect(withRateLimitRetry(fn, { onRetry })).rejects.toThrow(msg);
+
+      // Permanent scope failures must surface immediately — no retries.
+      expect(fn).toHaveBeenCalledTimes(1);
+      expect(onRetry).not.toHaveBeenCalled();
+    }
+  });
+
+  it("cancels transient-auth retry sleep when abort signal fires", async () => {
+    const authErr = new Error(
+      '401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}',
+    );
+    const fn = vi.fn().mockRejectedValue(authErr);
+    const ac = new AbortController();
+
+    const promise = withRateLimitRetry(fn, {
+      maxRetries: 5,
+      signal: ac.signal,
+    });
+
+    // Let the first call fail and enter the auth-retry sleep (~5s).
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Abort before the 5s auth delay elapses.
+    ac.abort(new Error("Task paused"));
+
+    await expect(promise).rejects.toThrow("Task paused");
+    // Only the initial call — the auth retry never fires.
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,6 +24,11 @@
 
 import { isUsageLimitError } from "./usage-limit-detector.js";
 
+/*
+FNXC:EngineAuthRetry 2026-07-05-06:07:
+A long-running agent session holds its OAuth access token in memory. Claude Max access tokens rotate mid-run (~8 h lifetime); the in-flight call fails with a 401 authentication_error even though the credentials file has already been refreshed, and the very next call succeeds. Retry these a few times so a token-boundary rotation does not surface as a spurious task-failure alert. This budget is separate from the rate-limit retry budget and must not consume rate-limit attempts.
+*/
+
 /**
  * Matches transient authentication failures caused by credential rotation —
  * e.g. a Claude Max OAuth access token expiring mid-run (~8 h lifetime). A
@@ -32,10 +37,20 @@ import { isUsageLimitError } from "./usage-limit-detector.js";
  * a couple of quick retries before propagating as a task failure.
  */
 const TRANSIENT_AUTH_ERROR_RE =
-  /"type":\s*"authentication_error"|invalid authentication credentials|token[_\s]?expired|oauth token does not meet scope/i;
+  /"type":\s*"authentication_error"|invalid authentication credentials|token[_\s]?expired/i;
+
+/*
+FNXC:EngineAuthRetry 2026-07-05-06:07:
+OAuth scope/permission-grant failures are NOT transient — the token is valid but lacks required grants, so the operator must re-authorize the connection. Retrying would repeat the failing call for ~10 s before surfacing the real (operator-actionable) error. This exclusion runs BEFORE the transient match because providers wrap scope errors inside a generic {"type":"authentication_error"} envelope that would otherwise match TRANSIENT_AUTH_ERROR_RE and retry pointlessly.
+*/
+const SCOPE_ERROR_RE =
+  /oauth token does not meet scope|insufficient[_\s-]?scope|invalid[_\s-]?scope/i;
 
 function isTransientAuthError(message: string | undefined): boolean {
-  return TRANSIENT_AUTH_ERROR_RE.test(message ?? "");
+  const msg = message ?? "";
+  // Permanent scope failures must surface immediately instead of retrying.
+  if (SCOPE_ERROR_RE.test(msg)) return false;
+  return TRANSIENT_AUTH_ERROR_RE.test(msg);
 }
 
 /** Transient-auth retry budget — separate from the rate-limit `maxRetries`. */
@@ -118,6 +133,10 @@ export async function withRateLimitRetry<T>(
 
       lastError = error;
 
+      /*
+      FNXC:EngineAuthRetry 2026-07-05-06:07:
+      Transient-auth retries use a separate, smaller budget (AUTH_MAX_RETRIES) at a flat ~5s delay, and decrement `attempt` so they never burn a rate-limit attempt. Credential rotation completes in seconds, so the rate-limit backoff curve (30s -> 2min) would only prolong the outage. An already-aborted signal short-circuits to throw the original auth error without sleeping, matching the rate-limit path.
+      */
       if (authError) {
         if (authRetries >= AUTH_MAX_RETRIES || signal?.aborted) {
           throw lastError;
