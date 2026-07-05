@@ -3393,6 +3393,132 @@ describe("TerminalModal — mobile layout contract", () => {
     }
   });
 
+  it("pins the mobile close button to the top-right corner of the header, not buried in .terminal-actions (FN-7565)", async () => {
+    const previousInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+
+    try {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const header = document.querySelector(".terminal-header");
+        expect(header).toBeTruthy();
+
+        // Exactly one close button renders on mobile — no duplicate close target.
+        const closeButtons = screen.getAllByTestId("terminal-close-btn");
+        expect(closeButtons).toHaveLength(1);
+        const closeBtn = closeButtons[0];
+
+        // It is a direct child of .terminal-header, not nested inside a wrapping
+        // .terminal-actions cluster (which no longer renders on mobile at all).
+        expect(closeBtn.parentElement).toBe(header);
+        expect(header?.querySelector(".terminal-actions")).toBeNull();
+
+        // It carries the mobile corner-pin class so CSS order/margin can place
+        // it last in flex order, flush against the right edge next to the tab
+        // dropdown, instead of falling back to order:0 (far left).
+        expect(closeBtn.className).toContain("terminal-close--corner");
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    }
+  });
+
+  it("keeps the mobile corner-pin invariant across connection/exit states (FN-7565)", async () => {
+    const previousInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+
+    try {
+      mockUseTerminal.mockReturnValue(
+        createMockTerminalState({ connectionStatus: "disconnected" }),
+      );
+      const { rerender } = render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const header = document.querySelector(".terminal-header");
+        const closeBtn = screen.getByTestId("terminal-close-btn");
+        expect(closeBtn.parentElement).toBe(header);
+        expect(closeBtn.className).toContain("terminal-close--corner");
+        // Reconnect control lives in the footer, not the header, so it cannot
+        // crowd the corner-pinned close button.
+        expect(screen.getByTestId("terminal-reconnect-btn").closest(".terminal-header")).toBeNull();
+      });
+
+      let exitCallback: ((code: number) => void) | null = null;
+      const customOnExit = vi.fn((cb: (code: number) => void) => {
+        exitCallback = cb;
+        return vi.fn();
+      });
+      mockUseTerminal.mockReturnValue(
+        createMockTerminalState({ connectionStatus: "connected", onExit: customOnExit }),
+      );
+      rerender(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        expect(mockTerminalInstance.open).toHaveBeenCalled();
+      });
+      act(() => {
+        exitCallback?.(1);
+      });
+
+      await waitFor(() => {
+        const header = document.querySelector(".terminal-header");
+        const closeBtn = screen.getByTestId("terminal-close-btn");
+        expect(closeBtn.parentElement).toBe(header);
+        expect(closeBtn.className).toContain("terminal-close--corner");
+        // Restart control + exit code live in the footer, not the header.
+        expect(screen.getByTestId("terminal-restart-btn").closest(".terminal-header")).toBeNull();
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    }
+  });
+
+  it("keeps the desktop close button in .terminal-actions with no mobile-only corner slot (FN-7565)", async () => {
+    const previousInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+
+    try {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const closeButtons = screen.getAllByTestId("terminal-close-btn");
+        expect(closeButtons).toHaveLength(1);
+        const closeBtn = closeButtons[0];
+        const actions = screen.getByTestId("terminal-actions");
+
+        // Desktop/floating/pinned-below keep the FN-7502 placement: close stays
+        // the rightmost child of .terminal-actions.
+        expect(actions.contains(closeBtn)).toBe(true);
+        expect(actions.lastElementChild).toBe(closeBtn);
+
+        // No mobile-only corner class/slot renders on desktop.
+        expect(closeBtn.className).not.toContain("terminal-close--corner");
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    }
+  });
+
+  it("corner-pins the mobile close button after .terminal-mobile-tabs and .terminal-workspace-picker in flex order (FN-7565)", () => {
+    const nonMediaMobileRule =
+      terminalModalCss.match(/\.modal\.terminal-modal\.terminal-modal--mobile \.terminal-close--corner\s*\{([^}]*)\}/)?.[1] ?? "";
+    const mediaMobileRule =
+      terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-close--corner\s*\{([^}]*)\}/)?.[1] ?? "";
+    const mobileTabsOrderMedia = terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-mobile-tabs\s*\{([^}]*)\}/)?.[1] ?? "";
+    const workspacePickerOrderMedia = terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-workspace-picker\s*\{([^}]*)\}/)?.[1] ?? "";
+    const baseHeaderRule = terminalModalCss.match(/\.terminal-header\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(nonMediaMobileRule).toContain("order: 3;");
+    expect(nonMediaMobileRule).toContain("margin-inline-start: auto;");
+    expect(mediaMobileRule).toContain("order: 3;");
+    expect(mediaMobileRule).toContain("margin-inline-start: auto;");
+    expect(mobileTabsOrderMedia).toContain("order: 1;");
+    expect(workspacePickerOrderMedia).toContain("order: 2;");
+    // Base header stays a flex row so order-based corner-pinning applies.
+    expect(baseHeaderRule).toContain("display: flex;");
+  });
+
   it("shows the reconnect control in the mobile footer when disconnected (FN-7560)", async () => {
     const previousInnerWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });

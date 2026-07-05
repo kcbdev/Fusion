@@ -2528,10 +2528,22 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           the action controls move into the `.terminal-status-bar` footer below
           (FN-7560) so they don't crowd the dropdown/close. Both sites render the
           SAME fragment, never a duplicated copy, so handlers cannot drift.
+
+          FNXC:TerminalHeader 2026-07-04-20:45:
+          FN-7565: on mobile, being a direct child of `.terminal-header` (not
+          nested in `.terminal-actions`) is necessary but not sufficient to land
+          in the top-right corner — flex items without an explicit `order` fall
+          back to `order: 0`, which sorts BEFORE `.terminal-mobile-tabs`
+          (`order: 1`) and `.terminal-workspace-picker` (`order: 2`), pushing the
+          close button to the far LEFT of the header instead of the corner users
+          expect for an app-sheet close control. The `terminal-close--corner`
+          class (CSS: highest `order` + `margin-inline-start: auto`) fixes this
+          so the X renders last in flex order and hugs the right edge regardless
+          of how wide the tab dropdown / workspace picker grow.
           */}
           {isMobileTerminal ? (
             <button
-              className="terminal-close"
+              className="terminal-close terminal-close--corner"
               onClick={onClose}
               data-testid="terminal-close-btn"
               title={t("terminal.closeTerminal", "Close terminal")}
