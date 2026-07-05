@@ -135,6 +135,13 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
    */
   const loginInProgress = new Map<string, PendingLogin>();
 
+  /*
+  FNXC:ProviderAuth 2026-07-05-00:00:
+  Interactive OAuth login (e.g. Anthropic subscription paste-callback flow) resolves the auth URL to the client immediately, then the real login continues in the background. When the background `storage.login` rejects — bad/expired code, token-exchange rejection, redirect_uri mismatch — that error was previously dropped on the floor: `rejectAuthInfo` is a no-op once the auth URL has been sent, and nothing logged or surfaced it. The UI (which only polls `/auth/status`) then showed a generic "login failed" with no cause, making the failure undiagnosable for both users and maintainers.
+  Retain the last background login error per provider so `/auth/status` can report why it failed, and always log it server-side. Cleared when a fresh login for the same provider starts.
+  */
+  const lastLoginError = new Map<string, string>();
+
   const OAUTH_SESSION_TTL_MS = 5 * 60 * 1000;
   const oauthSessions = new Map<string, { port: number; path: string; originalRedirectUri: string; expiresAt: number }>();
 
@@ -474,6 +481,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         keyHint?: string;
         loginInProgress?: boolean;
         requiresManualCode?: boolean;
+        loginError?: string;
       }[] = await Promise.all(oauthProviders.map(async (p) => {
         const statusProvider = toAuthStatusProvider(p);
         const storageProviderId = toOauthCredentialProviderId(statusProvider.id);
@@ -501,6 +509,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
           expired,
           loginInProgress: loginInProgress.has(statusProvider.id),
           requiresManualCode: getManualCodeConfig(toOauthLoginProviderId(statusProvider.id), origin) !== undefined || undefined,
+          loginError: lastLoginError.get(statusProvider.id),
         };
       }));
 
@@ -1082,6 +1091,9 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         throw conflict(`Login already in progress for ${provider}`);
       }
 
+      // Fresh login attempt clears any prior background failure for this provider.
+      lastLoginError.delete(provider);
+
       const storage = getAuthStorage();
       const oauthProviders = storage.getOAuthProviders();
       const found = oauthProviders.find((p) => p.id === provider || p.id === storageProvider);
@@ -1201,7 +1213,16 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         })
         .catch((err: unknown) => {
           // Login failed — also reject auth URL if not yet received
-          rejectAuthInfo(err instanceof Error ? err : new Error(String(err)));
+          const error = err instanceof Error ? err : new Error(String(err));
+          // Surface the real cause: reject the auth-URL promise if it hasn't
+          // resolved yet, and always retain + log the error. Once the auth URL
+          // is already sent, rejectAuthInfo is a no-op, so this retained error
+          // is the only channel by which the client learns why login failed.
+          rejectAuthInfo(error);
+          if (error.message !== "cancelled") {
+            lastLoginError.set(provider, error.message);
+            console.error(`[auth/login] background login failed for ${provider}: ${error.message}`);
+          }
         })
         .finally(() => {
           clearTimeout(timeout);

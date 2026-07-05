@@ -262,6 +262,56 @@ describe("createFusionAuthStorage", () => {
       expect(await authStorage.getApiKey("anthropic-subscription")).toBe("legacy-subscription-access-token");
     });
 
+    it("restores the subscription card when re-login writes the credential under the legacy anthropic id", async () => {
+      // Repro of FN: interactive subscription login persists OAuth under `anthropic`,
+      // but the settings card / status read is keyed on `anthropic-subscription`.
+      // After an in-session logout the subscription id is suppressed; a successful
+      // re-login must clear that suppression on BOTH aliases or the card is stuck
+      // reporting "Login did not complete" despite a valid stored credential.
+      const authStorage = createFusionAuthStorage();
+
+      authStorage.logout("anthropic-subscription");
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
+
+      // `set` under the legacy id mirrors what interactive login persists.
+      authStorage.set("anthropic", {
+        type: "oauth",
+        access: "relogin-access-token",
+        refresh: "relogin-refresh-token",
+        expires: Date.now() + 3_600_000,
+      });
+
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(true);
+      expect(await authStorage.getApiKey("anthropic-subscription")).toBe("relogin-access-token");
+    });
+
+    it("restores the subscription card when re-auth writes under the subscription id", async () => {
+      const authStorage = createFusionAuthStorage();
+
+      authStorage.logout("anthropic-subscription");
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
+
+      authStorage.set("anthropic-subscription", {
+        type: "oauth",
+        access: "subscription-relogin-token",
+        refresh: "subscription-relogin-refresh",
+        expires: Date.now() + 3_600_000,
+      });
+
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(true);
+    });
+
+    it("does not revive a logged-out subscription card from a raw anthropic API key", async () => {
+      // A raw `anthropic` API key belongs to its own card and must not alias into
+      // the subscription's logged-out state — only OAuth credentials do.
+      const authStorage = createFusionAuthStorage();
+
+      authStorage.logout("anthropic-subscription");
+      authStorage.set("anthropic", { type: "api_key", key: "sk-ant-api03-raw-key" });
+
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
+    });
+
     it("refreshes legacy Anthropic OAuth in place for direct runtime auth", async () => {
       writeFusionAuth(homeDir, {
         anthropic: {

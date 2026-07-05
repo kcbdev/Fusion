@@ -1774,6 +1774,15 @@ export interface AuthProvider {
   /** True when the redirect cannot reach this dashboard host and the user must paste the URL/code back manually. */
   requiresManualCode?: boolean;
   /**
+   * Reason the most recent background OAuth login attempt failed, if any.
+   * Interactive logins resolve the auth URL immediately and finish in the
+   * background; when that background flow rejects (bad/expired code, token
+   * exchange rejection, redirect_uri mismatch) this carries the cause so the
+   * UI can show why login failed instead of a generic error. Cleared when a
+   * fresh login for the provider starts.
+   */
+  loginError?: string;
+  /**
    * How this provider authenticates / is activated.
    * - "oauth": OAuth flow (user clicks Login → redirect)
    * - "api_key": API key stored locally
