@@ -338,6 +338,33 @@ function createMockMissionStore() {
 
       return fixFeature;
     }),
+    reconcileSupersededGeneratedFixFeatures: vi.fn((sliceId: string) => {
+      let supersededCount = 0;
+      const featureIds: string[] = [];
+      const featureHasPassed = (feature: MissionFeature | undefined) =>
+        feature?.lastValidatorStatus === "passed" || feature?.loopState === "passed";
+      const hasPassedAncestor = (feature: MissionFeature, seen = new Set<string>()): boolean => {
+        const sourceFeatureId = feature.generatedFromFeatureId;
+        if (!sourceFeatureId || seen.has(sourceFeatureId)) return false;
+        seen.add(sourceFeatureId);
+        const sourceFeature = features.get(sourceFeatureId);
+        return featureHasPassed(sourceFeature) || (sourceFeature ? hasPassedAncestor(sourceFeature, seen) : false);
+      };
+      for (const feature of [...features.values()]) {
+        if (feature.sliceId !== sliceId || !feature.generatedFromFeatureId || !hasPassedAncestor(feature)) continue;
+        if (feature.status === "done" && feature.loopState === "passed" && feature.lastValidatorStatus === "passed") continue;
+        features.set(feature.id, {
+          ...feature,
+          status: "done",
+          loopState: "passed",
+          lastValidatorStatus: "passed",
+          updatedAt: new Date().toISOString(),
+        });
+        supersededCount += 1;
+        featureIds.push(feature.id);
+      }
+      return { supersededCount, featureIds };
+    }),
     triageFeature: vi.fn(async (featureId: string) => {
       const feature = features.get(featureId);
       if (!feature) throw new Error(`Feature ${featureId} not found`);

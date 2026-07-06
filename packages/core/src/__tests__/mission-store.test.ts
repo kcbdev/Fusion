@@ -1683,6 +1683,56 @@ describe("MissionStore", () => {
         store.updateFeature(feature.id, { lastValidatorStatus: "passed" });
         expect(store.computeSliceStatus(slice.id)).toBe("complete");
       });
+
+      it("supersedes generated fix descendants once an ancestor feature passes", () => {
+        const mission = store.createMission({ title: "Mission" });
+        const milestone = store.addMilestone(mission.id, { title: "Milestone" });
+        const slice = store.addSlice(milestone.id, { title: "Slice" });
+        const source = store.addFeature(slice.id, { title: "Source" });
+
+        store.updateFeature(source.id, { status: "done" });
+        const sourceFailRun = store.startValidatorRun(source.id, "task_completion");
+        store.completeValidatorRun(sourceFailRun.id, "failed", "missing evidence");
+        const fix1 = store.createGeneratedFixFeature(source.id, sourceFailRun.id, ["CA-source"]);
+
+        const fix1FailRun = store.startValidatorRun(fix1.id, "task_completion");
+        store.completeValidatorRun(fix1FailRun.id, "failed", "still missing evidence");
+        const fix2 = store.createGeneratedFixFeature(fix1.id, fix1FailRun.id, ["CA-fix1"]);
+
+        store.updateFeature(fix1.id, { status: "blocked", loopState: "blocked", lastValidatorStatus: "failed" });
+        store.updateFeature(fix2.id, { status: "blocked", loopState: "blocked", lastValidatorStatus: "error" });
+        store.updateFeature(source.id, { status: "done", loopState: "passed", lastValidatorStatus: "passed" });
+
+        expect(store.computeSliceStatus(slice.id)).toBe("pending");
+
+        const report = store.reconcileSupersededGeneratedFixFeatures(slice.id);
+
+        expect(report).toEqual({ supersededCount: 2, featureIds: [fix1.id, fix2.id] });
+        expect(store.getFeature(fix1.id)).toMatchObject({ status: "done", loopState: "passed", lastValidatorStatus: "passed" });
+        expect(store.getFeature(fix2.id)).toMatchObject({ status: "done", loopState: "passed", lastValidatorStatus: "passed" });
+        expect(store.computeSliceStatus(slice.id)).toBe("complete");
+      });
+
+      it("reconciles stale generated fix features when a source validator run passes", () => {
+        const mission = store.createMission({ title: "Mission" });
+        const milestone = store.addMilestone(mission.id, { title: "Milestone" });
+        const slice = store.addSlice(milestone.id, { title: "Slice" });
+        const source = store.addFeature(slice.id, { title: "Source" });
+
+        store.updateFeature(source.id, { status: "done" });
+        const failedRun = store.startValidatorRun(source.id, "task_completion");
+        store.completeValidatorRun(failedRun.id, "failed", "missing evidence");
+        const staleFix = store.createGeneratedFixFeature(source.id, failedRun.id, ["CA-source"]);
+        store.updateFeature(staleFix.id, { status: "blocked", loopState: "blocked", lastValidatorStatus: "failed" });
+
+        expect(store.computeSliceStatus(slice.id)).toBe("pending");
+
+        const passingRun = store.startValidatorRun(source.id, "task_completion");
+        store.completeValidatorRun(passingRun.id, "passed", "evidence now complete");
+
+        expect(store.getFeature(staleFix.id)).toMatchObject({ status: "done", loopState: "passed", lastValidatorStatus: "passed" });
+        expect(store.computeSliceStatus(slice.id)).toBe("complete");
+      });
     });
 
     describe("computeMilestoneStatus", () => {

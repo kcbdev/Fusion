@@ -2751,6 +2751,13 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     // Re-read the run to get the updated state
     const updatedRun = this.getValidatorRun(runId)!;
 
+    if (result === "passed") {
+      const passedFeature = this.getFeature(run.featureId);
+      if (passedFeature) {
+        this.reconcileSupersededGeneratedFixFeatures(passedFeature.sliceId);
+      }
+    }
+
     this.emit("validator-run:completed", updatedRun, result, durationMs);
 
     return updatedRun;
@@ -3161,6 +3168,66 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Mark generated Fix Features obsolete once an ancestor feature has already
+   * passed validation.
+   *
+   * Validator failures can create a chain of generated features. If the original
+   * feature is later validated successfully, older descendants are no longer
+   * actionable remediation work. Leaving them blocked/defined keeps the slice
+   * pending forever even though the authoritative source feature has passed.
+   */
+  reconcileSupersededGeneratedFixFeatures(sliceId: string): { supersededCount: number; featureIds: string[] } {
+    const features = this.listFeatures(sliceId);
+    const featureById = new Map(features.map((feature) => [feature.id, feature]));
+    const ancestorPassedMemo = new Map<string, boolean>();
+
+    const featureHasPassed = (feature: MissionFeature | undefined): boolean => {
+      if (!feature) return false;
+      return feature.lastValidatorStatus === "passed" || feature.loopState === "passed";
+    };
+
+    const hasPassedAncestor = (feature: MissionFeature, seen = new Set<string>()): boolean => {
+      const sourceFeatureId = feature.generatedFromFeatureId;
+      if (!sourceFeatureId || seen.has(sourceFeatureId)) {
+        return false;
+      }
+      const cached = ancestorPassedMemo.get(feature.id);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      seen.add(sourceFeatureId);
+      const sourceFeature = featureById.get(sourceFeatureId) ?? this.getFeature(sourceFeatureId);
+      const passed = featureHasPassed(sourceFeature) || (sourceFeature ? hasPassedAncestor(sourceFeature, seen) : false);
+      ancestorPassedMemo.set(feature.id, passed);
+      return passed;
+    };
+
+    const supersededFeatureIds = features
+      .filter((feature) => feature.generatedFromFeatureId && hasPassedAncestor(feature))
+      .filter((feature) => feature.status !== "done" || feature.loopState !== "passed" || feature.lastValidatorStatus !== "passed")
+      .map((feature) => feature.id);
+
+    for (const featureId of supersededFeatureIds) {
+      this.updateFeature(featureId, {
+        status: "done",
+        loopState: "passed",
+        lastValidatorStatus: "passed",
+      });
+    }
+
+    if (supersededFeatureIds.length > 0) {
+      this.recomputeSliceStatus(sliceId);
+      this.db.bumpLastModified();
+    }
+
+    return {
+      supersededCount: supersededFeatureIds.length,
+      featureIds: supersededFeatureIds,
+    };
   }
 
   /**
