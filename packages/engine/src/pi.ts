@@ -1861,10 +1861,16 @@ export function wrapToolsWithPermanentAgentGating(
 
           let approvalRequest = await gating.findPendingApprovalRequest?.(dedupeKey);
           if (!approvalRequest && gating.createApprovalRequest) {
+            // FNXC:AgentGating 2026-07-05-00:00:
+            // FN-7609: pass the dedupe key through so the gating closure can persist
+            // it into targetAction.context.approvalDedupeKey — without this, the
+            // findPendingApprovalRequest lookup above can never match and every
+            // retrying heartbeat tick mints a fresh duplicate approval request.
             approvalRequest = await gating.createApprovalRequest({
               category: normalizeApprovalRequestCategory(decision.category),
               toolName: decision.toolName,
               args: params,
+              approvalDedupeKey: dedupeKey,
             });
           }
 

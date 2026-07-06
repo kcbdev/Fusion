@@ -77,6 +77,7 @@ import { canonicalFusionBranchName, canonicalStepInstanceBranchName, generateWor
 import { resolveTaskWorktreePath, resolveWorktreesDir } from "./worktree-paths.js";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { describeModel, formatModelMarkerDetails, promptWithFallback, compactSessionContext } from "./pi.js";
+import { buildAgentGatedActionSummary } from "./permanent-agent-gating.js";
 import { accumulateSessionTokenUsage, mergeTokenUsagePerModel } from "./session-token-usage.js";
 import {
   createResolvedAgentSession,
@@ -2302,7 +2303,14 @@ export class TaskExecutor {
       },
       taskId,
       runId: taskId ? this.getRunContextFor(taskId)?.runId : undefined,
-      createApprovalRequest: async ({ category, toolName, args }) => this.approvalRequestStore.create({
+      // FNXC:AgentGating 2026-07-05-00:00:
+      // FN-7609: operators approving a gated action need the real command/args,
+      // and a stateless heartbeat retrying the same command must reuse a single
+      // pending approval instead of minting duplicates. `summary` is now
+      // payload-bearing (shared helper) and `approvalDedupeKey`/`command`/`cwd`
+      // are persisted into targetAction.context so findPendingApprovalRequest
+      // can match and the UI can render the payload without re-parsing.
+      createApprovalRequest: async ({ category, toolName, args, approvalDedupeKey }) => this.approvalRequestStore.create({
         requester: {
           actorId,
           actorType: "agent",
@@ -2313,13 +2321,20 @@ export class TaskExecutor {
         targetAction: {
           category,
           action: toolName,
-          summary: `Agent gated action for ${toolName}`,
+          summary: buildAgentGatedActionSummary(toolName, args),
           resourceType: "tool",
           resourceId: toolName,
           context: {
             toolName,
             toolArgs: args,
             source: "agent-gating",
+            ...(approvalDedupeKey ? { approvalDedupeKey } : {}),
+            ...(typeof (args as Record<string, unknown> | undefined)?.command === "string"
+              ? { command: (args as Record<string, unknown>).command }
+              : {}),
+            ...(typeof (args as Record<string, unknown> | undefined)?.cwd === "string"
+              ? { cwd: (args as Record<string, unknown>).cwd }
+              : {}),
           },
         },
       }),

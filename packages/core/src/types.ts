@@ -6725,6 +6725,14 @@ export interface PermanentAgentGatingContext {
     category: AgentPermissionPolicyActionCategory;
     toolName: string;
     args: Record<string, unknown>;
+    /**
+     * FNXC:AgentGating 2026-07-05-00:00:
+     * FN-7609: the dedupe key must be persisted into the created request's
+     * targetAction.context so a retrying heartbeat's findPendingApprovalRequest
+     * lookup (which matches on context.approvalDedupeKey) can actually find and
+     * reuse the pending request instead of minting a new blank one every tick.
+     */
+    approvalDedupeKey?: string;
   }) => Promise<ApprovalRequest | null>;
   findPendingApprovalRequest?: (dedupeKey: string) => Promise<ApprovalRequest | null>;
 }
