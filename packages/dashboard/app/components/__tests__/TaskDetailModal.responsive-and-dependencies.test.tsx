@@ -304,6 +304,77 @@ describe("TaskDetailModal", () => {
       expect(prioritySavingBlock).not.toMatch(/border|min-height|padding/);
     });
 
+    it("makes low/high/urgent visibly distinct colors on the detail Priority chip, scoped away from TaskCard (FN-7601)", () => {
+      const css = readDashboardStylesSource();
+
+      // FN-7585's shared base rule and FN-7597's neutral `normal` rule must
+      // survive untouched — this task only ADDS per-level overrides on top.
+      const baseChipBlock = getExactCssRuleBlock(css, ".detail-priority-chip");
+      expect(baseChipBlock).toContain("border-width: var(--btn-border-width);");
+      expect(baseChipBlock).toContain("border-color: var(--border);");
+      expect(baseChipBlock).toContain("border-radius: var(--detail-control-border-radius);");
+      const normalBlock = getExactCssRuleBlock(css, ".detail-priority-chip.card-priority-badge--normal");
+      expect(normalBlock).toMatch(/background:\s*color-mix\(in srgb, var\(--text-muted\)/);
+      expect(normalBlock).toContain("color: var(--text-muted);");
+
+      const lowBlock = getExactCssRuleBlock(css, ".detail-priority-chip.card-priority-badge--low");
+      const highBlock = getExactCssRuleBlock(css, ".detail-priority-chip.card-priority-badge--high");
+      const urgentBlock = getExactCssRuleBlock(css, ".detail-priority-chip.card-priority-badge--urgent");
+
+      // Each non-neutral level must declare its own tinted border-color AND
+      // background, using the matching semantic token family.
+      for (const [block, token] of [
+        [lowBlock, "--color-info"],
+        [highBlock, "--color-warning"],
+        [urgentBlock, "--color-error"],
+      ] as const) {
+        expect(block).not.toBe("");
+        expect(block).toMatch(/border-color\s*:/);
+        expect(block).toMatch(/background\s*:/);
+        expect(block).toContain(token);
+      }
+
+      // None of the per-level border-colors may resolve to the plain shared
+      // `var(--border)` value used by the base rule — that was the original
+      // bug (every level looked the same washed-out box).
+      const borderColorOf = (block: string): string => {
+        const match = block.match(/border-color\s*:\s*([^;]+);/);
+        return match?.[1]?.trim() ?? "";
+      };
+      const backgroundOf = (block: string): string => {
+        const match = block.match(/background\s*:\s*([^;]+);/);
+        return match?.[1]?.trim() ?? "";
+      };
+
+      const lowBorder = borderColorOf(lowBlock);
+      const highBorder = borderColorOf(highBlock);
+      const urgentBorder = borderColorOf(urgentBlock);
+
+      expect(lowBorder).not.toBe("var(--border)");
+      expect(highBorder).not.toBe("var(--border)");
+      expect(urgentBorder).not.toBe("var(--border)");
+
+      // Mutually distinct — low, high, and urgent must not collapse onto the
+      // same border-color or background declaration as one another.
+      expect(new Set([lowBorder, highBorder, urgentBorder]).size).toBe(3);
+      const lowBg = backgroundOf(lowBlock);
+      const highBg = backgroundOf(highBlock);
+      const urgentBg = backgroundOf(urgentBlock);
+      expect(new Set([lowBg, highBg, urgentBg]).size).toBe(3);
+
+      // `normal`'s background/border must remain distinct from all three tinted
+      // levels (it keeps the FN-7597 neutral treatment, not a semantic tint).
+      expect(new Set([backgroundOf(normalBlock), lowBg, highBg, urgentBg]).size).toBe(4);
+
+      // The read-only TaskCard badge tints referenced by TaskCard.css must be
+      // untouched by this task — confirm no `.detail-priority-chip` compound
+      // selector leaks a border-color override into the bare `.card-priority-badge--*`
+      // selectors (those remain single-class, background/color-only rules).
+      expect(css).toMatch(/\.card-priority-badge--low\s*\{\s*background:\s*color-mix\(in srgb, var\(--color-info\) 15%, transparent\);\s*color:\s*var\(--color-info\);\s*\}/);
+      expect(css).toMatch(/\.card-priority-badge--high\s*\{\s*background:\s*color-mix\(in srgb, var\(--color-warning\) 18%, transparent\);\s*color:\s*var\(--color-warning\);\s*\}/);
+      expect(css).toMatch(/\.card-priority-badge--urgent\s*\{\s*background:\s*color-mix\(in srgb, var\(--color-error\) 20%, transparent\);\s*color:\s*var\(--color-error-dark\);\s*\}/);
+    });
+
     it("keeps grouped timestamp metadata inline on desktop and mobile", () => {
       const css = readDashboardStylesSource();
 
