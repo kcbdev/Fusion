@@ -180,6 +180,19 @@ function validateMissionBranchStrategy(value: unknown): MissionBranchStrategy | 
   };
 }
 
+function validateTaskPrefix(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new Error("taskPrefix must be a string");
+  }
+  const trimmed = value.trim().toUpperCase();
+  if (!trimmed) return undefined; // empty => inherit the project prefix
+  if (!/^[A-Z][A-Z0-9]*$/.test(trimmed)) {
+    throw new Error("taskPrefix must start with a letter and contain only letters and digits");
+  }
+  return trimmed;
+}
+
 function validateOrderedIds(body: unknown): string[] {
   if (!body || typeof body !== "object") {
     throw new Error("Request body must contain orderedIds array");
@@ -444,7 +457,7 @@ export function createMissionRouter(
   router.post(
     "/",
     catchTypedHandler(async (req, res) => {
-      const { title, description, autoAdvance, baseBranch, branchStrategy, goalIds } = req.body;
+      const { title, description, autoAdvance, baseBranch, branchStrategy, taskPrefix, goalIds } = req.body;
 
       const validatedTitle = validateTitle(title);
       const validatedDescription = validateDescription(description);
@@ -455,6 +468,7 @@ export function createMissionRouter(
         description: validatedDescription,
         baseBranch: validateDescription(baseBranch),
         branchStrategy: validateMissionBranchStrategy(branchStrategy),
+        taskPrefix: validateTaskPrefix(taskPrefix),
       };
 
       const mission = missionStore.createMission(input);
@@ -1120,7 +1134,7 @@ export function createMissionRouter(
     "/:missionId",
     catchTypedHandler(async (req, res) => {
       const { missionId } = req.params;
-      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy, goalIds } = req.body;
+      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy, taskPrefix, goalIds } = req.body;
 
       if (!validateMissionId(missionId)) {
         throw badRequest("Invalid mission ID format");
@@ -1150,6 +1164,9 @@ export function createMissionRouter(
       }
       if (branchStrategy !== undefined) {
         updates.branchStrategy = validateMissionBranchStrategy(branchStrategy);
+      }
+      if (taskPrefix !== undefined) {
+        updates.taskPrefix = validateTaskPrefix(taskPrefix);
       }
 
       if (Object.keys(updates).length === 0 && validatedGoalIds === undefined) {

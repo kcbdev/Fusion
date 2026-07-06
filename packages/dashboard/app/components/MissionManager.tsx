@@ -294,6 +294,7 @@ interface MissionFormData {
   autopilotEnabled: boolean;
   baseBranch: string;
   branchStrategy: MissionBranchStrategy;
+  taskPrefix: string;
 }
 
 interface MilestoneFormData {
@@ -326,6 +327,7 @@ const EMPTY_MISSION_FORM: MissionFormData = {
   branchStrategy: {
     mode: "project-default",
   },
+  taskPrefix: "",
 };
 
 const EMPTY_MILESTONE_FORM: MilestoneFormData = {
@@ -1611,6 +1613,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       autopilotEnabled: mission.autopilotEnabled ?? false,
       baseBranch: mission.baseBranch ?? "",
       branchStrategy: normalizeMissionBranchStrategy(mission.branchStrategy),
+      taskPrefix: mission.taskPrefix ?? "",
     });
   }, []);
 
@@ -1648,6 +1651,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           autopilotEnabled: missionForm.autopilotEnabled,
           baseBranch: missionForm.baseBranch.trim() || undefined,
           branchStrategy,
+          taskPrefix: missionForm.taskPrefix.trim() || undefined,
         }, projectId);
         addToast(t("missions.created", "Mission created"), "success");
       } else if (editingMissionId) {
@@ -1660,6 +1664,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           autopilotEnabled: missionForm.autopilotEnabled,
           baseBranch: missionForm.baseBranch.trim() || "",
           branchStrategy,
+          taskPrefix: missionForm.taskPrefix.trim() || undefined,
         };
         if (missionForm.autopilotEnabled) {
           updates.autoAdvance = true;
@@ -2808,6 +2813,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       value={missionForm.baseBranch}
                       onChange={(e) => setMissionForm({ ...missionForm, baseBranch: e.target.value })}
                       aria-label={t("missions.missionTargetBranchAriaLabel", "Mission target branch")}
+                    />
+                  </label>
+                  <label>
+                    {t("missions.taskPrefix", "Task prefix")}
+                    <input
+                      type="text"
+                      placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
+                      value={missionForm.taskPrefix}
+                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
                     />
                   </label>
                   <label>
@@ -4536,6 +4551,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                     />
                   </label>
                   <label>
+                    {t("missions.taskPrefix", "Task prefix")}
+                    <input
+                      type="text"
+                      placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
+                      value={missionForm.taskPrefix}
+                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
+                    />
+                  </label>
+                  <label>
                     {t("missions.branchStrategy", "Branch strategy")}
                     <select
                       value={missionForm.branchStrategy.mode}
@@ -4627,6 +4652,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       value={missionForm.baseBranch}
                       onChange={(e) => setMissionForm({ ...missionForm, baseBranch: e.target.value })}
                       aria-label={t("missions.missionTargetBranchAriaLabel", "Mission target branch")}
+                    />
+                  </label>
+                  <label>
+                    {t("missions.taskPrefix", "Task prefix")}
+                    <input
+                      type="text"
+                      placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
+                      value={missionForm.taskPrefix}
+                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
                     />
                   </label>
                   <label>

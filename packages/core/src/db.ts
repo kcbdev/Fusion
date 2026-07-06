@@ -183,7 +183,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 139;
+const SCHEMA_VERSION = 140;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -956,6 +956,7 @@ CREATE TABLE IF NOT EXISTS missions (
   interviewState TEXT NOT NULL,
   baseBranch TEXT,
   branchStrategy TEXT,
+  taskPrefix TEXT,
   autoAdvance INTEGER DEFAULT 0,
   autoMerge INTEGER,
   createdAt TEXT NOT NULL,
@@ -5607,6 +5608,14 @@ export class Database {
        */
       this.applyMigration(139, () => {
         this.addColumnIfMissing("tasks", "approvedPlanFingerprint", "TEXT");
+      });
+    }
+
+    if (version < 140) {
+      // Per-mission ticket id prefix (e.g. "ERR") for triaged tasks; NULL means
+      // inherit the project-wide taskPrefix setting. Additive-only, no backfill.
+      this.applyMigration(140, () => {
+        this.addColumnIfMissing("missions", "taskPrefix", "TEXT");
       });
     }
 

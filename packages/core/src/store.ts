@@ -4451,7 +4451,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     },
   ): Promise<Task> {
     const settings = await this.getSettingsFast();
-    const prefix = (settings.taskPrefix || "FN").trim().toUpperCase();
+    // A per-mission taskPrefix (threaded via TaskCreateInput at triage time)
+    // overrides the project-wide setting for this task's id reservation.
+    const prefix = (input.taskPrefix?.trim() || settings.taskPrefix || "FN").trim().toUpperCase();
     const allocator = this.getDistributedTaskIdAllocator();
     const nodeId = await this.resolveLocalNodeIdForTaskAllocation();
     const reservation = await allocator.reserveDistributedTaskId({

@@ -56,6 +56,7 @@ export interface Mission {
     mode: "project-default" | "existing" | "custom-new" | "auto-per-task";
     branchName?: string;
   };
+  taskPrefix?: string;
   status: MissionStatus;
   interviewState: "not_started" | "in_progress" | "completed" | "needs_update";
   autoAdvance?: boolean;

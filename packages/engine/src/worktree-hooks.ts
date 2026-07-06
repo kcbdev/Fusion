@@ -207,7 +207,16 @@ export function buildCommitMsgTrailerHook(
     commitAuthorEmail?: string;
   } = {}
 ): string {
-  const taskPrefix = (options.taskPrefix ?? "FN").trim() || "FN";
+  // Derive the strip prefix from the task id itself so per-mission prefixes
+  // (e.g. ERR-5 while the project taskPrefix is still "FN") strip correctly.
+  // The fusion-task-id file holds the real id, so PREFIX must match it, not the
+  // project-wide options.taskPrefix. Falls back to options.taskPrefix / "FN"
+  // only when taskId isn't a well-formed "<PREFIX>-<n>".
+  const trimmedTaskId = taskId.trim();
+  const derivedPrefix = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(trimmedTaskId)
+    ? trimmedTaskId.replace(/-\d+$/, "").toUpperCase()
+    : "";
+  const taskPrefix = (derivedPrefix || options.taskPrefix || "FN").trim() || "FN";
   const trailerName = (options.trailerName ?? "Fusion-Task-Id").trim() || "Fusion-Task-Id";
   const commitAuthorName = (options.commitAuthorName ?? DEFAULT_COMMIT_AUTHOR_NAME).trim() || DEFAULT_COMMIT_AUTHOR_NAME;
   const commitAuthorEmail = (options.commitAuthorEmail ?? DEFAULT_COMMIT_AUTHOR_EMAIL).trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;

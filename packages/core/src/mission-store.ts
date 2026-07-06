@@ -233,6 +233,7 @@ interface MissionRow {
   interviewState: string;
   baseBranch: string | null;
   branchStrategy: string | null;
+  taskPrefix: string | null;
   autoMerge: number | null;
   autoAdvance: number;
   autopilotEnabled: number;
@@ -435,6 +436,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       interviewState: row.interviewState as InterviewState,
       baseBranch: row.baseBranch || undefined,
       branchStrategy,
+      taskPrefix: row.taskPrefix || undefined,
       autoMerge: row.autoMerge === null ? undefined : Boolean(row.autoMerge),
       autoAdvance: Boolean(row.autoAdvance),
       autopilotEnabled: Boolean(row.autopilotEnabled),
@@ -661,6 +663,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       interviewState: "not_started",
       baseBranch: input.baseBranch,
       branchStrategy: input.branchStrategy,
+      taskPrefix: input.taskPrefix,
       autoMerge: input.autoMerge,
       autoAdvance: false,
       autopilotEnabled: false,
@@ -670,8 +673,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     };
 
     this.db.prepare(`
-      INSERT INTO missions (id, title, description, status, interviewState, baseBranch, branchStrategy, autoMerge, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO missions (id, title, description, status, interviewState, baseBranch, branchStrategy, taskPrefix, autoMerge, autoAdvance, autopilotEnabled, autopilotState, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       mission.id,
       mission.title,
@@ -680,6 +683,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       mission.interviewState,
       mission.baseBranch ?? null,
       mission.branchStrategy ? JSON.stringify(mission.branchStrategy) : null,
+      mission.taskPrefix ?? null,
       mission.autoMerge === undefined ? null : (mission.autoMerge ? 1 : 0),
       mission.autoAdvance ? 1 : 0,
       mission.autopilotEnabled ? 1 : 0,
@@ -1276,6 +1280,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         interviewState = ?,
         baseBranch = ?,
         branchStrategy = ?,
+        taskPrefix = ?,
         autoMerge = ?,
         autoAdvance = ?,
         autopilotEnabled = ?,
@@ -1290,6 +1295,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       updated.interviewState,
       updated.baseBranch ?? null,
       updated.branchStrategy ? JSON.stringify(updated.branchStrategy) : null,
+      updated.taskPrefix ?? null,
       updated.autoMerge === undefined ? null : (updated.autoMerge ? 1 : 0),
       updated.autoAdvance ? 1 : 0,
       updated.autopilotEnabled ? 1 : 0,
@@ -3978,6 +3984,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
           description,
           branch: branchAssignment.workingBranch,
           baseBranch: resolvedBaseBranch,
+          taskPrefix: mission?.taskPrefix,
           ...(missionId
             ? {
                 branchContext: {

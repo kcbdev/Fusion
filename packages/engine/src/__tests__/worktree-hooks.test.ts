@@ -84,6 +84,15 @@ describe("worktree-hooks", () => {
     expect(hook).toContain("s/^KB-//i");
   });
 
+  it("derives the strip prefix from the task id, ignoring a mismatched options.taskPrefix", () => {
+    // A per-mission ticket (ERR-5) whose project-wide options.taskPrefix is
+    // still "FN" must strip its own ERR- prefix, not "FN-".
+    const hook = buildCommitMsgTrailerHook("ERR-5", { taskPrefix: "FN" });
+    expect(hook).toContain('PREFIX="ERR"');
+    expect(hook).toContain("s/^ERR-//i");
+    expect(hook).not.toContain('PREFIX="FN"');
+  });
+
   it("installs metadata and pre-commit + commit-msg hooks in linked worktree", async () => {
     const root = mkdtempSync(join(tmpdir(), "wt-hook-root-"));
     execFileSync("git", ["init"], { cwd: root });

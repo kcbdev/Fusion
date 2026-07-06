@@ -192,6 +192,24 @@ describe("MissionStore", () => {
       expect(store.getMission(mission.id)?.branchStrategy).toBeUndefined();
     });
 
+    it("round-trips mission taskPrefix on create", () => {
+      const mission = store.createMission({ title: "Prefixed", taskPrefix: "ERR" });
+      expect(store.getMission(mission.id)?.taskPrefix).toBe("ERR");
+    });
+
+    it("updates mission taskPrefix", () => {
+      const mission = store.createMission({ title: "Original" });
+      const updated = store.updateMission(mission.id, { taskPrefix: "BUG" });
+      expect(updated.taskPrefix).toBe("BUG");
+      expect(store.getMission(mission.id)?.taskPrefix).toBe("BUG");
+    });
+
+    it("reads undefined taskPrefix for legacy rows", () => {
+      const mission = store.createMission({ title: "Legacy row" });
+      db.prepare("UPDATE missions SET taskPrefix = NULL WHERE id = ?").run(mission.id);
+      expect(store.getMission(mission.id)?.taskPrefix).toBeUndefined();
+    });
+
     // FNXC:CoreTests 2026-06-25-21:50: real-sleep removed (FN-5048); advance the
     // fake clock between create and update so updatedAt > createdAt deterministically.
     it("updates a mission", () => {
@@ -2349,6 +2367,20 @@ describe("MissionStore", () => {
       expect(task!.description).toContain("Acceptance Criteria");
       expect(task!.sliceId).toBe(slice.id);
       expect(task!.missionId).toBe(mission.id);
+    });
+
+    it("mints the triaged task id with the mission's taskPrefix", async () => {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const msWithTs = ts.getMissionStore();
+
+      const mission = msWithTs.createMission({ title: "Mission", taskPrefix: "ERR" });
+      const milestone = msWithTs.addMilestone(mission.id, { title: "Milestone" });
+      const slice = msWithTs.addSlice(milestone.id, { title: "Slice" });
+      const feature = msWithTs.addFeature(slice.id, { title: "Feature" });
+
+      const triaged = await msWithTs.triageFeature(feature.id);
+      expect(triaged.taskId).toMatch(/^ERR-\d+$/);
     });
 
     /*

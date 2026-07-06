@@ -7930,6 +7930,8 @@ export interface Mission {
     mode: "project-default" | "existing" | "custom-new" | "auto-per-task";
     branchName?: string;
   };
+  /** Per-mission ticket id prefix (e.g. "ERR"); undefined inherits the project prefix. */
+  taskPrefix?: string;
   status: MissionStatus;
   interviewState: "not_started" | "in_progress" | "completed" | "needs_update";
   autoAdvance?: boolean;
@@ -8021,7 +8023,7 @@ export function fetchMissions(projectId?: string): Promise<MissionWithSummary[]>
 }
 
 /** Create a new mission */
-export function createMission(input: { title: string; description?: string; autoAdvance?: boolean; autopilotEnabled?: boolean; baseBranch?: string; branchStrategy?: Mission["branchStrategy"] }, projectId?: string): Promise<Mission> {
+export function createMission(input: { title: string; description?: string; autoAdvance?: boolean; autopilotEnabled?: boolean; baseBranch?: string; branchStrategy?: Mission["branchStrategy"]; taskPrefix?: string }, projectId?: string): Promise<Mission> {
   return api<Mission>(withProjectId("/missions", projectId), {
     method: "POST",
     body: JSON.stringify(input),
