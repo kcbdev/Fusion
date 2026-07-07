@@ -10894,6 +10894,21 @@ export async function aiMergeTask(
         }
       } else {
         mergerLog.warn(`${taskId}: push to remote failed: ${pushResult.error}`);
+        await audit.git({
+          type: "push:origin",
+          target: taskId,
+          metadata: {
+            integrationBranch: mergeTarget.branch,
+            remote: settings.pushRemote || "origin",
+            outcome: "failed",
+            stderrPreview: pushResult.error,
+          },
+        }).catch(() => undefined);
+        await store.logEntry(
+          taskId,
+          `Push to remote failed after merge — task marked done anyway; local main may diverge from origin: ${pushResult.error}`,
+          "PushToRemoteFailed",
+        ).catch(() => undefined);
       }
       result.pushedToRemote = pushResult.pushed;
       if (pushResult.error) {
@@ -10903,6 +10918,21 @@ export async function aiMergeTask(
       mergerLog.error(`${taskId}: push to remote error: ${err.message}`);
       result.pushedToRemote = false;
       result.pushError = err.message;
+      await audit.git({
+        type: "push:origin",
+        target: taskId,
+        metadata: {
+          integrationBranch: mergeTarget.branch,
+          remote: settings.pushRemote || "origin",
+          outcome: "failed",
+          stderrPreview: err.message,
+        },
+      }).catch(() => undefined);
+      await store.logEntry(
+        taskId,
+        `Push to remote threw after merge — task marked done anyway; local main may diverge from origin: ${err.message}`,
+        "PushToRemoteFailed",
+      ).catch(() => undefined);
     }
   }
 

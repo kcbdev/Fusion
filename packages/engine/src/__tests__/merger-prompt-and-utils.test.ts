@@ -467,6 +467,26 @@ describe("push-after-merge", () => {
     expect(result.pushedToRemote).toBe(false);
     expect(result.pushError).toContain("permission denied");
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+
+    // FN-7625: a failed push must not vanish silently — it needs a persisted
+    // audit event and a task log entry, not just a process-wide log line.
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: "git",
+        mutationType: "push:origin",
+        target: "FN-050",
+        metadata: expect.objectContaining({
+          outcome: "failed",
+          remote: "origin",
+          stderrPreview: expect.stringContaining("permission denied"),
+        }),
+      }),
+    );
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-050",
+      expect.stringContaining("Push to remote failed after merge"),
+      "PushToRemoteFailed",
+    );
   });
 
   it.each([undefined, "", "   "])("FN-7490 falls back to origin and integration branch for empty pushRemote %s", async (pushRemote) => {
