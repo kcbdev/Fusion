@@ -36,10 +36,23 @@ export interface DesktopRuntimeStatus {
   error?: string;
 }
 
+/*
+ * FNXC:DesktopRuntime 2026-07-07-12:00:
+ * FN-7623: the embedded desktop server must wire a PluginStore + PluginLoader into createServer
+ * (as the CLI dashboard command does) or the Settings -> Plugins Browse-registry sub-router never
+ * mounts ("Plugin \"registry\" not found") and plugin install throws "Plugin install mode is not
+ * supported: plugin loader not available". getPluginStore()/getDatabase() are the two TaskStore
+ * members this wiring needs beyond the pre-existing init/watch/close surface.
+ */
+type PluginStoreLike = { init(): Promise<void> };
+type PluginDatabaseLike = { runPluginSchemaInits(hooks: Array<{ pluginId: string; hook: unknown }>): Promise<void> };
+
 type TaskStoreLike = {
   init(): Promise<void>;
   watch(): Promise<void>;
   close(): void;
+  getPluginStore(): PluginStoreLike;
+  getDatabase(): PluginDatabaseLike;
 };
 
 type RuntimeCleanup = () => Promise<void> | void;
@@ -87,7 +100,7 @@ async function createStoreDefault(rootDir: string): Promise<TaskStoreLike> {
 }
 
 async function createDashboardServerDefault(store: TaskStoreLike, rootDir: string): Promise<{ server: Server; cleanup: RuntimeCleanup }> {
-  const { CentralCore } = await import("@fusion/core");
+  const { CentralCore, PluginLoader } = await import("@fusion/core");
   const { createServer } = await import("@fusion/dashboard");
   const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry, seedDashboardProviders } = await import("@fusion/engine");
 
@@ -149,6 +162,40 @@ async function createDashboardServerDefault(store: TaskStoreLike, rootDir: strin
       log: (scope, message) => strace(`[${scope}] ${message}`),
     });
     providerSeeding.dispose = dispose;
+
+    /*
+     * FNXC:DesktopRuntime 2026-07-07-12:00:
+     * FN-7623: mirror the CLI dashboard command's plugin wiring (packages/cli/src/commands/dashboard.ts)
+     * — construct the store's PluginStore, build a PluginLoader, load enabled plugins, and run schema-init
+     * hooks — so the desktop embedded server's registry sub-router mounts (GET /api/plugins/registry) and
+     * POST /api/plugins install mode works. Bundled-plugin auto-install (Hermes/OpenClaw/Paperclip/Dependency
+     * Graph) depends on packages/cli/src/plugins/bundled-plugin-install.ts, which is CLI-only and out of
+     * scope for desktop (desktop must not depend on the CLI package) — see FN-7623 scope note. Failures here
+     * must not crash embedded startup: the dashboard still needs to boot even if the plugin subsystem can't
+     * come up (e.g. a corrupt plugin manifest), so this is wrapped and traced rather than left to throw.
+     */
+    let pluginStore: PluginStoreLike | undefined;
+    let pluginLoader: InstanceType<typeof PluginLoader> | undefined;
+    try {
+      strace("createDashboardServer: pluginStore.init");
+      pluginStore = store.getPluginStore();
+      await pluginStore.init();
+      pluginLoader = new PluginLoader({ pluginStore: pluginStore as never, taskStore: store as never });
+      strace("createDashboardServer: pluginLoader.loadAllPlugins");
+      const { loaded, errors } = await pluginLoader.loadAllPlugins();
+      strace(`createDashboardServer: plugins loaded=${loaded} errors=${errors}`);
+      const schemaHooks = pluginLoader.getPluginSchemaInitHooks();
+      if (schemaHooks.length > 0) {
+        await store.getDatabase().runPluginSchemaInits(schemaHooks);
+      }
+    } catch (error) {
+      strace(
+        `createDashboardServer: plugin subsystem init FAILED (non-fatal, dashboard still boots) — ${error instanceof Error ? error.stack : String(error)}`,
+      );
+      pluginStore = undefined;
+      pluginLoader = undefined;
+    }
+
     strace("createDashboardServer: createServer");
     const app = createServer(store as never, {
       ...(primaryEngine ? { engine: primaryEngine } : {}),
@@ -156,6 +203,7 @@ async function createDashboardServerDefault(store: TaskStoreLike, rootDir: strin
       centralCore,
       authStorage: wrappedAuthStorage,
       modelRegistry,
+      ...(pluginStore && pluginLoader ? { pluginStore: pluginStore as never, pluginLoader, pluginRunner: pluginLoader } : {}),
       onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
     });
 

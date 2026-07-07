@@ -30,10 +30,28 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  // FN-7623: pluginStore/pluginLoader mocks proving local-server.ts wires the plugin subsystem
+  // into createServer (the fix for "Plugin install mode is not supported" and the Browse-registry
+  // "Plugin \"registry\" not found" symptoms).
+  const pluginStoreInstance = {
+    init: vi.fn(async () => undefined),
+  };
+  const pluginLoaderInstance = {
+    loadAllPlugins: vi.fn(async () => ({ loaded: 2, errors: 0 })),
+    getPluginSchemaInitHooks: vi.fn(() => []),
+  };
+  const runPluginSchemaInits = vi.fn(async () => undefined);
+  const database = { runPluginSchemaInits };
+  const PluginLoader = vi.fn(function () {
+    return pluginLoaderInstance;
+  });
+
   const store = {
     init: vi.fn(async () => undefined),
     watch: vi.fn(async () => undefined),
     close: vi.fn(),
+    getPluginStore: vi.fn(() => pluginStoreInstance),
+    getDatabase: vi.fn(() => database),
   };
   const centralCore = {
     init: vi.fn(async () => undefined),
@@ -61,6 +79,8 @@ const mocks = vi.hoisted(() => {
     init = store.init;
     watch = store.watch;
     close = store.close;
+    getPluginStore = store.getPluginStore;
+    getDatabase = store.getDatabase;
   }
 
   const server = Object.assign(new SimpleEmitter(), {
@@ -94,6 +114,7 @@ const mocks = vi.hoisted(() => {
   return {
     TaskStore,
     CentralCore,
+    PluginLoader,
     ProjectEngineManager,
     createServer,
     store,
@@ -101,12 +122,15 @@ const mocks = vi.hoisted(() => {
     centralCore,
     engineManager,
     engine,
+    pluginStoreInstance,
+    pluginLoaderInstance,
+    runPluginSchemaInits,
     seedDashboardProviders,
     seedDashboardProvidersDispose,
   };
 });
 
-vi.mock("@fusion/core", () => ({ TaskStore: mocks.TaskStore, CentralCore: mocks.CentralCore }));
+vi.mock("@fusion/core", () => ({ TaskStore: mocks.TaskStore, CentralCore: mocks.CentralCore, PluginLoader: mocks.PluginLoader }));
 vi.mock("@fusion/dashboard", () => ({ createServer: mocks.createServer }));
 vi.mock("@fusion/engine", () => ({
   ProjectEngineManager: mocks.ProjectEngineManager,
@@ -244,5 +268,48 @@ describe("DesktopLocalServerManager", () => {
 
     await manager.stop();
     expect(mocks.seedDashboardProvidersDispose).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * FN-7623 symptom verification: before this fix, DesktopLocalServerManager.start() called
+   * createServer WITHOUT pluginStore/pluginLoader, so the registry sub-router never mounted
+   * ("Plugin \"registry\" not found" on Browse registry) and install threw "Plugin install mode
+   * is not supported: plugin loader not available". Assert the fix: createServer now receives
+   * pluginStore, pluginLoader, and pluginRunner (aliased to the same PluginLoader instance).
+   */
+  it("wires PluginStore + PluginLoader into createServer (FN-7623)", async () => {
+    const { DesktopLocalServerManager } = await import("../local-server.ts");
+    const manager = new DesktopLocalServerManager("/repo");
+
+    await manager.start();
+
+    expect(mocks.store.getPluginStore).toHaveBeenCalledTimes(1);
+    expect(mocks.pluginStoreInstance.init).toHaveBeenCalledTimes(1);
+    expect(mocks.PluginLoader).toHaveBeenCalledWith(
+      expect.objectContaining({ pluginStore: mocks.pluginStoreInstance, taskStore: expect.anything() }),
+    );
+    expect(mocks.pluginLoaderInstance.loadAllPlugins).toHaveBeenCalledTimes(1);
+    expect(mocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        pluginStore: mocks.pluginStoreInstance,
+        pluginLoader: mocks.pluginLoaderInstance,
+        pluginRunner: mocks.pluginLoaderInstance,
+      }),
+    );
+  });
+
+  it("boots the dashboard without plugin wiring when the plugin subsystem fails to init (fail-soft)", async () => {
+    mocks.pluginStoreInstance.init.mockRejectedValueOnce(new Error("plugin db locked"));
+    const { DesktopLocalServerManager } = await import("../local-server.ts");
+    const manager = new DesktopLocalServerManager("/repo");
+
+    const runtime = await manager.start();
+
+    expect(runtime.port).toBe(4545);
+    expect(mocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({ pluginStore: expect.anything() }),
+    );
   });
 });

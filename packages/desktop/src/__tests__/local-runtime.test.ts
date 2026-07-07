@@ -47,6 +47,19 @@ class FakeServer {
  * `createDashboardServer` in LocalRuntimeManagerOptions). Mirrors local-server.test.ts's pattern.
  */
 const engineMocks = vi.hoisted(() => {
+  // FN-7623: pluginStore/pluginLoader mocks proving createDashboardServerDefault wires the plugin
+  // subsystem into createServer (fixes desktop's "Plugin install mode is not supported" and Browse
+  // registry "Plugin \"registry\" not found" symptoms).
+  const pluginStoreInstance = { init: vi.fn(async () => undefined) };
+  const pluginLoaderInstance = {
+    loadAllPlugins: vi.fn(async () => ({ loaded: 2, errors: 0 })),
+    getPluginSchemaInitHooks: vi.fn(() => []),
+  };
+  const runPluginSchemaInits = vi.fn(async () => undefined);
+  const PluginLoader = vi.fn(function () {
+    return pluginLoaderInstance;
+  });
+
   const centralCore = {
     init: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
@@ -76,14 +89,18 @@ const engineMocks = vi.hoisted(() => {
     centralCore,
     engineManager,
     CentralCore,
+    PluginLoader,
     ProjectEngineManager,
     seedDashboardProviders,
     seedDashboardProvidersDispose,
     createServer,
+    pluginStoreInstance,
+    pluginLoaderInstance,
+    runPluginSchemaInits,
   };
 });
 
-vi.mock("@fusion/core", () => ({ CentralCore: engineMocks.CentralCore }));
+vi.mock("@fusion/core", () => ({ CentralCore: engineMocks.CentralCore, PluginLoader: engineMocks.PluginLoader }));
 vi.mock("@fusion/dashboard", () => ({ createServer: engineMocks.createServer }));
 vi.mock("@fusion/engine", () => ({
   ProjectEngineManager: engineMocks.ProjectEngineManager,
@@ -97,6 +114,8 @@ describe("LocalRuntimeManager", () => {
     init: vi.fn(async () => undefined),
     watch: vi.fn(async () => undefined),
     close: vi.fn(),
+    getPluginStore: vi.fn(() => engineMocks.pluginStoreInstance),
+    getDatabase: vi.fn(() => ({ runPluginSchemaInits: engineMocks.runPluginSchemaInits })),
   };
 
   beforeEach(() => {
@@ -441,5 +460,107 @@ describe("LocalRuntimeManager", () => {
 
     await manager.stopLocal();
     expect(engineMocks.seedDashboardProvidersDispose).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * FN-7623 symptom verification: before this fix, createDashboardServerDefault called createServer
+   * WITHOUT pluginStore/pluginLoader, so desktop's Browse-registry sub-router never mounted ("Plugin
+   * \"registry\" not found") and plugin install threw "Plugin install mode is not supported: plugin
+   * loader not available". Assert the fix in the engine-less (zero-projects) startup state — the
+   * plugin subsystem must wire in regardless of whether a primary engine resolved.
+   */
+  it("wires PluginStore + PluginLoader into createServer when engine-less (zero projects) (FN-7623)", async () => {
+    const { LocalRuntimeManager } = await import("../local-runtime.ts");
+    const server = new FakeServer(4545);
+    engineMocks.createServer.mockReturnValueOnce({
+      listen: vi.fn(() => {
+        setTimeout(() => server.emit("listening"), 0);
+        return server as unknown as Server;
+      }),
+    });
+
+    const manager = new LocalRuntimeManager({
+      rootDir: "/repo",
+      createStore: async () => store,
+    });
+
+    await manager.startLocal();
+
+    expect(store.getPluginStore).toHaveBeenCalledTimes(1);
+    expect(engineMocks.pluginStoreInstance.init).toHaveBeenCalledTimes(1);
+    expect(engineMocks.PluginLoader).toHaveBeenCalledWith(
+      expect.objectContaining({ pluginStore: engineMocks.pluginStoreInstance, taskStore: expect.anything() }),
+    );
+    expect(engineMocks.pluginLoaderInstance.loadAllPlugins).toHaveBeenCalledTimes(1);
+    expect(engineMocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        pluginStore: engineMocks.pluginStoreInstance,
+        pluginLoader: engineMocks.pluginLoaderInstance,
+        pluginRunner: engineMocks.pluginLoaderInstance,
+      }),
+    );
+
+    await manager.stopLocal();
+  });
+
+  it("wires PluginStore + PluginLoader into createServer when a project engine resolved (projects-present) (FN-7623)", async () => {
+    const { LocalRuntimeManager } = await import("../local-runtime.ts");
+    engineMocks.centralCore.listProjects.mockResolvedValueOnce([
+      { id: "project-1", name: "Repo", path: "/repo", status: "active" },
+    ]);
+    const server = new FakeServer(4545);
+    engineMocks.createServer.mockReturnValueOnce({
+      listen: vi.fn(() => {
+        setTimeout(() => server.emit("listening"), 0);
+        return server as unknown as Server;
+      }),
+    });
+
+    const manager = new LocalRuntimeManager({
+      rootDir: "/repo",
+      createStore: async () => store,
+    });
+
+    await manager.startLocal();
+
+    expect(engineMocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        engine: expect.anything(),
+        pluginStore: engineMocks.pluginStoreInstance,
+        pluginLoader: engineMocks.pluginLoaderInstance,
+        pluginRunner: engineMocks.pluginLoaderInstance,
+      }),
+    );
+
+    await manager.stopLocal();
+  });
+
+  it("boots the dashboard without plugin wiring when the plugin subsystem fails to init (fail-soft) (FN-7623)", async () => {
+    const { LocalRuntimeManager } = await import("../local-runtime.ts");
+    engineMocks.pluginStoreInstance.init.mockRejectedValueOnce(new Error("plugin db locked"));
+    const server = new FakeServer(4545);
+    engineMocks.createServer.mockReturnValueOnce({
+      listen: vi.fn(() => {
+        setTimeout(() => server.emit("listening"), 0);
+        return server as unknown as Server;
+      }),
+    });
+
+    const manager = new LocalRuntimeManager({
+      rootDir: "/repo",
+      createStore: async () => store,
+    });
+
+    const status = await manager.startLocal();
+
+    expect(status).toMatchObject({ source: "embedded-local", state: "running", port: 4545 });
+    expect(engineMocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({ pluginStore: expect.anything() }),
+    );
+
+    await manager.stopLocal();
   });
 });

@@ -4,10 +4,23 @@ import type { Server } from "node:http";
 
 import { resolveDesktopRuntimePrimaryProject } from "./engine-runtime.js";
 
+/*
+ * FNXC:DesktopRuntime 2026-07-07-12:00:
+ * FN-7623: this legacy desktop local server path had the same missing plugin-subsystem wiring as
+ * local-runtime.ts — createServer() never received pluginStore/pluginLoader, so Settings -> Plugins
+ * Browse registry ("Plugin \"registry\" not found") and plugin install ("Plugin install mode is not
+ * supported: plugin loader not available") were both dead in this path too. Keep both desktop server
+ * paths consistent (see local-runtime.ts's matching comment).
+ */
+type PluginStoreLike = { init(): Promise<void> };
+type PluginDatabaseLike = { runPluginSchemaInits(hooks: Array<{ pluginId: string; hook: unknown }>): Promise<void> };
+
 type TaskStoreLike = {
   init(): Promise<void>;
   watch(): Promise<void>;
   close(): void;
+  getPluginStore(): PluginStoreLike;
+  getDatabase(): PluginDatabaseLike;
 };
 
 type RuntimeCleanup = () => Promise<void> | void;
@@ -53,7 +66,7 @@ export class DesktopLocalServerManager {
 
     try {
       const { TaskStore } = await import("@fusion/core");
-      const { CentralCore } = await import("@fusion/core");
+      const { CentralCore, PluginLoader } = await import("@fusion/core");
       const { createServer } = await import("@fusion/dashboard");
       const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry, seedDashboardProviders } = await import("@fusion/engine");
       store = new TaskStore(this.rootDir) as TaskStoreLike;
@@ -93,12 +106,38 @@ export class DesktopLocalServerManager {
         modelRegistry,
       });
       providerSeeding.dispose = dispose;
+
+      /*
+       * FNXC:DesktopRuntime 2026-07-07-12:00:
+       * FN-7623: mirror the CLI dashboard command's plugin wiring — construct the store's PluginStore,
+       * build a PluginLoader, load enabled plugins, and run schema-init hooks — so this legacy path's
+       * registry sub-router mounts and install works too. Fail soft: a broken plugin subsystem must not
+       * prevent the embedded dashboard from booting.
+       */
+      let pluginStore: PluginStoreLike | undefined;
+      let pluginLoader: InstanceType<typeof PluginLoader> | undefined;
+      try {
+        pluginStore = store.getPluginStore();
+        await pluginStore.init();
+        pluginLoader = new PluginLoader({ pluginStore: pluginStore as never, taskStore: store as never });
+        await pluginLoader.loadAllPlugins();
+        const schemaHooks = pluginLoader.getPluginSchemaInitHooks();
+        if (schemaHooks.length > 0) {
+          await store.getDatabase().runPluginSchemaInits(schemaHooks);
+        }
+      } catch {
+        // Plugin subsystem failures must not block embedded dashboard startup (FN-7623).
+        pluginStore = undefined;
+        pluginLoader = undefined;
+      }
+
       const app = createServer(store as never, {
         ...(primaryEngine ? { engine: primaryEngine } : {}),
         engineManager,
         centralCore,
         authStorage: wrappedAuthStorage,
         modelRegistry,
+        ...(pluginStore && pluginLoader ? { pluginStore: pluginStore as never, pluginLoader, pluginRunner: pluginLoader } : {}),
         onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       });
       server = app.listen(0);
