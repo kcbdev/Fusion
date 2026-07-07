@@ -10,8 +10,11 @@ import type { TaskStore } from "@fusion/core";
 import { request } from "../test-request.js";
 import { createSSE } from "../sse.js";
 
-class MockStore {
-  constructor(private readonly rootDir: string, private readonly db: Database) {}
+// FNXC:DashboardTests 2026-07-07-08:10: createServer now subscribes via store.on("task:moved") (TaskStore extends EventEmitter) to purge task-planner chats on archive (FN-7337); back the mock store with a real EventEmitter so server startup wiring works instead of throwing "store.on is not a function".
+class MockStore extends EventEmitter {
+  constructor(private readonly rootDir: string, private readonly db: Database) {
+    super();
+  }
 
   getRootDir(): string { return this.rootDir; }
   getFusionDir(): string { return join(this.rootDir, ".fusion"); }
