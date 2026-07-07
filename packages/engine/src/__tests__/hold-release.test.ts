@@ -24,6 +24,7 @@ import {
   runHoldReleaseSweep,
   promoteHeldTask,
   releaseHeldTaskByEvent,
+  isUnplannedForExecution,
   type HoldReleaseDeps,
   type SlotReservation,
 } from "../hold-release.js";
@@ -51,6 +52,23 @@ function setSelection(store: TaskStore, taskId: string, workflowId: string): voi
      VALUES (?, ?, '[]', ?)
      ON CONFLICT(taskId) DO UPDATE SET workflowId = excluded.workflowId, updatedAt = excluded.updatedAt`,
   ).run(taskId, workflowId, new Date().toISOString());
+}
+
+/**
+ * FNXC:WorkflowScheduling 2026-07-07-00:00:
+ * FN-7648's trait-based unplanned guard now applies to ANY "todo"-column card,
+ * not only ones released via a `reserveSlot` dep (the guard used to live only
+ * inside the scheduler's closure, so a card created via `store.createTask` and
+ * moved straight to "todo" without ever getting a real spec sailed through
+ * `runHoldReleaseSweep(store, noReserveDeps)` in these fixtures). Production
+ * `todo` cards always carry a real spec by the time triage moves them there, so
+ * fixtures representing an "already planned, ready to dispatch" card must write
+ * one too.
+ */
+async function writeRealPrompt(store: TaskStore, taskId: string, title: string): Promise<void> {
+  await store.updateTask(taskId, {
+    prompt: `# Task: ${taskId} - ${title}\n\n## Mission\n\nReal spec written for test fixture purposes (not the bootstrap stub).\n`,
+  });
 }
 
 /** Write a transitionPending marker directly (simulating a crash mid-transition). */
@@ -138,6 +156,7 @@ describe("hold-release sweep (U6)", () => {
   // (hold release: capacity), which releases into `in-progress` (wip).
   async function seedTodoCard(): Promise<string> {
     const task = await store.createTask({ description: "card" });
+    await writeRealPrompt(store, task.id, "card");
     setColumn(store, task.id, "todo");
     return task.id;
   }
@@ -159,6 +178,7 @@ describe("hold-release sweep (U6)", () => {
     // returned false here and these selected built-in tasks were silently skipped forever.
     for (const workflowId of LINEAR_BUILTIN_WORKFLOW_IDS) {
       const task = await store.createTask({ description: `card ${workflowId}` });
+      await writeRealPrompt(store, task.id, `card ${workflowId}`);
       setSelection(store, task.id, workflowId);
       setColumn(store, task.id, "todo");
       selectedTasks.push(task.id);
@@ -178,11 +198,13 @@ describe("hold-release sweep (U6)", () => {
 
     const v1Def = await store.createWorkflowDefinition({ name: "pure v1 custom", ir: pureV1CustomWorkflowIr() });
     const v1Task = await store.createTask({ description: "pure-v1 custom card" });
+    await writeRealPrompt(store, v1Task.id, "pure-v1 custom card");
     setSelection(store, v1Task.id, v1Def.id);
     setColumn(store, v1Task.id, "todo");
 
     const v2Def = await store.createWorkflowDefinition({ name: "authored v2 capacity", ir: authoredV2CapacityWorkflowIr() });
     const v2Task = await store.createTask({ description: "authored-v2 custom card" });
+    await writeRealPrompt(store, v2Task.id, "authored-v2 custom card");
     setSelection(store, v2Task.id, v2Def.id);
     setColumn(store, v2Task.id, "todo");
 
@@ -686,5 +708,221 @@ describe("hold-release sweep — dependency gating (KTD-5)", () => {
       (call) => (call[0] as { mutationType?: string })?.mutationType === "merge:dependency-parity-diff",
     );
     expect(diffLogged).toBe(true);
+  });
+});
+
+// ── FN-7648: unplanned/intake-resident cards must never enter a processing
+// column, even when the workflow's intake column is renamed away from the
+// literal "todo" id ──────────────────────────────────────────────────────────
+//
+// The reserveSlot bootstrap-stub guard used to be gated on `task.column ===
+// "todo"`, so a custom workflow whose intake column is renamed (e.g. `ideas`)
+// bypassed the stub check entirely and could release an unplanned card
+// straight into execution. The fix is trait-based (`isUnplannedForExecution`
+// resolves the `intake` trait on the card's OWN column), so this suite
+// exercises the renamed-column surface directly, plus a positive control that
+// a genuinely planned card in the SAME custom workflow still dispatches.
+function renamedIntakeCapacityWorkflowIr(): WorkflowIr {
+  return {
+    version: "v2",
+    name: "renamed-intake-capacity-workflow",
+    columns: [
+      {
+        id: "ideas",
+        name: "Ideas",
+        traits: [
+          { trait: "intake" },
+          { trait: "hold", config: { release: "capacity" } },
+        ],
+      },
+      {
+        id: "in-progress",
+        name: "in-progress",
+        traits: [{ trait: "wip", config: { limit: "settings.maxConcurrent" } }, { trait: "abort-on-exit" }, { trait: "timing" }],
+      },
+      { id: "in-review", name: "in-review", traits: [{ trait: "merge-blocker" }, { trait: "human-review" }] },
+      { id: "done", name: "done", traits: [{ trait: "complete" }] },
+    ],
+    nodes: [
+      { id: "start", kind: "start", column: "ideas" },
+      { id: "execute", kind: "prompt", column: "in-progress", config: { seam: "execute", prompt: "Do the work" } },
+      { id: "end", kind: "end", column: "done" },
+    ],
+    edges: [
+      { from: "start", to: "execute", condition: "success" },
+      { from: "execute", to: "end", condition: "success" },
+      { from: "execute", to: "end", condition: "failure" },
+    ],
+  } as WorkflowIr;
+}
+
+describe("hold-release sweep — FN-7648 unplanned/intake cards never enter execution", () => {
+  let rootDir = "";
+  let store: TaskStore;
+  const reserveSlotDeps: HoldReleaseDeps = {
+    now: () => Date.now(),
+    reserveSlot: () => ({ release: vi.fn() }),
+  };
+
+  beforeEach(async () => {
+    rootDir = mkdtempSync(join(tmpdir(), "fn-7648-hold-release-"));
+    git(rootDir, "init -b main");
+    git(rootDir, "config user.name 'Fusion'");
+    git(rootDir, "config user.email 'hi@runfusion.ai'");
+    writeFileSync(join(rootDir, "README.md"), "root\n");
+    git(rootDir, "add README.md");
+    git(rootDir, "commit -m init");
+    store = new TaskStore(rootDir, undefined, { inMemoryDb: false });
+    await store.init();
+    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
+    await store.updateSettings({ maxConcurrent: 10 } as Parameters<typeof store.updateSettings>[0]);
+  });
+
+  afterEach(() => {
+    try { store?.close(); } catch { /* ignore */ }
+    if (rootDir) rmSync(rootDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("keeps an unplanned card (bootstrap-stub PROMPT.md) held in a renamed custom intake column instead of releasing it into in-progress", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake", ir: renamedIntakeCapacityWorkflowIr() });
+    const task = await store.createTask({ description: "unplanned ideas card" });
+    setSelection(store, task.id, def.id);
+    setColumn(store, task.id, "ideas");
+
+    // Card still carries the bootstrap-stub PROMPT.md written at createTask time.
+    const before = await store.getTask(task.id);
+    expect(before?.column).toBe("ideas");
+
+    const result = await runHoldReleaseSweep(store, reserveSlotDeps);
+
+    expect(result.released).not.toContain(task.id);
+    const after = await store.getTask(task.id);
+    expect(after?.column).toBe("ideas");
+    expect(after?.status).not.toBe("in-progress" as unknown as typeof after.status);
+  });
+
+  it("keeps an unplanned card with status:'planning' held in a renamed custom intake column", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake (status)", ir: renamedIntakeCapacityWorkflowIr() });
+    const task = await store.createTask({ description: "specified-in-place ideas card" });
+    setSelection(store, task.id, def.id);
+    setColumn(store, task.id, "ideas");
+    await store.updateTask(task.id, {
+      prompt: `# Task: ${task.id} - specified-in-place\n\n## Mission\n\nReal-looking spec, but status is still planning.\n`,
+    });
+    await store.updateTask(task.id, { status: "planning" } as Parameters<typeof store.updateTask>[1]);
+
+    const result = await runHoldReleaseSweep(store, reserveSlotDeps);
+
+    expect(result.released).not.toContain(task.id);
+    expect((await store.getTask(task.id))?.column).toBe("ideas");
+  });
+
+  it("does not leak a reserved worktree/semaphore slot when holding back an unplanned renamed-intake card", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake (leak check)", ir: renamedIntakeCapacityWorkflowIr() });
+    const task = await store.createTask({ description: "unplanned ideas card" });
+    setSelection(store, task.id, def.id);
+    setColumn(store, task.id, "ideas");
+
+    let reserveCalls = 0;
+    const release = vi.fn();
+    const deps: HoldReleaseDeps = {
+      now: () => Date.now(),
+      reserveSlot: () => {
+        reserveCalls += 1;
+        return { release };
+      },
+    };
+
+    await runHoldReleaseSweep(store, deps);
+
+    // The unplanned-for-execution guard fires before reserveSlot is ever called
+    // (issueRelease checks it first), so no slot is reserved and none needs
+    // releasing.
+    expect(reserveCalls).toBe(0);
+    expect(release).not.toHaveBeenCalled();
+    expect((await store.getTask(task.id))?.column).toBe("ideas");
+  });
+
+  it("positive control: a genuinely planned card in the SAME custom workflow still releases into in-progress", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake (planned)", ir: renamedIntakeCapacityWorkflowIr() });
+    const task = await store.createTask({ description: "planned ideas card" });
+    setSelection(store, task.id, def.id);
+    await store.updateTask(task.id, {
+      prompt: `# Task: ${task.id} - planned ideas card\n\n## Mission\n\nA real spec, not the bootstrap stub.\n\n## Steps\n\n### Step 0: Do the work\n`,
+    });
+    setColumn(store, task.id, "ideas");
+
+    const result = await runHoldReleaseSweep(store, reserveSlotDeps);
+
+    expect(result.released).toContain(task.id);
+    expect((await store.getTask(task.id))?.column).toBe("in-progress");
+  });
+
+  it("promoteHeldTask does not silently push an unplanned renamed-intake card into execution", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake (promote)", ir: renamedIntakeCapacityWorkflowIr() });
+    const task = await store.createTask({ description: "unplanned ideas card, explicit promote" });
+    setSelection(store, task.id, def.id);
+    setColumn(store, task.id, "ideas");
+
+    // No reserveSlot dep passed — this is the shape real callers (fn_task_promote,
+    // webhook release) use today, which used to bypass the scheduler's
+    // reserveSlot guard entirely.
+    const outcome = await promoteHeldTask(store, task.id);
+
+    expect(outcome.released).toBe(false);
+    expect((await store.getTask(task.id))?.column).toBe("ideas");
+  });
+
+  it("releaseHeldTaskByEvent does not silently push an unplanned renamed-intake card into execution", async () => {
+    const def = await store.createWorkflowDefinition({ name: "renamed intake (event)", ir: {
+      ...renamedIntakeCapacityWorkflowIr(),
+      columns: [
+        {
+          id: "ideas",
+          name: "Ideas",
+          traits: [
+            { trait: "intake" },
+            { trait: "hold", config: { release: "external-event" } },
+          ],
+        },
+        { id: "in-progress", name: "in-progress", traits: [{ trait: "wip", config: { limit: "settings.maxConcurrent" } }, { trait: "abort-on-exit" }, { trait: "timing" }] },
+        { id: "in-review", name: "in-review", traits: [{ trait: "merge-blocker" }, { trait: "human-review" }] },
+        { id: "done", name: "done", traits: [{ trait: "complete" }] },
+      ],
+    } as WorkflowIr });
+    const task = await store.createTask({ description: "unplanned ideas card, external event" });
+    setSelection(store, task.id, def.id);
+    setColumn(store, task.id, "ideas");
+
+    const outcome = await releaseHeldTaskByEvent(store, task.id, "webhook:test");
+
+    expect(outcome.released).toBe(false);
+    expect((await store.getTask(task.id))?.column).toBe("ideas");
+  });
+
+  it("isUnplannedForExecution: true for bootstrap stub in a todo column, true for status:planning, true for intake-trait column, false for a real spec in a non-intake column", async () => {
+    const def = await store.createWorkflowDefinition({ name: "predicate probe", ir: renamedIntakeCapacityWorkflowIr() });
+    const ir = await store.getWorkflowDefinition(def.id);
+    if (!ir?.ir) throw new Error("missing workflow ir");
+
+    const stubTask = await store.createTask({ description: "stub" });
+    setSelection(store, stubTask.id, def.id);
+    setColumn(store, stubTask.id, "ideas");
+    expect(await isUnplannedForExecution(store, (await store.getTask(stubTask.id))!, ir.ir)).toBe(true);
+
+    const planningTask = await store.createTask({ description: "planning status" });
+    setSelection(store, planningTask.id, def.id);
+    setColumn(store, planningTask.id, "in-progress");
+    await store.updateTask(planningTask.id, { status: "planning" } as Parameters<typeof store.updateTask>[1]);
+    expect(await isUnplannedForExecution(store, (await store.getTask(planningTask.id))!, ir.ir)).toBe(true);
+
+    const plannedTask = await store.createTask({ description: "planned" });
+    setSelection(store, plannedTask.id, def.id);
+    await store.updateTask(plannedTask.id, {
+      prompt: `# Task: ${plannedTask.id} - planned\n\n## Mission\n\nReal spec.\n`,
+    });
+    setColumn(store, plannedTask.id, "in-progress");
+    expect(await isUnplannedForExecution(store, (await store.getTask(plannedTask.id))!, ir.ir)).toBe(false);
   });
 });
