@@ -55,6 +55,7 @@
 - Gate boundary: soft-deleted children and archived-column children do **not** block parent removal; only live non-archived children block.
 - `cleanupArchivedTasks` intentionally tolerates dangling lineage pointers in historical/archive cleanup flows; it does not run lineage rewrites.
 - For forensic reads, soft-deleted parents remain accessible through `readTaskFromDb(id, { includeDeleted: true })`.
+- Agent-facing tool layer (FN-7661): the `fn_task_archive` and `fn_task_delete` pi/CLI tools (`packages/cli/src/extension.ts`) both accept an optional `removeLineageReferences` boolean and forward it to `store.archiveTask` / `store.deleteTask`, so an agent that hits `TaskHasLineageChildrenError` can retry with `{ removeLineageReferences: true }` to clear the block — matching the recovery path the error message already advertises.
 
 ### Documents under soft-deleted tasks (FN-5140)
 
