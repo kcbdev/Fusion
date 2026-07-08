@@ -81,14 +81,19 @@ describe("buildBoardWorkflowsPayload", () => {
       "done",
       "archived",
     ]);
+    // FN-7660: the intake column (id: "triage") displays as "Planning";
+    // the id itself is unchanged.
     expect(defaultWf!.columns.map((c) => c.name)).toEqual([
-      "Triage",
+      "Planning",
       "Todo",
       "In Progress",
       "In Review",
       "Done",
       "Archived",
     ]);
+    const intakeColumn = defaultWf!.columns.find((c) => c.id === "triage");
+    expect(intakeColumn).toBeDefined();
+    expect(intakeColumn!.name).toBe("Planning");
     const inReview = defaultWf!.columns.find((c) => c.id === "in-review");
     expect(inReview).toBeDefined();
     expect(inReview!.flags.mergeBlocker).toBe(true);

@@ -1213,7 +1213,7 @@
       "workflowMismatch": "Drag can't move a card between workflows. Use the workflow switcher instead."
     },
     "todo": "To Do",
-    "triage": "Triage",
+    "triage": "Planning",
     "workflow": {
       "edit": "Edit workflows",
       "new": "New workflow"
@@ -5295,7 +5295,7 @@
     "catchUpPolicyRunOne": "Run the most recent missed run",
     "catchUpPolicySkip": "Skip missed runs",
     "columnTodo": "To Do",
-    "columnTriage": "Triage",
+    "columnTriage": "Planning",
     "command": "Command",
     "commandHelp": "Shell command to execute. Runs with your user permissions.",
     "commandHint": "Shell command to execute.",
@@ -5473,7 +5473,7 @@
     "targetColumnLabel": "Target Column",
     "taskColumnLabel": "Target Column",
     "taskColumnTodo": "To Do",
-    "taskColumnTriage": "Triage",
+    "taskColumnTriage": "Planning",
     "taskDescription": "Task Description *",
     "taskDescriptionHelp": "Describes the task that will be created.",
     "taskDescriptionHint": "Describes the task that will be created.",
@@ -5493,7 +5493,7 @@
     "title": "Automations",
     "todoColumn": "To Do",
     "toggleError": "Failed to toggle routine",
-    "triageColumn": "Triage",
+    "triageColumn": "Planning",
     "triggerApi": "API",
     "triggerCron": "Cron",
     "triggerManual": "Manual",
