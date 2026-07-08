@@ -2,6 +2,20 @@ import React from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { TaskCard, formatElapsedDurationDone, __test_areTaskCardPropsEqual } from "../TaskCard";
+
+// Pre-existing gap (unrelated to FN-7676): TaskCard unconditionally renders
+// RuntimeFallbackBadge, which calls the shared useToast() hook directly (not
+// via the addToast prop). This file renders <TaskCard> outside a
+// ToastProvider, so mock the hook the same way sibling suites
+// (PlanningModeModal.*.test.tsx) already do to avoid a widespread
+// "useToast must be used within ToastProvider" failure across this file.
+vi.mock("../../hooks/useToast", () => ({
+  useToast: () => ({
+    addToast: vi.fn(),
+    removeToast: vi.fn(),
+    toasts: [],
+  }),
+}));
 import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import { useOverlayDismiss } from "../../hooks/useOverlayDismiss";
 import type { ConfirmOptions } from "../../hooks/useConfirm";
@@ -2882,9 +2896,12 @@ describe("TaskCard", () => {
     expect(screen.getByText("1 active")).toBeDefined();
     expect(screen.getByText("active")).toBeDefined();
     expect(container.querySelector(".card-step-name.active")?.textContent).toBe("Step 1");
+    // FN-7676: the steps breakdown must still render once a task is out of Planning (`in-progress`/`executing`).
+    expect(container.querySelector(".card-steps-toggle")).not.toBeNull();
+    expect(container.querySelector(".card-progress")).not.toBeNull();
   });
 
-  it("shows running Plan Review progress while the task is still in triage", () => {
+  it("hides the steps breakdown while the task is still in triage, even with a running Plan Review", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({
@@ -2906,16 +2923,31 @@ describe("TaskCard", () => {
       />,
     );
 
-    expect(screen.getByText("0/2")).toBeDefined();
-    expect(screen.getByText("1 active")).toBeDefined();
+    expect(container.querySelector(".card-progress")).toBeNull();
+    expect(container.querySelector(".card-steps-toggle")).toBeNull();
+    expect(container.querySelector(".card-steps-list")).toBeNull();
+    expect(screen.queryByText("0/2")).toBeNull();
+    expect(screen.queryByText("1 active")).toBeNull();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show steps" }));
+  it("does not render the steps toggle for a triage card with populated steps", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "triage",
+          status: "planning" as any,
+          steps: Array.from({ length: 10 }, (_, i) => ({ name: `Step ${i}`, status: "pending" as const })),
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
 
-    expect(container.querySelector(".card-step-name.active")?.textContent).toBe("Plan Review");
-    expect(container.querySelector(".card-step-active-badge")?.textContent).toBe("active");
-    const dots = container.querySelectorAll(".card-step-dot");
-    expect(dots[0]?.className).toContain("card-step-dot--running");
-    expect(dots[0]?.className).not.toContain("card-step-dot--pending");
+    expect(container.querySelector(".card-progress")).toBeNull();
+    expect(container.querySelector(".card-steps-toggle")).toBeNull();
+    expect(container.querySelector(".card-steps-list")).toBeNull();
+    expect(screen.queryByText("0/10")).toBeNull();
+    expect(screen.queryByText("10 steps")).toBeNull();
   });
 
   it("does not show a false triage active indicator for enabled-but-not-started Plan Review", () => {

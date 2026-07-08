@@ -1377,12 +1377,11 @@ function TaskCardComponent({
     [unifiedProgress.items],
   );
   /*
-  FNXC:TaskCardWorkflowProgress 2026-07-04-09:08:
-  Prompt Reviewer / Plan Review can run before a task leaves Triage. Show the existing card progress affordance when Triage has an actually active unified progress item, but keep enabled-only workflow steps hidden so idle review gates do not create false active indicators or empty progress shells.
+  FNXC:TaskCardWorkflowProgress 2026-07-08-hh:mm:
+  FN-7676 — cards in the Planning/`triage` column must not surface the steps breakdown (progress bar, active badge, step-count toggle, expandable list); enumerated implementation steps are premature planning artifacts, not execution progress. The affordance now appears only after the task leaves Planning (`in-progress` / `executing`), matching `ListView.shouldShowTaskProgress`. A running Plan Review while still in `triage` intentionally no longer surfaces the card progress indicator — the header `planning` status badge remains the only in-flight signal.
   */
   const showProgressSection =
-    unifiedProgress.total > 0 &&
-    (task.status === "executing" || task.column === "in-progress" || (task.column === "triage" && activeProgressCount > 0));
+    unifiedProgress.total > 0 && (task.status === "executing" || task.column === "in-progress");
 
   useEffect(() => {
     if (task.column !== "in-progress" && task.column !== "in-review") {
