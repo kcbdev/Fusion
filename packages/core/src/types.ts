@@ -804,6 +804,21 @@ export interface CustomProvider {
    * Omitted/false forces legacy `system` role emission to avoid provider 400s.
    */
   supportsDeveloperRole?: boolean;
+  /**
+   * FNXC:ProviderAuth 2026-07-08-00:00:
+   * FN-7689: opt-in for custom `openai-compatible`/`openai-responses` gateways that proxy an
+   * Anthropic-format backend (e.g. `usai/claude_4_6_sonnet`). When true, registered
+   * `openai-completions` models get pi-ai's `compat.cacheControlFormat = "anthropic"`, which makes
+   * pi-ai emit Anthropic-style `cache_control` breakpoints on the system prompt, last
+   * conversation message, and last tool. Without this, pi-ai's `detectCompat` only auto-enables
+   * caching for OpenRouter `anthropic/*` models, so a generic custom gateway re-bills the entire
+   * context prefix uncached every turn (measured cachedTokens=0/cacheWriteTokens=0 across 243
+   * runs, ~327.5:1 input:output ratio). Default off — never force cache_control on gateways that
+   * did not opt in, since non-Anthropic-compatible backends (Together, Fireworks, etc.) can 400 on
+   * unexpected `cache_control` fields. Inert for `anthropic-compatible` (already auto-caches) and
+   * `google-generative-ai` (no cache_control concept).
+   */
+  anthropicPromptCaching?: boolean;
   models?: { id: string; name: string }[];
 }
 

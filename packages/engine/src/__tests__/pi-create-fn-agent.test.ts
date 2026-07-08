@@ -1629,6 +1629,77 @@ describe("createFnAgent", () => {
     }
   });
 
+  /*
+  FNXC:ProviderAuth 2026-07-08-00:00:
+  FN-7689 regression coverage — registration path B (createFnAgent's inline custom-provider
+  registration). Path A was already refactored into `buildCustomProviderModels` and reused here,
+  but this test exists specifically to catch a future re-divergence: if someone inlines a fresh
+  models.map(...) in createFnAgent again (as it was before this fix), this assertion fails.
+  */
+  it("registers openai-compatible custom providers with compat.cacheControlFormat='anthropic' when opted in (createFnAgent inline path)", async () => {
+    readCustomProvidersMock.mockReturnValue([
+      {
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        name: "Custom OpenAI Caching",
+        apiType: "openai-compatible",
+        baseUrl: "https://custom.example/v1",
+        apiKey: "CUSTOM_API_KEY",
+        anthropicPromptCaching: true,
+        models: [{ id: "custom-model", name: "Custom Model" }],
+      },
+      {
+        id: "660e8400-e29b-41d4-a716-446655440001",
+        name: "Custom OpenAI No Caching",
+        apiType: "openai-compatible",
+        baseUrl: "https://nocaching.example/v1",
+        apiKey: "NOCACHE_API_KEY",
+        models: [{ id: "nocache-model", name: "No Cache Model" }],
+      },
+      {
+        id: "770e8400-e29b-41d4-a716-446655440002",
+        name: "Custom Anthropic Caching Opt-in",
+        apiType: "anthropic-compatible",
+        baseUrl: "https://anthropic.example",
+        apiKey: "ANTHROPIC_API_KEY",
+        anthropicPromptCaching: true,
+        models: [{ id: "anthropic-model", name: "Anthropic Model" }],
+      },
+    ] as any);
+
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "openai-codex",
+      defaultModelId: "gpt-5.4",
+    });
+
+    // Opted-in openai-compatible provider: cacheControlFormat must be set.
+    expect(registerProviderMock).toHaveBeenCalledWith("custom-openai-caching", expect.objectContaining({
+      api: "openai-completions",
+      models: [expect.objectContaining({
+        id: "custom-model",
+        compat: expect.objectContaining({ cacheControlFormat: "anthropic" }),
+      })],
+    }));
+
+    // Opted-out (default) openai-compatible provider: no forced cache_control marker.
+    const noCacheCall = registerProviderMock.mock.calls.find(([key]: [string]) => key === "custom-openai-no-caching");
+    expect(noCacheCall).toBeDefined();
+    const [, noCacheConfig] = noCacheCall as [string, { models: Array<{ compat?: Record<string, unknown> }> }];
+    expect(noCacheConfig.models[0].compat).not.toHaveProperty("cacheControlFormat");
+
+    // anthropic-compatible provider: opt-in is a documented no-op — pi-ai's anthropic path already
+    // auto-caches without this compat flag, and openai-completions-only compat must not leak in.
+    const anthropicCall = registerProviderMock.mock.calls.find(([key]: [string]) => key === "custom-anthropic-caching-opt-in");
+    expect(anthropicCall).toBeDefined();
+    const [, anthropicConfig] = anthropicCall as [string, { api: string; models: Array<{ compat?: Record<string, unknown> }> }];
+    expect(anthropicConfig.api).toBe("anthropic-messages");
+    expect(anthropicConfig.models[0].compat).toBeUndefined();
+  });
+
   it("avoids lock-based SettingsManager.create when loading extension providers", async () => {
     const { createFnAgent } = await import("../pi.js");
 

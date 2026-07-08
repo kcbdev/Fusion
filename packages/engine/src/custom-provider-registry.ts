@@ -22,6 +22,7 @@ interface ModelRegistryLike {
       maxTokens: number;
       compat?: {
         supportsDeveloperRole?: boolean;
+        cacheControlFormat?: "anthropic";
       };
     }>;
   }) => void;
@@ -51,29 +52,67 @@ export function resolveApiType(apiType: string): string {
   return "openai-completions";
 }
 
+/**
+ * FNXC:ProviderAuth 2026-07-08-00:00:
+ * FN-7689: shared model-list builder used by BOTH custom-provider registration paths
+ * (this module's `toProviderConfig` and pi.ts's `createFnAgent` inline registration) so the
+ * `compat.cacheControlFormat` opt-in cannot drift between them again. `api` is the pi-ai
+ * api-registry key resolved by each call site's own resolver — `resolveApiType` here returns
+ * `"anthropic"` while pi.ts's `resolveCustomProviderApiType` returns `"anthropic-messages"` for
+ * the same `anthropic-compatible` input (a pre-existing naming drift out of scope for this fix;
+ * see FN-7689 follow-up). Only `"openai-completions"` gets `compat.cacheControlFormat` — pi-ai's
+ * anthropic path already auto-caches without any flag, and `openai-responses` uses OpenAI's
+ * native `prompt_cache_key`/`prompt_cache_retention` mechanism (no `cache_control` marker concept
+ * per pi-ai's `OpenAIResponsesCompat`), so the opt-in is inert there by construction.
+ */
+export function buildCustomProviderModels(
+  provider: CustomProvider,
+  api: string,
+): Array<{
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: ("text" | "image")[];
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow: number;
+  maxTokens: number;
+  compat?: { supportsDeveloperRole?: boolean; cacheControlFormat?: "anthropic" };
+}> {
+  const supportsDeveloperRole = provider.supportsDeveloperRole === true;
+  const anthropicPromptCaching = provider.anthropicPromptCaching === true;
+
+  return (provider.models ?? []).map((model) => ({
+    id: model.id,
+    name: model.name,
+    reasoning: false,
+    input: ["text" as const],
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+    contextWindow: 128000,
+    maxTokens: 16384,
+    ...(api === "openai-completions"
+      ? {
+          compat: {
+            supportsDeveloperRole,
+            ...(anthropicPromptCaching ? { cacheControlFormat: "anthropic" as const } : {}),
+          },
+        }
+      : {}),
+  }));
+}
+
 function toProviderConfig(provider: CustomProvider) {
   const api = resolveApiType(provider.apiType);
-  const supportsDeveloperRole = provider.supportsDeveloperRole === true;
 
   return {
     baseUrl: provider.baseUrl,
     api,
     apiKey: provider.apiKey,
-    models: (provider.models ?? []).map((model) => ({
-      id: model.id,
-      name: model.name,
-      reasoning: false,
-      input: ["text" as const],
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-      },
-      contextWindow: 128000,
-      maxTokens: 16384,
-      ...(api === "openai-completions" ? { compat: { supportsDeveloperRole } } : {}),
-    })),
+    models: buildCustomProviderModels(provider, api),
   };
 }
 

@@ -2338,6 +2338,12 @@ export interface CustomProvider {
   apiType: "openai-compatible" | "anthropic-compatible" | "google-generative-ai" | "openai-responses";
   baseUrl: string;
   apiKey?: string;
+  /**
+   * FNXC:ProviderAuth 2026-07-08-00:00:
+   * FN-7689: dashboard-local mirror of @fusion/core's CustomProvider.anthropicPromptCaching
+   * opt-in. Keep in sync with packages/core/src/types.ts.
+   */
+  anthropicPromptCaching?: boolean;
   models?: { id: string; name: string }[];
 }
 
@@ -2352,6 +2358,7 @@ export async function fetchCustomProviders(): Promise<CustomProviderConfig[] & {
       : provider.apiType === "openai-responses" ? "openai-responses"
       : "openai-completions",
     apiKey: provider.apiKey,
+    anthropicPromptCaching: provider.anthropicPromptCaching,
     models: (provider.models ?? []).map((model) => ({ id: model.id, name: model.name })),
   } satisfies CustomProviderConfig));
   return Object.assign(legacyProviders, { providers: legacyProviders });
@@ -2373,6 +2380,9 @@ export function updateCustomProvider(
     ...(typeof legacy.name === "string" ? { name: legacy.name } : {}),
     ...(typeof legacy.baseUrl === "string" ? { baseUrl: legacy.baseUrl } : {}),
     ...(typeof legacy.apiKey === "string" ? { apiKey: legacy.apiKey } : {}),
+    ...("anthropicPromptCaching" in (updates as Record<string, unknown>)
+      ? { anthropicPromptCaching: (updates as Partial<Omit<CustomProvider, "id">>).anthropicPromptCaching }
+      : {}),
     ...(Array.isArray(legacy.models)
       ? {
           models: legacy.models.map((model) => ({
@@ -2433,6 +2443,8 @@ export interface CustomProviderConfig {
   baseUrl: string;
   api: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
   apiKey?: string;
+  /** FNXC:ProviderAuth 2026-07-08-00:00: FN-7689 caching opt-in, carried through the legacy shape. */
+  anthropicPromptCaching?: boolean;
   models: CustomProviderModelInput[];
 }
 

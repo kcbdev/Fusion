@@ -363,6 +363,7 @@ The custom-provider form uses these fields:
 - **API type** — one of the supported API types above.
 - **Base URL** — the provider endpoint base URL. It must be a valid `http` or `https` URL, for example `https://api.example.com/v1`.
 - **API key** — optional credential for providers that require authentication.
+- **Enable Anthropic-style prompt caching** — shown only for **OpenAI-compatible** and **OpenAI Responses** provider entries. Turn this on when the provider gateway proxies an Anthropic-format backend (for example a self-hosted router fronting Claude models) to enable pi-ai's `cache_control` prompt caching, which stops re-billing the full context prefix every turn. Leave it off for gateways that do not support Anthropic-style caching (Together, Fireworks, etc.) to avoid provider errors. See [`anthropicPromptCaching` in the Settings Reference](./settings-reference.md#customproviders) for details.
 - **Available models** — comma-separated model IDs, for example `gpt-4, gpt-3.5-turbo`.
 
 Use **Detect Models** to auto-fill **Available models** while adding or editing a provider from the provider's `/models` endpoint. Detection requires a **Base URL** and may require an **API key**, depending on the provider. Saved providers also have a row-level **Refresh Models** action that uses the stored endpoint and credential to replace the persisted model list without exposing the raw key in the browser.

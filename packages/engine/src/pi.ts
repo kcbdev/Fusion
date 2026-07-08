@@ -63,6 +63,7 @@ import { applyClaudeAcpEnable } from "./claude-acp-enable.js";
 import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
 import { piLog, extensionsLog } from "./logger.js";
 import { readCustomProviders } from "./custom-providers.js";
+import { buildCustomProviderModels } from "./custom-provider-registry.js";
 import {
   buildGateRejection,
   evaluateAgentActionGate,
@@ -2092,24 +2093,20 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   for (const provider of customProviders) {
     try {
       const registryKey = customProviderRegistryKey(provider, customProviders);
+      const api = resolveCustomProviderApiType(provider.apiType);
+      // FNXC:ProviderAuth 2026-07-08-00:00:
+      // FN-7689: reuse the shared `buildCustomProviderModels` helper (custom-provider-registry.ts)
+      // instead of building the model list inline here. This is registration path B (the
+      // `createFnAgent` inline path); path A is `custom-provider-registry.ts`'s `toProviderConfig`.
+      // Before this fix path B set no `compat` at all, so an opted-in provider's
+      // `anthropicPromptCaching` flag only took effect via path A and silently dropped here —
+      // exactly the drift risk called out for FN-7689. Sharing the builder makes that
+      // impossible to reintroduce.
       modelRegistry.registerProvider(registryKey, {
         baseUrl: provider.baseUrl,
-        api: resolveCustomProviderApiType(provider.apiType),
+        api,
         apiKey: provider.apiKey,
-        models: (provider.models ?? []).map((model) => ({
-          id: model.id,
-          name: model.name,
-          reasoning: false,
-          input: ["text" as const],
-          cost: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-          contextWindow: 128000,
-          maxTokens: 16384,
-        })),
+        models: buildCustomProviderModels(provider, api),
       });
       piLog.log(`Registered custom provider "${provider.name}" (key=${registryKey}, id=${provider.id})`);
     } catch (error) {
