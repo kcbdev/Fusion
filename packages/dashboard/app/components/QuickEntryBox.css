@@ -185,6 +185,37 @@ The global `.description-with-refine textarea { padding-right: 70px }` (styles.c
 }
 
 /*
+FNXC:QuickAddActionRow 2026-07-08-00:00:
+FN-7680 — Save (`btn btn-task-create btn-sm`) rendered a different box height
+than its `.quick-entry-actions` siblings. Root cause is content-height drift
+across button variants, not one single property: text buttons (Save, Fast,
+Subtask, the workflow/priority/deps `.dep-trigger` triggers) get an 18px line
+box from the inherited body line-height at 12px font-size, while icon-only
+buttons (Attach, GitHub toggle) collapse to their bare ~14px icon because
+`.btn-icon` sets `line-height: 0`; separately, `.dep-trigger` buttons (Priority,
+Deps, and — pre-FN-7677 — the workflow trigger) inherit the shared
+`.dep-trigger, .inline-create-model-trigger` rule's shorter 3px/8px padding
+instead of `.btn-sm`'s 4px/10px. Rather than chase each contributor
+individually (padding, line-height, icon size) per button variant, assert one
+uniform `min-height` scoped to this row: with the project-wide
+`box-sizing: border-box` reset, min-height normalizes every `.btn` variant in
+`.quick-entry-actions` (plus the non-`.btn` optional-steps trigger) to the same
+total box height regardless of its individual content/padding, without editing
+the shared `.btn`, `.btn-sm`, `.btn-icon`, `.btn-task-create`, or `.dep-trigger`
+rules in styles.css (those still back InlineCreateCard/NewTaskModal/
+TaskDetailModal/TaskForm). This is the desktop-width counterpart to the
+existing mobile touch-target min-height block further down this file (the
+"max-width: 768px" rule) — that block already applies the same
+normalization pattern for mobile; this rule closes the gap for desktop widths
+so the invariant holds at both breakpoints (FN-5751 lesson: no mobile-only or
+desktop-only fix).
+*/
+.quick-entry-actions .btn,
+.quick-entry-actions .wf-optional-steps-dropdown-trigger {
+  min-height: calc(var(--space-xl) + var(--space-xs));
+}
+
+/*
 FNXC:QuickAddWorkflow 2026-06-30-00:00:
 Quick-add workflow targeting sits in the action row as a compact existing-button dropdown. Use tokenized sizing/colors so the selector wraps with Save/Plan controls on narrow Board and List surfaces without introducing a separate visual hierarchy.
 
