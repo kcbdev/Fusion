@@ -140,6 +140,7 @@ function resolveBundledPluginDirInDashboard(pluginId: string): string | null {
 
 import { createSessionDiagnostics } from "./ai-session-diagnostics.js";
 import { createApiRoutesContext } from "./routes/context.js";
+import type { ScopeValue } from "./routes/types.js";
 import { registerTaskWorkflowRoutes } from "./routes/register-task-workflow-routes.js";
 import { registerWorkflowRoutes } from "./routes/register-workflow-routes.js";
 import { registerPlanningSubtaskRoutes } from "./routes/register-planning-subtask-routes.js";
@@ -2443,84 +2444,110 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     }
   });
 
-  // GET /automations/:id/run/stream — stream live manual-run output.
-  router.get("/automations/:id/run/stream", async (req: Request, res: Response) => {
-    const scope = parseScopeParam(req);
-    const automationStore = resolveAutomationStore(req, scope);
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  /**
+   * FNXC:AutomationLiveOutput 2026-07-07-08:30 (FN-7663, follow-up from FN-7652):
+   * `/automations/:id/run/stream` and `/routines/:id/run/stream` are otherwise-identical SSE
+   * endpoints layered over the same `AutomationLiveRunRegistry` (`automationLiveRuns`). Before
+   * this consolidation, each route carried its own copy of the header/replay/subscribe/teardown
+   * logic — the FN-7652 live-output fix had to be applied twice, and any future fix could drift
+   * between the two copies. This single generic factory is parameterized ONLY by what actually
+   * differs between the two routes (store resolver, entity getter, not-found message) so a fix
+   * to the streaming behavior is written once and applies to both endpoints.
+   */
+  function makeRunStreamHandler<TStore, TEntity extends { id: string; scope?: ScopeValue }>(config: {
+    resolveStore: (req: Request, scope: ScopeValue | undefined) => TStore;
+    getEntity: (store: TStore, id: string) => Promise<TEntity>;
+    notFoundMessage: string;
+  }): (req: Request, res: Response) => Promise<void> {
+    const { resolveStore, getEntity, notFoundMessage } = config;
+    return async (req: Request, res: Response) => {
+      const scope = parseScopeParam(req);
+      const store = resolveStore(req, scope);
+      const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    try {
-      const schedule = await automationStore.getSchedule(id);
-      if (scope && schedule.scope !== scope) {
-        throw notFound("Schedule not found");
-      }
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-      res.write(": connected\n\n");
-
-      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : undefined;
-      const lastEventId = parseLastEventId(req);
-      let unsubscribeRun: (() => void) | undefined;
-      let unsubscribeStart: (() => void) | undefined;
-
-      const attachRun = (run: AutomationLiveRunRecord) => {
-        const buffered = automationLiveRuns.getBufferedEvents(run.runId, lastEventId ?? 0);
-        if (!replayBufferedSSE(res, buffered)) {
-          res.end();
-          return;
+      try {
+        const entity = await getEntity(store, id);
+        if (scope && entity.scope !== scope) {
+          throw notFound(notFoundMessage);
         }
-        if (run.status !== "running") {
-          res.end();
-          return;
-        }
-        unsubscribeRun = automationLiveRuns.subscribe(run.runId, (event, eventId) => {
-          if (!writeSSEEvent(res, event.type, JSON.stringify(event.data ?? {}), eventId)) {
-            unsubscribeRun?.();
+
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders();
+        res.write(": connected\n\n");
+
+        const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : undefined;
+        const lastEventId = parseLastEventId(req);
+        let unsubscribeRun: (() => void) | undefined;
+        let unsubscribeStart: (() => void) | undefined;
+
+        const attachRun = (run: AutomationLiveRunRecord) => {
+          const buffered = automationLiveRuns.getBufferedEvents(run.runId, lastEventId ?? 0);
+          if (!replayBufferedSSE(res, buffered)) {
+            res.end();
             return;
           }
-          if (event.type === "complete" || event.type === "error") {
-            unsubscribeRun?.();
+          if (run.status !== "running") {
             res.end();
+            return;
           }
-        });
-      };
+          unsubscribeRun = automationLiveRuns.subscribe(run.runId, (event, eventId) => {
+            if (!writeSSEEvent(res, event.type, JSON.stringify(event.data ?? {}), eventId)) {
+              unsubscribeRun?.();
+              return;
+            }
+            if (event.type === "complete" || event.type === "error") {
+              unsubscribeRun?.();
+              res.end();
+            }
+          });
+        };
 
-      // FNXC:AutomationLiveOutput 2026-07-07-00:00 (FN-7652): no explicit runId means "attach me to
-      // this request's own run" — use getForAutoAttach so a stale finished run from before this
-      // trigger isn't mistaken for it (see AutomationLiveRunRegistry.getForAutoAttach).
-      const existingRun = requestedRunId
-        ? automationLiveRuns.get(requestedRunId, schedule.id)
-        : automationLiveRuns.getForAutoAttach(schedule.id);
-      if (existingRun) {
-        attachRun(existingRun);
-      } else if (requestedRunId) {
-        writeSSEEvent(res, "error", JSON.stringify({ message: "Live run not found or expired", runId: requestedRunId }));
-        res.end();
-      } else {
-        unsubscribeStart = automationLiveRuns.subscribeToScheduleStart(schedule.id, (run) => {
+        // FNXC:AutomationLiveOutput 2026-07-07-00:00 (FN-7652): no explicit runId means "attach me to
+        // this request's own run" — use getForAutoAttach so a stale finished run from before this
+        // trigger isn't mistaken for it (see AutomationLiveRunRegistry.getForAutoAttach).
+        const existingRun = requestedRunId
+          ? automationLiveRuns.get(requestedRunId, entity.id)
+          : automationLiveRuns.getForAutoAttach(entity.id);
+        if (existingRun) {
+          attachRun(existingRun);
+        } else if (requestedRunId) {
+          writeSSEEvent(res, "error", JSON.stringify({ message: "Live run not found or expired", runId: requestedRunId }));
+          res.end();
+        } else {
+          unsubscribeStart = automationLiveRuns.subscribeToScheduleStart(entity.id, (run) => {
+            unsubscribeStart?.();
+            attachRun(run);
+          });
+        }
+
+        req.on("close", () => {
+          unsubscribeRun?.();
           unsubscribeStart?.();
-          attachRun(run);
         });
+      } catch (err: unknown) {
+        if (err instanceof ApiError) {
+          throw err;
+        }
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          throw notFound(notFoundMessage);
+        }
+        rethrowAsApiError(err);
       }
+    };
+  }
 
-      req.on("close", () => {
-        unsubscribeRun?.();
-        unsubscribeStart?.();
-      });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw notFound("Schedule not found");
-      }
-      rethrowAsApiError(err);
-    }
-  });
+  // GET /automations/:id/run/stream — stream live manual-run output.
+  router.get(
+    "/automations/:id/run/stream",
+    makeRunStreamHandler({
+      resolveStore: resolveAutomationStore,
+      getEntity: (store, id) => store.getSchedule(id),
+      notFoundMessage: "Schedule not found",
+    }),
+  );
 
   // POST /automations/:id/toggle — toggle enabled/disabled
   router.post("/automations/:id/toggle", async (req: Request, res: Response) => {
@@ -2937,83 +2964,14 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   // GET /routines/:id/run/stream — stream live manual routine output.
-  router.get("/routines/:id/run/stream", async (req: Request, res: Response) => {
-    const scope = parseScopeParam(req);
-    const routineStore = resolveRoutineStore(req, scope);
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-
-    try {
-      const routine = await routineStore.getRoutine(id);
-      if (scope && routine.scope !== scope) {
-        throw notFound("Routine not found");
-      }
-
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-      res.flushHeaders();
-      res.write(": connected\n\n");
-
-      const requestedRunId = typeof req.query.runId === "string" ? req.query.runId : undefined;
-      const lastEventId = parseLastEventId(req);
-      let unsubscribeRun: (() => void) | undefined;
-      let unsubscribeStart: (() => void) | undefined;
-
-      const attachRun = (run: AutomationLiveRunRecord) => {
-        const buffered = automationLiveRuns.getBufferedEvents(run.runId, lastEventId ?? 0);
-        if (!replayBufferedSSE(res, buffered)) {
-          res.end();
-          return;
-        }
-        if (run.status !== "running") {
-          res.end();
-          return;
-        }
-        unsubscribeRun = automationLiveRuns.subscribe(run.runId, (event, eventId) => {
-          if (!writeSSEEvent(res, event.type, JSON.stringify(event.data ?? {}), eventId)) {
-            unsubscribeRun?.();
-            return;
-          }
-          if (event.type === "complete" || event.type === "error") {
-            unsubscribeRun?.();
-            res.end();
-          }
-        });
-      };
-
-      // FNXC:AutomationLiveOutput 2026-07-07-00:00 (FN-7652): no explicit runId means "attach me to
-      // this request's own run" — use getForAutoAttach so a stale finished run from before this
-      // trigger isn't mistaken for it (see AutomationLiveRunRegistry.getForAutoAttach).
-      const existingRun = requestedRunId
-        ? automationLiveRuns.get(requestedRunId, routine.id)
-        : automationLiveRuns.getForAutoAttach(routine.id);
-      if (existingRun) {
-        attachRun(existingRun);
-      } else if (requestedRunId) {
-        writeSSEEvent(res, "error", JSON.stringify({ message: "Live run not found or expired", runId: requestedRunId }));
-        res.end();
-      } else {
-        unsubscribeStart = automationLiveRuns.subscribeToScheduleStart(routine.id, (run) => {
-          unsubscribeStart?.();
-          attachRun(run);
-        });
-      }
-
-      req.on("close", () => {
-        unsubscribeRun?.();
-        unsubscribeStart?.();
-      });
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw notFound("Routine not found");
-      }
-      rethrowAsApiError(err);
-    }
-  });
+  router.get(
+    "/routines/:id/run/stream",
+    makeRunStreamHandler({
+      resolveStore: resolveRoutineStore,
+      getEntity: (store, id) => store.getRoutine(id),
+      notFoundMessage: "Routine not found",
+    }),
+  );
 
   // GET /routines/:id/runs — get execution history
   router.get("/routines/:id/runs", async (req: Request, res: Response) => {

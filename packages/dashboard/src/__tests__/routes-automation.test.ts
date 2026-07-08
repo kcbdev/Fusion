@@ -1588,6 +1588,17 @@ describe("Automation routes", () => {
       expect(res.body.error).toContain("Schedule not found");
     });
 
+    // FNXC:AutomationLiveOutput 2026-07-07-08:30 (FN-7663): proves the shared run-stream handler
+    // preserves scope isolation identically to every other /automations/:id/* route.
+    it("GET /automations/:id/run/stream returns 404 for schedule with wrong scope", async () => {
+      const mockStore = createMockAutomationStore();
+      mockStore.getSchedule.mockResolvedValue({ ...FAKE_SCHEDULE, scope: "global" as const });
+      const { app } = buildApp(mockStore);
+      const res = await REQUEST(app, "GET", "/api/automations/sched-001/run/stream?scope=project");
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain("Schedule not found");
+    });
+
     it("POST /automations/:id/toggle with matching scope returns 200", async () => {
       const mockStore = createMockAutomationStore();
       mockStore.getSchedule.mockResolvedValue({ ...FAKE_SCHEDULE, scope: "project" as const });
@@ -2094,6 +2105,18 @@ describe("Routine routes", () => {
       expect(runRes.body.result.output).toBe("routine-live-output");
     });
 
+    // FNXC:AutomationLiveOutput 2026-07-07-08:30 (FN-7663): mirrors the automations "unknown manual
+    // run id" coverage — both routes now share one handler for the requested-runId-not-found branch.
+    it("returns a terminal SSE error for an unknown manual run id", async () => {
+      const mockStore = createMockRoutineStore();
+      const { app } = buildRoutineApp(mockStore);
+
+      const streamRes = await performRequest(app, "GET", "/api/routines/routine-001/run/stream?runId=missing-run");
+      expect(streamRes.status).toBe(200);
+      expect(String(streamRes.body)).toContain("event: error");
+      expect(String(streamRes.body)).toContain("Live run not found or expired");
+    });
+
     // FNXC:AutomationLiveOutput 2026-07-07-01:00 (FN-7652): mirrors the /automations/:id/run/stream
     // coverage above — both stream endpoints share AutomationLiveRunRegistry/attachRun, so the
     // runId-less-stream invariant (success run never delivers a terminal error) must hold for /routines too.
@@ -2530,6 +2553,18 @@ describe("Routine routes", () => {
       mockStore.getRoutine.mockResolvedValue({ ...FAKE_ROUTINE, scope: "project" as const });
       const { app } = buildRoutineApp(mockStore);
       const res = await REQUEST(app, "POST", "/api/routines/routine-001/run?scope=global");
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain("Routine not found");
+    });
+
+    // FNXC:AutomationLiveOutput 2026-07-07-08:30 (FN-7663): mirrors the automations run-stream
+    // scope test above — both routes now delegate to the same shared handler, so scope isolation
+    // must hold identically for /routines/:id/run/stream.
+    it("GET /routines/:id/run/stream returns 404 for routine with wrong scope", async () => {
+      const mockStore = createMockRoutineStore();
+      mockStore.getRoutine.mockResolvedValue({ ...FAKE_ROUTINE, scope: "project" as const });
+      const { app } = buildRoutineApp(mockStore);
+      const res = await REQUEST(app, "GET", "/api/routines/routine-001/run/stream?scope=global");
       expect(res.status).toBe(404);
       expect(res.body.error).toContain("Routine not found");
     });
