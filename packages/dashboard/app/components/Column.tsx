@@ -577,7 +577,10 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
   const showDoneArchiveAction = isDoneSortColumn && !!onArchiveAllDone;
   /*
   FNXC:PlanApproval 2026-07-01-08:44:
-  Triage and workflow intake/hold column actions need a Board shortcut that mirrors the project auto-approve plan override without replacing Settings modal's full workflow/auto-approve/require-all editor.
+  Triage and workflow intake/planning column actions need a Board shortcut that mirrors the project auto-approve plan override without replacing Settings modal's full workflow/auto-approve/require-all editor.
+
+  FNXC:PlanApproval 2026-07-07-00:00 (FN-7653 correction):
+  This shortcut belongs ONLY to the intake/planning column, never to hold (Todo-like) columns — the built-in Coding workflow's Todo column carries the hold trait and was wrongly surfacing this toggle. Board.tsx is the single source of truth gating which columns receive `onTogglePlanAutoApprove`; Column.tsx just renders whatever prop it is given, so the fix lives in Board.tsx's intake-only gate, not here.
   */
   const hasPlanAutoApproveAction = !!onTogglePlanAutoApprove;
   const hasDoneMenuActions = showDoneSortControl || showDoneArchiveAction;
