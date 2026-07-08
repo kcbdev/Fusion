@@ -118,13 +118,11 @@ export interface UseChatReturn {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   /**
-   * FNXC:ChatSearch 2026-07-07-00:00:
-   * When true, search matches only session title/agentId (the original client-side-only
-   * behavior). When false (default), search also matches message content via a debounced
-   * server round trip; matched sessions are unioned into `filteredSessions`.
+   * FNXC:ChatSearch 2026-07-07-12:00:
+   * Search always matches session title/agentId AND message content via a debounced server
+   * round trip; matched sessions are unioned into `filteredSessions`. There is no client toggle
+   * to restrict search back to title-only (FN-7651 removed the "Search in title only" button).
    */
-  searchInTitleOnly: boolean;
-  setSearchInTitleOnly: (value: boolean) => void;
   filteredSessions: ChatSessionInfo[];
 
   // Refresh
@@ -352,14 +350,13 @@ export function useChat(
   // Search/filter
   const [searchQuery, setSearchQuery] = useState("");
   /*
-  FNXC:ChatSearch 2026-07-07-00:00:
-  Default is content mode (searchInTitleOnly=false): the query matches title/agentId AND
-  message content. The toggle flips this to the pre-existing title/agentId-only behavior.
+  FNXC:ChatSearch 2026-07-07-12:00:
+  Content mode is always on: the query matches title/agentId AND message content. There is no
+  client toggle to restrict this back to title/agentId-only (FN-7651 removed the button).
   */
-  const [searchInTitleOnly, setSearchInTitleOnly] = useState(false);
   const [contentMatchedPreviews, setContentMatchedPreviews] = useState<Map<string, string>>(new Map());
   // Monotonic request counter: guards against an out-of-order/superseded debounced content
-  // search response overwriting a newer query's results (or a toggle-to-title-only reset).
+  // search response overwriting a newer query's results.
   const contentSearchRequestIdRef = useRef(0);
 
   // Pagination
@@ -1307,17 +1304,17 @@ export function useChat(
   );
 
   /*
-  FNXC:ChatSearch 2026-07-07-00:00:
+  FNXC:ChatSearch 2026-07-07-12:00:
   Content search requires a server round trip (message bodies are not fully loaded
   client-side), so it is debounced (300ms) and guarded against out-of-order responses via a
-  monotonic request id: a superseded query (typed-ahead, or a toggle back to title-only)
-  invalidates in-flight responses instead of letting a stale result flash in. Switching to
-  title-only or clearing the query resets `contentMatchedPreviews` synchronously so there is
-  no stale-result flash while the (now-irrelevant) debounced fetch is still pending/aborted.
+  monotonic request id: a superseded query (typed-ahead) invalidates in-flight responses
+  instead of letting a stale result flash in. Clearing the query resets
+  `contentMatchedPreviews` synchronously so there is no stale-result flash while the
+  (now-irrelevant) debounced fetch is still pending/aborted.
   */
   const trimmedSearchQuery = searchQuery.trim();
   useEffect(() => {
-    if (searchInTitleOnly || !trimmedSearchQuery) {
+    if (!trimmedSearchQuery) {
       contentSearchRequestIdRef.current++;
       setContentMatchedPreviews(new Map());
       return;
@@ -1346,10 +1343,10 @@ export function useChat(
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [trimmedSearchQuery, searchInTitleOnly, projectId]);
+  }, [trimmedSearchQuery, projectId]);
 
   // Filter sessions based on search query: title/agentId match always applies; content
-  // matches (from contentMatchedPreviews) are unioned in unless searchInTitleOnly is set.
+  // matches (from contentMatchedPreviews) are always unioned in.
   const filteredSessions = (() => {
     if (!trimmedSearchQuery) return sessions;
 
@@ -1360,7 +1357,7 @@ export function useChat(
         s.agentId.toLowerCase().includes(lowerQuery),
     );
 
-    if (searchInTitleOnly || contentMatchedPreviews.size === 0) {
+    if (contentMatchedPreviews.size === 0) {
       return titleMatched;
     }
 
@@ -1639,8 +1636,6 @@ export function useChat(
     hasMoreMessages,
     searchQuery,
     setSearchQuery,
-    searchInTitleOnly,
-    setSearchInTitleOnly,
     filteredSessions,
     refreshSessions,
     agentsMap,
