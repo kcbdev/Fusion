@@ -308,3 +308,153 @@ describe("TaskStore.updateWorkflowSettingValues", () => {
     expect(effective.workflowStepTimeoutMs).toBe(900_000);
   });
 });
+
+describe("TaskStore.getModelLaneDrift", () => {
+  const harness = createSharedTaskStoreTestHarness();
+
+  beforeAll(harness.beforeAll);
+  afterAll(harness.afterAll);
+  beforeEach(harness.beforeEach);
+  afterEach(harness.afterEach);
+
+  it("flags non-terminal tasks still pinned to a lane's old value, and excludes done/unrelated tasks", async () => {
+    const store = harness.store();
+
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionProvider: "anthropic",
+      executionModelId: "claude-sonnet-4-6",
+    });
+    const before = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    const pinned = await store.createTask({
+      description: "pinned to old model",
+      workflowId: BUILTIN_CODING,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+    });
+    const alreadyCurrent = await store.createTask({
+      description: "already on the new model",
+      workflowId: BUILTIN_CODING,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-5",
+    });
+    const doneTask = await store.createTask({
+      description: "terminal task, excluded even though pinned to the old model",
+      workflowId: BUILTIN_CODING,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      column: "done",
+    });
+
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionModelId: "claude-sonnet-5",
+    });
+    const after = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    const drift = store.getModelLaneDrift(BUILTIN_CODING, before, after);
+    expect(drift).toHaveLength(1);
+    const execution = drift[0];
+    expect(execution.lane).toBe("execution");
+    expect(execution.from).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-6" });
+    expect(execution.to).toEqual({ provider: "anthropic", modelId: "claude-sonnet-5" });
+    expect(execution.taskIds).toEqual([pinned.id]);
+    expect(execution.taskIds).not.toContain(alreadyCurrent.id);
+    expect(execution.taskIds).not.toContain(doneTask.id);
+  });
+
+  it("reports no drift when the lane value is unchanged", async () => {
+    const store = harness.store();
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionProvider: "anthropic",
+      executionModelId: "claude-sonnet-5",
+    });
+    const before = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, { requirePrApproval: true });
+    const after = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    expect(store.getModelLaneDrift(BUILTIN_CODING, before, after)).toEqual([]);
+  });
+
+  // FN-5893: the invariant holds across ALL model lanes, not only `execution`.
+  it("flags the planning lane's pinned tasks when the planning model changes", async () => {
+    const store = harness.store();
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      planningProvider: "anthropic",
+      planningModelId: "claude-opus-4-6",
+    });
+    const before = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+    const pinned = await store.createTask({
+      description: "pinned to old planning model",
+      workflowId: BUILTIN_CODING,
+      planningModelProvider: "anthropic",
+      planningModelId: "claude-opus-4-6",
+    });
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      planningModelId: "claude-opus-4-8",
+    });
+    const after = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    const drift = store.getModelLaneDrift(BUILTIN_CODING, before, after);
+    expect(drift).toHaveLength(1);
+    expect(drift[0].lane).toBe("planning");
+    expect(drift[0].taskIds).toEqual([pinned.id]);
+  });
+
+  it("flags the validator lane's pinned tasks when the validator model changes", async () => {
+    const store = harness.store();
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      validatorProvider: "anthropic",
+      validatorModelId: "claude-haiku-4-5",
+    });
+    const before = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+    const pinned = await store.createTask({
+      description: "pinned to old validator model",
+      workflowId: BUILTIN_CODING,
+      validatorModelProvider: "anthropic",
+      validatorModelId: "claude-haiku-4-5",
+    });
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      validatorModelId: "claude-haiku-5",
+    });
+    const after = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    const drift = store.getModelLaneDrift(BUILTIN_CODING, before, after);
+    expect(drift).toHaveLength(1);
+    expect(drift[0].lane).toBe("validator");
+    expect(drift[0].taskIds).toEqual([pinned.id]);
+  });
+
+  // Greptile P1: when the default workflow is diffed, no-selection tasks resolve
+  // through it and are pinned to its lane values, so they must be counted — but
+  // only when the caller opts in via `includeNullSelection`.
+  it("includes no-workflow-selection tasks only when includeNullSelection is set", async () => {
+    const store = harness.store();
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionProvider: "anthropic",
+      executionModelId: "claude-sonnet-4-6",
+    });
+    const before = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+    // No workflowId → no task_workflow_selection row → resolves to the default.
+    const nullSelected = await store.createTask({
+      description: "no workflow selection, pinned to old model",
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+    });
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionModelId: "claude-sonnet-5",
+    });
+    const after = store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT);
+
+    // Default excludes null-selection tasks: the route passes a concrete id.
+    const withoutNull = store.getModelLaneDrift(BUILTIN_CODING, before, after);
+    expect(withoutNull).toHaveLength(1);
+    expect(withoutNull[0].taskIds).not.toContain(nullSelected.id);
+
+    // Opt in (the route does this when patching the default workflow).
+    const withNull = store.getModelLaneDrift(BUILTIN_CODING, before, after, {
+      includeNullSelection: true,
+    });
+    expect(withNull).toHaveLength(1);
+    expect(withNull[0].taskIds).toContain(nullSelected.id);
+  });
+});
