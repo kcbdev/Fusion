@@ -30,7 +30,32 @@ function parseModelLines(raw: string): string[] {
   return Array.from(new Set(ids));
 }
 
-export async function discoverCursorModels(binary: string, timeoutMs = 5000): Promise<{ models: string[]; source: string; fallbackUsed: boolean; reason?: string }> {
+/** Optional per-model metadata captured only from structured (JSON) discovery entries. */
+export interface CursorModelMeta {
+  reasoning?: boolean;
+  contextWindow?: number;
+}
+
+export interface CursorModelDiscoveryResult {
+  models: string[];
+  source: string;
+  fallbackUsed: boolean;
+  reason?: string;
+  /**
+   * FNXC:CursorCli 2026-07-08-00:00:
+   * FN-7700: optional per-id `reasoning`/`contextWindow` metadata, populated
+   * ONLY when the defensive JSON-tolerant discovery path parses object
+   * entries carrying those fields. The real, plain-text `cursor-agent models`
+   * output (source `models-text`/`none`) never populates this map — metadata
+   * is structured-source pass-through only, never parsed from the free-text
+   * `<id> - <Label>` lines and never fabricated. Additive alongside the
+   * existing `models: string[]` bare-id contract; omitted entirely when no
+   * entry carried any metadata.
+   */
+  modelMeta?: Record<string, CursorModelMeta>;
+}
+
+export async function discoverCursorModels(binary: string, timeoutMs = 5000): Promise<CursorModelDiscoveryResult> {
   const res = await runCursorCommand(binary, ["models"], timeoutMs);
   if (res.code !== 0) {
     return { models: [], source: "none", fallbackUsed: true, reason: "model discovery command unavailable" };
@@ -50,11 +75,24 @@ export async function discoverCursorModels(binary: string, timeoutMs = 5000): Pr
   try {
     const parsed = JSON.parse(output);
     if (Array.isArray(parsed)) {
-      const ids = parsed
-        .map((entry) => (typeof entry === "string" ? entry : typeof entry?.id === "string" ? entry.id : undefined))
-        .filter((id): id is string => Boolean(id));
+      const ids: string[] = [];
+      const modelMeta: Record<string, CursorModelMeta> = {};
+      for (const entry of parsed) {
+        const id = typeof entry === "string" ? entry : typeof entry?.id === "string" ? entry.id : undefined;
+        if (!id) continue;
+        ids.push(id);
+
+        if (entry && typeof entry === "object") {
+          const meta: CursorModelMeta = {};
+          if (typeof entry.reasoning === "boolean") meta.reasoning = entry.reasoning;
+          if (typeof entry.contextWindow === "number") meta.contextWindow = entry.contextWindow;
+          if (Object.keys(meta).length > 0) modelMeta[id] = meta;
+        }
+      }
       if (ids.length > 0) {
-        return { models: Array.from(new Set(ids)), source: "models-json", fallbackUsed: false };
+        const result: CursorModelDiscoveryResult = { models: Array.from(new Set(ids)), source: "models-json", fallbackUsed: false };
+        if (Object.keys(modelMeta).length > 0) result.modelMeta = modelMeta;
+        return result;
       }
     }
   } catch {

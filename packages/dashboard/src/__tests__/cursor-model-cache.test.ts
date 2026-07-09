@@ -51,6 +51,32 @@ describe("cursorDiscoveryToModels", () => {
   it("returns an empty array for an empty model list", () => {
     expect(cursorDiscoveryToModels([])).toEqual([]);
   });
+
+  it("surfaces source-reported reasoning/contextWindow metadata when present", () => {
+    const models = cursorDiscoveryToModels([
+      { id: "cursor/gpt-5", label: "GPT-5", reasoning: true, contextWindow: 200000 },
+    ]);
+    expect(models).toEqual([
+      { provider: "cursor-cli", id: "cursor/gpt-5", name: "GPT-5", reasoning: true, contextWindow: 200000 },
+    ]);
+  });
+
+  it("defaults reasoning/contextWindow to false/0 when the entry does not report them", () => {
+    const models = cursorDiscoveryToModels([{ id: "cursor/sonnet" }]);
+    expect(models[0]?.reasoning).toBe(false);
+    expect(models[0]?.contextWindow).toBe(0);
+  });
+
+  it("handles a mix of enriched and default entries independently", () => {
+    const models = cursorDiscoveryToModels([
+      { id: "cursor/a", reasoning: true, contextWindow: 128000 },
+      { id: "cursor/b" },
+    ]);
+    expect(models).toEqual([
+      { provider: "cursor-cli", id: "cursor/a", name: "cursor/a", reasoning: true, contextWindow: 128000 },
+      { provider: "cursor-cli", id: "cursor/b", name: "cursor/b", reasoning: false, contextWindow: 0 },
+    ]);
+  });
 });
 
 describe("getCursorPickerModels caching", () => {

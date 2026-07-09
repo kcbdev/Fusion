@@ -67,6 +67,39 @@ describe("discoverCursorModels", () => {
     expect(runCursorCommand).toHaveBeenCalledWith("cursor-agent", ["models"], 5000);
     expect(result.models).toEqual(["cursor/a", "cursor/b"]);
     expect(result.source).toBe("models-json");
+    expect(result.modelMeta).toBeUndefined();
+  });
+
+  it("captures reasoning/contextWindow metadata from JSON object entries that report them", async () => {
+    vi.mocked(runCursorCommand).mockResolvedValueOnce({
+      code: 0,
+      stdout: '[{"id":"cursor/a","reasoning":true,"contextWindow":200000},{"id":"cursor/b"}]',
+      stderr: "",
+    });
+    const result = await discoverCursorModels("cursor-agent");
+
+    expect(result.models).toEqual(["cursor/a", "cursor/b"]);
+    expect(result.modelMeta).toEqual({ "cursor/a": { reasoning: true, contextWindow: 200000 } });
+  });
+
+  it("ignores malformed metadata field types on JSON object entries", async () => {
+    vi.mocked(runCursorCommand).mockResolvedValueOnce({
+      code: 0,
+      stdout: '[{"id":"cursor/a","reasoning":"yes","contextWindow":"big"}]',
+      stderr: "",
+    });
+    const result = await discoverCursorModels("cursor-agent");
+
+    expect(result.models).toEqual(["cursor/a"]);
+    expect(result.modelMeta).toBeUndefined();
+  });
+
+  it("never populates modelMeta from the plain-text discovery path", async () => {
+    vi.mocked(runCursorCommand).mockResolvedValueOnce({ code: 0, stdout: REAL_MODELS_OUTPUT, stderr: "" });
+    const result = await discoverCursorModels("cursor-agent");
+
+    expect(result.source).toBe("models-text");
+    expect(result.modelMeta).toBeUndefined();
   });
 
   it("returns empty discovery when the command fails outright", async () => {

@@ -66,9 +66,16 @@ export async function probeCursorCliProvider(opts?: { binaryPath?: string }): Pr
   return probeCursorBinary(opts);
 }
 
-/** Result shape returned by the Cursor plugin's model-discovery contribution. */
+/**
+ * Result shape returned by the Cursor plugin's model-discovery contribution.
+ *
+ * FNXC:CursorCli 2026-07-08-00:00:
+ * FN-7700: `reasoning`/`contextWindow` are optional pass-through fields the
+ * plugin only populates from structured (JSON) discovery entries; they are
+ * omitted (never defaulted here) when the source did not report them.
+ */
 export interface CursorModelDiscoveryResult {
-  models: Array<{ id: string; label?: string }>;
+  models: Array<{ id: string; label?: string; reasoning?: boolean; contextWindow?: number }>;
   source: string;
   fallbackUsed: boolean;
   reason?: string;

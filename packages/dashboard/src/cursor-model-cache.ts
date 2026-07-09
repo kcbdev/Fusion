@@ -25,6 +25,13 @@
  * storm. Unlike Hermes (whose profile presence IS the enable signal), Cursor
  * has its own settings toggle (`useCursorCli`); the toggle gate lives in the
  * `/api/models` merge site (register-model-routes.ts), not in this module.
+ *
+ * FN-7700: `reasoning`/`contextWindow` are now source-driven, not hardcoded.
+ * `cursorDiscoveryToModels` reads `entry.reasoning`/`entry.contextWindow`
+ * when the discovery pipeline reports them (structured JSON `cursor-agent`
+ * output only — the real, plain-text CLI never reports them today), and
+ * falls back to `false`/`0` otherwise. This mirrors the still-deferred
+ * Hermes enrichment gap noted below; do not change Hermes behavior here.
  */
 
 import { discoverCursorCliModels } from "./runtime-provider-probes.js";
@@ -49,16 +56,19 @@ const DEFAULT_TTL_MS = 60_000;
  *
  * The discovered `id` is used as the stable model id (it is the CLI's own
  * unique identifier, e.g. `"cursor/gpt-5"`). `name` falls back to `id` when
- * no `label` is provided. `reasoning`/`contextWindow` are unknown at this
- * layer (Cursor discovery does not report them), so they default to
- * `false`/`0` \u2014 enrichment is a documented follow-up, not part of this
- * task's scope.
+ * no `label` is provided.
+ *
+ * FN-7700: `reasoning`/`contextWindow` are source-driven — when the discovery
+ * entry reports them (structured JSON `cursor-agent` output only), they are
+ * carried through verbatim; otherwise they default to `false`/`0`, exactly
+ * as before. This is pass-through only: never fabricated, never parsed from
+ * free-text labels.
  *
  * Discovered entries that map to the same id are de-duplicated, keeping the
  * first occurrence.
  */
 export function cursorDiscoveryToModels(
-  models: ReadonlyArray<{ id: string; label?: string }>,
+  models: ReadonlyArray<{ id: string; label?: string; reasoning?: boolean; contextWindow?: number }>,
 ): CursorPickerModel[] {
   const seen = new Set<string>();
   const result: CursorPickerModel[] = [];
@@ -72,8 +82,8 @@ export function cursorDiscoveryToModels(
       provider: CURSOR_PICKER_PROVIDER_ID,
       id,
       name: model.label?.trim() || id,
-      reasoning: false,
-      contextWindow: 0,
+      reasoning: model.reasoning ?? false,
+      contextWindow: model.contextWindow ?? 0,
     });
   }
 
