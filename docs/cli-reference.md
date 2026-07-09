@@ -609,6 +609,23 @@ already-completed side effect. The resolved `TaskStore` — whether resolved
 from the registered/default project or the uncached CWD-fallback project —
 is always closed on exit so the CLI process exits promptly.
 
+FN-7739 extends the same pattern to `fn backup *` (`create`/`list`/
+`restore`/`cleanup`), `fn memory-backup *` (`create`/`list`/`restore`),
+`fn mcp *` (`list`/`add`/`edit`/`remove`/`enable`/`disable`/`import`/
+`export`/`validate`), and `fn db vacuum`. `fn backup`/`fn memory-backup`
+retry their `getSettings()` board read; `fn mcp` retries project-scope
+`updateSettings` writes (mutations) and reads, and closes BOTH the cached
+project `TaskStore` and the ad-hoc uncached secrets `TaskStore` opened by
+`--secret-ref`/`--create-secret-*` resolution when no project is in scope;
+`fn db vacuum` retries the VACUUM call itself (VACUUM requires an exclusive
+lock, the canonical transient-lock case) and closes the resolved store
+BEFORE each `process.exit()` call, since `runDbVacuum` always exits
+explicitly and a pending `finally` does not run after `process.exit()`. MCP
+global-scope settings live in the file-backed `GlobalSettingsStore`
+(`~/.fusion/settings.json`, no SQLite handle) and are intentionally left
+with no close and no lock-retry. All of the above honor the same
+`FUSION_CLI_LOCK_RETRY_MS` deadline override.
+
 ### Execution and status
 
 ```bash
