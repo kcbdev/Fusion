@@ -558,6 +558,20 @@ The embedded title reads like other embedded-view titles (Planning modal-header-
   border-bottom: var(--btn-border-width) solid var(--border);
 }
 
+/* FNXC:Settings 2026-07-09-00:00: the row wraps label + input + results; on desktop it always
+   renders (see .settings-search-toggle below, hidden here). On mobile the toggle in SettingsModal.tsx
+   controls whether this wrapper mounts at all. */
+.settings-search-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* Desktop/tablet: search row is always visible, so the toggle icon never renders here. */
+.settings-search-toggle {
+  display: none;
+}
+
 .settings-search-label {
   color: var(--text-muted);
   font-size: 0.75rem;
@@ -2177,6 +2191,23 @@ The header row wraps so the badge drops below the heading on narrow widths inste
 
   .settings-search {
     padding: var(--space-md) var(--space-lg) var(--space-sm);
+  }
+
+  /* FNXC:Settings 2026-07-09-00:00: mobile-only collapse-by-default toggle. The row starts
+     collapsed (only the icon button renders) and expands to the full search row on tap. */
+  .settings-search-toggle {
+    --settings-search-toggle-touch-target: calc(var(--space-lg) + var(--space-lg) + var(--space-xs));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: flex-start;
+    width: var(--settings-search-toggle-touch-target);
+    height: var(--settings-search-toggle-touch-target);
+    flex-shrink: 0;
+  }
+
+  .settings-search-row {
+    margin-top: var(--space-xs);
   }
 
   .settings-search-input-wrap {

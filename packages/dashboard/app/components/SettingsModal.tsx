@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type MouseEvent } from "react";
-import { Globe, Folder, RefreshCw, Star, HelpCircle, Settings as SettingsIcon } from "lucide-react";
+import { Globe, Folder, RefreshCw, Star, HelpCircle, Settings as SettingsIcon, Search, X as SearchToggleCloseIcon } from "lucide-react";
 import {
   getErrorMessage,
   resolveGitlabConfig,
@@ -973,6 +973,18 @@ export function SettingsModal({
       : false,
   );
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
+  /*
+   * FNXC:Settings 2026-07-09-00:00:
+   * Mobile Settings previously always rendered the `.settings-search` row (label + input + result
+   * count) above the section picker, eating vertical space even when the user was not searching.
+   * On mobile only, the row now starts COLLAPSED behind a compact icon toggle; tapping it reveals
+   * the input, tapping again hides it. Desktop/tablet is untouched — the row is always visible
+   * there and the toggle never renders (see `isMobileSettingsSearch` below). Decision on the
+   * active-query edge case: `settingsSearchQuery` state is never cleared by collapsing, so
+   * re-expanding always restores the exact query and result count the user had before collapsing
+   * (no forced auto-expand — the toggle stays user-controlled).
+   */
+  const [mobileSearchRowExpanded, setMobileSearchRowExpanded] = useState(false);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [updateCheckLoading, setUpdateCheckLoading] = useState(false);
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null);
@@ -1053,6 +1065,10 @@ export function SettingsModal({
   const searchableSectionOptions = searchMatchedSections.filter((section) => !section.isGroupHeader);
   const hasSettingsSearchQuery = normalizedSettingsSearchQuery.length > 0;
   const hasSettingsSearchResults = searchableSectionOptions.length > 0;
+  // FNXC:Settings 2026-07-09-00:00: desktop/tablet always show the search row and never render the
+  // toggle; mobile starts collapsed (`mobileSearchRowExpanded === false`) until the user taps it.
+  const isMobileSettingsSearch = viewportMode === "mobile";
+  const settingsSearchRowVisible = !isMobileSettingsSearch || mobileSearchRowExpanded;
   const firstSearchMatchedSectionId = resolveFirstSelectableSettingsSection(searchMatchedSections, firstVisibleSectionId);
 
   /** Get the scope of the currently active section */
@@ -3636,42 +3652,64 @@ export function SettingsModal({
           <div className="settings-layout">
             <aside className="settings-navigation" aria-label={t("settings.search.navigationLabel", "Settings navigation")}> 
               <div className="settings-search" data-testid="settings-search">
-                <label className="settings-search-label" htmlFor="settings-search-input">
-                  {t("settings.search.label", "Search settings")}
-                </label>
-                <div className="settings-search-input-wrap">
-                  <input
-                    id="settings-search-input"
-                    data-testid="settings-search-input"
-                    className="input settings-search-input"
-                    type="search"
-                    value={settingsSearchQuery}
-                    onChange={(event) => setSettingsSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape" && hasSettingsSearchQuery) {
-                        event.stopPropagation();
-                        setSettingsSearchQuery("");
-                      }
-                    }}
-                    placeholder={t("settings.search.placeholder", "Search by setting or section")}
-                    aria-describedby="settings-search-results"
-                  />
-                  {hasSettingsSearchQuery && (
-                    <button
-                      type="button"
-                      className="btn btn-sm settings-search-clear"
-                      onClick={() => setSettingsSearchQuery("")}
-                      aria-label={t("settings.search.clear", "Clear settings search")}
-                    >
-                      {t("actions.clear", "Clear")}
-                    </button>
-                  )}
-                </div>
-                <div id="settings-search-results" className="settings-search-results" aria-live="polite">
-                  {hasSettingsSearchQuery
-                    ? t("settings.search.resultCount", "{{count}} matching sections", { count: searchableSectionOptions.length })
-                    : t("settings.search.allSections", "Showing all settings sections")}
-                </div>
+                {isMobileSettingsSearch && (
+                  // FNXC:Settings 2026-07-09-00:00: mobile-only compact icon toggle; hidden entirely on
+                  // desktop/tablet via `isMobileSettingsSearch`, which always shows the row instead.
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-icon settings-search-toggle"
+                    onClick={() => setMobileSearchRowExpanded((expanded) => !expanded)}
+                    aria-expanded={settingsSearchRowVisible}
+                    aria-controls="settings-search-row-region"
+                    aria-label={
+                      settingsSearchRowVisible
+                        ? t("settings.search.toggleHide", "Hide search")
+                        : t("settings.search.toggleShow", "Show search")
+                    }
+                  >
+                    {settingsSearchRowVisible ? <SearchToggleCloseIcon size={16} /> : <Search size={16} />}
+                  </button>
+                )}
+                {settingsSearchRowVisible && (
+                  <div id="settings-search-row-region" className="settings-search-row">
+                    <label className="settings-search-label" htmlFor="settings-search-input">
+                      {t("settings.search.label", "Search settings")}
+                    </label>
+                    <div className="settings-search-input-wrap">
+                      <input
+                        id="settings-search-input"
+                        data-testid="settings-search-input"
+                        className="input settings-search-input"
+                        type="search"
+                        value={settingsSearchQuery}
+                        onChange={(event) => setSettingsSearchQuery(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape" && hasSettingsSearchQuery) {
+                            event.stopPropagation();
+                            setSettingsSearchQuery("");
+                          }
+                        }}
+                        placeholder={t("settings.search.placeholder", "Search by setting or section")}
+                        aria-describedby="settings-search-results"
+                      />
+                      {hasSettingsSearchQuery && (
+                        <button
+                          type="button"
+                          className="btn btn-sm settings-search-clear"
+                          onClick={() => setSettingsSearchQuery("")}
+                          aria-label={t("settings.search.clear", "Clear settings search")}
+                        >
+                          {t("actions.clear", "Clear")}
+                        </button>
+                      )}
+                    </div>
+                    <div id="settings-search-results" className="settings-search-results" aria-live="polite">
+                      {hasSettingsSearchQuery
+                        ? t("settings.search.resultCount", "{{count}} matching sections", { count: searchableSectionOptions.length })
+                        : t("settings.search.allSections", "Showing all settings sections")}
+                    </div>
+                  </div>
+                )}
               </div>
               {showMobileSectionPicker && (
                 <div className="settings-mobile-section-picker">

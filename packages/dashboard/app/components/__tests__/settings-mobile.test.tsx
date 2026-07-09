@@ -308,6 +308,8 @@ describe("SettingsModal mobile adaptations", () => {
     const { getByLabelText, getByTestId, queryByLabelText, getByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
+    // FN-7713: search row is collapsed by default on mobile — expand it first.
+    await user.click(getByLabelText("Show search"));
     const search = getByTestId("settings-search-input");
     await user.type(search, "mcp");
 
@@ -587,5 +589,72 @@ describe("SettingsModal mobile adaptations", () => {
     expectBaseRule(css, ".settings-section-heading", "padding: var(--space-lg) 0 var(--space-md);");
     expectBaseRule(css, ".settings-section-heading", "margin: 0;");
     expect(css).not.toMatch(/\.settings-section-heading\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
+  });
+
+  // FN-7713: mobile Settings search row collapses by default behind an icon toggle; desktop keeps
+  // the row always visible with no toggle.
+  describe("mobile settings search collapse toggle (FN-7713)", () => {
+    it("hides the search input by default on mobile and reveals it via the toggle", async () => {
+      mockSettingsViewport(true);
+      const user = userEvent.setup();
+      const { getByLabelText, queryByTestId, findByLabelText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+      await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+      // Collapsed by default: no search input, toggle present and labeled "Show search".
+      expect(queryByTestId("settings-search-input")).toBeNull();
+      const toggle = getByLabelText("Show search");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(toggle.getAttribute("aria-controls")).toBe("settings-search-row-region");
+
+      await user.click(toggle);
+      expect(await findByLabelText("Hide search")).toBeTruthy();
+      expect(getByLabelText("Hide search").getAttribute("aria-expanded")).toBe("true");
+      expect(document.getElementById("settings-search-row-region")).toBeTruthy();
+
+      await user.click(getByLabelText("Hide search"));
+      await waitFor(() => expect(queryByTestId("settings-search-input")).toBeNull());
+      expect(getByLabelText("Show search").getAttribute("aria-expanded")).toBe("false");
+      // No leftover shell for the results region while collapsed.
+      expect(document.getElementById("settings-search-row-region")).toBeNull();
+      expect(document.getElementById("settings-search-results")).toBeNull();
+    });
+
+    it("preserves an active search query across collapse/expand cycles", async () => {
+      mockSettingsViewport(true);
+      const user = userEvent.setup();
+      const { getByLabelText, getByTestId, queryByTestId } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+      await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+      await user.click(getByLabelText("Show search"));
+      const search = getByTestId("settings-search-input");
+      await user.type(search, "mcp");
+      expect((getByTestId("settings-search-input") as HTMLInputElement).value).toBe("mcp");
+
+      // Collapse while a query is active: state is preserved, no forced auto-expand.
+      await user.click(getByLabelText("Hide search"));
+      expect(queryByTestId("settings-search-input")).toBeNull();
+
+      // Re-expanding restores the exact query and its results region.
+      await user.click(getByLabelText("Show search"));
+      expect((getByTestId("settings-search-input") as HTMLInputElement).value).toBe("mcp");
+      expect(document.getElementById("settings-search-results")?.textContent).toContain("matching sections");
+    });
+
+    it("keeps the desktop search row always visible with no toggle rendered", async () => {
+      mockSettingsViewport(false);
+      const { queryByLabelText, getByTestId } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+      await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+      expect(getByTestId("settings-search-input")).toBeTruthy();
+      expect(queryByLabelText("Show search")).toBeNull();
+      expect(queryByLabelText("Hide search")).toBeNull();
+    });
+
+    it("contains the mobile-only toggle CSS override and hides it on desktop", () => {
+      const css = loadAllAppCss();
+
+      expectMobileRule(css, ".settings-search-toggle", "display: inline-flex;");
+      expectBaseRule(css, ".settings-search-toggle", "display: none;");
+    });
   });
 });
