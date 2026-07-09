@@ -1286,6 +1286,8 @@ Dashboard surfacing path:
 - `useAgents` already refreshes on `agent:updated`/`agent:stateChanged` (`packages/dashboard/app/hooks/useAgents.ts`)
 - No new SSE event is introduced; stale durable agents become dashboard-visible as `Unresponsive` through the existing refresh path
 
+**Orphaned-timer invalidation on stop (FN-7718):** CLI-driven `fn agent stop`/`start` mutate the agent row from a separate process, so the in-process `agent:updated` listener never fires for those transitions — the 60s audit is the only cross-process reconciliation path. The audit now unregisters a lingering timer entry for any agent that fails eligibility (non-tickable state, `runtimeConfig.enabled === false`, or ephemeral/non-heartbeat-managed) instead of skipping past it, so a stopped agent never keeps an orphaned/"zombie" registration. `syncTimerForAgent`'s in-process start seam mirrors this: an eligible agent with a present-but-stale timer entry is force-cleared and re-armed rather than left as a no-op. This means a `stop`/`start` cycle is a durable fix — it no longer relies on the FN-7645 stale-repair path eventually catching the drift minutes later.
+
 ### Timer State Lifecycle (FN-2289)
 
 Heartbeat timers are armed for agents in valid working states and remain armed across state transitions:

@@ -4438,8 +4438,28 @@ export class HeartbeatTriggerScheduler {
     }
 
     if (this.timers.has(agent.id)) {
-      // Already ticking — non-config updates should not reset the interval.
-      return;
+      /*
+       * FNXC:AgentHeartbeat 2026-07-09-00:00:
+       * FN-7718 — a bare "already ticking" return here used to no-op even when
+       * the present timer entry was a stale/orphaned leftover (e.g. one that
+       * survived a stop the audit had not yet reconciled, or a start transition
+       * racing an in-flight registration). Reuse the same repair-stale gate the
+       * audit uses (default multiplier, since this sync path has no access to
+       * per-project settings) so a start transition force-clears+re-arms a
+       * present-but-stale entry instead of inheriting it, while a healthy fresh
+       * entry is still left alone — unrelated agent:updated events must never
+       * reset a healthy cadence.
+       */
+      const staleThresholdMs = this.getRepairStaleThresholdMs(agent, HeartbeatTriggerScheduler.DEFAULT_REPAIR_STALE_MULTIPLIER);
+      const elapsedMs = getHeartbeatAgeMs(agent);
+      const staleAtSync = Number.isFinite(elapsedMs) && elapsedMs > staleThresholdMs;
+      if (!staleAtSync) {
+        // Already ticking and fresh — non-config updates should not reset the interval.
+        return;
+      }
+      heartbeatLog.warn(
+        `Timer sync force re-armed stale present entry for ${agent.id} (${reason}): no heartbeat for ${Math.round(elapsedMs / 1000)}s (threshold ${Math.round(staleThresholdMs / 1000)}s)`,
+      );
     }
 
     this.registerAgent(agent.id, this.getAgentTimerConfig(agent), {
@@ -4622,7 +4642,30 @@ export class HeartbeatTriggerScheduler {
       let rearmedCount = 0;
       let zombieRearmedCount = 0;
       for (const agent of agents) {
-        if (!this.isTimerEligibleAgent(agent)) continue;
+        /*
+         * FNXC:AgentHeartbeat 2026-07-09-00:00:
+         * FN-7718 — CLI-driven `fn agent stop`/`start` mutate the agent row from
+         * a SEPARATE process, so the in-process `agent:updated` listener
+         * (syncTimerForAgent -> unregisterAgent) never fires for those
+         * transitions. This 60s audit is therefore the ONLY cross-process
+         * reconciliation path. Previously this loop bare-`continue`d past every
+         * non-eligible agent (stopped/paused, runtimeConfig.enabled===false, or
+         * ephemeral/!isHeartbeatManaged), which meant a timer entry armed while
+         * the agent was still running/eligible was never cleared — an orphaned
+         * "zombie" registration that lingered until the FN-7645 stale-repair
+         * path eventually fired minutes after a subsequent start (the recurring
+         * `zombie-timer-rearmed` symptom). Fix: when an agent is no longer
+         * timer-eligible but still has a present timer entry, unregister it here
+         * so a later start begins from a completely clean scheduling state
+         * instead of inheriting a stale/orphaned timer.
+         */
+        if (!this.isTimerEligibleAgent(agent)) {
+          if (this.timers.has(agent.id)) {
+            this.unregisterAgent(agent.id);
+            heartbeatLog.log(`Timer audit cleared orphaned timer for non-eligible agent ${agent.id} (audit:${reason})`);
+          }
+          continue;
+        }
 
         const hasTimerEntry = this.timers.has(agent.id);
         const staleThresholdMs = this.getRepairStaleThresholdMs(agent, staleMultiplier);
