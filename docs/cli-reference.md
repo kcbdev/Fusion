@@ -795,11 +795,13 @@ Pause a running/active agent by transitioning its state to `paused`.
 - If the agent is already paused, this is a no-op and prints `Agent <id> is already paused`.
 - Invalid state transitions are rejected with `Cannot stop agent <id> — current state '<state>' cannot transition to 'paused'`.
 - On success, prints `✓ Agent <id> stopped`.
+- The command always closes its store connections and exits promptly on every path (success, already-paused, not-found, invalid-transition) — it never hangs. The underlying state-store write is bounded by a fast-fail deadline (default 10s, override via `FUSION_AGENT_CMD_TIMEOUT_MS`); if it cannot complete in time, the command prints a clear error naming the agent and operation and exits non-zero instead of hanging. Safe to drive from an automated recovery watcher.
 
 **Examples:**
 ```bash
 fn agent stop AGENT-001
 fn agent stop AGENT-001 --project my-project
+FUSION_AGENT_CMD_TIMEOUT_MS=5000 fn agent stop AGENT-001  # tighter fast-fail deadline
 ```
 
 ### `fn agent start`
@@ -817,6 +819,7 @@ Resume a paused agent by transitioning its state to `active`.
 - If the agent is already `active` or `running`, this is a no-op and prints `Agent <id> is already running (<state>)`.
 - Invalid state transitions are rejected with `Cannot start agent <id> — current state '<state>' cannot transition to 'active'`.
 - On success, prints `✓ Agent <id> started`.
+- Same deterministic-exit and fast-fail-timeout behavior as `fn agent stop` (see above) — the command always closes its store connections and exits promptly, and the state-store write is bounded by `FUSION_AGENT_CMD_TIMEOUT_MS` (default 10s).
 
 **Examples:**
 ```bash

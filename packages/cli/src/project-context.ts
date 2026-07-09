@@ -312,3 +312,47 @@ export async function getStore(
   const context = await resolveProject(projectName, cwd, globalDir);
   return context.store;
 }
+
+/**
+ * FNXC:CliAgentControl 2026-07-08-00:00:
+ * Close a resolved project's `TaskStore` and evict it from `storeCache` when
+ * it is that store's owner. `resolveProject()` always constructs (and, for
+ * registered/CWD-detected projects, caches) a `TaskStore` even when a caller
+ * only needs the resolved `projectPath` — e.g. `fn agent stop/start`
+ * (packages/cli/src/commands/agent.ts) never touches `context.store` at all.
+ * An unclosed cached store keeps the underlying SQLite connection (and any
+ * handles it owns) alive, which can keep the CLI process's event loop alive
+ * past the point where the command's real work is done — the process never
+ * exits on its own, so a caller bounding the subprocess with a timeout (e.g.
+ * a recovery watcher) sees a false "hang" until it force-kills at its own
+ * deadline. Close+evict is best-effort and idempotent so it is safe even if
+ * another in-process caller already holds/closed the same cached instance.
+ */
+export async function closeProjectStore(context: ProjectContext): Promise<void> {
+  try {
+    await context.store.close();
+  } catch {
+    // Best-effort: an already-closed store (or one closed by a concurrent
+    // in-process caller) must not throw here.
+  }
+  if (storeCache.get(context.projectId) === context.store) {
+    storeCache.delete(context.projectId);
+  }
+}
+
+/**
+ * FNXC:CliAgentControl 2026-07-08-00:00:
+ * Resolve only the project PATH without leaking the `TaskStore` that
+ * `resolveProject()` constructs internally. Use this instead of
+ * `resolveProject()` when a command has no use for `context.store` (see
+ * `closeProjectStore` above for the underlying leak this avoids).
+ */
+export async function resolveProjectPathOnly(
+  projectNameFlag?: string,
+  cwd: string = process.cwd(),
+  globalDir?: string,
+): Promise<string> {
+  const context = await resolveProject(projectNameFlag, cwd, globalDir);
+  await closeProjectStore(context);
+  return context.projectPath;
+}
