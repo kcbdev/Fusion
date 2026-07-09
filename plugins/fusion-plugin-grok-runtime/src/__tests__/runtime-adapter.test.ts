@@ -9,8 +9,17 @@ describe("GrokRuntimeAdapter", () => {
     expect(result.session.systemPrompt).toBe("sys");
   });
 
-  it("promptWithFallback resolves without throwing", async () => {
+  // FN-7715: promptWithFallback is an INTENTIONAL no-op — Grok streaming
+  // flows through the pi/xAI OpenAI-compatible path registered by FN-7711,
+  // not through this plugin runtime adapter (which is only reached via
+  // runtimeConfig.runtimeHint === "grok", which nothing in the product
+  // sets). This module imports no process-spawning seam (compare
+  // process-manager.ts's `runGrokCommand`), so this asserts the intentional
+  // no-op contract at the only observable boundary: it resolves without
+  // throwing and returns no value, taking no action.
+  it("promptWithFallback is an intentional no-op: resolves without throwing, returns undefined", async () => {
     const adapter = new GrokRuntimeAdapter();
+
     await expect(adapter.promptWithFallback()).resolves.toBeUndefined();
   });
 
