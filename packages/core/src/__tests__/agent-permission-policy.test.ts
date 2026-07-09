@@ -13,7 +13,16 @@ import { AGENT_PERMISSION_POLICY_ACTION_CATEGORIES } from "../types.js";
 import {
   ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS,
   COORDINATION_EXEMPT_TOOLS,
+  READONLY_FN_TOOLS,
 } from "../../../engine/src/gating-classifications.js";
+
+// FN-7733: the GitLab browse tools are read-only discovery tools (they list issues/MRs without
+// creating task rows) and must never be governed as task_agent_mutation examples.
+const GITLAB_BROWSE_TOOLS = [
+  "fn_task_browse_gitlab_project_issues",
+  "fn_task_browse_gitlab_group_issues",
+  "fn_task_browse_gitlab_merge_requests",
+] as const;
 
 describe("agent-permission-policy", () => {
   it("returns the canonical built-in preset catalog", () => {
@@ -119,6 +128,16 @@ describe("agent-permission-policy", () => {
     for (const toolName of AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation) {
       expect(toolName.startsWith("fn_")).toBe(true);
       expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has(toolName)).toBe(true);
+    }
+  });
+
+  it("excludes read-only GitLab browse tools from task_agent_mutation examples and pins them as READONLY_FN_TOOLS", () => {
+    // FN-7733: regression coverage for the invariant, not just the reported repro — the browse
+    // tools must never appear as mutation examples, and must remain positively classified as
+    // read-only so this cannot silently regress.
+    for (const toolName of GITLAB_BROWSE_TOOLS) {
+      expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation).not.toContain(toolName);
+      expect(READONLY_FN_TOOLS.has(toolName)).toBe(true);
     }
   });
 

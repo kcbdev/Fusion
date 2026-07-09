@@ -6736,7 +6736,8 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
   command_execution: ["bash (non-git)", "fn_run_verification", "fn_acquire_repo_worktree", "read", "find", "grep", "ls"],
   network_api: ["fn_research_run (web/research)", "fn_research_cancel", "fn_web_fetch", "worktrunk_install"],
   /* FNXC:ToolGovernance 2026-06-27-16:51: Dashboard policy examples must mirror action-gate mutation exports. Identity reflection is exempt heartbeat coordination, so it is intentionally not advertised as task_agent_mutation.
-   * FNXC:WorkflowAuthoringTools 2026-06-29-23:40: Published workflow authoring tools are now agent-visible, so policy examples include the mutating workflow create/update/delete/settings/select surface operators can approve or block. */
+   * FNXC:WorkflowAuthoringTools 2026-06-29-23:40: Published workflow authoring tools are now agent-visible, so policy examples include the mutating workflow create/update/delete/settings/select surface operators can approve or block.
+   * FNXC:ToolGovernance 2026-07-09-09:36: FN-7733 — the GitLab browse tools (fn_task_browse_gitlab_project_issues, fn_task_browse_gitlab_group_issues, fn_task_browse_gitlab_merge_requests) are read-only discovery tools that never create task rows and are already classified under READONLY_FN_TOOLS in gating-classifications.ts; they were never members of ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS. Listing them here as task_agent_mutation examples broke the invariant that this list must be a subset of the action-gate mutation classification, so they are intentionally excluded. The mutating fn_task_import_gitlab_* variants (which do create task rows) remain listed below. */
   task_agent_mutation: [
     "fn_task_create",
     "fn_delegate_task",
@@ -6745,9 +6746,6 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
     "fn_task_import_gitlab_project_issues",
     "fn_task_import_gitlab_group_issues",
     "fn_task_import_gitlab_merge_requests",
-    "fn_task_browse_gitlab_project_issues",
-    "fn_task_browse_gitlab_group_issues",
-    "fn_task_browse_gitlab_merge_requests",
     "fn_spawn_agent",
     "fn_update_agent_config",
     "fn_task_update",
