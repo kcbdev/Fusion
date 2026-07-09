@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { customProviderRegistryKey, mergeSupplementalAnthropicModels, resolvePlanningSettingsModel } from "@fusion/core";
 import type { CustomProvider } from "@fusion/core";
 import { ApiError } from "../api-error.js";
+import { getCursorPickerModels, CURSOR_PICKER_PROVIDER_ID } from "../cursor-model-cache.js";
 import { getHermesPickerModels, HERMES_PICKER_PROVIDER_ID } from "../hermes-model-cache.js";
 import type { AuthStorageLike } from "../routes.js";
 import type { ApiRouteRegistrar } from "./types.js";
@@ -283,6 +284,41 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         models.push(hermesModel);
       }
 
+      /*
+      FNXC:ModelCatalog 2026-07-08-00:05:
+      FN-7696: additively surface Cursor CLI-discovered models
+      (`cursor-agent models --json`, with text/`model list` fallbacks) under
+      the stable "cursor-cli" provider id, mirroring the FN-7636 Hermes merge
+      above. Unlike Hermes (whose profile presence IS the enable signal),
+      Cursor has its own settings toggle (useCursorCli) — the toggle IS the
+      signal here, so discovery is only attempted when useCursorCli is true.
+      Fetched through getCursorPickerModels, backed by a short-TTL,
+      single-flight cache keyed by binary path — this call NEVER spawns
+      cursor-agent per request, and NEVER throws (a missing/failed/
+      unavailable binary degrades to []). Cursor rows are merged respecting
+      the existing seenModelKeys provider/id dedup so an existing row always
+      wins over a colliding Cursor row — purely additive, must never
+      displace, overwrite, or filter out an existing row.
+      */
+      if (useCursorCli) {
+        // getCursorPickerModels never throws by contract (see
+        // cursor-model-cache.ts), but this try/catch is a defensive belt so
+        // a Cursor discovery failure can never reject the /models handler or
+        // drop existing rows — degrade to zero Cursor rows instead.
+        try {
+          const cursorModels = await getCursorPickerModels();
+          for (const cursorModel of cursorModels) {
+            const key = `${cursorModel.provider}/${cursorModel.id}`;
+            if (seenModelKeys.has(key)) continue;
+            seenModelKeys.add(key);
+            models.push(cursorModel);
+          }
+        } catch (cursorErr: unknown) {
+          const message = cursorErr instanceof Error ? cursorErr.message : String(cursorErr);
+          runtimeLogger.child("models").warn(`Failed to load cursor-cli models: ${message}`);
+        }
+      }
+
       // Filter to only providers the user has explicitly configured in Fusion.
       // getAvailable() checks supplemental credential stores (Codex CLI,
       // Claude Code, env vars) which surface providers the user may not
@@ -305,6 +341,15 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       if (useClaudeCli) configuredProviders.add("pi-claude-cli");
       if (useDroidCli) configuredProviders.add("droid-cli");
       if (useLlamaCpp) configuredProviders.add("llama-server");
+      // FNXC:ModelCatalog 2026-07-08-00:05 (FN-7696): allow-list "cursor-cli"
+      // through the final filter whenever the toggle is on — independent of
+      // any auth.json/models.json cursor-cli entry and independent of
+      // whether discovery actually contributed rows (mirrors
+      // useClaudeCli/useDroidCli/useLlamaCpp exactly; unlike hermesRowsAdded,
+      // Cursor's own toggle IS the signal, not row presence). This closes the
+      // previously-missing configuredProviders.add("cursor-cli") gap that
+      // silently dropped Cursor rows even when the plugin surfaced them.
+      if (useCursorCli) configuredProviders.add(CURSOR_PICKER_PROVIDER_ID);
       // FNXC:ModelCatalog 2026-07-07-09:05 (FN-7636): only allow-list "hermes"
       // through the final filter when Hermes rows were actually contributed
       // above, mirroring the useClaudeCli/useDroidCli toggle pattern (Hermes

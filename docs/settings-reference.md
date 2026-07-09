@@ -966,6 +966,8 @@ Z.ai's built-in provider uses the existing `zai` auth entry / `ZAI_API_KEY` envi
 
 When the Hermes Runtime plugin (`fusion-plugin-hermes-runtime`) is installed and the local `hermes` CLI has configured profiles (`hermes profile list`), those profiles are surfaced additively in `/api/models` under the `hermes` provider — one row per profile, id/name derived from the profile name and its configured model. This surfacing is read-only (Fusion does not create or edit Hermes profiles) and is fetched through a short-TTL, single-flight cache so the model picker never spawns the `hermes` CLI on every request; a missing/failed `hermes` binary simply yields zero Hermes rows without affecting other providers.
 
+When the Cursor Runtime plugin (`fusion-plugin-cursor-runtime`) is installed and the `useCursorCli` toggle is enabled (Settings → Authentication), Cursor CLI-discovered models (`cursor-agent models --json`, with text/`model list` fallbacks) are surfaced additively in `/api/models` under the `cursor-cli` provider — id/name derived from the discovered model id/label. This surfacing is fetched through a short-TTL, single-flight cache so the model picker never spawns `cursor-agent` on every request; a missing/failed/unavailable Cursor CLI binary simply yields zero `cursor-cli` rows without affecting other providers. Disabling `useCursorCli` hides all `cursor-cli` rows.
+
 ### Planning model
 
 1. Per-task `planningModelProvider` + `planningModelId`

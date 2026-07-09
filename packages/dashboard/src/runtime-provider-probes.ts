@@ -25,6 +25,7 @@ import {
 } from "@fusion-plugin-examples/openclaw-runtime";
 
 import {
+  discoverCursorProviderModels,
   probeCursorBinary,
   type CursorBinaryStatus,
 } from "@fusion-plugin-examples/cursor-runtime";
@@ -63,6 +64,31 @@ export { mintAgentApiKeyViaCli };
 
 export async function probeCursorCliProvider(opts?: { binaryPath?: string }): Promise<CursorBinaryStatus> {
   return probeCursorBinary(opts);
+}
+
+/** Result shape returned by the Cursor plugin's model-discovery contribution. */
+export interface CursorModelDiscoveryResult {
+  models: Array<{ id: string; label?: string }>;
+  source: string;
+  fallbackUsed: boolean;
+  reason?: string;
+}
+
+/**
+ * Discover Cursor CLI models via `cursor-agent models --json` (with text /
+ * `model list` fallbacks), delegating to the Cursor Runtime plugin's
+ * `discoverCursorProviderModels` cliProviders contribution.
+ *
+ * This is the stable mock/spy boundary for `cursor-model-cache.ts` and its
+ * tests — never called directly per-request; see `getCursorPickerModels`.
+ * Never throws by contract of the underlying plugin function (a missing/
+ * unavailable binary resolves to `{ models: [], fallbackUsed: true, ... }`).
+ */
+export async function discoverCursorCliModels(opts?: {
+  binaryPath?: string;
+  timeoutMs?: number;
+}): Promise<CursorModelDiscoveryResult> {
+  return discoverCursorProviderModels(opts) as Promise<CursorModelDiscoveryResult>;
 }
 
 /**
