@@ -667,3 +667,57 @@ Hydrated worktree DB: 4 tasks, 12 task_documents, 3 artifacts
 A concrete recovered failure mode now covered by tests: when a worktree directory exists but its local `.fusion/` scratch state is missing, opening `DatabaseSync(<worktree>/.fusion/fusion.db)` can fail with `unable to open database file`. Hydration now performs destination bootstrap (`mkdir -p .fusion` + schema init) and retries the destination open once before degrading.
 
 Failure policy remains strict non-blocking for genuinely unrecoverable cases: hydration warnings are logged, but worktree creation/execution continues. Examples that still intentionally degrade include source DB missing, destination write-permission failures, and irreconcilable schema/open errors after bootstrap retry. Canonical task data remains the root project TaskStore DB; if an agent needs non-hydrated rows immediately, `fn_task_show` remains the canonical fallback path.
+
+## Silent board-mutation write loss (FN-7730)
+
+**Symptom:** board mutations issued through `fn_task_update` (and other pi-extension write
+tools invoked from an executor agent session) appeared to succeed, but the change was never
+visible on the project-root `.fusion/fusion.db` that the engine and dashboard read from — with
+no error surfaced on any write path.
+
+**Root cause — a DB-path resolution mismatch, not a WAL/durability defect.** Investigation
+(see task FN-7730's `research` document for the full trace) disproved the WAL `-shm`-unavailable
+and uncheckpointed-WAL/`.recover` hypotheses on a normally-writable POSIX filesystem: both
+failure conditions were reproduced directly and confirmed to throw a loud SQLite error rather
+than silently drop data with the `node:sqlite` bindings and `sqlite3` CLI version this repo
+requires. The real defect was in **project-root resolution** for pi-extension tool calls
+(`packages/cli/src/extension.ts`'s `resolveProjectRoot(cwd)` → `getProjectRootFromWorktree`
+in `packages/core/src/pi-extensions.ts`):
+
+1. `getProjectRootFromWorktree` matches the standard `.worktrees/<id>` and
+ `.fusion/worktrees/<id>` path shapes via hardcoded regex. A project with a non-default
+ `settings.worktreesDir` (an arbitrary relative/absolute location — common in containerized
+ deployments) doesn't match either pattern.
+2. The only remaining resolution path, `getProjectRootFromGitLinkedWorktree`, shelled out to
+ `git rev-parse --git-common-dir`/`--git-dir` via `spawnSync`. A failing `git` invocation —
+ missing binary in a minimal container image, Docker's "detected dubious ownership"
+ `safe.directory` refusal on a bind-mounted repo owned by a different UID, or any other
+ non-zero exit — returned `null` with **no thrown error** (by design, so a non-worktree `cwd`
+ doesn't explode), but with no non-git fallback.
+3. `resolveProjectRoot`'s caller then fell back to a naive upward walk for the nearest ancestor
+ with a `.fusion` directory. Because the task's own worktree already has a locally-hydrated
+ `.fusion/fusion.db` (see "Per-Worktree DB Hydration" above), the walk matched **immediately**
+ at the worktree itself, never reaching the true project root.
+4. Every subsequent write tool call for that agent session then silently landed in the
+ throwaway, one-way-hydrated worktree-local `fusion.db` — never synced back to the project
+ root — with zero error surfaced.
+
+**Fix:** `getProjectRootFromGitLinkedWorktree` now resolves the linked-worktree relationship
+directly from git's own on-disk metadata first — the worktree's `.git` file (`gitdir: <path>`)
+plus its `commondir` sidecar, the same contract `git worktree add` writes — via plain
+filesystem reads. This has **no subprocess dependency and is unaffected by the `git` binary's
+availability or Docker UID/`safe.directory` permission checks**. The `git rev-parse` CLI path is
+kept as a secondary fallback for any layout the filesystem parser can't resolve, preserving
+prior behavior for those edge cases.
+
+**Operator guidance:** if you suspect a write went to the wrong file, confirm which path a tool
+session resolves by checking `.fusion/fusion.db` for a `mtime` change immediately after the
+write in both the project root and (if applicable) the task's worktree directory. A
+non-standard `settings.worktreesDir` combined with a broken `git` CLI in the execution
+environment (missing binary, or `git config --global --add safe.directory '*'` not set for a
+bind-mounted repo owned by a different UID) was the confirmed trigger; setting
+`safe.directory` correctly or installing `git` resolves the underlying condition even without
+this fix, and this fix additionally removes the dependency on that condition being addressed.
+There is no data-recovery step needed once the resolver is fixed — no rows were corrupted, they
+were written to (and remain recoverable from) the worktree-local `.fusion/fusion.db` if it still
+exists on disk.
