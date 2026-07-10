@@ -106,6 +106,18 @@ function formatErrorEventDiagnostic(event: GrokErrorEvent): string {
   return detail ? `Grok CLI error: ${detail}` : "Grok CLI emitted an error event without a message.";
 }
 
+function formatNoNdjsonDiagnostic(firstStdoutLine: string | undefined): string {
+  const firstLine = firstStdoutLine ? compactDiagnostic(firstStdoutLine) : "";
+  if (firstLine) {
+    return `Grok CLI produced stdout but no NDJSON events for a headless prompt; first line: ${firstLine}`;
+  }
+  return "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not the supported grok-cli headless implementation, did not recognize --prompt/--format json, or exited interactive mode immediately after stdin EOF.";
+}
+
+function appendMessage(session: GrokSession, role: "user" | "assistant", content: string): void {
+  session.state.messages.push({ role, content });
+}
+
 export interface GrokRuntimeAdapterOptions {
   /** Binary name/path to invoke. Defaults to "grok" (PATH resolution). */
   binary?: string;
@@ -157,6 +169,7 @@ export class GrokRuntimeAdapter implements AgentRuntime {
     const grokSession = session as GrokSession;
     const cwd = options?.cwd;
     const signal = options?.signal;
+    appendMessage(grokSession, "user", prompt);
 
     return new Promise<void>((resolve) => {
       let proc: GrokStreamProcess;
@@ -168,14 +181,21 @@ export class GrokRuntimeAdapter implements AgentRuntime {
         // contract of always producing a well-formed result while retaining
         // the concrete diagnostic for callers that surface session.state.
         const message = err instanceof Error ? err.message : String(err);
-        grokSession.state.errorMessage = compactDiagnostic(`Grok CLI spawn failed: ${message}`);
+        const diagnostic = compactDiagnostic(`Grok CLI spawn failed: ${message}`);
+        grokSession.state.errorMessage = diagnostic;
+        grokSession.callbacks.onText?.(diagnostic);
+        appendMessage(grokSession, "assistant", diagnostic);
         resolve();
         return;
       }
 
       let settled = false;
       let firstLineReceived = false;
+      let receivedNdjsonEvent = false;
+      let firstStdoutLine: string | undefined;
       let receivedText = false;
+      let assistantText = "";
+      let diagnosticEmitted = false;
       let stderr = "";
       let firstLineTimer: NodeJS.Timeout | undefined;
       let inactivityTimer: NodeJS.Timeout | undefined;
@@ -185,21 +205,40 @@ export class GrokRuntimeAdapter implements AgentRuntime {
         grokSession.state.errorMessage = message;
       };
 
+      const emitDiagnosticText = (message: string | undefined) => {
+        const diagnostic = message?.trim();
+        if (!diagnostic || receivedText || diagnosticEmitted) return;
+        diagnosticEmitted = true;
+        grokSession.callbacks.onText?.(diagnostic);
+        appendMessage(grokSession, "assistant", diagnostic);
+      };
+
       /*
       FNXC:GrokCli 2026-07-10-00:00:
       A failing headless `grok` run can close stdout before the child `close` event reports its non-zero exit and stderr. Resolving on readline close made dashboard Chat persist an empty assistant message before the diagnostic existed. Finalize only from subprocess close/error or lifecycle timeouts, and store concrete stderr/NDJSON error details on session.state.errorMessage so shared chat/executor seams can surface the reason without breaking the resolve-never-reject runtime contract.
+
+      FNXC:GrokCli 2026-07-10-09:55:
+      FN-7788 root-caused the remaining immediate "no message" symptom to a code-0 prompt run that emitted no parsed NDJSON at all, commonly caused by an unsupported/wrong `grok` binary falling into interactive mode and immediately reading EOF from ignored stdin. Upstream guarantees a valid `grok --prompt <text> --format json` run emits at least `step_start`, so a zero-NDJSON close is now a diagnosable failure surfaced through both `onText` and `session.state.errorMessage`; only a real NDJSON run with empty assistant text stays silent.
       */
       const finish = () => {
         if (settled) return;
         settled = true;
         if (firstLineTimer) clearTimeout(firstLineTimer);
         if (inactivityTimer) clearTimeout(inactivityTimer);
+        if (assistantText) {
+          appendMessage(grokSession, "assistant", assistantText);
+        } else {
+          emitDiagnosticText(grokSession.state.errorMessage);
+        }
         resolve();
       };
 
       const resetInactivityTimer = () => {
         if (inactivityTimer) clearTimeout(inactivityTimer);
         inactivityTimer = setTimeout(() => {
+          setErrorMessage(
+            `Grok CLI stopped producing stdout for ${INACTIVITY_TIMEOUT_MS}ms during a headless prompt; the process was killed.`,
+          );
           forceKillGrokStream(proc);
           finish();
         }, INACTIVITY_TIMEOUT_MS);
@@ -207,6 +246,9 @@ export class GrokRuntimeAdapter implements AgentRuntime {
 
       firstLineTimer = setTimeout(() => {
         if (firstLineReceived) return;
+        setErrorMessage(
+          `Grok CLI produced no stdout within ${FIRST_LINE_TIMEOUT_MS}ms for a headless prompt; the process was killed.`,
+        );
         forceKillGrokStream(proc);
         finish();
       }, FIRST_LINE_TIMEOUT_MS);
@@ -216,15 +258,20 @@ export class GrokRuntimeAdapter implements AgentRuntime {
       rl.on("line", (line: string) => {
         if (!firstLineReceived) {
           firstLineReceived = true;
+          firstStdoutLine = line;
           if (firstLineTimer) clearTimeout(firstLineTimer);
         }
         resetInactivityTimer();
 
         const event = parseLine(line);
         if (!event) return;
+        receivedNdjsonEvent = true;
 
         if (event.type === "text") {
-          receivedText = receivedText || event.text.length > 0;
+          if (event.text.length > 0) {
+            receivedText = true;
+            assistantText += event.text;
+          }
           grokSession.callbacks.onText?.(event.text);
         } else if (event.type === "tool_use") {
           // FNXC:GrokCli 2026-07-09-00:10: FN-7724 — bridge the verified
@@ -269,6 +316,8 @@ export class GrokRuntimeAdapter implements AgentRuntime {
         const failed = typeof code === "number" ? code !== 0 : Boolean(signal);
         if (!receivedText && failed) {
           setErrorMessage(formatCloseDiagnostic(typeof code === "number" ? code : null, signal, stderr));
+        } else if (!receivedText && !receivedNdjsonEvent && typeof code === "number" && code === 0) {
+          setErrorMessage(formatNoNdjsonDiagnostic(firstStdoutLine));
         }
         finish();
       });

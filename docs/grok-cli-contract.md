@@ -108,6 +108,18 @@ Notes:
   line to stderr and calls `process.exit(1)` before any NDJSON is emitted.
   Consumers must therefore also treat a non-zero exit with no JSON output as
   a distinct failure mode from a well-formed `error` event.
+- A **code-0 run with zero parsed NDJSON events is anomalous**, not a valid
+  empty assistant response. A supported headless prompt emits at least
+  `step_start`; when Fusion sees stdout close + process close(0) with no
+  parsed NDJSON, it surfaces a diagnostic instead of persisting a mystery
+  empty message. This shape can occur when the `grok` binary on PATH is the
+  wrong/unsupported binary or falls back to an interactive mode that exits
+  immediately after stdin EOF.
+
+<!--
+FNXC:GrokCli 2026-07-10-10:02:
+FN-7788 pins the zero-NDJSON invariant after the operator reported Grok CLI still returned "no message" immediately after non-zero failure diagnostics landed. A valid headless prompt must emit `step_start`; code-0/no-NDJSON closes are therefore operator-actionable runtime failures, commonly wrong-binary or interactive-EOF fallback, and adapters must not swallow them as legitimate empty replies.
+-->
 
 ## Auth / readiness
 

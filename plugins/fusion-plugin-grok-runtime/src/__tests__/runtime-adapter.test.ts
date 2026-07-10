@@ -82,6 +82,7 @@ describe("GrokRuntimeAdapter", () => {
 
     expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({}));
     expect(onText.mock.calls.map((c) => c[0])).toEqual(["hel", "lo!"]);
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: "hello!" });
   });
 
   it("skips malformed/unrecognized lines without invoking onText and without throwing", async () => {
@@ -155,14 +156,55 @@ describe("GrokRuntimeAdapter", () => {
     expect(session.state.errorMessage).toBe("Grok CLI failed with code 2 and no stderr output.");
   });
 
-  it("keeps a clean content-less zero exit silent", async () => {
+  it("records a concrete diagnostic for code-0 exits with zero NDJSON output", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.end();
+    proc.emit("close", 0, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBe(
+      "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not the supported grok-cli headless implementation, did not recognize --prompt/--format json, or exited interactive mode immediately after stdin EOF.",
+    );
+    expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: session.state.errorMessage });
+  });
+
+  it("records a concrete diagnostic for code-0 exits with non-NDJSON stdout only", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.write("Welcome to grok interactive mode\n");
+    stdout.end();
+    proc.emit("close", 0, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBe(
+      "Grok CLI produced stdout but no NDJSON events for a headless prompt; first line: Welcome to grok interactive mode",
+    );
+    expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
+  });
+
+  it("keeps a clean NDJSON run with no assistant text silent", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
     const { session } = await adapter.createSession({});
 
     const promise = adapter.promptWithFallback(session, "hi");
-    stdout.end();
+    stdout.write(`${JSON.stringify({ type: "step_start", stepNumber: 1, timestamp: 1 })}\n`);
+    stdout.write(
+      `${JSON.stringify({ type: "step_finish", stepNumber: 1, timestamp: 2, finishReason: "stop", usage: {} })}\n`,
+    );
     proc.emit("close", 0, null);
     await promise;
 
