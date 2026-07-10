@@ -130,10 +130,17 @@
   border-bottom: 1px solid var(--border);
 }
 
+/*
+FNXC:ModelDropdown 2026-07-09-00:00:
+FN-7760 requires the portaled model list to remain the touch-scroll owner on mobile. The global mobile lockdown keeps body/root overflow hidden and defaults touch gestures to vertical panning, so this fixed-position scroller needs its own iOS momentum scrolling, contained overscroll, and explicit vertical pan contract.
+*/
 .model-combobox-list {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 4px 0;
 }
 

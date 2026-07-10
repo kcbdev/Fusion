@@ -76,6 +76,76 @@ describe("CustomModelDropdown", () => {
     expect(hostSurface.contains(portal)).toBe(false);
   });
 
+  it.each([
+    { width: 390, height: 844, query: "(max-width: 640px)", expectedMaxHeight: "360px" },
+    { width: 700, height: 900, query: "(max-width: 768px)", expectedMaxHeight: "420px" },
+  ])("keeps the portaled model list touch-scrollable at $query", async ({ width, height, query, expectedMaxHeight }) => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const css = readFileSync(resolve(__dirname, "../CustomModelDropdown.css"), "utf-8");
+    const listRule = css.match(/\.model-combobox-list\s*\{[^}]*\}/)?.[0] ?? "";
+    const overflowingModels = Array.from({ length: 30 }, (_, index) => ({
+      provider: index % 2 === 0 ? "openai" : "anthropic",
+      id: `model-${index}`,
+      name: `Model ${index}`,
+      reasoning: index % 3 === 0,
+      contextWindow: 128000 + index,
+    }));
+
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(width);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(height);
+    vi.spyOn(window, "matchMedia").mockImplementation((mediaQuery: string) => ({
+      matches: mediaQuery === query || (width <= 640 && mediaQuery === "(max-width: 768px)"),
+      media: mediaQuery,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as MediaQueryList));
+
+    render(
+      <CustomModelDropdown
+        label="Executor Model"
+        value=""
+        onChange={onChange}
+        models={overflowingModels}
+        favoriteModels={["openai/model-0", "anthropic/model-1"]}
+        onToggleModelFavorite={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Executor Model" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 24,
+      y: 80,
+      width: 320,
+      height: 36,
+      top: 80,
+      right: 344,
+      bottom: 116,
+      left: 24,
+      toJSON: () => ({}),
+    });
+
+    await user.click(trigger);
+
+    const portal = await screen.findByTestId("model-combobox-portal");
+    const list = portal.querySelector(".model-combobox-list");
+
+    expect(portal.classList.contains("model-combobox-dropdown--portal")).toBe(true);
+    expect(portal.style.maxHeight).toBe(expectedMaxHeight);
+    expect(list).toBeInstanceOf(HTMLElement);
+    expect(within(portal).getAllByRole("option").length).toBeGreaterThan(20);
+    expect(listRule).toContain("overflow-y: auto;");
+    expect(listRule).toContain("overflow-x: hidden;");
+    expect(listRule).toContain("-webkit-overflow-scrolling: touch;");
+    expect(listRule).toContain("overscroll-behavior: contain;");
+    expect(listRule).toContain("touch-action: pan-y;");
+    expect(listRule).not.toContain("touch-action: none");
+  });
+
   it("supports an explicit No change sentinel while keeping Use default available", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
