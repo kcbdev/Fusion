@@ -42,7 +42,7 @@ describe("spawnGrokStream", () => {
       "-p",
       "hello",
       "--output-format",
-      "streaming-json",
+      "json",
       "-m",
       "grok-4.5",
       "--cwd",
@@ -62,7 +62,7 @@ describe("spawnGrokStream", () => {
       "-p",
       "hello",
       "--output-format",
-      "streaming-json",
+      "json",
       "--cwd",
       "/tmp/project",
     ], expect.objectContaining({ cwd: "/tmp/project" }));

@@ -23,23 +23,23 @@ The previously assumed `superagent-ai/grok-cli` contract is a different product 
 - **Auth model — the `grok` CLI owns its own authentication; Fusion does not require a Fusion-visible API key to enable/use it (FN-7716).** Fusion additionally probes the `GROK_API_KEY` env var and `~/.grok/user-settings.json` → `{ "apiKey": "..." }` purely as a **non-blocking informational hint** (`apiKeyDetected`); it never gates Enable or the authenticated state. The direct xAI OpenAI-compatible streaming path (base URL `https://api.x.ai/v1`) still uses `$GROK_API_KEY` when present, independent of the CLI provider.
 - Model discovery: `grok models` (plain text). The observed xAI shape is `Default model: <id>`, then `Available models:`, then `* <id> (default)` / `- <id>` bullet rows.
 
-## CLI streaming execution path (FN-7790)
+## CLI headless execution path (FN-7790 / FN-7796)
 
-The plugin's `GrokRuntimeAdapter` streams a real Grok response through xAI's CLI:
+The plugin's `GrokRuntimeAdapter` returns a real Grok response through xAI's reliable single-object CLI output:
 
 ```bash
-grok -p "<text>" --output-format streaming-json
+grok -p "<text>" --output-format json
 # with optional model/cwd:
-grok -p "<text>" --output-format streaming-json -m "grok-4.5" --cwd "/path/to/project"
+grok -p "<text>" --output-format json -m "grok-4.5" --cwd "/path/to/project"
 ```
 
 - `-p, --single <PROMPT>` runs a single prompt and exits; it does not require interactive stdin.
-- `--output-format streaming-json` emits NDJSON with event types `thought`, `text`, and `end`.
-- `thought.data` drives `onThinking`; `text.data` drives `onText` and persisted assistant content; `end.sessionId` is stored when present. The subprocess `close` event remains the authoritative resolution point so stderr/exit diagnostics are preserved.
-- A wrong-binary/wrong-flag run that emits no parsed NDJSON surfaces a concrete diagnostic instead of a blank assistant response. A real `end` event with empty accumulated text remains a legitimate silent response.
+- `--output-format json` emits one object with `{ text, stopReason, sessionId, requestId, thought }`. Fusion buffers stdout until subprocess `close`, then bridges `thought` to `onThinking`, `text` to `onText` and persisted assistant content, and stores `sessionId` when present.
+- xAI's `--output-format streaming-json` mode is not used for the primary headless path because live `grok 0.2.93` testing found it can intermittently end `stopReason:"Cancelled"` with zero `text` events. A non-`EndTurn` stop reason with empty text now surfaces a concrete diagnostic instead of a blank assistant response; a parseable `EndTurn` with empty text remains a legitimate silent response.
+- A wrong-binary/wrong-flag run that emits no parseable JSON surfaces a concrete diagnostic instead of a blank assistant response.
 - **Auth implication:** because the `grok` binary resolves its own credentials for this path, a CLI-routed selection needs **no Fusion-visible `GROK_API_KEY`** — unlike the direct xAI OpenAI-compatible streaming path.
 
-See `docs/grok-cli-contract.md` for the full contract, live captures, and the reason Fusion no longer uses the old `grok --prompt <text> --format json` / `step_*` schema.
+See `docs/grok-cli-contract.md` for the full contract, live captures, and the reason Fusion no longer uses the old `grok --prompt <text> --format json` / `step_*` schema or the flaky streaming-json prompt path.
 
 ## Routing Grok through the CLI runtime (FN-7725 / FN-7753 / FN-7790)
 

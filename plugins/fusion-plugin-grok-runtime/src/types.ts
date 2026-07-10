@@ -1,7 +1,16 @@
 /*
-FNXC:GrokCli 2026-07-10-10:48:
-FN-7790: operators run xAI's official Grok Build TUI (`grok 0.2.93`), not the previously assumed `superagent-ai/grok-cli` product. The real headless stream is `grok -p <prompt> --output-format streaming-json` and emits `thought`/`text`/`end` objects with `data`, so these types intentionally retire the old `step_*`/`tool_use`/`error` union that made fake tests pass while the real binary returned no assistant text.
+FNXC:GrokCli 2026-07-10-12:50:
+FN-7796: xAI Grok Build TUI's `--output-format streaming-json` can emit reasoning-only events and then `stopReason:"Cancelled"` with zero assistant text. The primary headless contract is therefore the reliable single `--output-format json` object `{text,stopReason,sessionId,requestId,thought}`; streaming event types remain only for diagnostics/regressions that model the captured flaky shape.
 */
+
+export interface GrokCliJsonResponse {
+  text?: string;
+  stopReason?: string;
+  sessionId?: string;
+  requestId?: string;
+  thought?: string;
+}
+
 
 export interface GrokThoughtEvent {
   type: "thought";

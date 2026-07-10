@@ -5,8 +5,8 @@ import type { GrokStreamProcess } from "../cli-stream.js";
 import { GrokRuntimeAdapter } from "../runtime-adapter.js";
 
 /*
-FNXC:GrokCli 2026-07-10-11:05:
-FN-7790: adapter tests are pinned to the operator-verified xAI Grok Build TUI stream (`thought`/`text`/`end` with `data`). They intentionally avoid a live binary in CI but exercise the same spawn seam and lifecycle diagnostics that previously hid the wrong `--prompt`/`--format json` contract behind fake superagent-ai fixtures.
+FNXC:GrokCli 2026-07-10-12:54:
+FN-7796: adapter tests are pinned to the reliable xAI Grok Build TUI headless contract (`--output-format json` single object) and the live-captured flaky `streaming-json` cancellation shape. They intentionally avoid a live binary in CI but exercise the same spawn seam and lifecycle diagnostics that previously hid wrong-contract and cancelled-no-text failures behind fake fixtures.
 */
 
 function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; stderr: PassThrough; kill: ReturnType<typeof vi.fn> } {
@@ -58,6 +58,65 @@ describe("GrokRuntimeAdapter", () => {
     expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({ model: undefined }));
   });
 
+
+  it("bridges the reliable single-object json response and persists assistant content", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const onThinking = vi.fn();
+    const { session } = await adapter.createSession({ onText, onThinking });
+
+    const promise = adapter.promptWithFallback(session, "hello grok");
+    stdout.write(JSON.stringify({ text: "Hello", stopReason: "EndTurn", sessionId: "session-json", requestId: "request-json", thought: "Thinking" }));
+    stdout.end();
+    closeProc(proc);
+    await promise;
+
+    expect(onThinking).toHaveBeenCalledWith("Thinking");
+    expect(onText).toHaveBeenCalledWith("Hello");
+    expect(session.sessionId).toBe("session-json");
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: "Hello" });
+  });
+
+  it("surfaces cancelled no-text json object as a diagnostic instead of a silent empty response", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "say hello in one word");
+    stdout.write(JSON.stringify({ text: "", stopReason: "Cancelled", sessionId: "session-cancelled" }));
+    stdout.end();
+    closeProc(proc);
+    await promise;
+
+    expect(session.state.errorMessage).toBe("Grok CLI ended with stopReason Cancelled and produced no assistant text.");
+    expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: session.state.errorMessage });
+  });
+
+  it("surfaces cancelled no-text streaming-json shape as a diagnostic instead of a silent empty response", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const onThinking = vi.fn();
+    const { session } = await adapter.createSession({ onText, onThinking });
+
+    const promise = adapter.promptWithFallback(session, "say hello in one word");
+    stdout.write(`${JSON.stringify({ type: "thought", data: "Thinking" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "Cancelled", sessionId: "session-cancelled", requestId: "request-cancelled" })}\n`);
+    stdout.end();
+    closeProc(proc);
+    await promise;
+
+    expect(session.state.errorMessage).toBe("Grok CLI ended with stopReason Cancelled and produced no assistant text.");
+    expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: session.state.errorMessage });
+  });
+
   it("bridges real xAI thought/text/end events and persists assistant content", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
@@ -75,7 +134,7 @@ describe("GrokRuntimeAdapter", () => {
     await promise;
 
     expect(onThinking.mock.calls.map((c) => c[0])).toEqual(["Thinking"]);
-    expect(onText.mock.calls.map((c) => c[0])).toEqual(["Hel", "lo"]);
+    expect(onText.mock.calls.map((c) => c[0])).toEqual(["Hello"]);
     expect(session.sessionId).toBe("session-1");
     expect(session.state.messages).toContainEqual({ role: "assistant", content: "Hello" });
   });
@@ -171,7 +230,7 @@ describe("GrokRuntimeAdapter", () => {
     expect(session.state.errorMessage).toBe("Grok CLI failed with code 2 and no stderr output.");
   });
 
-  it("records a concrete diagnostic for code-0 exits with zero NDJSON output", async () => {
+  it("records a concrete diagnostic for code-0 exits with zero JSON output", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
@@ -184,13 +243,13 @@ describe("GrokRuntimeAdapter", () => {
     await promise;
 
     expect(session.state.errorMessage).toBe(
-      "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not xAI's supported Grok Build TUI headless implementation, did not recognize -p/--output-format streaming-json, or exited interactive mode immediately after stdin EOF.",
+      "Grok CLI produced no JSON output for a headless prompt; this usually means the binary on PATH is not xAI's supported Grok Build TUI headless implementation, did not recognize -p/--output-format json, or exited interactive mode immediately after stdin EOF.",
     );
     expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
     expect(session.state.messages).toContainEqual({ role: "assistant", content: session.state.errorMessage });
   });
 
-  it("records a concrete diagnostic for code-0 exits with non-NDJSON stdout only", async () => {
+  it("records a concrete diagnostic for code-0 exits with non-JSON stdout only", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
@@ -204,7 +263,7 @@ describe("GrokRuntimeAdapter", () => {
     await promise;
 
     expect(session.state.errorMessage).toBe(
-      "Grok CLI produced stdout but no NDJSON events for a headless prompt; first line: Welcome to grok interactive mode",
+      "Grok CLI produced stdout but no parseable JSON response for a headless prompt; first output: Welcome to grok interactive mode",
     );
     expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
   });
