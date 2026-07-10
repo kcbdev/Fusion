@@ -547,6 +547,96 @@ describe("ChatManager.sendMessage", () => {
     expect(assistantCall?.[1].content).toBe("Hello world!");
   });
 
+  it("persists streamed replies and broadcasts done for no-state plugin runtime sessions", async () => {
+    const events: Array<{ type: string; data: any }> = [];
+    const unsubscribe = chatStreamManager.subscribe("chat-001", (event) => {
+      events.push(event);
+    });
+    mockChatStore.addMessage.mockImplementation((_sessionId, input) => ({
+      id: input.role === "assistant" ? "assistant-msg" : "user-msg",
+      sessionId: "chat-001",
+      role: input.role,
+      content: input.content,
+      thinkingOutput: input.thinkingOutput,
+      metadata: input.metadata,
+      createdAt: "2026-07-10T00:00:00.000Z",
+    }));
+
+    __setCreateFnAgent(async (options: any) => ({
+      session: {
+        prompt: vi.fn().mockImplementation(async () => {
+          options.onText?.("Grok CLI streamed reply");
+        }),
+        dispose: vi.fn(),
+        messages: [],
+      },
+    }));
+
+    const chatManager = createChatManager();
+    await expect(chatManager.sendMessage("chat-001", "Hello Grok")).resolves.toBeUndefined();
+    unsubscribe();
+
+    const assistantCalls = mockChatStore.addMessage.mock.calls.filter((call) => call[1].role === "assistant");
+    expect(assistantCalls).toHaveLength(1);
+    expect(assistantCalls[0]?.[1].content).toBe("Grok CLI streamed reply");
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "done",
+      data: expect.objectContaining({
+        message: expect.objectContaining({ content: "Grok CLI streamed reply" }),
+      }),
+    }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+    expect(assistantCalls[0]?.[1].content).not.toContain("Response failed");
+  });
+
+  it("does not crash when a no-state plugin runtime streams no text", async () => {
+    const events: Array<{ type: string; data: any }> = [];
+    const unsubscribe = chatStreamManager.subscribe("chat-001", (event) => {
+      events.push(event);
+    });
+    mockChatStore.addMessage.mockImplementation((_sessionId, input) => ({
+      id: input.role === "assistant" ? "assistant-msg" : "user-msg",
+      sessionId: "chat-001",
+      role: input.role,
+      content: input.content,
+      createdAt: "2026-07-10T00:00:00.000Z",
+    }));
+
+    __setCreateFnAgent(async () => ({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+        messages: [],
+      },
+    }));
+
+    const chatManager = createChatManager();
+    await expect(chatManager.sendMessage("chat-001", "Hello Grok")).resolves.toBeUndefined();
+    unsubscribe();
+
+    const assistantCalls = mockChatStore.addMessage.mock.calls.filter((call) => call[1].role === "assistant");
+    expect(assistantCalls).toHaveLength(1);
+    expect(assistantCalls[0]?.[1].content).toBe("");
+    expect(events).toContainEqual(expect.objectContaining({ type: "done" }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+  });
+
+  it("falls back to top-level messages for no-state plugin runtime sessions", async () => {
+    __setCreateFnAgent(async () => ({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+        messages: [{ role: "assistant", content: "Top-level Grok message" }],
+      },
+    }));
+
+    const chatManager = createChatManager();
+    await expect(chatManager.sendMessage("chat-001", "Hello Grok")).resolves.toBeUndefined();
+
+    const assistantCall = mockChatStore.addMessage.mock.calls.find((call) => call[1].role === "assistant");
+    expect(assistantCall?.[1].content).toBe("Top-level Grok message");
+  });
+
   // U11 / R12 drift guard: the chat lane must expose workflow discovery,
   // mutation, settings, selection, and trait vocabulary to the agent when a
   // scoped task store is available.

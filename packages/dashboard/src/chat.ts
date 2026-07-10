@@ -1781,7 +1781,13 @@ export class ChatManager {
       );
 
       type AgentMessage = { role?: string; type?: string; content?: string | Array<{ type?: string; text?: string }> };
-      const messages = (resolvedSession.session.state.messages as AgentMessage[]) ?? [];
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtime sessions (grok/droid/cursor) expose top-level `messages` and stream via `onText` without a pi-shaped `state`, so room responders must read messages null-safely while preserving pi/openclaw state-backed sessions.
+       */
+      const roomSessionState = resolvedSession.session.state as { messages?: AgentMessage[]; errorMessage?: string } | undefined;
+      const roomTopLevelMessages = (resolvedSession.session as { messages?: AgentMessage[] }).messages;
+      const messages = roomSessionState?.messages ?? roomTopLevelMessages ?? [];
       const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant" || message.type === "assistant");
       let content = "";
       if (typeof lastAssistant?.content === "string") {
@@ -1792,7 +1798,7 @@ export class ChatManager {
           .join("");
       }
 
-      const stateError = (resolvedSession.session.state as { errorMessage?: string } | undefined)?.errorMessage;
+      const stateError = roomSessionState?.errorMessage;
       if (stateError?.trim()) {
         throw new Error(stateError.trim());
       }
@@ -2369,10 +2375,16 @@ export class ChatManager {
         return;
       }
 
-      // Some runtimes (e.g. plugin-backed Codex/openclaw) signal provider failures
-      // by setting session.state.errorMessage rather than throwing. Surface that
-      // as an error event instead of persisting a blank assistant reply.
-      const sessionErrorMessage = (agentResult.session.state as { errorMessage?: unknown }).errorMessage;
+      interface AgentMessage {
+        role: string;
+        content?: string | Array<{ type: string; text: string }>;
+      }
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtime sessions (grok/droid/cursor) expose top-level `messages` and stream via `onText` without a pi-shaped `state`; keep `state.errorMessage` optional so successful streams do not become TypeErrors, while pi/openclaw/hermes provider errors still surface when set.
+       */
+      const agentSessionState = agentResult.session.state as { errorMessage?: unknown; messages?: AgentMessage[] } | undefined;
+      const sessionErrorMessage = agentSessionState?.errorMessage;
       if (typeof sessionErrorMessage === "string" && sessionErrorMessage.trim().length > 0
           && !accumulatedText && !accumulatedThinking && toolCallsAccum.length === 0) {
         const failureInfo = addModelContextToFailureInfo(
@@ -2391,11 +2403,12 @@ export class ChatManager {
 
       // Extract response text from agent state
       let responseText = "";
-      interface AgentMessage {
-        role: string;
-        content?: string | Array<{ type: string; text: string }>;
-      }
-      const lastMessage = (agentResult.session.state.messages as AgentMessage[])
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtimes can omit `state` entirely; use streamed text first, then fall back through state-backed messages and top-level session messages so no-state sessions persist successful replies instead of crashing during extraction.
+       */
+      const agentMessages = agentSessionState?.messages ?? (agentResult.session as { messages?: AgentMessage[] }).messages ?? [];
+      const lastMessage = agentMessages
         .filter((m: AgentMessage) => m.role === "assistant")
         .pop();
 
