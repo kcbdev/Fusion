@@ -1932,6 +1932,69 @@ describe("createFnAgent", () => {
     expect(anthropicRegistrations).toHaveLength(0);
   });
 
+  it("synthesizes OpenAI Codex GPT-5.6 models from supplemental metadata when the pi registry lacks them", async () => {
+    // FNXC:ModelCatalog 2026-07-09-00:00:
+    // FN-7754 regression coverage for the createFnAgent registry-seeding surface: a pi catalog with no openai-codex provider/models must still surface all GPT-5.6 codenamed variants through the shared additive supplemental merge.
+    getAllMock.mockReturnValue([]);
+    findMock.mockImplementation((provider: string, modelId: string) => ({ provider, id: modelId }));
+
+    const { createFnAgent } = await import("../pi.js");
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "openai-codex",
+      defaultModelId: "gpt-5.6-luna",
+    });
+
+    expect(registerProviderMock).toHaveBeenCalledWith("openai-codex", expect.objectContaining({
+      models: expect.arrayContaining([
+        expect.objectContaining({ id: "gpt-5.6-luna" }),
+        expect.objectContaining({ id: "gpt-5.6-sol" }),
+        expect.objectContaining({ id: "gpt-5.6-terra" }),
+      ]),
+    }));
+    expect(createAgentSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: { provider: "openai-codex", id: "gpt-5.6-luna" },
+    }));
+  });
+
+  it("does not duplicate OpenAI Codex GPT-5.6 rows already present in the pi registry", async () => {
+    const existingLunaRow = {
+      provider: "openai-codex",
+      id: "gpt-5.6-luna",
+      name: "GPT-5.6 Luna Upstream",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 1, output: 2 },
+      contextWindow: 200_000,
+      maxTokens: 16_000,
+    };
+    getAllMock.mockReturnValue([existingLunaRow]);
+    findMock.mockImplementation((provider: string, modelId: string) => ({ provider, id: modelId }));
+
+    const { createFnAgent } = await import("../pi.js");
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "readonly",
+      defaultProvider: "openai-codex",
+      defaultModelId: "gpt-5.6-luna",
+    });
+
+    const openAiCodexRegistrations = registerProviderMock.mock.calls.filter(([name]) => name === "openai-codex");
+    expect(openAiCodexRegistrations).toHaveLength(1);
+    const registeredProvider = openAiCodexRegistrations[0]?.[1] as { models: Array<{ id: string; name?: string }> };
+    const registeredModels = registeredProvider.models;
+    const lunaRows = registeredModels.filter((model) => model.id === "gpt-5.6-luna");
+    expect(lunaRows).toHaveLength(1);
+    expect(lunaRows[0]).toMatchObject({ name: "GPT-5.6 Luna Upstream" });
+    expect(registeredModels).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "gpt-5.6-sol" }),
+      expect.objectContaining({ id: "gpt-5.6-terra" }),
+    ]));
+  });
+
   // Restored v0.51.0 behavior: a subscription-OAuth `anthropic/<model>` selection stays on
   // the built-in `anthropic` provider (pi-ai POSTs the OAuth token to /v1 with Claude Code
   // impersonation). No `/v1`-based `anthropic-subscription` provider is registered, and there

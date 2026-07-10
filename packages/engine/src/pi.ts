@@ -45,6 +45,7 @@ import {
   mergeBuiltInGrokProviderModels,
   mergeBuiltInZaiProviderModels,
   mergeSupplementalAnthropicModels,
+  mergeSupplementalOpenAiCodexModels,
   registerBuiltInGrokProvider,
   registerBuiltInZaiProvider,
   resolvePiExtensionProjectRoot,
@@ -2121,6 +2122,11 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   }
   modelRegistry.refresh();
   mergeSupplementalAnthropicModels(modelRegistry, (message) => extensionsLog.warn(message));
+  /*
+   * FNXC:ModelCatalog 2026-07-09-00:00:
+   * FN-7754 mirrors the dashboard register-model-routes.ts supplemental merge seam so the GPT-5.6 codenamed OpenAI-Codex models surface on the engine createFnAgent registry-seeding path, not just /api/models. FN-7745 only wired the dashboard surface; this merge is additive and dedupe-safe, so pinned catalog rows win and no duplicate ids are added.
+   */
+  mergeSupplementalOpenAiCodexModels(modelRegistry, (message) => extensionsLog.warn(message));
 
   // Build the pi built-in tool set. We deliberately do NOT use the bundled
   // `createCodingTools` / `createReadOnlyTools` presets — they're missing

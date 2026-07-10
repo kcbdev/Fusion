@@ -977,7 +977,7 @@ When the Cursor Runtime plugin (`fusion-plugin-cursor-runtime`) is installed and
 
 When the Grok Runtime plugin (`fusion-plugin-grok-runtime`) is installed and the `useGrokCli` toggle is enabled (Settings → Authentication), Grok CLI-discovered models (`grok models`) are surfaced additively in `/api/models` under the `grok-cli` provider — id/name derived from the discovered model id/label. This surfacing is fetched through a short-TTL, single-flight cache so the model picker never spawns `grok` on every request; a missing/failed/unavailable Grok CLI binary simply yields zero `grok-cli` rows without affecting other providers. Disabling `useGrokCli` hides all `grok-cli` rows. Unlike Cursor (OAuth/session auth), Grok is API-key auth: the Settings card's status text guides operators to `GROK_API_KEY` or `~/.grok/user-settings.json` when the binary is available but no key is configured.
 
-The three GPT-5.6 codenamed OpenAI Codex variants (`gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`) are additively surfaced under the `openai-codex` provider (FN-7745, mirroring the Anthropic/Z.ai supplemental-merge pattern above) so they appear in `/api/models` whenever `openai-codex` is configured — deduped against any pinned pi-ai catalog row that already carries one of the ids.
+The three GPT-5.6 codenamed OpenAI Codex variants (`gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`) are additively surfaced under the `openai-codex` provider (FN-7745/FN-7754, mirroring the Anthropic/Z.ai supplemental-merge pattern above) so they appear both in dashboard `/api/models` and the engine/pi `createFnAgent` registry-seeding surface whenever `openai-codex` is configured — deduped against any pinned pi-ai catalog row that already carries one of the ids.
 
 ### Planning model
 
