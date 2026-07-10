@@ -163,6 +163,13 @@ function stripGrokCliModelProviderPrefix(modelId: string | undefined): string | 
     : normalized;
 }
 
+function buildMissingGrokRuntimeError(): Error {
+  return new Error(
+    "Grok CLI models require the bundled Grok CLI runtime when no Fusion-visible GROK_API_KEY is set. "
+    + "Install and enable the Grok CLI runtime plugin, or set GROK_API_KEY to use the direct xAI endpoint.",
+  );
+}
+
 function deriveGrokRuntimeHintForNoVisibleKey(
   runtimeOptions: AgentRuntimeOptions,
   pluginRunner: PluginRunner | undefined,
@@ -171,10 +178,11 @@ function deriveGrokRuntimeHintForNoVisibleKey(
     && runtimeOptions.fallbackProvider !== GROK_CLI_PROVIDER_ID) return undefined;
   if (isGrokApiKeyFusionVisible()) return undefined;
   try {
-    return pluginRunner?.getRuntimeById("grok") ? "grok" : undefined;
+    if (pluginRunner?.getRuntimeById("grok")) return "grok";
   } catch {
-    return undefined;
+    throw buildMissingGrokRuntimeError();
   }
+  throw buildMissingGrokRuntimeError();
 }
 
 function applyGrokCliNoKeyRuntimeOptions(
@@ -435,6 +443,9 @@ export async function createResolvedAgentSession(
   FN-7758 extends the no-visible-key invariant to configured fallback models. Pi resolves fallback models
   during session creation and prompt-time swaps through the key-requiring provider registry, so a grok-cli
   fallback must select the Grok CLI runtime up front and promote the fallback model into the CLI session.
+
+  FNXC:GrokCliRouting 2026-07-09-23:05:
+  FN-7761 closes the packaged serve/daemon/dashboard gap: if grok-cli is selected and no Fusion-visible key exists, this seam must never silently fall through to the key-requiring pi/openai-completions runtime when the Grok plugin was not pre-installed. The hosts eagerly install/load the bundled runtime; if that genuinely fails, throw an operator-actionable error naming the two supported remediations.
   */
   const autoGrokRuntimeHint = !useMockRuntime && !runtimeHint
     ? deriveGrokRuntimeHintForNoVisibleKey(runtimeOptions, pluginRunner)

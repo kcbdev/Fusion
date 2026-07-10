@@ -295,27 +295,26 @@ describe("Grok CLI runtime routing (FN-7725)", () => {
     }));
   });
 
-  it("keeps grok-cli on pi when no key is visible but the Grok runtime is not registered", async () => {
+  it("surfaces an actionable dual-remediation error instead of falling through to the key-requiring pi runtime when the Grok runtime is unavailable", async () => {
     vi.mocked(fusionCore.isGrokApiKeyFusionVisible).mockReturnValue(false);
     const pluginRunner = createMockPluginRunner({
       getRuntimeById: vi.fn().mockReturnValue(undefined),
     });
 
-    const result = await createResolvedAgentSession({
+    /*
+     * FNXC:GrokCliRouting 2026-07-09-23:05:
+     * FN-7761 symptom reproduction: packaged hosts previously left fusion-plugin-grok-runtime uninstalled, so getRuntimeById("grok") was undefined and grok-cli/no-key sessions fell through to pi's direct endpoint. The fixed invariant forbids that silent fallback and tells operators to either enable the Grok CLI runtime or set GROK_API_KEY.
+     */
+    await expect(createResolvedAgentSession({
       sessionPurpose: "executor",
       pluginRunner,
       cwd: "/tmp/project",
       defaultProvider: "grok-cli",
       defaultModelId: "grok-4.5",
       systemPrompt: "no-runtime-registered",
-    });
+    })).rejects.toThrow(/Install and enable the Grok CLI runtime plugin, or set GROK_API_KEY/);
 
-    expect(result.runtimeId).toBe("pi");
-    expect(result.wasConfigured).toBe(false);
-    expect(mockCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
-      defaultProvider: "grok-cli",
-      defaultModelId: "grok-4.5",
-    }));
+    expect(mockCreateFnAgent).not.toHaveBeenCalled();
   });
 
   it("auto-routes heartbeat/room responder grok-cli defaults to the Grok runtime when no Fusion-visible key exists", async () => {

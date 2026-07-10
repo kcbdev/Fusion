@@ -98,7 +98,7 @@ import {
 } from "./llama-cpp-extension.js";
 import { getCachedUpdateStatus, isUpdateCheckEnabled } from "../update-cache.js";
 import { resolveSelfExtension } from "./self-extension.js";
-import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
+import { ensureBundledDependencyGraphPluginInstalled, ensureBundledGrokRuntimePluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
 import { handleOpencodeGoApiKeySaved, syncStartupModels } from "./startup-model-sync.js";
 import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo, type GitStatus, type GitCommit, type GitCommitDetail, type GitBranch, type GitWorktree, type FileEntry, type FileReadResult, type TaskStep as TUITaskStep, type TaskLogEntry as TUITaskLogEntry, type TaskDetailData, type TaskEvent } from "./dashboard-tui/index.js";
@@ -1316,6 +1316,24 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     } catch (err) {
       logSink.log(
         `Failed to auto-install bundled Dependency Graph plugin: ${err instanceof Error ? err.message : err}`,
+        "plugins",
+      );
+    }
+
+    /*
+     * FNXC:GrokCliRouting 2026-07-09-23:05:
+     * FN-7761: packaged `fn dashboard` must make fusion-plugin-grok-runtime enabled and loadable before chat sends. Without this eager Grok-scoped bootstrap, grok-cli/no-key messages bypass the logged-in `grok` CLI and hit pi's direct endpoint missing-key path.
+     */
+    try {
+      const installStatus = await ensureBundledGrokRuntimePluginInstalled(pluginStore, pluginLoader);
+      if (installStatus === "installed") {
+        logSink.log("Installed bundled Grok CLI runtime plugin", "plugins");
+      } else if (installStatus === "missing-bundle") {
+        logSink.log("Bundled Grok CLI runtime plugin was not found in this build", "plugins");
+      }
+    } catch (err) {
+      logSink.log(
+        `Failed to auto-install bundled Grok CLI runtime plugin: ${err instanceof Error ? err.message : err}`,
         "plugins",
       );
     }

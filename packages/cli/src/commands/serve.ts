@@ -78,7 +78,7 @@ import {
 import { resolveSelfExtension } from "./self-extension.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
 import { handleOpencodeGoApiKeySaved, syncStartupModels } from "./startup-model-sync.js";
-import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
+import { ensureBundledDependencyGraphPluginInstalled, ensureBundledGrokRuntimePluginInstalled, ensureBundledPluginInstalled, isBundledPluginId } from "../plugins/bundled-plugin-install.js";
 import { ensureCwdProjectRegistered } from "./ensure-project-registered.js";
 
 const DIAGNOSTIC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -546,7 +546,22 @@ export async function runServe(
     console.warn(`[plugins] Failed to auto-install bundled Dependency Graph plugin: ${err instanceof Error ? err.message : err}`);
   }
 
-  // Lazy-install hook for bundled runtime plugins (Hermes/OpenClaw/Paperclip).
+  /*
+   * FNXC:GrokCliRouting 2026-07-09-23:05:
+   * FN-7761: packaged `fn serve` must make the bundled Grok CLI runtime discoverable before any message-sending lane starts. Otherwise grok-cli/no-key selections fall through to the direct xAI endpoint and incorrectly ask for GROK_API_KEY even though the `grok` CLI owns auth.
+   */
+  try {
+    const installStatus = await ensureBundledGrokRuntimePluginInstalled(pluginStore, pluginLoader);
+    if (installStatus === "installed") {
+      console.log("[plugins] Installed bundled Grok CLI runtime plugin");
+    } else if (installStatus === "missing-bundle") {
+      console.warn("[plugins] Bundled Grok CLI runtime plugin was not found in this build");
+    }
+  } catch (err) {
+    console.warn(`[plugins] Failed to auto-install bundled Grok CLI runtime plugin: ${err instanceof Error ? err.message : err}`);
+  }
+
+  // Lazy-install hook for bundled runtime plugins (Hermes/OpenClaw/Paperclip/Grok).
   const ensureBundledPluginInstalledCallback = async (pluginId: string): Promise<boolean> => {
     if (!isBundledPluginId(pluginId)) {
       console.warn(`[plugins] ensureBundledPluginInstalled: unknown bundled plugin id "${pluginId}"`);

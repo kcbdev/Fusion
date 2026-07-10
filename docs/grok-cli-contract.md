@@ -134,7 +134,7 @@ Notes:
   `GrokCliProviderCard.tsx`) is out of scope for this task and is not
   modified here.
 
-## Wiring (resolved — FN-7725, extended by FN-7753/FN-7758)
+## Wiring (resolved — FN-7725, extended by FN-7753/FN-7758/FN-7761)
 
 <!--
 FNXC:GrokCli 2026-07-09-00:00:
@@ -160,7 +160,7 @@ via the dashboard's agent **Runtime Source → Runtime** picker
 plugin runtime, including the bundled Grok Runtime plugin's `runtimeId:
 "grok"`, with no Grok-specific code required).
 
-**Automatic no-key fallback (FN-7753/FN-7758):** when `createResolvedAgentSession()` sees
+**Automatic no-key fallback (FN-7753/FN-7758/FN-7761):** when `createResolvedAgentSession()` sees
 all of the following, it derives the same effective `runtimeHint: "grok"` before
 calling `resolveRuntime()`:
 
@@ -172,6 +172,11 @@ calling `resolveRuntime()`:
    `~/.grok/user-settings.json`'s `apiKey` field; and
 4. the bundled Grok Runtime plugin has registered runtime id `"grok"`.
 
+<!--
+FNXC:GrokCliRouting 2026-07-09-23:05:
+FN-7761 closes the packaged-host availability gap. Packaged `fn serve`, `fn daemon`, and `fn dashboard` now eagerly ensure the bundled `fusion-plugin-grok-runtime` before `loadAllPlugins()`, so fresh installs expose runtime id `"grok"` to the shared session seam without requiring the operator to first open plugin settings. If the runtime still cannot be loaded, Fusion fails before pi session creation with a dual-remediation error: install/enable the Grok CLI runtime plugin, or set `GROK_API_KEY` to use the direct xAI endpoint.
+-->
+
 FN-7758 also requires dashboard Chat/QuickChat and room responders to forward
 the configured default provider/model into this same session seam when a send has
 no explicit model and no bound agent runtime model. That keeps the no-key routing
@@ -180,8 +185,12 @@ chat, QuickChat, and room responder surfaces instead of letting model-less chat
 bypass the auto-derive by omitting `defaultProvider`.
 
 If a Fusion-visible key exists, the direct xAI OpenAI-compatible endpoint remains
-the default. If the Grok runtime is not registered, Fusion leaves the session on
-the existing PI/direct path rather than inventing a separate routing mode.
+the default. If the Grok runtime is not registered or cannot be loaded in the
+no-visible-key `grok-cli` case, Fusion no longer leaves the session on the
+existing PI/direct path because that path produces the misleading missing-key
+error. Instead it raises an actionable error that names both supported recovery
+paths: install/enable the Grok CLI runtime plugin so the logged-in `grok` CLI
+owns auth, or set `GROK_API_KEY` so the direct xAI endpoint can authenticate.
 
 **Exact seam:** `packages/engine/src/agent-session-helpers.ts`'s
 `extractRuntimeHint(runtimeConfig)` reads that hint from the assigned agent's
@@ -215,7 +224,7 @@ additive change," formalizing + testing + documenting the already-working
 path is lower risk and closes the actual gap (an *exercised* path, not just
 an implemented adapter) without adding new user-facing config surface.
 
-**Model plumbing (FN-7753/FN-7758):** for the automatic no-key fallback, the selected
+**Model plumbing (FN-7753/FN-7758/FN-7761):** for the automatic no-key fallback, the selected
 `grok-cli/*` model id is preserved through `AgentRuntimeOptions.defaultModelId`
 (or promoted from `fallbackModelId` when the fallback provider is the grok-cli
 selection), normalized by stripping a leading `grok-cli/` (or `grok/`) prefix,

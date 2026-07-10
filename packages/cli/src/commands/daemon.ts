@@ -76,7 +76,7 @@ import { resolveSelfExtension } from "./self-extension.js";
 import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
 import { getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
 import { resolveProject } from "../project-context.js";
-import { ensureBundledDependencyGraphPluginInstalled } from "../plugins/bundled-plugin-install.js";
+import { ensureBundledDependencyGraphPluginInstalled, ensureBundledGrokRuntimePluginInstalled } from "../plugins/bundled-plugin-install.js";
 import { handleOpencodeGoApiKeySaved, syncStartupModels } from "./startup-model-sync.js";
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
 import { ensureCwdProjectRegistered } from "./ensure-project-registered.js";
@@ -519,6 +519,21 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     }
   } catch (err) {
     console.warn(`[plugins] Failed to auto-install bundled Dependency Graph plugin: ${err instanceof Error ? err.message : err}`);
+  }
+
+  /*
+   * FNXC:GrokCliRouting 2026-07-09-23:05:
+   * FN-7761: packaged daemon sessions must load the bundled Grok CLI runtime before executors/reviewers create sessions, so grok-cli/no-key routing uses the logged-in `grok` CLI instead of pi's key-requiring direct endpoint.
+   */
+  try {
+    const installStatus = await ensureBundledGrokRuntimePluginInstalled(pluginStore, pluginLoader);
+    if (installStatus === "installed") {
+      console.log("[plugins] Installed bundled Grok CLI runtime plugin");
+    } else if (installStatus === "missing-bundle") {
+      console.warn("[plugins] Bundled Grok CLI runtime plugin was not found in this build");
+    }
+  } catch (err) {
+    console.warn(`[plugins] Failed to auto-install bundled Grok CLI runtime plugin: ${err instanceof Error ? err.message : err}`);
   }
 
   // Auto-load all enabled plugins so runtime UI (NewAgentDialog, AgentDetailView)
