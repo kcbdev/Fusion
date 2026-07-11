@@ -36,8 +36,9 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { realpathSync } from "node:fs";
+import { realpathSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertNotWorkspaceTaskMerge,
@@ -81,6 +82,8 @@ import cycle (merger-ai-worktree imports `MIN_TEMP_WORKTREE_REAP_AGE_MS` from se
 */
 import { isRepoLanded, findProvenLandedCommit, FUSION_TASK_ID_TRAILER_KEY } from "./workspace-land-predicate.js";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
+import { getCommitTaskOwnership } from "./already-merged-detector.js";
+import { resolveLegacyAiMergeRootPath } from "./worktree-paths.js";
 import {
   cleanupAiMergeWorktree,
   pruneExistingAiMergeWorktrees,
@@ -126,6 +129,80 @@ function getErrorMessage(err: unknown): string {
 
 function short(sha: string): string {
   return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 8) : sha;
+}
+
+function taskHasApprovedAiMergeReview(task: Task | undefined): boolean {
+  return (task?.log ?? []).some((entry) =>
+    typeof entry.action === "string"
+    && /AI merge review \(pass \d+\): approved/.test(entry.action)
+  );
+}
+
+function listAiMergeWorktreeCandidates(taskId: string, projectRootDir: string, settings?: Settings): string[] {
+  const prefix = `fusion-ai-merge-${taskId.toLowerCase()}-`;
+  const roots = Array.from(new Set([resolveAiMergeRoot(projectRootDir, settings), resolveLegacyAiMergeRootPath(projectRootDir), tmpdir()]));
+  const candidates: string[] = [];
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root).filter((entry) => entry.startsWith(prefix));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) candidates.push(join(root, entry));
+  }
+  return candidates;
+}
+
+async function recoverApprovedPreexistingAiMergeWorktree(
+  repoRootDir: string,
+  integrationBranch: string,
+  ctx: LandRepoContext,
+): Promise<LandOneRepoResult | null> {
+  const { taskId, settings, store, audit, log, allowDirtyLocalCheckoutSync, stashResolveAgent } = ctx;
+  const task = await store.getTask(taskId).catch(() => undefined);
+  if (!taskHasApprovedAiMergeReview(task)) return null;
+
+  const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], repoRootDir);
+  for (const candidate of listAiMergeWorktreeCandidates(taskId, repoRootDir, settings)) {
+    let mergeRoot = candidate;
+    try { mergeRoot = realpathSync(candidate); } catch { /* keep original */ }
+    if (activeSessionRegistry.isPathActive(candidate) || activeSessionRegistry.isPathActive(mergeRoot)) continue;
+
+    try {
+      const squashSha = await git(["rev-parse", "--verify", "HEAD"], mergeRoot);
+      if (!squashSha || squashSha === tipSha) continue;
+      const show = await git(["show", "-s", "--format=%s%x1f%b", squashSha], mergeRoot);
+      const [subject = "", body = ""] = show.split("\x1f");
+      if (!getCommitTaskOwnership(taskId, task?.lineageId, subject, body).owned) continue;
+      if (!(await gitOk(["merge-base", "--is-ancestor", tipSha, squashSha], repoRootDir))) continue;
+
+      const alreadyLanded = await gitOk(["merge-base", "--is-ancestor", squashSha, `refs/heads/${integrationBranch}`], repoRootDir);
+      if (!alreadyLanded) {
+        const land = await landSquash({
+          projectRootDir: repoRootDir,
+          mergeRoot,
+          integrationBranch,
+          tipSha,
+          squashSha,
+          taskId,
+          audit,
+          resolveConflicts: stashResolveAgent,
+          allowDirtyLocalCheckoutSync,
+        });
+        if (land.outcome !== "advanced") continue;
+        await log(`AI merge: recovered approved pre-existing clean-room commit ${short(squashSha)} before pruning`);
+        await audit.git({ type: "merge:ai-landed", target: integrationBranch, metadata: { taskId, landedSha: squashSha, source: "pre-prune-clean-room-recovery", mergeRoot } }).catch(() => undefined);
+        return { outcome: "landed", squashSha, localSync: land.localSync, tipSha, integrationBranch };
+      }
+
+      await log(`AI merge: recovered already-landed clean-room commit ${short(squashSha)} before pruning`);
+      return { outcome: "landed", squashSha, localSync: "skipped-other-branch", tipSha, integrationBranch };
+    } catch (err: unknown) {
+      await log(`AI merge: skipped pre-existing clean-room recovery candidate ${mergeRoot}: ${getErrorMessage(err)}`);
+    }
+  }
+  return null;
 }
 
 export {
@@ -612,6 +689,12 @@ export async function landOneRepo(
     mergeAgent, reviewAgent, stashResolveAgent,
     includeTaskId, trailers, taskTitle, signal, store,
   } = ctx;
+
+  // If a prior merger died after the clean-room squash was approved but before
+  // landing/finalization, land that commit before the normal pre-merge prune can
+  // delete the only easy reference to it.
+  const recovered = await recoverApprovedPreexistingAiMergeWorktree(repoRootDir, integrationBranch, ctx);
+  if (recovered) return recovered;
 
   // Pre-merge prune is rooted at THIS sub-repo (KTD1): N per-repo clean rooms for
   // one task share the `fusion-ai-merge-<taskId>-` prefix, so a prune rooted at a
