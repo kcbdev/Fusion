@@ -107,7 +107,7 @@ import { PRIORITY_EXECUTE, type AgentSemaphore } from "./concurrency.js";
 // filter reuses the SAME always-allowed/scope-match surface as the non-workspace path (F5). One-way
 // executor→workspace-paths edge (workspace-paths imports nothing).
 import { deriveRepoScopeSubset, normalizeRepoRelPath } from "./workspace-paths.js";
-import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, detectNestedWorktreeRoot, getRegisteredWorktreePaths, isGitRepository, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type WorktreePool } from "./worktree-pool.js";
+import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, detectGitRepository, detectNestedWorktreeRoot, getRegisteredWorktreePaths, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type GitRepoDetection, type WorktreePool } from "./worktree-pool.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
 import { ActiveSessionWorktreeRemovalError } from "./worktree-backend.js";
 import {
@@ -947,6 +947,14 @@ function evaluatePromptDerivedNoCommitEligibility(task: Task, promptContent: str
 }
 
 class NonRetryableWorktreeError extends Error {}
+
+function formatGitRepositoryDetectionError(rootDir: string, detection: Extract<GitRepoDetection, { status: "error" }>): string {
+  const stderr = detection.stderr.trim() || "git rev-parse --git-dir failed without stderr";
+  const remedy = detection.reason === "dubious-ownership"
+    ? ` Resolve Git safe-directory ownership with: git config --global --add safe.directory "${rootDir}"`
+    : "";
+  return `Git repository detection failed for project directory "${rootDir}". Fusion could not verify worktree support because git reported: ${stderr}.${remedy}`;
+}
 
 function buildSessionWorktreePathRegex(rootDir: string, settings: Partial<Settings>): RegExp {
   const configuredBase = resolveWorktreesDir(rootDir, settings).split(/[\\/]/).filter(Boolean).pop() ?? ".worktrees";
@@ -9526,14 +9534,26 @@ export class TaskExecutor {
       and enable a workspace with nothing to work on. Gate every workspace check on repos.length > 0.
       */
       const hasWorkspaceRepos = (this.workspaceConfig?.repos.length ?? 0) > 0;
-      if (!hasWorkspaceRepos && !await isGitRepository(this.rootDir)) {
-        await this.store.logEntry(
-          task.id,
-          "Cannot execute task: project directory is not a Git repository. Fusion requires a Git repository for worktree-based task execution.",
-        );
-        throw new Error(
-          "Project directory is not a Git repository. Fusion requires a Git repository for worktree creation. Initialize with 'git init' or run from a Git project directory.",
-        );
+      if (!hasWorkspaceRepos) {
+        const gitDetection = await detectGitRepository(this.rootDir);
+        if (gitDetection.status === "not-repo") {
+          await this.store.logEntry(
+            task.id,
+            "Cannot execute task: project directory is not a Git repository. Fusion requires a Git repository for worktree-based task execution.",
+          );
+          throw new Error(
+            "Project directory is not a Git repository. Fusion requires a Git repository for worktree creation. Initialize with 'git init' or run from a Git project directory.",
+          );
+        }
+        if (gitDetection.status === "error") {
+          /*
+          FNXC:Worktree 2026-07-10-00:00:
+          FN-7799 requires environmental Git probe failures in valid repos to surface the real cause instead of telling operators to run `git init`. Dubious ownership and similar persistent failures otherwise block every task across restarts with a false non-repo diagnosis.
+          */
+          const message = formatGitRepositoryDetectionError(this.rootDir, gitDetection);
+          await this.store.logEntry(task.id, message);
+          throw new Error(message);
+        }
       }
 
       const hadAssignedWorktree = Boolean(task.worktree);
