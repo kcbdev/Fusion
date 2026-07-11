@@ -57,8 +57,14 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-vi.mock("@fusion/core", () => {
+vi.mock("@fusion/core", async (importOriginal) => {
+  /*
+  FNXC:DashboardAgentImportTests 2026-07-07-08:05:
+  Spread the real @fusion/core module and override only the agent-import seams (AgentStore, ChatStore, the company parsers, and the no-op guard/hook stubs). FN-7444 added planning-summary deepening constants (PLANNING_DEEPEN_PROCEED_OPTION_ID etc.) that src/planning.ts imports from core; a fully hand-written mock omitted them and made createServer fail to load with "No export is defined on the @fusion/core mock". Spreading importOriginal keeps every real export (including future additions) resolvable while the explicit keys below retain the focused mock behavior. This also removes the prior duplicate CLI_AGENT_ADAPTER_IDS / sanitizeCliAgentSettings keys (a merge artifact whose second copy silently won).
+  */
+  const actual = await importOriginal() as Record<string, unknown>;
   return {
+    ...actual,
     AgentStore: class MockAgentStore {
       init = mockInit;
       listAgents = mockListAgents;
@@ -71,11 +77,7 @@ vi.mock("@fusion/core", () => {
     parseCompanyArchive: (...args: unknown[]) => mockParseCompanyArchive(...args),
     parseSingleAgentManifest: (...args: unknown[]) => mockParseSingleAgentManifest(...args),
     prepareAgentCompaniesImport: (...args: unknown[]) => mockPrepareAgentCompaniesImport(...args),
-    CLI_AGENT_ADAPTER_IDS: ["claude-code", "codex", "droid", "pi", "generic"],
-    sanitizeCliAgentSettings: (value: unknown) => value,
     AgentCompaniesParseError: MockAgentCompaniesParseError,
-    CLI_AGENT_ADAPTER_IDS: ["claude-code", "codex", "droid", "pi", "generic"],
-    sanitizeCliAgentSettings: () => undefined,
     isEphemeralAgent: (agent: { metadata?: Record<string, unknown> }) =>
       agent?.metadata?.agentKind === "task-worker",
     deterministicGuardLocks: new Map(),

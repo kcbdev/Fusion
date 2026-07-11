@@ -92,6 +92,7 @@ import {
   requiresNativeShellOnboarding,
   shouldShowFirstEverBootLoader,
   isSessionNeedingInputForBanner,
+  isPlanningAwaitingInput,
   getCliActionDisabledReasonForBanner,
   executeCliSessionBannerAction,
 } from "./utils/appLifecycle";
@@ -103,6 +104,7 @@ export {
   requiresNativeShellOnboarding,
   shouldShowFirstEverBootLoader,
   isSessionNeedingInputForBanner,
+  isPlanningAwaitingInput,
   getCliActionDisabledReasonForBanner,
   executeCliSessionBannerAction,
 } from "./utils/appLifecycle";
@@ -365,9 +367,16 @@ function AppInner() {
   /*
    * FNXC:SessionBanner 2026-06-14-19:32:
    * CLI agent sessions use `waiting_on_input` and `needs_attention` to represent user-actionable states. The banner feed must include those statuses in addition to the legacy planning-session statuses so visible CLI actions cannot be silently hidden from users.
+   *
+   * FNXC:SessionBanner 2026-07-05-00:00:
+   * Planning `awaiting_input` sessions are excluded from the banner feed: the banner's Resume button did not
+   * reliably redirect into Planning Mode. That signal now surfaces as a yellow `status-dot--pending` nav badge
+   * (see `planningNeedsInput` below) whose click target is the already-correct `planning` view navigation.
+   * Planning sessions in `error` status are unaffected and still render in the banner.
    */
-  const sessionsNeedingInput = bgSessions.filter(isSessionNeedingInputForBanner);
+  const sessionsNeedingInput = bgSessions.filter((s) => isSessionNeedingInputForBanner(s) && !isPlanningAwaitingInput(s));
   const sessionBannersHidden = useSessionBannersHidden();
+  const planningNeedsInput = bgPlanningSessions.some((s) => s.status === "awaiting_input");
 
   // Modal state/handlers - required before useViewState
   const modalManager = useModalManager({
@@ -432,7 +441,7 @@ function AppInner() {
   // FNXC:DashboardLiveUpdates 2026-06-26-01:08:
   // SSE remains enabled only for board/list views to free connection slots for mission detail fetches. The false→true missed-event catch-up lives inside useTasks so App keeps the routing gate only and cannot double-fetch on task-view re-entry.
   const taskSseEnabled = taskView === "board" || taskView === "list";
-  const { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, revertTask, archiveAllDone, loadArchivedTasks, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
+  const { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, bypassReview, resetTask, updateTask, duplicateTask, archiveTask, unarchiveTask, revertTask, archiveAllDone, loadArchivedTasks, loadMoreArchivedTasks, archivedHasMore, archivedLoadingMore, ingestCreatedTasks, lastFetchTimeMs } = useTasks(
     {
       ...(currentProject ? { projectId: currentProject.id } : {}),
       searchQuery: searchQuery || undefined,
@@ -1244,7 +1253,7 @@ function AppInner() {
 
   // Props for the extracted <MainContent> switch (see components/dashboard/MainContent.tsx).
   // Every value is passed by its App name; the switch renders the same subtrees as before.
-  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openTaskPopup: popOutTaskDetail, openMobileTasksInPopup, openFileInBrowser, onMoveTask: moveTask, onDeleteTask: deleteTask, onArchiveTask: archiveTask, onRevertTask: revertTask, onMergeTask: mergeTask, onRetryTask: retryTask, onResetTask: resetTask, onDuplicateTask: duplicateTask, onTaskUpdated: (task: Task) => ingestCreatedTasks([task]), openSettings: (section?: string) => openSettingsWithNav(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), prAuthAvailable, autoMerge, taskDetailChatFirst, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
+  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openTaskPopup: popOutTaskDetail, openMobileTasksInPopup, openFileInBrowser, onMoveTask: moveTask, onDeleteTask: deleteTask, onArchiveTask: archiveTask, onRevertTask: revertTask, onMergeTask: mergeTask, onRetryTask: retryTask, onBypassReview: bypassReview, onResetTask: resetTask, onDuplicateTask: duplicateTask, onTaskUpdated: (task: Task) => ingestCreatedTasks([task]), openSettings: (section?: string) => openSettingsWithNav(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), prAuthAvailable, autoMerge, taskDetailChatFirst, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
 
   /*
   FNXC:OpenTasksInRightSidebar 2026-06-28-00:00:
@@ -1389,6 +1398,9 @@ function AppInner() {
     deleteTask,
     archiveAllDone,
     loadArchivedTasks,
+    loadMoreArchivedTasks,
+    archivedHasMore,
+    archivedLoadingMore,
     searchQuery,
     availableModels,
     favoriteProviders,
@@ -1586,6 +1598,7 @@ function AppInner() {
             mailboxUnreadCount={mailboxUnreadCount}
             mailboxPendingApprovalCount={mailboxPendingApprovalCount}
             chatHasUnreadResponse={chatHasUnreadResponse}
+            planningNeedsInput={planningNeedsInput}
             experimentalFeatures={{
               insights: insightsEnabled,
               memoryView: memoryEnabled,
@@ -1668,6 +1681,7 @@ function AppInner() {
         onOpenPlanning={openPlanningWithNav}
         onResumePlanning={resumePlanningWithNav}
         activePlanningSessionCount={bgPlanningSessions.length}
+        planningNeedsInput={planningNeedsInput}
         onOpenUsage={() => openUsageWithNav(null)}
         onViewAllProjects={handleViewAllProjects}
         onRunScript={runScriptWithNav}
@@ -1784,6 +1798,7 @@ function AppInner() {
               onDeleteTask={deleteTask}
               onMergeTask={mergeTask}
               onRetryTask={retryTask}
+              onBypassReview={bypassReview}
               onResetTask={resetTask}
               onDuplicateTask={duplicateTask}
               onRequestClose={close}
@@ -1814,7 +1829,7 @@ function AppInner() {
         }}
         onPlanningMode={openPlanningWithInitialPlanWithNav}
         onSubtaskBreakdown={subtaskBreakdownEnabled ? openSubtaskBreakdownWithNav : undefined}
-        taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, revertTask, retryTask, resetTask, duplicateTask }}
+        taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, revertTask, retryTask, bypassReview, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}
         settings={{ prAuthAvailable, autoMerge, taskDetailChatFirst, themeMode, colorTheme, dashboardFontScalePct, shadcnCustomColors, resolvedThemeMode, setThemeMode, setColorTheme, setDashboardFontScalePct, setShadcnCustomColors, setQuickChatButtonModeImmediate }}
         onSettingsClose={handleSettingsCloseWithNav}

@@ -58,6 +58,7 @@ const {
   mockBeginGeneration,
   mockIsGenerating,
   mockGetActiveGenerationId,
+  mockRewindSessionForEdit,
 } = vi.hoisted(() => {
   // Store subscribers per session for broadcast simulation
   const subscribers = new Map<string, Set<{ callback: (event: any, eventId?: number) => void; generationId?: number }>>();
@@ -124,6 +125,7 @@ const {
     mockBeginGeneration: vi.fn(() => ({ generationId: 1, abortController: new AbortController() })),
     mockIsGenerating: vi.fn(() => false),
     mockGetActiveGenerationId: vi.fn(() => undefined),
+    mockRewindSessionForEdit: vi.fn(),
     mockChatStreamManager: chatStreamManager,
   };
 });
@@ -143,6 +145,7 @@ const mockAddMessage = vi.fn();
 const mockGetMessages = vi.fn();
 const mockGetMessage = vi.fn();
 const mockGetLastMessageForSessions = vi.fn().mockReturnValue(new Map());
+const mockSearchSessionsByMessageContent = vi.fn().mockReturnValue(new Map());
 const mockFindLatestActiveSessionForTarget = vi.fn();
 const mockDeleteMessage = vi.fn();
 const mockDeleteSessionsForAgentId = vi.fn();
@@ -186,6 +189,7 @@ vi.mock("../chat.js", () => {
       beginGeneration = mockBeginGeneration;
       isGenerating = mockIsGenerating;
       getActiveGenerationId = mockGetActiveGenerationId;
+      rewindSessionForEdit = mockRewindSessionForEdit;
     },
     chatStreamManager: mockChatStreamManager,
     TASK_PLANNER_CHAT_AGENT_ID_PREFIX: "task-planner:",
@@ -303,6 +307,7 @@ const mockChatStoreInstance = {
   getMessages: mockGetMessages,
   getMessage: mockGetMessage,
   getLastMessageForSessions: mockGetLastMessageForSessions,
+  searchSessionsByMessageContent: mockSearchSessionsByMessageContent,
   findLatestActiveSessionForTarget: mockFindLatestActiveSessionForTarget,
   deleteMessage: mockDeleteMessage,
   deleteSessionsForAgentId: mockDeleteSessionsForAgentId,
@@ -318,6 +323,7 @@ function createMockChatManager() {
     beginGeneration: mockBeginGeneration,
     isGenerating: mockIsGenerating,
     getActiveGenerationId: mockGetActiveGenerationId,
+    rewindSessionForEdit: mockRewindSessionForEdit,
   };
 }
 
@@ -390,6 +396,7 @@ describe("Chat API Routes", () => {
     mockCancelGeneration.mockReset();
     mockIsGenerating.mockReset();
     mockGetActiveGenerationId.mockReset();
+    mockRewindSessionForEdit.mockReset();
     mockAgentStoreInit.mockResolvedValue(undefined);
     mockAgentStoreGetAgent.mockReset();
     mockGetOrCreateProjectStore.mockReset();
@@ -402,6 +409,7 @@ describe("Chat API Routes", () => {
     mockCancelGeneration.mockReturnValue(false);
     mockIsGenerating.mockReturnValue(false);
     mockGetActiveGenerationId.mockReturnValue(undefined);
+    mockRewindSessionForEdit.mockResolvedValue({ retained: [] });
 
     // Default agent mock - agent with model config
     mockAgentStoreGetAgent.mockResolvedValue({
@@ -924,6 +932,82 @@ describe("Chat API Routes", () => {
       expect(response.status).toBe(200);
       expect(mockListSessions).toHaveBeenCalledWith({ projectId: "proj-001" });
     });
+
+    describe("content search (q / titleOnly)", () => {
+      it("narrows results to content-matched sessions and attaches matchedMessagePreview", async () => {
+        const matchSession = { ...sampleSession, id: "chat-match" };
+        const noMatchSession = { ...sampleSession, id: "chat-no-match" };
+        mockListSessions.mockReturnValue([matchSession, noMatchSession]);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+        mockSearchSessionsByMessageContent.mockReturnValue(new Map([["chat-match", "found the roadmap here"]]));
+
+        const response = await request(app, "GET", "/api/chat/sessions?q=roadmap");
+
+        expect(response.status).toBe(200);
+        expect(mockSearchSessionsByMessageContent).toHaveBeenCalledWith("roadmap", ["chat-match", "chat-no-match"]);
+        const body = (response.body as any).sessions;
+        expect(body.map((s: any) => s.id)).toEqual(["chat-match"]);
+        expect(body[0].matchedMessagePreview).toBe("found the roadmap here");
+      });
+
+      it("ignores content search and preserves current behavior when titleOnly=true", async () => {
+        mockListSessions.mockReturnValue([sampleSession]);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+
+        const response = await request(app, "GET", "/api/chat/sessions?q=roadmap&titleOnly=true");
+
+        expect(response.status).toBe(200);
+        expect(mockSearchSessionsByMessageContent).not.toHaveBeenCalled();
+        expect((response.body as any).sessions).toHaveLength(1);
+      });
+
+      it("performs no content search when q is absent (unchanged default behavior)", async () => {
+        mockListSessions.mockReturnValue([sampleSession]);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+
+        const response = await request(app, "GET", "/api/chat/sessions");
+
+        expect(response.status).toBe(200);
+        expect(mockSearchSessionsByMessageContent).not.toHaveBeenCalled();
+        expect((response.body as any).sessions).toHaveLength(1);
+      });
+
+      it("keeps task-planner sessions excluded from content matches when the setting is off", async () => {
+        const plannerMatch = { ...sampleSession, id: "chat-planner", agentId: "task-planner:FN-7337" };
+        mockListSessions.mockReturnValue([plannerMatch]);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+        mockSearchSessionsByMessageContent.mockReturnValue(new Map([["chat-planner", "secret plan"]]));
+
+        const response = await request(app, "GET", "/api/chat/sessions?q=secret");
+
+        expect(response.status).toBe(200);
+        // Task-planner filter runs before content search narrowing, so the planner session
+        // never reaches searchSessionsByMessageContent and is excluded from the response.
+        expect((response.body as any).sessions).toHaveLength(0);
+      });
+
+      it("handles injection-style q values (%, ') safely and passes them through verbatim", async () => {
+        mockListSessions.mockReturnValue([sampleSession]);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+        mockSearchSessionsByMessageContent.mockReturnValue(new Map());
+
+        const response = await request(app, "GET", `/api/chat/sessions?q=${encodeURIComponent("50%' OR 1=1--")}`);
+
+        expect(response.status).toBe(200);
+        expect(mockSearchSessionsByMessageContent).toHaveBeenCalledWith("50%' OR 1=1--", [sampleSession.id]);
+        expect((response.body as any).sessions).toHaveLength(0);
+      });
+
+      it("does not run content search for lookup=resume", async () => {
+        mockFindLatestActiveSessionForTarget.mockReturnValue(sampleSession);
+        mockGetLastMessageForSessions.mockReturnValue(new Map());
+
+        const response = await request(app, "GET", "/api/chat/sessions?lookup=resume&agentId=agent-001&q=roadmap");
+
+        expect(response.status).toBe(200);
+        expect(mockSearchSessionsByMessageContent).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe("POST /api/chat/sessions", () => {
@@ -1423,6 +1507,124 @@ describe("Chat API Routes", () => {
 
       expect(response.status).toBe(404);
       expect(mockDeleteMessage).toHaveBeenCalledWith("msg-xyz789");
+    });
+  });
+
+  describe("PATCH /api/chat/sessions/:id/messages/:messageId", () => {
+    it("truncates from the target message and returns retained history", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue(sampleMessage);
+      mockIsGenerating.mockReturnValue(false);
+      const retained = [{ ...sampleMessage, id: "msg-earlier", content: "earlier turn" }];
+      mockRewindSessionForEdit.mockResolvedValue({ retained });
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/msg-xyz789",
+        JSON.stringify({ content: "edited content" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect((response.body as any).retained).toEqual(retained);
+      expect(mockRewindSessionForEdit).toHaveBeenCalledWith("chat-abc123", "msg-xyz789");
+    });
+
+    it("allows editing the first message in a thread", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue(sampleMessage);
+      mockIsGenerating.mockReturnValue(false);
+      mockRewindSessionForEdit.mockResolvedValue({ retained: [] });
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/msg-xyz789",
+        JSON.stringify({ content: "edited first message" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect((response.body as any).retained).toEqual([]);
+    });
+
+    it("returns 400 when the target message is not a user message", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue({ ...sampleMessage, role: "assistant" as const });
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/msg-xyz789",
+        JSON.stringify({ content: "edited content" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockRewindSessionForEdit).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for empty content", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue(sampleMessage);
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/msg-xyz789",
+        JSON.stringify({ content: "   " }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockRewindSessionForEdit).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when session not found", async () => {
+      mockGetSession.mockReturnValue(undefined);
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/nonexistent/messages/msg-xyz789",
+        JSON.stringify({ content: "edited content" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(404);
+    });
+
+    it("returns 404 when message not found", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue(undefined);
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/nonexistent",
+        JSON.stringify({ content: "edited content" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(404);
+    });
+
+    it("rejects the edit while a generation is in flight for the session", async () => {
+      mockGetSession.mockReturnValue(sampleSession);
+      mockGetMessage.mockReturnValue(sampleMessage);
+      mockIsGenerating.mockReturnValue(true);
+
+      const response = await request(
+        app,
+        "PATCH",
+        "/api/chat/sessions/chat-abc123/messages/msg-xyz789",
+        JSON.stringify({ content: "edited content" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockRewindSessionForEdit).not.toHaveBeenCalled();
     });
   });
 

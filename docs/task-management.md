@@ -149,14 +149,20 @@ The duplicate-close task log line remains `Duplicate of <canonicalTaskId> — cl
 Fusion applies two conservative intake heuristics that may auto-archive newly filed tasks before execution starts:
 
 - **Ghost-bug preflight** (triage finalize path): for bug-fix-shaped specs that cite concrete constructs/commands, Fusion probes current `main`. If all definitive probes show the cited bug does not reproduce, the task is archived as `auto-resolved-ghost-bug`.
-- **Same-agent duplicate intake** (create path): if the same `source.sourceAgentId` filed a highly similar task within 24h (threshold `0.75`), the later task is archived as `auto-resolved-duplicate` and the earliest sibling is kept.
+- **Same-agent duplicate intake** (create path): if the same `source.sourceAgentId` (or `source.sourceParentTaskId`) filed a highly similar task within 24h (threshold `0.75`), Fusion still detects the near-duplicate — but what happens next depends on the `autoArchiveDuplicateTasksEnabled` project/global setting (default **`false`**, FN-7658):
+  - **Default (`false`)**: the later task is left in place and flagged via the same near-duplicate marker used elsewhere (`sourceMetadata.nearDuplicateOf` / `nearDuplicateScore`), so the dashboard's yellow "Duplicate" chip with Keep/Archive actions surfaces it for a human decision. The task is never moved to `archived` automatically.
+  - **`true`** (legacy behavior, opt-in): the later task is archived as `auto-resolved-duplicate` and the earliest sibling is kept, exactly as before FN-7658.
+
+Ghost-bug preflight is unaffected by `autoArchiveDuplicateTasksEnabled` — it is a distinct heuristic and always auto-archives on a definitive non-repro.
 
 Both heuristics are **fail-open**: probe/detection errors, timeouts, or inconclusive signals do not block normal intake — the task continues in the regular flow.
+
+Tombstone-resurrection blocking (recreating a soft-deleted task within the sticky window) is a separate safety mechanism from same-agent duplicate intake and is **not** gated by `autoArchiveDuplicateTasksEnabled` — it always throws `TombstonedTaskResurrectionError` regardless of the setting.
 
 Activity + run-audit event types:
 
 - `task:auto-archived-ghost-bug`
-- `task:auto-archived-duplicate`
+- `task:auto-archived-duplicate` — emitted for both outcomes of the same-agent duplicate heuristic; the flag-only (default) path sets `metadata.source: "same-agent-flagged"` to distinguish it from the legacy auto-archive outcome.
 
 These appear in task activity history; run-audit entries are emitted where run context exists (triage/engine paths). Store-only intake paths record activity without synthetic run context.
 
@@ -262,6 +268,8 @@ Fusion task columns use persisted enum values as the API/filter contract. Caller
    - Self-healing can still auto-finalize retry-exhausted failed review tasks when it can prove their branch content already landed on the merge target, so already-merged work does not deadlock in `in-review`.
    - Repeated engine merge-queue drops now escalate to an explicit recoverable review failure: if auto-recovery hits `Auto-merge starvation:` in the task `error`, Fusion has already seen three consecutive enqueue attempts rejected by the engine merge queue. Operators can recover by clearing the failed state from the dashboard, which lets the usual unpause/clear flow re-attempt merge once the underlying queue wedge is resolved.
    - Non-recoverable state-machine errors during finalization (for example `Invalid transition: 'todo' → 'done'`) are treated as terminal review failures: recovery must not re-enqueue these tasks for merge unless task state changes prove they are recoverable.
+   - FNXC:AutoMergeLifecycle 2026-07-07-12:00 (FN-7641): a **proven-merge recovery rehome** is now a recoverable state-machine transition, not a terminal error. `finalizeProvenAutoMergeTask` already verifies `hasDurableMergeProof` + `getTaskHardMergeBlocker` before requesting `done` from a stale legacy column (`todo`/`in-progress`/`triage`) via `store.moveTask(id, "done", { recoveryRehome: true, preserveProgress: true })`; the store now accepts that legacy→legacy recovery rehome (previously rejected as `Invalid transition: 'todo' → 'done'`, stranding a workspace-merge-landed card in `todo` forever — NEXT-010). Only the proven-merge `recoveryRehome` adjacency check is relaxed; the `in-review → done` merge-blocker guard and normal (non-recovery) transitions are unchanged.
+   - FNXC:StateMachine 2026-07-07-12:00 (FN-7641): setting a task's `nodeId` override to the workflow's terminal `end` node never silently no-ops. With durable merge proof (`mergeDetails.mergeConfirmed === true`) it finalizes the card to `done` via the same recovery-rehome path above; without proof it returns an explicit, actionable error instead of writing the field and leaving the card unchanged (NEXT-322 / NEXT-375 / NEXT-340 — a human/agent merging the branch tip directly into `main`, out-of-band, then setting `nodeId='end'`, used to leave the card silently stuck in `in-review`). This contract is enforced once in `TaskStore.updateTask` / `node-override-guard.ts` and shared identically by the dashboard PATCH `/api/tasks/:id` route and the CLI `fn_task_update` tool.
 
 #### Self-healing: stranded-completed-todo recovery
 

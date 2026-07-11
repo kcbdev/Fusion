@@ -137,6 +137,39 @@ async function waitForExpectation(assertion: () => void, timeoutMs: number = 1_0
   }
 }
 
+/*
+FNXC:WebSocketBadgeTests 2026-07-07-17:20:
+FN-5048 follow-through: replace the residual fixed 100ms "wait for subscription to be established"
+sleeps with a deterministic await on the server-side WebSocketManager `subscription:changed` event
+(exposed on the express app as `badgeWsManager`). This returns the instant the server registers the
+subscription (typically <5ms) instead of always paying 100ms, and closes the ordering race where a
+slow subscribe let the subsequent task:updated emit be dropped before the client was registered.
+The count-check and listener registration are synchronous (no await between), so the incoming ws
+message task cannot interleave and be missed.
+*/
+async function waitForSubscription(
+  app: ReturnType<typeof createServer>,
+  taskId: string,
+  projectId = "default",
+): Promise<void> {
+  const manager = (app as unknown as { badgeWsManager?: WebSocketManager | null }).badgeWsManager;
+  if (!manager) {
+    // Manager not exposed: yield a macrotask so the queued subscribe message is processed.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return;
+  }
+  if (manager.getSubscriptionCount(taskId, projectId) > 0) return;
+  await new Promise<void>((resolve) => {
+    const onChange = (changedTaskId: string, count: number, changedProjectId: string): void => {
+      if (changedTaskId === taskId && changedProjectId === projectId && count > 0) {
+        manager.off("subscription:changed", onChange);
+        resolve();
+      }
+    };
+    manager.on("subscription:changed", onChange);
+  });
+}
+
 describe("WebSocketManager", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -353,8 +386,8 @@ describe("/api/ws integration", () => {
     await once(client, "open");
     client.send(JSON.stringify({ type: "subscribe", taskId: initialTask.id }));
 
-    // Wait for subscription to be established
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the server to register the subscription (deterministic; see waitForSubscription).
+    await waitForSubscription(app, initialTask.id);
 
     const updatedTask = createTask({
       prInfo: {
@@ -440,8 +473,8 @@ describe("multi-instance /api/ws integration", () => {
     await once(clientB, "open");
     clientB.send(JSON.stringify({ type: "subscribe", taskId: taskA.id }));
 
-    // Give time for subscription to be established
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for instance B to register the subscription before emitting on instance A.
+    await waitForSubscription(appB, taskA.id);
 
     // Emit badge-changing task:updated on instance A (no local subscribers)
     const updatedTaskA = createTask({
@@ -523,8 +556,8 @@ describe("multi-instance /api/ws integration", () => {
     await once(client, "open");
     client.send(JSON.stringify({ type: "subscribe", taskId: task.id }));
 
-    // Wait for subscription
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait for the server to register the subscription (deterministic; see waitForSubscription).
+    await waitForSubscription(app, task.id);
 
     // Emit task:updated on the same instance
     const updatedTask = createTask({
@@ -632,10 +665,17 @@ describe("multi-instance /api/ws integration", () => {
       updatedAt: "2026-03-30T12:00:00.000Z",
     });
     (storeA as unknown as MockStore).task = updatedTask;
+    /*
+    FNXC:WebSocketBadgeTests 2026-07-07-17:20:
+    FN-5048 follow-through: await the shared pub/sub `message` delivery instead of a fixed 100ms
+    propagation sleep. The listener is armed before the task:updated emit so it captures the
+    publish; instance B's server handler (registered at creation, earlier than this listener)
+    caches the snapshot synchronously ahead of this resolve, so the late subscriber is guaranteed
+    to find the cached merged snapshot without paying an unconditional 100ms.
+    */
+    const propagated = once(sharedPubSub as unknown as EventEmitter, "message");
     (storeA as unknown as MockStore).emit("task:updated", updatedTask);
-
-    // Wait for pub/sub to propagate
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await propagated;
 
     // Now connect a NEW client to instance B and subscribe
     const clientB = new WebSocket(`ws://127.0.0.1:${portB}/api/ws`);

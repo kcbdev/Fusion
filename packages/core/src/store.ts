@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile, rename, unlink, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync, statSync, watch, type Dirent, type FSWatcher } from "node:fs";
+import { existsSync, statSync, type Dirent, type FSWatcher } from "node:fs";
 import { detectWorkspaceRepos, saveWorkspaceConfig, loadWorkspaceConfig } from "./git-repository.js";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, Artifact, ArtifactCreateInput, ArtifactType, ArtifactWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, CommitAssociationDiffBackfillReport, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision, PluginActivation, PluginActivationInput } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
@@ -18,6 +18,7 @@ import {
 import { parseWorkflowIr, serializeWorkflowIr, downgradeIrToV1IfPure } from "./workflow-ir.js";
 import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
 import { extractEffectiveWriteScopeFromPrompt, extractFileScopeTokens, isValidFileScopeEntry } from "./file-scope-classification.js";
+import { FsWatchPollController } from "./fs-watch-poll-controller.js";
 
 export type OverlapBlockerRepairReason =
   | "task-not-found"
@@ -161,7 +162,7 @@ import { CentralCore } from "./central-core.js";
 import { SecretsStore } from "./secrets-store.js";
 import { MasterKeyManager } from "./master-key.js";
 import { hasSyncPassphraseConfigured } from "./secrets-sync-passphrase.js";
-import { getTaskDoneBypassBlocker, getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
+import { getLatestFailedPreMergeReviewStep, getTaskDoneBypassBlocker, getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
 import { DEFAULT_STALE_MERGING_MIN_AGE_MS, getInReviewStallReason } from "./in-review-stall.js";
 import { getInReviewStalledSignal } from "./in-review-stalled.js";
 import { getStalePausedReviewSignal } from "./stale-paused-review.js";
@@ -202,7 +203,7 @@ import {
 } from "./distributed-task-id.js";
 import { detectStalledReview } from "./stalled-review-detector.js";
 import { computeRetrySummary } from "./retry-summary.js";
-import { archiveAsSameAgentDuplicate, findSameAgentDuplicates } from "./duplicate-intake.js";
+import { archiveAsSameAgentDuplicate, flagSameAgentDuplicate, findSameAgentDuplicates } from "./duplicate-intake.js";
 import { isNearDuplicateCanonicalInactive } from "./near-duplicate-canonical.js";
 import {
   detectTaskIdIntegrityAnomalies,
@@ -1607,8 +1608,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /** Separate SQLite database for compact archived task snapshots. */
   private _archiveDb: ArchiveDatabase | null = null;
 
-  /** File-system watcher instance */
-  private watcher: FSWatcher | null = null;
+  /**
+   * FNXC:CoreStores 2026-07-09-14:20:
+   * FN-7726 — the mechanical fs.watch+poll lifecycle (fail-soft watch setup,
+   * setInterval, teardown) is now owned by the shared `FsWatchPollController`
+   * (see fs-watch-poll-controller.ts) instead of being duplicated inline;
+   * TaskStore still owns `taskCache`/`lastKnownModified`/`pollingInProgress`
+   * and the actual diff body in checkForChanges(), passed to the controller
+   * as `onPoll`.
+   */
+  private readonly watchPoll = new FsWatchPollController();
+  /** Back-compat accessor so existing tests can reach the live FSWatcher via `storeAny.watcher`. */
+  private get watcher(): FSWatcher | null {
+    return this.watchPoll.watcher;
+  }
   /** In-memory cache of tasks for diffing watcher events */
   private taskCache: Map<string, Task> = new Map();
   /**
@@ -1673,8 +1686,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private _pluginWorkflowStepTemplates: Array<{ pluginId: string; template: WorkflowStepTemplate }> = [];
   /** Global settings store (`~/.fusion/settings.json`) */
   private globalSettingsStore: GlobalSettingsStore;
-  /** Polling interval for change detection */
-  private pollInterval: ReturnType<typeof setInterval> | null = null;
   /** Guard flag to prevent overlapping poll cycles */
   private pollingInProgress = false;
   /** Last known modification timestamp for change detection */
@@ -1702,7 +1713,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /** Whether the store is actively watching for changes (watcher or polling). */
   private get isWatching(): boolean {
-    return this.watcher !== null || this.pollInterval !== null;
+    return this.watchPoll.isWatching();
   }
   /** Cached MissionStore instance */
   private missionStore: MissionStore | null = null;
@@ -5254,8 +5265,25 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       const siblingTaskIds = matches.filter((match) => !match.tombstoned).map((match) => match.id);
       if (siblingTaskIds.length === 0) return;
       const scores = Object.fromEntries(matches.filter((match) => !match.tombstoned).map((match) => [match.id, match.score]));
-      await archiveAsSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
-      task.column = "archived";
+      /*
+      FNXC:DuplicateIntake 2026-07-07-00:00 (FN-7658):
+      Operators do not want same-agent duplicates silently vanishing into `archived`
+      during intake. Default (`autoArchiveDuplicateTasksEnabled` falsey) flags the
+      duplicate in place via the near-duplicate marker so a human decides (Keep/Archive
+      chip). Only an explicit `true` restores the pre-FN-7658 auto-archive behavior.
+      NOTE: the tombstone-resurrection block above (`TombstonedTaskResurrectionError`)
+      is a distinct safety mechanism and is intentionally NOT gated by this setting —
+      it always fires regardless of `autoArchiveDuplicateTasksEnabled`.
+      */
+      if (settings.autoArchiveDuplicateTasksEnabled === true) {
+        await archiveAsSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
+        task.column = "archived";
+      } else {
+        const appliedPatch = await flagSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
+        if (appliedPatch) {
+          task.sourceMetadata = { ...(task.sourceMetadata ?? {}), ...appliedPatch };
+        }
+      }
     } catch (error) {
       if (error instanceof TombstonedTaskResurrectionError) {
         throw error;
@@ -6145,6 +6173,38 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     if (limit === undefined) return sorted.slice(offset);
     return sorted.slice(offset, offset + Math.max(0, limit));
+  }
+
+  /**
+   * FNXC:ArchivePagination 2026-07-08-00:00:
+   * Dedicated archived-only read path for the Archived board column. The
+   * merged `listTasks({includeArchived:true})` path re-sorts everything
+   * (active + archived) by `createdAt ASC`, which is correct for the merged
+   * consumers (github-tracking reconciler, signal routes, agent-token-usage,
+   * self-healing) but wrong for the Archived column (must be newest-first)
+   * and unbounded (loads the whole archive). This method reads ONLY from
+   * `archiveDb` via the bounded `listPage()` SQL LIMIT/OFFSET query and
+   * preserves `archivedAt DESC` order — it must NOT be re-sorted by
+   * createdAt. Default page size is 100 to back a chunk-of-100 "Show more"
+   * UI; do not use this method as a substitute for the merged path.
+   */
+  async listArchivedTasks(options?: {
+    limit?: number;
+    offset?: number;
+    slim?: boolean;
+  }): Promise<{ tasks: Task[]; total: number; hasMore: boolean }> {
+    const rawLimit = options?.limit ?? 100;
+    const limit = Math.min(500, Math.max(1, Math.trunc(rawLimit) || 100));
+    const rawOffset = options?.offset ?? 0;
+    const offset = Math.max(0, Math.trunc(rawOffset) || 0);
+    const slim = options?.slim ?? true;
+
+    const total = this.archiveDb.getArchivedRowCount();
+    const entries = this.archiveDb.listPage(limit, offset);
+    const tasks = entries.map((entry) => this.archiveEntryToTask(entry, slim));
+    const hasMore = offset + tasks.length < total;
+
+    return { tasks, total, hasMore };
   }
 
   /**
@@ -7677,7 +7737,28 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         options?.recoveryRehome === true &&
         !sourceIsLegacy &&
         (COLUMNS as readonly string[]).includes(toColumn);
-      if (!isEvacuation) {
+      /*
+      FNXC:AutoMergeLifecycle 2026-07-07-12:00:
+      Signature 1 (FN-7641 / NEXT-010): a proven-merge recovery rehome can also run
+      LEGACY -> LEGACY (e.g. `todo -> done` when finalizeProvenAutoMergeTask reaches a
+      task whose column drifted to `todo`/`in-progress`/`triage` before workspace-merge
+      finalization runs). VALID_TRANSITIONS['todo'] never lists 'done' -- that adjacency
+      graph encodes the NORMAL flow, not proven-merge recovery -- so the legacy adjacency
+      check below rejected the finalizer's `store.moveTask(id, 'done', { recoveryRehome:
+      true, preserveProgress: true })` call with "Invalid transition: 'todo' -> 'done'.
+      Valid targets: in-progress, triage, archived", stranding the card in `todo` forever
+      even though `finalizeProvenAutoMergeTask` already verified `hasDurableMergeProof`
+      and `getTaskHardMergeBlocker` before calling moveTask. Bypass ONLY the adjacency
+      check for a recoveryRehome move between two legacy columns; the merge-blocker guard
+      below (fromColumn === 'in-review' && toColumn === 'done') and the finalizer's own
+      hard-blocker gate are untouched, so non-recovery moves and genuine merge blockers
+      are not weakened.
+      */
+      const isLegacyRecoveryRehome =
+        options?.recoveryRehome === true &&
+        sourceIsLegacy &&
+        (COLUMNS as readonly string[]).includes(toColumn);
+      if (!isEvacuation && !isLegacyRecoveryRehome) {
         /*
         FNXC:WorkflowColumns 2026-07-05-19:30:
         Workflow columns graduated to always-on (no experimental flag emitted), so this "flag-OFF"
@@ -8442,7 +8523,53 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; workspaceWorktrees?: import("./types.js").Task["workspaceWorktrees"]; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; customFields?: Record<string, unknown>; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; plannerOversightLevel?: import("./types.js").PlannerOversightLevel | null; awaitingApprovalReason?: import("./types.js").Task["awaitingApprovalReason"] | null; approvedPlanFingerprint?: string | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; graphResumeRetryCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; gitlabTracking?: (Omit<import("./types.js").TaskGitLabTracking, "item"> & { item?: import("./types.js").TaskGitLabTrackedItem | null }) | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; workflowTransitionNotification?: import("./types.js").Task["workflowTransitionNotification"] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
+    /*
+    FNXC:StateMachine 2026-07-07-12:00:
+    Signature 2 (FN-7641): resolve the nodeId='end' finalize-on-proof-or-error contract ONCE here so
+    the dashboard route, CLI task-update tool, and any other updateTask caller share identical
+    behavior via this single choke point. Read the current task and check BEFORE acquiring the
+    per-task lock (getTask/moveTask each acquire their own lock; nesting inside withTaskLock would
+    deadlock since the lock is non-reentrant). A terminal-node override with durable merge proof
+    finalizes the card to done via the Signature-1 recovery rehome; without proof it throws an
+    explicit error instead of letting updateTaskUnlocked write a no-op nodeId field.
+    */
+    if (updates.nodeId !== undefined) {
+      const currentTask = await this.getTask(id).catch(() => null);
+      if (currentTask) {
+        const validation = validateNodeOverrideChange(currentTask, updates.nodeId ?? null, {
+          isTerminalNodeId: (nodeId) => this.isTaskTerminalNodeId(id, nodeId),
+        });
+        if (!validation.allowed) {
+          throw new Error(validation.message);
+        }
+        if (validation.requiresFinalize) {
+          await this.moveTask(id, "done", {
+            moveSource: "engine",
+            recoveryRehome: true,
+            preserveProgress: true,
+          });
+        }
+      }
+    }
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
+  }
+
+  /**
+   * FNXC:StateMachine 2026-07-07-12:00:
+   * Resolve whether `nodeId` is the task's resolved workflow terminal `end` node (kind === "end"),
+   * for the nodeId='end' finalize-on-proof-or-error contract (FN-7641 Signature 2). Falls back to
+   * the literal id check when the workflow IR cannot be resolved or does not contain the node, which
+   * still matches every built-in workflow's terminal node id.
+   */
+  private isTaskTerminalNodeId(taskId: string, nodeId: string): boolean {
+    try {
+      const ir = this.resolveTaskWorkflowIrSync(taskId);
+      const node = ir.nodes.find((n) => n.id === nodeId);
+      if (node) return node.kind === "end";
+    } catch {
+      // Fall through to the literal-id fallback below.
+    }
+    return nodeId === "end";
   }
 
   async updateTaskAtomic(
@@ -8733,6 +8860,22 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     projectId: string,
     patch: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    return (await this.updateWorkflowSettingValuesWithPrevious(workflowId, projectId, patch)).stored;
+  }
+
+  /**
+   * Like {@link updateWorkflowSettingValues} but also returns the row's value
+   * snapshot as it was read INSIDE the same serialized transaction, immediately
+   * before the merge. Callers that diff before→after (e.g. model-lane drift on
+   * `PATCH /workflows/:id/setting-values`) must use this — reading `before`
+   * outside the write transaction races a concurrent patch of the same row and
+   * can pair a stale `previous` with another writer's `stored` (Greptile P2).
+   */
+  async updateWorkflowSettingValuesWithPrevious(
+    workflowId: string,
+    projectId: string,
+    patch: Record<string, unknown>,
+  ): Promise<{ previous: Record<string, unknown>; stored: Record<string, unknown> }> {
     const declarations = await this.resolveWorkflowSettingDeclarations(workflowId);
     const result = validateSettingValuePatch(declarations, patch);
     if (result.rejections.length > 0) {
@@ -8747,8 +8890,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     // write transaction. Validation/declaration resolution above stays outside
     // since it's async and doesn't read the row being mutated.
     return this.db.transactionImmediate(() => {
-      const current = this.getWorkflowSettingValues(workflowId, projectId);
-      const next: Record<string, unknown> = { ...current };
+      const previous = this.getWorkflowSettingValues(workflowId, projectId);
+      const next: Record<string, unknown> = { ...previous };
       for (const [key, value] of Object.entries(result.accepted)) {
         if (value === null) {
           delete next[key];
@@ -8767,7 +8910,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         )
         .run(workflowId, projectId, JSON.stringify(next), now);
       this.db.bumpLastModified();
-      return next;
+      // `previous` is captured before the merge; it and `next` are a consistent
+      // before/after pair from the same transaction snapshot.
+      return { previous, stored: next };
     });
   }
 
@@ -9550,11 +9695,23 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
    * Pause or unpause a task. Paused tasks are excluded from all automated
    * agent and scheduler interaction. Logs the action and emits `task:updated`.
    */
+  /*
+   * FNXC:ApprovalHold 2026-07-09-00:05:
+   * FN-7736: `agentOptions.pausedReason` is the minimal seam for durably
+   * stamping WHY a task was paused (e.g. the canonical
+   * `AWAITING_APPROVAL_PAUSE_REASON` from a tool-approval gate). Widening
+   * this existing options bag avoids a second, racy `updateTask` write right
+   * after `pauseTask` — the reason lands atomically with the pause itself.
+   * On unpause the caller-supplied reason is cleared here (mirroring how
+   * `pausedByAgentId`/`userPaused` are already cleared below); sweep-set
+   * built-in reasons like `branch-conflict-unrecoverable` are cleared by
+   * their own dedicated resume code paths and are unaffected.
+   */
   async pauseTask(
     id: string,
     paused: boolean,
     runContext?: RunMutationContext,
-    agentOptions?: { pausedByAgentId?: string },
+    agentOptions?: { pausedByAgentId?: string; pausedReason?: string },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
@@ -9570,9 +9727,13 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       if (paused && agentOptions?.pausedByAgentId) {
         task.pausedByAgentId = agentOptions.pausedByAgentId;
       }
+      if (paused && agentOptions?.pausedReason) {
+        task.pausedReason = agentOptions.pausedReason;
+      }
       if (!paused) {
         task.pausedByAgentId = undefined;
         task.userPaused = undefined;
+        task.pausedReason = undefined;
       }
       // When pausing an in-progress/in-review task, set status so the UI can show the state.
       // When unpausing, clear the "paused" status.
@@ -9609,6 +9770,104 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       } else {
         await this.atomicWriteTaskJson(dir, task);
       }
+      if (this.isWatching) this.taskCache.set(id, { ...task });
+
+      this.emit("task:updated", task);
+      return task;
+    });
+  }
+
+  /*
+   * FNXC:ReviewLaneBypass 2026-07-09-00:00:
+   * Operator/privileged-only escape hatch for a card stranded in `in-review`
+   * solely by a failed pre-merge review lane (leading real-world cause: the
+   * Runfusion/Fusion#1946 `(no feedback captured)` no-verdict dispatch
+   * defect). Requires a mandatory `reason` and rewrites the latest failed
+   * pre-merge `WorkflowStepResult` to a terminal `"skipped"` status with
+   * explicit bypass audit metadata (who/when/why/prior status) — it never
+   * synthesizes a reviewer `verdict`. This clears ONLY the
+   * "task has failed pre-merge workflow steps" `getTaskMergeBlocker` reason;
+   * paused/incomplete-step/blocking-status/still-pending conditions still
+   * block, and an `autoMerge:false` task is not force-merged — it only
+   * becomes eligible for the normal human-review merge path (FN-7720). NOT
+   * exposed to executor/reviewer/triage agent tool surfaces — see
+   * `fn_task_bypass_review` registration comments for the same rule.
+   */
+  async bypassFailedPreMergeReviewStep(
+    id: string,
+    options: { reason: string; actor: string },
+  ): Promise<Task> {
+    const reason = options.reason?.trim();
+    if (!reason) {
+      throw new Error("bypassFailedPreMergeReviewStep requires a non-empty reason");
+    }
+    const actor = options.actor?.trim() || "operator";
+
+    return this.withTaskLock(id, async () => {
+      const dir = this.taskDir(id);
+      const task = await this.readTaskJson(dir);
+
+      if (task.column !== "in-review") {
+        throw new Error(`Cannot bypass review lane for ${id}: task is in '${task.column}', must be in 'in-review'`);
+      }
+      if (task.paused) {
+        throw new Error(`Cannot bypass review lane for ${id}: task is paused`);
+      }
+
+      const target = getLatestFailedPreMergeReviewStep(task);
+      if (!target) {
+        throw new Error(`Cannot bypass review lane for ${id}: no failed pre-merge review step found`);
+      }
+
+      const results = task.workflowStepResults ?? [];
+      const targetIndex = results.indexOf(target);
+      if (targetIndex === -1) {
+        throw new Error(`Cannot bypass review lane for ${id}: failed step result not found`);
+      }
+
+      const now = new Date().toISOString();
+      const bypassed: import("./types.js").WorkflowStepResult = {
+        ...target,
+        status: "skipped",
+        bypassedBy: actor,
+        bypassedAt: now,
+        bypassReason: reason,
+        bypassedFromStatus: target.status,
+        bypassedFromVerdict: target.verdict,
+      };
+      // A bypass never fabricates a reviewer verdict.
+      delete bypassed.verdict;
+
+      const nextResults = [...results];
+      nextResults[targetIndex] = bypassed;
+      task.workflowStepResults = nextResults;
+
+      if (!task.log) {
+        task.log = [];
+      }
+      task.updatedAt = now;
+      task.log.push({
+        timestamp: now,
+        action: `Review lane bypassed: ${target.workflowStepName} (${target.workflowStepId}) by ${actor} — ${reason}`,
+      });
+
+      this.recordRunAuditEvent({
+        taskId: task.id,
+        agentId: actor,
+        runId: this.makeSyntheticDeleteRunId(task.id),
+        domain: "database",
+        mutationType: "task:bypass-review",
+        target: task.id,
+        metadata: {
+          workflowStepId: target.workflowStepId,
+          workflowStepName: target.workflowStepName,
+          bypassedFromStatus: target.status,
+          bypassedFromVerdict: target.verdict ?? null,
+          reason,
+        },
+      });
+
+      await this.atomicWriteTaskJson(dir, task);
       if (this.isWatching) this.taskCache.set(id, { ...task });
 
       this.emit("task:updated", task);
@@ -12540,7 +12799,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
    * any task mutations.
    */
   async watch(): Promise<void> {
-    if (this.watcher || this.pollInterval) return; // already watching
+    if (this.watchPoll.isWatching()) return; // already watching
     this.clearStartupSlimListMemo();
 
     // Populate cache with current state. The watcher only needs metadata to
@@ -12618,30 +12877,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     this.lastPollTime = new Date().toISOString();
 
     // Use a sentinel watcher object so existing code that checks `this.watcher` still works
-    try {
-      this.watcher = watch(this.tasksDir, { recursive: true }, (_event, _filename) => {
-        // No-op - we use polling now, but keep watcher for API compat
-      });
-      this.watcher.on("error", (err) => {
-        storeLog.warn("fs.watch emitted an error; polling will continue", {
-          phase: "watch:fs-watch-error",
-          error: err instanceof Error ? err.message : String(err),
-          tasksDir: this.tasksDir,
-        });
-      });
-    } catch (err) {
-      // fs.watch may not be available - that's fine
-      storeLog.warn("fs.watch unavailable; falling back to polling-only updates", {
-        phase: "watch:fs-watch-setup",
-        error: err instanceof Error ? err.message : String(err),
-        tasksDir: this.tasksDir,
-      });
-    }
-
-    // Poll for changes every second
-    this.pollInterval = setInterval(() => {
-      void this.checkForChanges();
-    }, 1000);
+    this.watchPoll.start({
+      dir: this.tasksDir,
+      recursive: true,
+      pollIntervalMs: 1000,
+      onPoll: () => this.checkForChanges(),
+      log: storeLog,
+      errorContext: { tasksDir: this.tasksDir },
+    });
     this.clearStartupSlimListMemo();
   }
 
@@ -12799,14 +13042,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
    * Stop watching and clean up.
    */
   stopWatching(): void {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
-    }
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
-    }
+    this.watchPoll.stop();
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
     }
@@ -12860,7 +13096,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       );
     }
 
-    return this.withTaskLock(id, async () => {
+    const attachment = await this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const attachDir = join(dir, "attachments");
       await mkdir(attachDir, { recursive: true });
@@ -12889,6 +13125,60 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
       return attachment;
     });
+
+    if (mimeType.startsWith("image/")) {
+      /*
+       * FNXC:ArtifactRegistry 2026-07-10-00:00:
+       * FN-7791 requires image task attachments created by agents, dashboard uploads, and route callers to surface as normal image artifacts. Register a URI-only artifact that points at the already-written attachment file so the proven artifact listing/SSE/media pipeline is reused without duplicating bytes or re-entering addAttachment.
+       *
+       * FNXC:ArtifactRegistry 2026-07-10-00:00:
+       * registerArtifact() enforces the artifact-registry active/non-archived task rule (see registerArtifact's ACTIVE_TASKS_WHERE check), but addAttachment has never enforced that rule for attachments themselves — attachments may be added to archived or soft-deleted tasks. Without this guard, attaching an image to an archived/soft-deleted task would throw here AFTER the attachment file and task.json were already written, so the caller would see addAttachment fail even though the attachment actually succeeded. Bridging into the artifact registry is best-effort: swallow the expected archived/not-found rejection so addAttachment keeps its existing always-succeeds-for-a-valid-image contract, and only the artifact-gallery bridge is skipped.
+       */
+      try {
+        await this.registerArtifact({
+          type: "image",
+          title: attachment.originalName,
+          description: "Image task attachment",
+          mimeType,
+          sizeBytes: attachment.size,
+          uri: `attachments/${attachment.filename}`,
+          authorId: "attachment",
+          authorType: "system",
+          taskId: id,
+          metadata: {
+            source: "attachment",
+            attachmentFilename: attachment.filename,
+            originalName: attachment.originalName,
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[fusion:store] Skipping artifact bridge for attachment ${attachment.filename} on task ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return attachment;
+  }
+
+  private async deleteAttachmentArtifactRows(taskId: string, filename: string): Promise<void> {
+    const rows = this.db
+      .prepare("SELECT * FROM artifacts WHERE taskId = ?")
+      .all(taskId) as unknown as ArtifactRow[];
+    const linkedArtifactIds = rows
+      .map((row) => this.rowToArtifact(row))
+      .filter((artifact) => artifact.metadata?.source === "attachment" && artifact.metadata.attachmentFilename === filename)
+      .map((artifact) => artifact.id);
+
+    if (linkedArtifactIds.length === 0) {
+      return;
+    }
+
+    const deleteArtifact = this.db.prepare("DELETE FROM artifacts WHERE id = ?");
+    for (const artifactId of linkedArtifactIds) {
+      deleteArtifact.run(artifactId);
+    }
+    this.db.bumpLastModified();
   }
 
   async getAttachment(
@@ -12923,6 +13213,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         err.code = "ENOENT";
         throw err;
       }
+
+      await this.deleteAttachmentArtifactRows(id, filename);
 
       // Remove file from disk
       const filePath = join(dir, "attachments", filename);
@@ -15198,6 +15490,7 @@ ${stepsSection}`;
       defaultOn: entry.template.defaultOn,
       modelProvider: entry.template.modelProvider,
       modelId: entry.template.modelId,
+      thinkingLevel: entry.template.thinkingLevel,
       createdAt: now,
       updatedAt: now,
     };
@@ -15739,6 +16032,87 @@ ${stepsSection}`;
       for (const row of unselected) ids.push(row.id);
     }
     return ids;
+  }
+
+  /** Model-lane setting keys (workflow_settings) paired with the task columns
+   *  they seed at task-creation time (a permanent point-in-time snapshot,
+   *  never re-synced when the workflow default later changes). */
+  private static readonly MODEL_LANES = [
+    { lane: "execution", providerKey: "executionProvider", modelIdKey: "executionModelId", providerCol: "modelProvider", modelIdCol: "modelId" },
+    { lane: "planning", providerKey: "planningProvider", modelIdKey: "planningModelId", providerCol: "planningModelProvider", modelIdCol: "planningModelId" },
+    { lane: "validator", providerKey: "validatorProvider", modelIdKey: "validatorModelId", providerCol: "validatorModelProvider", modelIdCol: "validatorModelId" },
+  ] as const;
+
+  /**
+   * Diff `before`/`after` workflow setting values for the three model lanes
+   * and, for each lane whose provider+modelId pair changed, list the
+   * non-terminal tasks on this workflow still pinned to the OLD pair. A
+   * task's model columns are captured once at creation and never re-synced,
+   * so changing a workflow's default silently orphans already-created tasks
+   * unless this drift is surfaced. Read-only — never mutates `tasks`; pair
+   * with `POST /tasks/batch-update-models` to actually re-pin flagged ids.
+   *
+   * When the diffed workflow is the project default, no-selection tasks resolve
+   * THROUGH it and are pinned to its lane values, so they must be counted as
+   * occupants. Callers pass `includeNullSelection: true` in that case (the
+   * route never hands us the internal `DEFAULT_WORKFLOW_POOL_ID` sentinel — it
+   * has the concrete default id — so we cannot infer this from `workflowId`
+   * alone; Greptile P1). When omitted, it falls back to the sentinel check.
+   */
+  getModelLaneDrift(
+    workflowId: string,
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+    options?: { includeNullSelection?: boolean },
+  ): Array<{
+    lane: string;
+    from: { provider: string | null; modelId: string | null };
+    to: { provider: string | null; modelId: string | null };
+    taskIds: string[];
+  }> {
+    const asStringOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+    const includeNullSelection =
+      options?.includeNullSelection ?? workflowId === TaskStore.DEFAULT_WORKFLOW_POOL_ID;
+    const drift: Array<{
+      lane: string;
+      from: { provider: string | null; modelId: string | null };
+      to: { provider: string | null; modelId: string | null };
+      taskIds: string[];
+    }> = [];
+
+    for (const l of TaskStore.MODEL_LANES) {
+      const fromProvider = asStringOrNull(before[l.providerKey]);
+      const fromModelId = asStringOrNull(before[l.modelIdKey]);
+      const toProvider = asStringOrNull(after[l.providerKey]);
+      const toModelId = asStringOrNull(after[l.modelIdKey]);
+      if (fromProvider === toProvider && fromModelId === toModelId) continue;
+      if (fromProvider === null && fromModelId === null) continue;
+
+      const occupants = this.listWorkflowOccupantTaskIds(workflowId, includeNullSelection);
+      let taskIds: string[] = [];
+      if (occupants.length > 0) {
+        const placeholders = occupants.map(() => "?").join(",");
+        const rows = this.db
+          .prepare(
+            `SELECT id FROM tasks
+              WHERE id IN (${placeholders})
+                AND "deletedAt" IS NULL
+                AND "column" != 'archived'
+                AND "column" != 'done'
+                AND "${l.providerCol}" IS ?
+                AND "${l.modelIdCol}" IS ?`,
+          )
+          .all(...occupants, fromProvider, fromModelId) as Array<{ id: string }>;
+        taskIds = rows.map((r) => r.id);
+      }
+      drift.push({
+        lane: l.lane,
+        from: { provider: fromProvider, modelId: fromModelId },
+        to: { provider: toProvider, modelId: toModelId },
+        taskIds,
+      });
+    }
+    return drift;
   }
 
   /** Map column id → occupant count for the tasks selecting `workflowId`

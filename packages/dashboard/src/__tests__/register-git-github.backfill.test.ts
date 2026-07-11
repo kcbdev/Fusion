@@ -16,6 +16,8 @@ function createStore(name: string): TaskStore {
     getSettings: vi.fn().mockResolvedValue({}),
     getGlobalSettingsStore: vi.fn(() => ({ getSettings: vi.fn().mockResolvedValue({}) })),
     logEntry: vi.fn().mockResolvedValue(undefined),
+    // FNXC:DashboardTests 2026-07-07-08:10: createServer subscribes via store.on("task:moved") to purge task-planner chats on archive (FN-7337); provide a no-op EventEmitter "on" so server startup wiring works instead of throwing "store.on is not a function".
+    on: vi.fn(),
     updateTask: vi.fn().mockResolvedValue(undefined),
     getDatabase: vi.fn().mockReturnValue({
       exec: vi.fn(),

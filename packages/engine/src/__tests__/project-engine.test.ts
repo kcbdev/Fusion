@@ -34,6 +34,9 @@ const mocks = vi.hoisted(() => ({
   oauthExpiryMonitorStop: vi.fn(),
   oauthValidityLoggerStart: vi.fn(async () => undefined),
   oauthValidityLoggerStop: vi.fn(),
+  // FNXC:EngineOAuth 2026-07-07-08:25: FN-7574 added OAuthRefreshScheduler (proactive access-token refresh) to the notification module; mirror its start/stop seams here alongside the sibling OAuth monitors.
+  oauthRefreshSchedulerStart: vi.fn(async () => undefined),
+  oauthRefreshSchedulerStop: vi.fn(),
   runtimeConfigurePrMonitoring: vi.fn(),
   prHandlerCreateFollowUpTask: vi.fn(async () => undefined),
 }));
@@ -161,6 +164,13 @@ vi.mock("../notification/index.js", () => ({
       stop: mocks.oauthExpiryMonitorStop,
     };
   }),
+  // FNXC:EngineOAuth 2026-07-07-08:25: FN-7574 constructs `new OAuthRefreshScheduler({ authStorage })` then awaits `.start()`/`.stop()` in ProjectEngine.start/stop. Export a constructable mock (function impl returning {start,stop}) so `new` works and the canonical-listener wiring tests run instead of failing on a missing mock export.
+  OAuthRefreshScheduler: vi.fn().mockImplementation(function () {
+    return {
+      start: mocks.oauthRefreshSchedulerStart,
+      stop: mocks.oauthRefreshSchedulerStop,
+    };
+  }),
   OAuthValidityLogger: vi.fn().mockImplementation(function () {
     return {
       start: mocks.oauthValidityLoggerStart,
@@ -234,6 +244,7 @@ function createMockStore(initialSettings: Record<string, unknown>) {
     emit: vi.fn(),
     addTaskComment: vi.fn(async () => undefined),
     getActiveMergingTask: vi.fn(() => null),
+    getBranchGroup: vi.fn(() => null),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void | Promise<void>) => {
       if (event === "settings:updated") {
         settingsHandlers.add(handler as (payload: SettingsHandlerPayload) => void | Promise<void>);
@@ -345,6 +356,8 @@ beforeEach(() => {
   mocks.oauthExpiryMonitorStop.mockClear();
   mocks.oauthValidityLoggerStart.mockClear();
   mocks.oauthValidityLoggerStop.mockClear();
+  mocks.oauthRefreshSchedulerStart.mockClear();
+  mocks.oauthRefreshSchedulerStop.mockClear();
 
   mocks.execFile.mockImplementation((
     _file: string,
@@ -395,6 +408,14 @@ describe("ProjectEngine notification ownership wiring", () => {
     expect(mocks.notificationServiceStart).toHaveBeenCalledTimes(1);
     expect(mocks.oauthExpiryMonitorStart).toHaveBeenCalledTimes(1);
     expect(mocks.notifierStart).toHaveBeenCalledTimes(1);
+
+    // FNXC:ClaudeOAuth 2026-07-08-12:10: the proactive refresher must start BEFORE the
+    // refresh-blind expiry monitor's first (awaited) check, or a stale-but-refreshable
+    // access token fires a false "OAuth token expired" ntfy push on startup. Lock the order.
+    expect(mocks.oauthRefreshSchedulerStart).toHaveBeenCalledTimes(1);
+    expect(mocks.oauthRefreshSchedulerStart.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.oauthExpiryMonitorStart.mock.invocationCallOrder[0],
+    );
 
     await engine.stop();
     expect(mocks.oauthExpiryMonitorStop).toHaveBeenCalledTimes(1);
@@ -1373,6 +1394,146 @@ describe("ProjectEngine U0 merge unification dispatch", () => {
     expect(result.merged).toBe(true);
     await engine.stop();
   });
+
+  // FNXC:Workspace 2026-07-05-00:00 (FN-7610):
+  // A workspace-mode task must route to landWorkspaceTask EVEN WHEN the project
+  // is configured with mergeStrategy:"pull-request" (getMergeStrategy resolves
+  // "pull-request") — the engine dispatch hoists an isWorkspaceTask check before
+  // the mergeStrategy branch so processPullRequestMerge (which would call
+  // getCurrentRepo against the non-git workspace root and throw "could not
+  // determine repository") is never reached for workspace tasks. Covers
+  // multi-repo, single-repo, and true-zero-commit no-op variants, plus asserts
+  // no regression to the legacy singular-worktree PR path.
+  describe("workspace tasks bypass PR-merge strategy (FN-7610)", () => {
+    it("multi-repo workspaceWorktrees + mergeStrategy=pull-request routes to landWorkspaceTask, never processPullRequestMerge", async () => {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      mockStore.store.getTask.mockResolvedValue({
+        id: "FN-WS-PR-MULTI",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: "queued",
+        branch: "fusion/fn-ws-pr-multi",
+        workspaceWorktrees: {
+          "repo-a": { worktreePath: "/tmp/a", branch: "fusion/fn-ws-pr-multi-a" },
+          "repo-b": { worktreePath: "/tmp/b", branch: "fusion/fn-ws-pr-multi-b" },
+        },
+      } as any);
+      mocks.currentStore = mockStore.store;
+      mocks.landWorkspaceTask.mockResolvedValue({
+        allLanded: true,
+        repos: [
+          { repo: "repo-a", status: "landed", landedSha: "aaaa1111", integrationBranch: "main" },
+          { repo: "repo-b", status: "landed", landedSha: "bbbb2222", integrationBranch: "main" },
+        ],
+      } as any);
+
+      const processPullRequestMerge = vi.fn(async () => "merged" as const);
+      const engine = createEngine({ processPullRequestMerge, getMergeStrategy: () => "pull-request" });
+      await engine.start();
+      const result = await engine.onMerge("FN-WS-PR-MULTI");
+      expect(processPullRequestMerge).not.toHaveBeenCalled();
+      expect(mocks.landWorkspaceTask).toHaveBeenCalled();
+      expect(result.merged).toBe(true);
+      await engine.stop();
+    });
+
+    it("single-key workspaceWorktrees + mergeStrategy=pull-request routes to landWorkspaceTask, never processPullRequestMerge", async () => {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      mockStore.store.getTask.mockResolvedValue({
+        id: "FN-WS-PR-SINGLE",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: "queued",
+        branch: "fusion/fn-ws-pr-single",
+        workspaceWorktrees: {
+          "repo-c": { worktreePath: "/tmp/c", branch: "fusion/fn-ws-pr-single-c" },
+        },
+      } as any);
+      mocks.currentStore = mockStore.store;
+      mocks.landWorkspaceTask.mockResolvedValue({
+        allLanded: true,
+        repos: [{ repo: "repo-c", status: "landed", landedSha: "cccc3333", integrationBranch: "main" }],
+      } as any);
+
+      const processPullRequestMerge = vi.fn(async () => "merged" as const);
+      const engine = createEngine({ processPullRequestMerge, getMergeStrategy: () => "pull-request" });
+      await engine.start();
+      const result = await engine.onMerge("FN-WS-PR-SINGLE");
+      expect(processPullRequestMerge).not.toHaveBeenCalled();
+      expect(mocks.landWorkspaceTask).toHaveBeenCalled();
+      expect(result.merged).toBe(true);
+      await engine.stop();
+    });
+
+    it("true-zero-commit no-op workspace task under mergeStrategy=pull-request finalizes without calling processPullRequestMerge and does not park failed", async () => {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      mockStore.store.getTask.mockResolvedValue({
+        id: "FN-WS-PR-NOOP",
+        column: "in-review",
+        paused: false,
+        mergeRetries: 0,
+        status: "queued",
+        branch: "fusion/fn-ws-pr-noop",
+        noCommitsExpected: true,
+        workspaceWorktrees: {
+          "repo-d": { worktreePath: "/tmp/d", branch: "fusion/fn-ws-pr-noop-d" },
+        },
+      } as any);
+      mocks.currentStore = mockStore.store;
+      // All repos land with no real commit (empty/no-op) — landWorkspaceTask still
+      // reports allLanded:true and finalizes gracefully.
+      mocks.landWorkspaceTask.mockResolvedValue({
+        allLanded: true,
+        repos: [{ repo: "repo-d", status: "empty", integrationBranch: "main" }],
+      } as any);
+
+      const processPullRequestMerge = vi.fn(async () => "merged" as const);
+      const engine = createEngine({ processPullRequestMerge, getMergeStrategy: () => "pull-request" });
+      await engine.start();
+      const result = await engine.onMerge("FN-WS-PR-NOOP");
+      expect(processPullRequestMerge).not.toHaveBeenCalled();
+      expect(mocks.landWorkspaceTask).toHaveBeenCalled();
+      expect(result.ok).not.toBe(false);
+      await engine.stop();
+    });
+
+    it("non-workspace task under mergeStrategy=pull-request still uses the PR path (no regression)", async () => {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      mockStore.store.getTask
+        .mockResolvedValueOnce({
+          id: "FN-WS-PR-LEGACY",
+          column: "in-review",
+          paused: false,
+          mergeRetries: 0,
+          status: null,
+          branch: "fusion/fn-ws-pr-legacy",
+        })
+        .mockResolvedValue({
+          id: "FN-WS-PR-LEGACY",
+          column: "done",
+          paused: false,
+          mergeRetries: 0,
+          status: null,
+          branch: "fusion/fn-ws-pr-legacy",
+          mergeDetails: { mergeConfirmed: true, mergedAt: "2026-07-05T00:00:00.000Z", mergeTargetBranch: "main" },
+        });
+      mocks.currentStore = mockStore.store;
+
+      const processPullRequestMerge = vi.fn(async () => "merged" as const);
+      const engine = createEngine({ processPullRequestMerge, getMergeStrategy: () => "pull-request" });
+      await engine.start();
+      engine.enqueueMerge("FN-WS-PR-LEGACY");
+
+      await vi.waitFor(() => {
+        expect(processPullRequestMerge).toHaveBeenCalled();
+      });
+      expect(mocks.landWorkspaceTask).not.toHaveBeenCalled();
+
+      await engine.stop();
+    });
+  });
 });
 
 /*
@@ -1407,15 +1568,26 @@ describe("ProjectEngine workspace merge dispatch hardening (Phase C review)", ()
     vi.useFakeTimers();
     try {
       const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
-      // First getTask (dispatch routing) returns the workspace task; the catch's getTask
-      // (after the throw) returns null to simulate a DB outage.
-      mockStore.store.getTask
-        .mockResolvedValueOnce(workspaceTask() as any) // dispatch routing read
-        .mockResolvedValueOnce(workspaceTask() as any) // canMergeTask sweep read (if any)
-        .mockResolvedValue(null as any); // catch-block read → DB outage
+      // FNXC:Workspace 2026-07-07-08:30 (FN-7610 regression):
+      // FN-7610 hoisted an isWorkspaceTask getTask read (mergeCandidate) into the
+      // dispatch ahead of landWorkspaceTask. A fixed mockResolvedValueOnce(2x)+null
+      // sequence no longer lands the null on the catch read — an earlier routing read
+      // consumes it and the workspace task never reaches landWorkspaceTask, so the
+      // WorkspacePartialLandError catch (and its fail-closed updateTask) never runs.
+      // Flip a flag inside the landWorkspaceTask mock and return the workspace task from
+      // getTask until that flag is set, so the null lands deterministically on the
+      // catch-block read (DB outage) regardless of how many routing reads precede the throw.
+      let landInvoked = false;
+      mocks.landWorkspaceTask.mockImplementation(async () => {
+        landInvoked = true;
+        throw new WorkspacePartialLandError(0, ["repo-a"], "Workspace partial land for FN-WSH: 0 landed, 1 failed");
+      });
       mocks.currentStore = mockStore.store;
-      mocks.landWorkspaceTask.mockRejectedValue(
-        new WorkspacePartialLandError(0, ["repo-a"], "Workspace partial land for FN-WSH: 0 landed, 1 failed"),
+      // getTask is typed to return a workspace task Record, but the real TaskStore
+      // signature yields Task | null; cast through unknown so the DB-outage null is
+      // expressible without `any`.
+      mockStore.store.getTask.mockImplementation(async () =>
+        (landInvoked ? null : workspaceTask()) as unknown as Record<string, unknown>,
       );
 
       const engine = createEngine();
@@ -2375,6 +2547,7 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
 
   it("startup merge sweep enqueues shared-group members when autoMerge is false", async () => {
     const mockStore = createMockStore({ ...baseSettings, autoMerge: false });
+    mockStore.store.getBranchGroup.mockReturnValue({ id: "BG-5819", status: "open", branchName: "fusion/groups/bg-5819" });
     mockStore.store.listTasks.mockResolvedValueOnce([
       {
         id: "FN-shared",
@@ -3150,8 +3323,8 @@ describe("ProjectEngine stale mergeActive rescue (FN-3900)", () => {
 });
 
 describe("allowInReviewMergeProcessing per-task autoMerge override", () => {
-  const gate = (task: Partial<Task>, settings: { autoMerge: boolean }) =>
-    (createEngine() as any).allowInReviewMergeProcessing(task, settings) as boolean;
+  const gate = (task: Partial<Task>, settings: { autoMerge: boolean }, branchGroup: { status: "open" | "finalized" | "abandoned" } | null = null) =>
+    (createEngine() as any).allowInReviewMergeProcessing(task, settings, { getBranchGroup: vi.fn(() => branchGroup) }) as boolean;
 
   it("lets an explicit per-task autoMerge:true through when the global setting is off", () => {
     expect(gate({ autoMerge: true }, { autoMerge: false })).toBe(true);
@@ -3167,11 +3340,40 @@ describe("allowInReviewMergeProcessing per-task autoMerge override", () => {
     expect(gate({ autoMerge: false }, { autoMerge: true })).toBe(true);
   });
 
-  it("still exempts shared-branch-group member integration when the global setting is off", () => {
+  it("still exempts live shared-branch-group member integration when the global setting is off", () => {
     expect(gate(
       { branchContext: { assignmentMode: "shared", groupId: "grp-1" } as Task["branchContext"] },
       { autoMerge: false },
+      { status: "open" },
     )).toBe(true);
+  });
+
+  it.each([
+    ["missing", null],
+    ["finalized", { status: "finalized" as const }],
+    ["abandoned", { status: "abandoned" as const }],
+  ])("blocks shared-branch-group member integration for %s groups when global autoMerge is off", (_label, branchGroup) => {
+    expect(gate(
+      { branchContext: { assignmentMode: "shared", groupId: "grp-1" } as Task["branchContext"] },
+      { autoMerge: false },
+      branchGroup,
+    )).toBe(false);
+  });
+
+  it.each([
+    ["api", { sourceType: "api" }],
+    ["user-created", { sourceType: undefined }],
+    ["engine-created", { sourceType: "unknown", sourceMetadata: { fusionBranchContext: { assignmentMode: "shared", groupId: "grp-1", source: "mission" } } }],
+  ])("applies the dissolved-group manual hold regardless of %s provenance", (_label, provenance) => {
+    expect(gate(
+      {
+        ...provenance,
+        autoMerge: undefined,
+        branchContext: { assignmentMode: "shared", groupId: "grp-1", source: "mission" } as Task["branchContext"],
+      },
+      { autoMerge: false },
+      null,
+    )).toBe(false);
   });
 });
 

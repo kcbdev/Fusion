@@ -19,6 +19,7 @@ vi.mock("../../api", () => ({
   fetchChatMessages: vi.fn(),
   updateChatSession: vi.fn(),
   deleteChatSession: vi.fn(),
+  editChatMessage: vi.fn(),
   streamChatResponse: vi.fn(),
   attachChatStream: vi.fn(),
   cancelChatResponse: vi.fn(),
@@ -54,6 +55,7 @@ const mockCreateChatSession = vi.mocked(apiModule.createChatSession);
 const mockFetchChatMessages = vi.mocked(apiModule.fetchChatMessages);
 const mockUpdateChatSession = vi.mocked(apiModule.updateChatSession);
 const mockDeleteChatSession = vi.mocked(apiModule.deleteChatSession);
+const mockEditChatMessage = vi.mocked(apiModule.editChatMessage);
 const mockStreamChatResponse = vi.mocked(apiModule.streamChatResponse);
 const mockAttachChatStream = vi.mocked(apiModule.attachChatStream);
 const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
@@ -68,6 +70,7 @@ function makeSession(overrides: Partial<ChatSession> & Pick<ChatSession, "id" | 
     projectId: overrides.projectId ?? null,
     modelProvider: overrides.modelProvider ?? null,
     modelId: overrides.modelId ?? null,
+    thinkingLevel: overrides.thinkingLevel ?? null,
     createdAt: overrides.createdAt ?? "2026-04-08T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-04-08T00:00:00.000Z",
   };
@@ -402,6 +405,102 @@ describe("useChat", () => {
     // sendMessage should return void (undefined), not a Promise
     const sendResult = result.current.sendMessage("Hello");
     expect(sendResult).toBeUndefined();
+  });
+
+  describe("editMessageAndResend", () => {
+    const mockAddToast = vi.fn();
+
+    // fetchChatMessages returns newest-first (order=desc); useChat reverses it to display
+    // oldest-first. `messages` here is given in display (oldest-first) order for readability,
+    // so we reverse it before handing it to the mock to match the real API contract.
+    async function setupWithMessages(messages: ChatMessage[]) {
+      const session = makeSession({ id: "session-001", agentId: "agent-001" });
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+      mockFetchChatMessages.mockResolvedValueOnce({ messages: messages.slice().reverse() });
+
+      const { result } = renderHook(() => useChat("proj-123", mockAddToast));
+
+      await waitFor(() => {
+        expect(result.current.sessions).toHaveLength(1);
+      });
+
+      act(() => {
+        result.current.selectSession("session-001");
+      });
+
+      await waitFor(() => {
+        expect(result.current.messages).toHaveLength(messages.length);
+      });
+
+      return result;
+    }
+
+    it("optimistically truncates from the edited message and resends via sendMessage", async () => {
+      const m1 = makeMessage({ id: "msg-1", sessionId: "session-001", role: "user", content: "one" });
+      const m2 = makeMessage({ id: "msg-2", sessionId: "session-001", role: "assistant", content: "two" });
+      const m3 = makeMessage({ id: "msg-3", sessionId: "session-001", role: "user", content: "three" });
+      const result = await setupWithMessages([m1, m2, m3]);
+
+      mockEditChatMessage.mockResolvedValueOnce({ retained: [m1, m2] });
+      const closeFn = vi.fn();
+      mockStreamChatResponse.mockImplementation(() => ({ close: closeFn, isConnected: () => true }));
+
+      await act(async () => {
+        await result.current.editMessageAndResend("msg-3", "three (edited)");
+      });
+
+      expect(mockEditChatMessage).toHaveBeenCalledWith("session-001", "msg-3", "three (edited)", "proj-123");
+      await waitFor(() => {
+        // Optimistic truncation drops msg-3, then sendMessage appends a fresh optimistic user bubble
+        // with the edited content — so retained [m1, m2] plus the new turn is 3 messages.
+        expect(result.current.messages).toHaveLength(3);
+        expect(result.current.messages[0]?.id).toBe("msg-1");
+        expect(result.current.messages[1]?.id).toBe("msg-2");
+        expect(result.current.messages[2]?.role).toBe("user");
+        expect(result.current.messages[2]?.content).toBe("three (edited)");
+      });
+      expect(mockStreamChatResponse).toHaveBeenCalledWith("session-001", "three (edited)", expect.anything(), undefined, "proj-123");
+    });
+
+    it("is a no-op while streaming", async () => {
+      const m1 = makeMessage({ id: "msg-1", sessionId: "session-001", role: "user", content: "one" });
+      const result = await setupWithMessages([m1]);
+
+      mockStreamChatResponse.mockImplementation(() => ({ close: vi.fn(), isConnected: () => true }));
+      act(() => {
+        result.current.sendMessage("in flight");
+      });
+      await waitFor(() => {
+        expect(result.current.isStreaming).toBe(true);
+      });
+
+      mockEditChatMessage.mockClear();
+      await act(async () => {
+        await result.current.editMessageAndResend("msg-1", "edited");
+      });
+
+      expect(mockEditChatMessage).not.toHaveBeenCalled();
+    });
+
+    it("reloads messages and does not resend on PATCH failure", async () => {
+      const m1 = makeMessage({ id: "msg-1", sessionId: "session-001", role: "user", content: "one" });
+      const m2 = makeMessage({ id: "msg-2", sessionId: "session-001", role: "assistant", content: "two" });
+      const result = await setupWithMessages([m1, m2]);
+
+      mockEditChatMessage.mockRejectedValueOnce(new Error("boom"));
+      // fetchChatMessages returns newest-first; the reload path reverses it back to [m1, m2].
+      mockFetchChatMessages.mockResolvedValueOnce({ messages: [m2, m1] });
+      mockStreamChatResponse.mockClear();
+
+      await act(async () => {
+        await result.current.editMessageAndResend("msg-1", "edited");
+      });
+
+      await waitFor(() => {
+        expect(result.current.messages.map((m) => m.id)).toEqual(["msg-1", "msg-2"]);
+      });
+      expect(mockStreamChatResponse).not.toHaveBeenCalled();
+    });
   });
 
   it("populates agentsMap on mount", async () => {
@@ -751,8 +850,8 @@ describe("useChat", () => {
     }));
   });
 
-  it("creates a new session and selects it", async () => {
-    const newSession = makeSession({ id: "session-new", agentId: "agent-001", title: "Test Chat" });
+  it("creates a new session with thinking level and selects it", async () => {
+    const newSession = makeSession({ id: "session-new", agentId: "agent-001", title: "Test Chat", thinkingLevel: "medium" });
     mockCreateChatSession.mockResolvedValueOnce({ session: newSession });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [] });
 
@@ -767,18 +866,28 @@ describe("useChat", () => {
       createdSession = await result.current.createSession({
         agentId: "agent-001",
         title: "Test Chat",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+        thinkingLevel: "medium",
       });
     });
 
     await waitFor(() => {
       expect(mockCreateChatSession).toHaveBeenCalledWith(
-        { agentId: "agent-001", title: "Test Chat" },
+        {
+          agentId: "agent-001",
+          title: "Test Chat",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          thinkingLevel: "medium",
+        },
         undefined,
       );
     });
 
     await waitFor(() => {
       expect(result.current.activeSession?.id).toBe("session-new");
+      expect(result.current.activeSession?.thinkingLevel).toBe("medium");
       expect(result.current.sessions).toHaveLength(1);
     });
   });
@@ -1542,6 +1651,119 @@ describe("useChat", () => {
       expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
       expect(result.current.isStreaming).toBe(false);
     });
+  });
+
+  it("FN-7656 reattaches and shows working state on refresh reporting isGenerating with no inFlightGeneration snapshot yet (pre-first-delta)", async () => {
+    // Regression: early in a generation the server reports isGenerating:true
+    // with inFlightGeneration still null (no delta emitted yet). The stale
+    // local `sessions` cache also reports isGenerating:false. selectSession's
+    // authoritative fetchChatSession refresh must reattach on isGenerating
+    // alone, without waiting for an inFlightGeneration snapshot.
+    const staleSession = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: false,
+      inFlightGeneration: null,
+    };
+    const generatingSessionNoSnapshot = {
+      ...staleSession,
+      isGenerating: true,
+      inFlightGeneration: null,
+    };
+
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [staleSession] });
+    mockFetchChatSession.mockResolvedValueOnce({ session: generatingSessionNoSnapshot });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+      expect(mockAttachChatStream).toHaveBeenCalledWith("session-001", expect.any(Object), undefined, {});
+      expect(result.current.isStreaming).toBe(true);
+    });
+  });
+
+  it("FN-7656 does not reattach when the authoritative refresh reports isGenerating:false", async () => {
+    const session = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: false,
+      inFlightGeneration: null,
+    };
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatSession.mockResolvedValueOnce({ session: { ...session, isGenerating: false, inFlightGeneration: null } });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-001", undefined);
+    });
+
+    expect(mockAttachChatStream).not.toHaveBeenCalled();
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("FN-7656 does not reattach to a session the user has already navigated away from before the refresh resolves", async () => {
+    const sessionA = {
+      ...makeSession({ id: "session-001", agentId: "agent-001" }),
+      isGenerating: false,
+      inFlightGeneration: null,
+    };
+    const sessionB = {
+      ...makeSession({ id: "session-002", agentId: "agent-001" }),
+      isGenerating: false,
+      inFlightGeneration: null,
+    };
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [sessionA, sessionB] });
+    const deferredRefresh = createDeferredPromise<{ session: ChatSession }>();
+    mockFetchChatSession.mockReturnValueOnce(deferredRefresh.promise);
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useChat());
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(2);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(mockFetchChatSession).toHaveBeenCalledWith("session-001", undefined);
+    });
+
+    // User navigates away to session-002 before the session-001 refresh resolves.
+    act(() => {
+      result.current.selectSession("session-002");
+    });
+
+    await act(async () => {
+      deferredRefresh.resolve({
+        session: { ...sessionA, isGenerating: true, inFlightGeneration: null },
+      });
+      await Promise.resolve();
+    });
+
+    expect(mockAttachChatStream).not.toHaveBeenCalled();
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.activeSession?.id).toBe("session-002");
   });
 
   it("fetches session on visible return only when no live stream and swallows reconnect failures", async () => {

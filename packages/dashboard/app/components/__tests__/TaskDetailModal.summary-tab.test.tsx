@@ -92,7 +92,11 @@ describe("TaskDetailModal Summary tab", () => {
     expect(container.querySelector(".detail-tabs")?.firstElementChild?.textContent).toBe("Activity");
     const summaryButton = screen.getByRole("button", { name: "Summary" });
     expectButtonActive(summaryButton);
-    expect(screen.queryByRole("button", { name: "Chat" })).toBeNull();
+    /*
+    FNXC:TaskDetailTabs 2026-07-07-09:25:
+    The planner-chat ("Chat") tab now renders unconditionally in the task-detail tab strip (both taskDetailChatFirst branches), so done tasks expose Activity, Chat, Summary, ... (see TaskDetailModal.definition-actions.test.tsx). Done tasks still land on Summary by default; Chat is present but not active.
+    */
+    expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
     expect(screen.getByText("Completion summary")).toBeTruthy();
     expect(screen.getByText("summary")).toBeTruthy();
     expect(screen.getByText("What changed")).toBeTruthy();
@@ -306,6 +310,40 @@ describe("TaskDetailModal Summary tab", () => {
     expect(within(rows[0]).getByText("5,678")).toBeTruthy();
     expect(within(rows[0]).getByText("90")).toBeTruthy();
     expect(within(rows[0]).getByText("7,014")).toBeTruthy();
+  });
+
+  it("renders a dollar amount for the current runtime token-usage model snapshot", () => {
+    render(
+      <TaskSummaryTab
+        task={doneTask({
+          tokenUsage: tokenUsage({
+            inputTokens: 1_000_000,
+            outputTokens: 200_000,
+            cachedTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: 1_200_000,
+            modelProvider: "anthropic",
+            modelId: "claude-sonnet-5",
+            perModel: [
+              {
+                modelProvider: "anthropic",
+                modelId: "claude-sonnet-5",
+                inputTokens: 1_000_000,
+                outputTokens: 200_000,
+                cachedTokens: 0,
+                cacheWriteTokens: 0,
+                totalTokens: 1_200_000,
+                firstUsedAt: "2026-07-10T15:22:50.837Z",
+                lastUsedAt: "2026-07-10T15:22:50.837Z",
+              },
+            ],
+          }),
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText("$4.00").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("claude-sonnet-5")).toBeTruthy();
   });
 
   it("applies pricing overrides passed into the summary component", () => {

@@ -25,9 +25,36 @@ describe("reliability interactions: same-agent duplicate intake", () => {
     while (fixtures.length) await fixtures.pop()!.cleanup();
   });
 
-  it("archives later near-duplicate from same agent", async () => {
+  it("FN-7658: flags (does not auto-archive) later near-duplicate from same agent by default", async () => {
     const fx = await createStore();
     fixtures.push(fx);
+
+    const a = await fx.store.createTask({
+      title: "fix: secrets sync typecheck",
+      description: "typecheck error in secrets-sync",
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
+    });
+    const b = await fx.store.createTask({
+      title: "fix: secrets sync typecheck regression",
+      description: "typecheck error in secrets-sync",
+      source: { sourceType: "agent_heartbeat", sourceAgentId: "agent-x" },
+    });
+
+    expect((await fx.store.getTask(a.id)).column).toBe("triage");
+    const refreshedB = await fx.store.getTask(b.id);
+    expect(refreshedB.column).not.toBe("archived");
+    expect(refreshedB.sourceMetadata?.nearDuplicateOf).toBe(a.id);
+    const activity = await fx.store.getActivityLog({ type: "task:auto-archived-duplicate", limit: 10 });
+    const entry = activity.find((item) => item.taskId === b.id);
+    expect(entry).toBeTruthy();
+    expect((entry?.metadata as { siblingTaskIds?: string[]; source?: string } | null)?.siblingTaskIds).toEqual([a.id]);
+    expect((entry?.metadata as { source?: string } | null)?.source).toBe("same-agent-flagged");
+  });
+
+  it("archives later near-duplicate from same agent when autoArchiveDuplicateTasksEnabled is true", async () => {
+    const fx = await createStore();
+    fixtures.push(fx);
+    await fx.store.updateSettings({ autoArchiveDuplicateTasksEnabled: true });
 
     const a = await fx.store.createTask({
       title: "fix: secrets sync typecheck",

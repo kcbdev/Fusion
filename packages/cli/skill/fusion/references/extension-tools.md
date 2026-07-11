@@ -85,6 +85,15 @@ Retry a failed task — clears the error state. Non-review failures move to todo
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Task ID to retry (e.g. FN-001). Must be in 'failed' state. |
 
+### fn_task_bypass_review
+
+Policy-gated escape hatch for an in-review task stranded solely by a failed pre-merge review lane (leading real-world cause: the Runfusion/Fusion#1946 '(no feedback captured)' no-verdict dispatch defect), not a real REVISE. Rewrites the latest failed pre-merge WorkflowStepResult to a terminal non-blocking status with explicit bypass audit metadata (who/when/why/prior status) — it never fabricates a reviewer verdict. Requires a mandatory reason and is audit-logged. Clears ONLY the failed-pre-merge-step merge blocker; paused, incomplete-step, blocking-status, and still-pending conditions still block, and an autoMerge:false task is not force-merged.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✓ | Task ID (e.g. FN-001) |
+| `reason` | string | ✓ | Mandatory justification for the bypass (audit-logged) |
+
 ### fn_task_duplicate
 
 Duplicate an existing task, creating a fresh copy in planning. Copies the title and description but resets all execution state. The AI planning agent will replan the new task.
@@ -104,11 +113,12 @@ Request a refinement of a completed or in-review task. Creates a new follow-up t
 
 ### fn_task_archive
 
-Archive a task from any live column (move to archived). Archived tasks are preserved for historical reference but moved out of the main board view.
+Archive a task from any live column (move to archived). Archived tasks are preserved for historical reference but moved out of the main board view. If the task is still referenced as a lineage parent by another task, archiving is rejected unless removeLineageReferences:true is passed.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Task ID to archive from any live column (e.g. FN-001). |
+| `removeLineageReferences` | boolean | — | When true, clear incoming lineage-parent references (child sourceParentTaskId) before archiving, so a task still referenced as a lineage parent can be archived. |
 
 ### fn_task_unarchive
 
@@ -120,12 +130,13 @@ Unarchive an archived task (move from archived → its restore column). Restores
 
 ### fn_task_delete
 
-Soft-delete a task from active Fusion board views. The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation.
+Soft-delete a task from active Fusion board views. The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation. If the task is still referenced as a lineage parent by another task, deletion is rejected unless removeLineageReferences:true is passed.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `id` | string | ✓ | Task ID to delete (e.g. FN-001) |
 | `allowResurrection` | boolean | — | When true, mark this tombstone as explicitly reusable for future recreation. |
+| `removeLineageReferences` | boolean | — | When true, clear incoming lineage-parent references (child sourceParentTaskId) before deleting, so a task still referenced as a lineage parent can be removed. |
 
 ### fn_task_browse_gitlab_project_issues
 

@@ -890,6 +890,12 @@ describe("GET /auth/status", () => {
       reason: "mocked unavailable",
       probeDurationMs: 0,
     });
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
+      reason: "mocked unavailable",
+      probeDurationMs: 0,
+    });
     vi.spyOn(llamaCppProbeModule, "probeLlamaCpp").mockResolvedValue({
       available: false,
       reason: "mocked unavailable",
@@ -931,12 +937,35 @@ describe("GET /auth/status", () => {
     expect(res.status).toBe(200);
     // Filter out synthetic CLI providers — they have dedicated route tests.
     // Structural assertions here are about OAuth + API-key paths only.
-    const providers = res.body.providers.filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "cursor-cli" && p.id !== "llama-cpp");
-    expect(providers).toEqual([
-      { id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth", expired: false, loginInProgress: false },
-      { id: "openrouter", name: "OpenRouter", authenticated: false, type: "api_key" },
-      { id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" },
+    const providers = res.body.providers.filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "cursor-cli" && p.id !== "grok-cli" && p.id !== "llama-cpp");
+    /*
+    FN-7625: the static catalog (anthropic-subscription/github-copilot/openai-codex
+    OAuth + the full API-key catalog) is always present, unioned with whatever the
+    mocked storage additionally reports — even when storage only reports a narrow
+    subset (github-copilot + openrouter + kimi-coding here).
+    */
+    expect(providers.map((p: any) => p.id)).toEqual([
+      "anthropic-subscription",
+      "github-copilot",
+      "openai-codex",
+      "anthropic-api-key",
+      "brave",
+      "kimi-coding",
+      "minimax",
+      "openrouter",
+      "opencode-go",
+      "tavily",
+      "zai",
     ]);
+    const githubCopilot = providers.find((p: any) => p.id === "github-copilot");
+    expect(githubCopilot).toEqual({ id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth", expired: false, loginInProgress: false });
+    const openrouter = providers.find((p: any) => p.id === "openrouter");
+    expect(openrouter).toEqual({ id: "openrouter", name: "OpenRouter", authenticated: false, type: "api_key" });
+    const kimiCoding = providers.find((p: any) => p.id === "kimi-coding");
+    expect(kimiCoding).toEqual({ id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" });
+    // Catalog-only entries (not reported by storage) still surface, present-but-unauthenticated.
+    const brave = providers.find((p: any) => p.id === "brave");
+    expect(brave).toEqual({ id: "brave", name: "Brave Search", authenticated: false, type: "api_key" });
     expect(authStorage.reload).toHaveBeenCalled();
   });
 
@@ -1025,14 +1054,36 @@ describe("GET /auth/status", () => {
     const res = await GET(app, "/api/auth/status");
 
     expect(res.status).toBe(200);
-    const providers = res.body.providers.filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "cursor-cli" && p.id !== "llama-cpp");
-    expect(providers).toEqual([
-      { id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth", expired: false, loginInProgress: false },
-      { id: "openai-codex", name: "OpenAI Codex", authenticated: false, type: "oauth", expired: false, loginInProgress: false, requiresManualCode: true },
-      { id: "openrouter", name: "OpenRouter", authenticated: false, type: "api_key" },
-      { id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" },
-      { id: "acme-extension", name: "Acme Extension", authenticated: true, type: "api_key" },
+    const providers = res.body.providers.filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "cursor-cli" && p.id !== "grok-cli" && p.id !== "llama-cpp");
+    /*
+    FN-7625: catalog ids remain present even though storage only reported a
+    narrow subset, and a storage-reported id NOT in the catalog ("acme-extension")
+    still surfaces — union, never intersection, with runtime state.
+    */
+    expect(providers.map((p: any) => p.id)).toEqual([
+      "anthropic-subscription",
+      "github-copilot",
+      "openai-codex",
+      "anthropic-api-key",
+      "brave",
+      "kimi-coding",
+      "minimax",
+      "openrouter",
+      "opencode-go",
+      "tavily",
+      "zai",
+      "acme-extension",
     ]);
+    const githubCopilot = providers.find((p: any) => p.id === "github-copilot");
+    expect(githubCopilot).toEqual({ id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth", expired: false, loginInProgress: false });
+    const openaiCodex = providers.find((p: any) => p.id === "openai-codex");
+    expect(openaiCodex).toEqual({ id: "openai-codex", name: "OpenAI Codex", authenticated: false, type: "oauth", expired: false, loginInProgress: false, requiresManualCode: true });
+    const openrouter = providers.find((p: any) => p.id === "openrouter");
+    expect(openrouter).toEqual({ id: "openrouter", name: "OpenRouter", authenticated: false, type: "api_key" });
+    const kimiCoding = providers.find((p: any) => p.id === "kimi-coding");
+    expect(kimiCoding).toEqual({ id: "kimi-coding", name: "Kimi", authenticated: false, type: "api_key" });
+    const acmeExtension = providers.find((p: any) => p.id === "acme-extension");
+    expect(acmeExtension).toEqual({ id: "acme-extension", name: "Acme Extension", authenticated: true, type: "api_key" });
   });
 
   it.each(["https://my-host.example.com", undefined])(
@@ -1462,6 +1513,121 @@ describe("GET /auth/status", () => {
     expect(res.status).toBe(500);
     expect(res.body.error).toBe("storage error");
   });
+
+  /*
+  FN-7625 symptom verification: connecting a runtime plugin (e.g. Hermes Runtime)
+  can narrow pi AuthStorage's live provider registry — storage.getOAuthProviders()
+  and storage.getApiKeyProviders() collapse to whatever that plugin still exposes.
+  Before the fix, GET /auth/status enumerated `providers` directly from those live
+  reads, so the response's provider set collapsed along with the narrowed registry.
+  The static catalog fix must keep provider *presence* deterministic — identical
+  full-catalog ids — across a full registry, a narrowed/empty registry (simulating
+  a connected runtime plugin), AND a registry that reports ids outside the catalog
+  (union, never intersection). Only per-provider `authenticated`/`expired` may vary.
+  */
+  describe("FN-7625: provider list is a static catalog independent of runtime/plugin connection state", () => {
+    const FULL_OAUTH_CATALOG_IDS = ["anthropic-subscription", "github-copilot", "openai-codex"];
+    const FULL_API_KEY_CATALOG_IDS = [
+      "anthropic-api-key",
+      "brave",
+      "kimi-coding",
+      "minimax",
+      "openrouter",
+      "opencode-go",
+      "tavily",
+      "zai",
+    ];
+    const FULL_CATALOG_IDS = [...FULL_OAUTH_CATALOG_IDS, ...FULL_API_KEY_CATALOG_IDS];
+
+    function nonCliProviderIds(res: any): string[] {
+      return res.body.providers
+        .filter((p: any) => p.id !== "claude-cli" && p.id !== "droid-cli" && p.id !== "cursor-cli" && p.id !== "grok-cli" && p.id !== "llama-cpp")
+        .map((p: any) => p.id);
+    }
+
+    it("enumerates the identical full catalog whether storage reports the full set or a narrowed/empty set (Hermes Runtime connection simulation)", async () => {
+      // Permutation 1: no runtime plugin connected — storage reports the full
+      // upstream registry.
+      (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+        { id: "anthropic", name: "Anthropic" },
+        { id: "github-copilot", name: "GitHub Copilot" },
+        { id: "openai-codex", name: "OpenAI Codex" },
+      ]);
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+        { id: "anthropic-api-key", name: "Anthropic API Key" },
+        { id: "brave", name: "Brave Search" },
+        { id: "kimi-coding", name: "Kimi" },
+        { id: "minimax", name: "Minimax" },
+        { id: "openrouter", name: "OpenRouter" },
+        { id: "opencode-go", name: "Opencode (Go)" },
+        { id: "tavily", name: "Tavily" },
+        { id: "zai", name: "Zai" },
+      ]);
+      const fullRes = await GET(app, "/api/auth/status");
+      expect(fullRes.status).toBe(200);
+      expect(nonCliProviderIds(fullRes)).toEqual(FULL_CATALOG_IDS);
+
+      // Permutation 2: a runtime plugin (e.g. Hermes Runtime) connects and
+      // narrows the live registry down to almost nothing — the exact
+      // reproduction from the task's Symptom Verification section.
+      (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+        { id: "github-copilot", name: "GitHub Copilot" },
+      ]);
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      const narrowedRes = await GET(app, "/api/auth/status");
+      expect(narrowedRes.status).toBe(200);
+      expect(nonCliProviderIds(narrowedRes)).toEqual(FULL_CATALOG_IDS);
+
+      // Permutation 3: another runtime plugin narrows the registry to a
+      // completely empty set (Paperclip / OpenClaw / Droid Runtime scenario).
+      (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      const emptyRes = await GET(app, "/api/auth/status");
+      expect(emptyRes.status).toBe(200);
+      expect(nonCliProviderIds(emptyRes)).toEqual(FULL_CATALOG_IDS);
+    });
+
+    it("still tracks authenticated/expired from storage while presence stays static", async () => {
+      (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "github-copilot");
+      (authStorage.hasApiKey as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "openrouter");
+
+      const res = await GET(app, "/api/auth/status");
+
+      expect(res.status).toBe(200);
+      // Catalog provider missing from storage still appears, present-but-unauthenticated.
+      const anthropicSubscription = res.body.providers.find((p: any) => p.id === "anthropic-subscription");
+      expect(anthropicSubscription).toMatchObject({ authenticated: false });
+      // Catalog provider storage marks authenticated stays authenticated.
+      const githubCopilot = res.body.providers.find((p: any) => p.id === "github-copilot");
+      expect(githubCopilot).toMatchObject({ authenticated: true });
+      const openrouter = res.body.providers.find((p: any) => p.id === "openrouter");
+      expect(openrouter).toMatchObject({ authenticated: true });
+      const brave = res.body.providers.find((p: any) => p.id === "brave");
+      expect(brave).toMatchObject({ authenticated: false });
+    });
+
+    it("surfaces a storage-reported provider absent from the catalog (union, never intersection) and keeps the Anthropic alias de-duplicated", async () => {
+      (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+        { id: "anthropic", name: "Anthropic" },
+        { id: "a-brand-new-upstream-oauth-provider", name: "Brand New Provider" },
+      ]);
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const res = await GET(app, "/api/auth/status");
+
+      expect(res.status).toBe(200);
+      const providerIds = res.body.providers.map((p: any) => p.id);
+      // Union: the new upstream provider surfaces alongside the static catalog.
+      expect(providerIds).toContain("a-brand-new-upstream-oauth-provider");
+      // The anthropic OAuth id is exposed only as the synthetic anthropic-subscription
+      // id — no duplicate raw "anthropic" OAuth card.
+      expect(providerIds).toContain("anthropic-subscription");
+      expect(providerIds).not.toContain("anthropic");
+      expect(providerIds.filter((id: string) => id === "anthropic-subscription")).toHaveLength(1);
+    });
+  });
 });
 
 describe("POST /auth/claude-cli", () => {
@@ -1648,6 +1814,12 @@ describe("Droid CLI auth routes", () => {
     });
     vi.spyOn(runtimeProviderProbesModule, "probeCursorCliProvider").mockResolvedValue({
       available: false,
+      reason: "mocked unavailable",
+      probeDurationMs: 0,
+    });
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
       reason: "mocked unavailable",
       probeDurationMs: 0,
     });
@@ -2060,6 +2232,286 @@ describe("Droid CLI auth routes", () => {
     expect(res.body.ready).toBe(false);
   });
 
+  it("POST /auth/grok-cli enables when grok binary is available", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      version: "grok 1.0.0",
+      probeDurationMs: 8,
+    });
+    store.updateGlobalSettings = vi.fn().mockResolvedValue({ useGrokCli: true });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ enabled: true }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ enabled: true, restartRequired: false });
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ useGrokCli: true });
+  });
+
+  it("POST /auth/grok-cli saves a validated binary path without toggling", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      version: "grok 1.0.0",
+      binaryPath: "/opt/Grok/grok",
+      configuredBinaryPath: "/opt/Grok/grok",
+      usingConfiguredBinaryPath: true,
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: false }),
+    });
+    store.updateGlobalSettings = vi.fn().mockResolvedValue({ useGrokCli: false, grokCliBinaryPath: "/opt/Grok/grok" });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ binaryPath: "  /opt/Grok/grok  " }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ enabled: false, binaryPath: "/opt/Grok/grok", restartRequired: false });
+    expect(runtimeProviderProbesModule.probeGrokCliProvider).toHaveBeenCalledWith({ binaryPath: "/opt/Grok/grok" });
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ grokCliBinaryPath: "/opt/Grok/grok" });
+  });
+
+  it("POST /auth/grok-cli rejects invalid binaryPath values", async () => {
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ enabled: false, binaryPath: 123 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("binaryPath must be a string or null");
+  });
+
+  it("POST /auth/grok-cli rejects configured paths that only succeed via PATH fallback", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      version: "grok 1.0.0",
+      binaryPath: "grok",
+      configuredBinaryPath: "/missing/grok",
+      usingConfiguredBinaryPath: false,
+      reason: "Configured Grok CLI binary '/missing/grok' failed; PATH fallback succeeded",
+      probeDurationMs: 8,
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ binaryPath: "/missing/grok" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Cannot save Grok CLI binary path");
+    expect(store.updateGlobalSettings).not.toHaveBeenCalled();
+  });
+
+  it("POST /auth/grok-cli clears the binary path and restores PATH auto-detection", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      version: "grok 1.0.0",
+      binaryPath: "grok",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true, grokCliBinaryPath: "/opt/Grok/grok" }),
+    });
+    store.updateGlobalSettings = vi.fn().mockResolvedValue({ useGrokCli: true });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ binaryPath: "   " }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ enabled: true, restartRequired: false });
+    expect(runtimeProviderProbesModule.probeGrokCliProvider).toHaveBeenCalledWith({ binaryPath: undefined });
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ grokCliBinaryPath: null });
+  });
+
+  it("POST /auth/grok-cli enables using the stored binary override", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      version: "grok 1.0.0",
+      binaryPath: "/opt/Grok/grok",
+      configuredBinaryPath: "/opt/Grok/grok",
+      usingConfiguredBinaryPath: true,
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ grokCliBinaryPath: "/opt/Grok/grok" }),
+    });
+    store.updateGlobalSettings = vi.fn().mockResolvedValue({ useGrokCli: true, grokCliBinaryPath: "/opt/Grok/grok" });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ enabled: true }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(runtimeProviderProbesModule.probeGrokCliProvider).toHaveBeenCalledWith({ binaryPath: "/opt/Grok/grok" });
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith({ useGrokCli: true });
+  });
+
+  it("POST /auth/grok-cli returns 400 when enabling without binary", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
+      reason: "grok not found",
+      probeDurationMs: 8,
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ enabled: true }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Cannot enable Grok CLI routing");
+  });
+
+  it("POST /auth/grok-cli disables without probing binary", async () => {
+    const probeSpy = vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider");
+    probeSpy.mockClear();
+    store.updateGlobalSettings = vi.fn().mockResolvedValue({ useGrokCli: false });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/grok-cli", JSON.stringify({ enabled: false }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ enabled: false, restartRequired: false });
+    expect(probeSpy).not.toHaveBeenCalled();
+  });
+
+  it("GET /providers/grok-cli/status returns readiness from toggle and binary, passing through apiKeyDetected as informational", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      apiKeyDetected: false,
+      version: "grok 1.0.0",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true, grokCliBinaryPath: "/opt/Grok/grok" }),
+    });
+
+    const res = await GET(buildApp(), "/api/providers/grok-cli/status");
+    expect(res.status).toBe(200);
+    expect(runtimeProviderProbesModule.probeGrokCliProvider).toHaveBeenCalledWith({ binaryPath: "/opt/Grok/grok" });
+    expect(res.body.ready).toBe(true);
+    expect(res.body.enabled).toBe(true);
+    expect(res.body.binaryPath).toBe("/opt/Grok/grok");
+    expect(res.body.binary.available).toBe(true);
+    expect(res.body.binary.authenticated).toBe(true);
+    expect(res.body.binary.apiKeyDetected).toBe(false);
+  });
+
+  it("GET /auth/status probes Grok CLI with the stored override and derives authenticated:true from toggle+binary availability only", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      apiKeyDetected: true,
+      version: "grok 1.0.0",
+      binaryPath: "/opt/Grok/grok",
+      configuredBinaryPath: "/opt/Grok/grok",
+      usingConfiguredBinaryPath: true,
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true, grokCliBinaryPath: "/opt/Grok/grok" }),
+    });
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(runtimeProviderProbesModule.probeGrokCliProvider).toHaveBeenCalledWith({ binaryPath: "/opt/Grok/grok" });
+    expect(res.body.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "grok-cli", authenticated: true }),
+      ]),
+    );
+  });
+
+  /*
+  FNXC:GrokCli 2026-07-09-00:00:
+  FN-7716 Symptom Verification: exact reproduction of the original
+  false-negative at the route layer — `useGrokCli` enabled, binary available,
+  but no Fusion-visible API key (probe reports `authenticated: false` with a
+  "GROK_API_KEY is not set" style reason under the OLD probe contract; under
+  the NEW contract the probe itself now reports `authenticated: true` with
+  `apiKeyDetected: false`). This test asserts the injected `grok-cli`
+  `/auth/status` provider is `authenticated: true` in that state (mirroring
+  Cursor's `cursorEnabled && cursorBinary.available` — no key requirement),
+  proving the false negative is resolved end-to-end through the route.
+  */
+  it("GET /auth/status reports grok-cli authenticated:true when the binary is available but no API key is detected — proves the original false-negative is resolved", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: true,
+      authenticated: true,
+      apiKeyDetected: false,
+      reason: "No Grok API key detected by Fusion (GROK_API_KEY unset, ~/.grok/user-settings.json not found); the CLI will use its own credentials.",
+      version: "grok 1.0.0",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true }),
+    });
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "grok-cli", authenticated: true }),
+      ]),
+    );
+  });
+
+  it("GET /auth/status reports grok-cli authenticated:false when the binary is unavailable, regardless of the enabled toggle", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
+      apiKeyDetected: false,
+      reason: "grok not found on PATH",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true }),
+    });
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "grok-cli", authenticated: false }),
+      ]),
+    );
+  });
+
+  it("GET /providers/grok-cli/status returns ready false when binary unavailable", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
+      reason: "missing",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true }),
+    });
+
+    const res = await GET(buildApp(), "/api/providers/grok-cli/status");
+    expect(res.status).toBe(200);
+    expect(res.body.ready).toBe(false);
+  });
+
   it("PUT /settings/global with useDroidCli fires onUseDroidCliToggled", async () => {
     const onUseDroidCliToggled = vi.fn();
     store.updateGlobalSettings = vi.fn().mockResolvedValue({ useDroidCli: true });
@@ -2455,6 +2907,28 @@ describe("POST /auth/login", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("Unknown provider");
+  });
+
+  it("FN-7624: returns a clear, non-misleading 400 for provider: \"github\" when only built-in OAuth providers are registered (never a 'model not found' style error)", async () => {
+    // Only the built-in dashboard OAuth providers are registered — no `github` provider exists,
+    // matching the real pi OAuth registry (anthropic / github-copilot / openai-codex only).
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+      { id: "github-copilot", name: "GitHub Copilot" },
+      { id: "openai-codex", name: "OpenAI Codex" },
+    ]);
+
+    // This reproduces the original symptom: the onboarding GitHub button used to call
+    // POST /api/auth/login { provider: "github" } and surface a confusing error.
+    const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({ provider: "github" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Unknown provider");
+    expect(res.body.error).toContain("github");
+    // Assert the error is never the misleading "model not found" style message the user reported.
+    expect(res.body.error.toLowerCase()).not.toContain("model not found");
   });
 
   it("returns 409 when login is already in progress for the same provider", async () => {

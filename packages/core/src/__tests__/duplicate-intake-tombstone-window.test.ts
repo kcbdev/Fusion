@@ -98,7 +98,7 @@ describe("FN-5233 tombstone sticky-window duplicate intake", () => {
     })).resolves.toMatchObject({ id: expect.any(String) });
   });
 
-  it("keeps live-task duplicate behavior (auto-archive) unchanged", async () => {
+  it("FN-7658: flags (does not auto-archive) live-task duplicates by default", async () => {
     const store = harness.store();
     const live = await store.createTask({
       title: "Live dup",
@@ -110,10 +110,46 @@ describe("FN-5233 tombstone sticky-window duplicate intake", () => {
       description: "duplicate text",
       source: { sourceType: "unknown", sourceAgentId: "agent-4" },
     });
-    expect(dup.column).toBe("archived");
+    expect(dup.column).not.toBe("archived");
+    expect(dup.sourceMetadata?.nearDuplicateOf).toBe(live.id);
     const events = (store as any).db.prepare("SELECT mutationType FROM runAuditEvents WHERE mutationType = 'intake:resurrection-blocked'").all() as Array<{ mutationType: string }>;
     expect(events).toHaveLength(0);
     expect(live.id).not.toBe(dup.id);
+  });
+
+  it("FN-7658: keeps legacy auto-archive behavior when autoArchiveDuplicateTasksEnabled is true", async () => {
+    const store = harness.store();
+    await store.updateSettings({ autoArchiveDuplicateTasksEnabled: true });
+    const live = await store.createTask({
+      title: "Live dup enabled",
+      description: "duplicate text enabled",
+      source: { sourceType: "unknown", sourceAgentId: "agent-4b" },
+    });
+    const dup = await store.createTask({
+      title: "Live dup enabled",
+      description: "duplicate text enabled",
+      source: { sourceType: "unknown", sourceAgentId: "agent-4b" },
+    });
+    expect(dup.column).toBe("archived");
+    expect(live.id).not.toBe(dup.id);
+  });
+
+  it("FN-7658: tombstone-resurrection blocking still fires when autoArchiveDuplicateTasksEnabled is false", async () => {
+    const store = harness.store();
+    await store.updateSettings({ tombstoneStickyWindowDays: 7, autoArchiveDuplicateTasksEnabled: false });
+
+    const original = await store.createTask({
+      title: "Resurrection guard stays on",
+      description: "Fix resurrection guard regardless of duplicate archive setting",
+      source: { sourceType: "unknown", sourceAgentId: "agent-4c" },
+    });
+    await store.deleteTask(original.id);
+
+    await expect(store.createTask({
+      title: "Resurrection guard stays on",
+      description: "Fix resurrection guard regardless of duplicate archive setting",
+      source: { sourceType: "unknown", sourceAgentId: "agent-4c" },
+    })).rejects.toBeInstanceOf(TombstonedTaskResurrectionError);
   });
 
   it("fails open when tombstone widening query errors", async () => {

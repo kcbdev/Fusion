@@ -5,11 +5,12 @@ import { Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ToastType } from "../hooks/useToast";
 import type { ChatMessageInfo, ToolCallInfo } from "../hooks/chatTypes";
-import { attachChatStream, ensureTaskPlannerChatSession, fetchChatMessages, fetchChatSession, fetchTaskDetail, fetchTaskPlannerChatSession, streamChatResponse, type ChatFailureInfo, type ChatStreamErrorMeta } from "../api";
+import { attachChatStream, editChatMessage, ensureTaskPlannerChatSession, fetchChatMessages, fetchChatSession, fetchTaskDetail, fetchTaskPlannerChatSession, streamChatResponse, type ChatFailureInfo, type ChatStreamErrorMeta } from "../api";
 import { parseQuestionToolCall, type ParsedQuestionToolCall } from "../utils/parseQuestionToolCall";
 import { ChatQuestionResponse } from "./ChatQuestionResponse";
 import { ProviderIcon } from "./ProviderIcon";
 import { StandardChatActionButton, StandardChatMessageItem, StandardStreamingMessage, formatModelTag } from "./StandardChatSurface";
+import { CHAT_COMMANDS, filterChatCommands, getSlashTriggerMatch, matchChatCommand, type ChatCommand } from "./chat-commands";
 import "./TaskPlannerChatTab.css";
 
 interface TaskPlannerChatTabProps {
@@ -302,6 +303,9 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const [commandFilter, setCommandFilter] = useState("");
+  const [highlightedCommandIndex, setHighlightedCommandIndex] = useState(0);
   const [streamingThinking, setStreamingThinking] = useState("");
   const [composerState, setComposerState] = useState<ComposerState>("idle");
   const composerStateRef = useRef<ComposerState>("idle");
@@ -330,6 +334,22 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
       : {};
   }, [planningModelId, planningModelProvider]);
   const plannerChatScopeKey = `${task.id}\u0000${projectId ?? ""}\u0000${planningModelProvider ?? ""}\u0000${planningModelId ?? ""}`;
+
+  /*
+   * FNXC:TaskPlannerChatSlashCommands 2026-07-08-00:00:
+   * /steer is only dispatchable when this task's bound agent is actively
+   * running (task.column === "in-progress"), mirroring how TaskChatTab gates
+   * its own done-task affordance on task.column. Any other state (todo,
+   * in-review, done, archived, triage) shows the command in the menu but
+   * disabled with a hint instead of hiding it outright, and dispatch itself
+   * is refused with the same hint rather than silently sending plain chat.
+   */
+  const agentRunning = task.column === "in-progress";
+  const filteredCommands = useMemo(() => filterChatCommands(commandFilter, CHAT_COMMANDS), [commandFilter]);
+
+  useEffect(() => {
+    setHighlightedCommandIndex(0);
+  }, [commandFilter]);
 
   const applyStreamingSnapshot = useCallback((resolvedSessionId: string, text: string, thinking: string, toolCalls: ToolCallInfo[]) => {
     setStreamingThinking(thinking);
@@ -604,7 +624,141 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
     }
   }, [addToast, modelPayload, projectId, sessionId, startPlannerStream, task.id, t]);
 
-  const sendMessage = useCallback(() => sendMessageContent(draft), [draft, sendMessageContent]);
+  const refreshTaskAfterEdit = useCallback(async (hadDiscardedSideEffect: boolean) => {
+    try {
+      const refreshedTask = await fetchTaskDetail(task.id, projectId);
+      onTaskUpdatedRef.current?.(refreshedTask);
+    } catch {
+      // Best-effort: the edit itself already succeeded and resent; a task-detail refresh
+      // failure here is non-fatal and must not be surfaced as an edit failure.
+    }
+    if (hadDiscardedSideEffect) {
+      addToastRef.current(
+        t(
+          "taskDetail.plannerChat.editDiscardedSideEffectsToast",
+          "Earlier steering comments or refinement tasks from the discarded messages were not undone",
+        ),
+        "info",
+      );
+    }
+  }, [projectId, t, task.id]);
+
+  /*
+   * FNXC:TaskDetailPlannerChat 2026-07-07-10:15:
+   * Editing an earlier Planner Chat message resumes the conversation from that point and forgets
+   * everything after it — both the persisted rows (via editChatMessage's server-side truncation)
+   * and the pi session context (via ChatManager.rewindSessionForEdit, reused unmodified from
+   * FN-7628). Product decision for already-applied task-scoped side effects: discarded turns may
+   * have already run fn_task_planner_add_steering (persisted a steering comment) or
+   * fn_task_planner_create_refinement (created a real task). Reverting those is destructive and
+   * out of scope here, so this task deliberately does NOT attempt to undo them — the steering
+   * comment stays on the task and the refinement task stays open. Instead, after a successful
+   * edit-and-resend we refresh task detail (so Activity/steering reflects reality) and, only when
+   * the discarded range contained a steering/refinement tool result, surface an informational
+   * toast so the user is not misled into thinking those changes were reverted.
+   */
+  const editMessageAndResend = useCallback(async (messageId: string, newContent: string) => {
+    if (composerStateRef.current === "sending" || !sessionId) return;
+    if (messageId.startsWith("optimistic-") || messageId === "streaming-assistant") return;
+    const trimmed = newContent.trim();
+    if (!trimmed) return;
+
+    const resolvedSessionId = sessionId;
+    const targetIndex = messages.findIndex((candidate) => candidate.id === messageId);
+    if (targetIndex === -1) return;
+
+    const discardedRange = messages.slice(targetIndex);
+    const hadDiscardedSideEffect = discardedRange.some((candidate) =>
+      extractToolCalls(candidate).some((toolCall) =>
+        extractPlannerSteeringResult(toolCall) !== null || extractPlannerRefinementResult(toolCall) !== null,
+      ),
+    );
+
+    // Optimistic truncation: drop the edited message and everything after it immediately,
+    // matching the server's index-based truncation semantics (not just a timestamp filter).
+    setMessages((current) => current.slice(0, targetIndex));
+
+    try {
+      await editChatMessage(resolvedSessionId, messageId, trimmed, projectId);
+    } catch (err) {
+      const message = getErrorMessage(err) || t("taskDetail.plannerChat.editFailed", "Failed to edit planner chat message");
+      setError(message);
+      addToastRef.current(message, "error");
+      // Restore truthful state from the server rather than trusting the optimistic truncation.
+      void refreshMessagesForSession(resolvedSessionId, () => true);
+      return;
+    }
+
+    await sendMessageContent(trimmed);
+    await refreshTaskAfterEdit(hadDiscardedSideEffect);
+  }, [messages, projectId, refreshMessagesForSession, refreshTaskAfterEdit, sendMessageContent, sessionId, t]);
+
+  const dispatchSlashCommand = useCallback(async (command: ChatCommand, remainder: string) => {
+    if (!agentRunning) {
+      // Do not silently fall back to a normal chat message: /steer with no
+      // running agent is a no-op with feedback, not a plain send.
+      addToastRef.current(t("taskDetail.plannerChat.commandNoRunningAgent", "No running agent to steer"), "warning");
+      return;
+    }
+
+    /*
+    FNXC:ChatSlashCommands 2026-07-10-11:40:
+    Clear the draft immediately on submit — BEFORE awaiting command.run — not after it resolves. Clearing in the success path wipes any text the user typed while the command was in flight (composer-wipe race, FUX-015).
+    */
+    setDraft("");
+    try {
+      await command.run({ taskId: task.id, projectId, remainder });
+      // Reuse the existing steering-refresh path (same toast + task refresh already
+      // used by the tool-call-driven steering flow above) instead of a second,
+      // divergent success toast for the same underlying action.
+      await refreshTaskAfterSteering();
+    } catch (err) {
+      const message = getErrorMessage(err) || t("taskDetail.plannerChat.commandSteerFailed", "Failed to send to the running agent");
+      addToastRef.current(message, "error");
+    }
+  }, [agentRunning, projectId, refreshTaskAfterSteering, t, task.id]);
+
+  const handleCommandMenuSelect = useCallback((command: ChatCommand) => {
+    if (!agentRunning) {
+      addToastRef.current(t("taskDetail.plannerChat.commandNoRunningAgent", "No running agent to steer"), "warning");
+      return;
+    }
+
+    setDraft((current) => {
+      const triggerMatch = getSlashTriggerMatch(current);
+      if (!triggerMatch) return current;
+      const replacement = `${command.trigger} `;
+      return current.slice(0, triggerMatch.start) + replacement + current.slice(triggerMatch.end);
+    });
+
+    setShowCommandMenu(false);
+    setCommandFilter("");
+    setHighlightedCommandIndex(0);
+  }, [agentRunning, t]);
+
+  const sendMessage = useCallback(() => {
+    const trimmed = draft.trim();
+    const commandMatch = matchChatCommand(trimmed, CHAT_COMMANDS);
+    if (commandMatch) {
+      setShowCommandMenu(false);
+      return dispatchSlashCommand(commandMatch.command, commandMatch.remainder);
+    }
+    return sendMessageContent(draft);
+  }, [draft, dispatchSlashCommand, sendMessageContent]);
+
+  const handleDraftChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = event.target.value;
+    setDraft(nextValue);
+
+    const triggerMatch = getSlashTriggerMatch(nextValue);
+    if (triggerMatch) {
+      setShowCommandMenu(true);
+      setCommandFilter(triggerMatch.filter);
+    } else {
+      setShowCommandMenu(false);
+      setCommandFilter("");
+    }
+  }, []);
 
   const stopPlannerStreaming = useCallback(() => {
     streamRequestRef.current += 1;
@@ -617,10 +771,41 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   }, []);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showCommandMenu && event.key === "ArrowDown") {
+      event.preventDefault();
+      if (filteredCommands.length > 0) {
+        setHighlightedCommandIndex((prev) => (prev + 1) % filteredCommands.length);
+      }
+      return;
+    }
+
+    if (showCommandMenu && event.key === "ArrowUp") {
+      event.preventDefault();
+      if (filteredCommands.length > 0) {
+        setHighlightedCommandIndex((prev) => (prev === 0 ? filteredCommands.length - 1 : prev - 1));
+      }
+      return;
+    }
+
+    if (showCommandMenu && (event.key === "Enter" || event.key === "Tab") && !event.shiftKey && filteredCommands.length > 0) {
+      event.preventDefault();
+      const commandToSelect = filteredCommands[highlightedCommandIndex] ?? filteredCommands[0];
+      if (commandToSelect) {
+        handleCommandMenuSelect(commandToSelect);
+      }
+      return;
+    }
+
+    if (showCommandMenu && event.key === "Escape") {
+      event.preventDefault();
+      setShowCommandMenu(false);
+      return;
+    }
+
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
     void sendMessage();
-  }, [sendMessage]);
+  }, [showCommandMenu, filteredCommands, highlightedCommandIndex, handleCommandMenuSelect, sendMessage]);
 
   const canSend = draft.trim().length > 0 && composerState !== "sending";
   const showEmptyState = historyLoaded && !loading && !error && messages.length === 0;
@@ -825,6 +1010,14 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
                   />
                 );
               }
+              /*
+               * FNXC:ChatMessageEdit 2026-07-07-10:15:
+               * Planner Chat (task-planner:<id> synthetic session) is model-loop and reuses FN-7628's
+               * rewind-and-resend path via the local editMessageAndResend orchestration above. The
+               * affordance is only offered on persisted user rows (never optimistic-<ts>/
+               * streaming-assistant placeholders, never assistant/system rows, and never while a
+               * generation is in flight) so StandardChatMessageItem never renders a dead/no-op button.
+               */
               return (
                 <StandardChatMessageItem
                   key={message.id}
@@ -839,6 +1032,13 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
                   isAwaitingQuestionAnswer={message.role === "assistant"}
                   onQuestionSubmit={(answerText) => void sendMessageContent(answerText)}
                   toolCallRenderer={(toolCall, index) => renderPlannerToolCall(message, toolCall, index)}
+                  onEditMessage={editMessageAndResend}
+                  canEdit={
+                    message.role === "user"
+                    && !message.id.startsWith("optimistic-")
+                    && message.id !== "streaming-assistant"
+                    && composerState !== "sending"
+                  }
                 />
               );
             })}
@@ -859,13 +1059,46 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
         )}
       </div>
 
+      {showCommandMenu && (
+        <div
+          className="chat-skill-menu task-planner-chat-command-menu"
+          data-testid="task-planner-chat-command-menu"
+          role="listbox"
+          aria-label={t("chat.commandSuggestions", "Command suggestions")}
+        >
+          {filteredCommands.length === 0 ? (
+            <div className="chat-skill-menu-empty">{t("chat.noCommandsFound", "No commands found")}</div>
+          ) : (
+            filteredCommands.map((command, index) => (
+              <button
+                key={command.trigger}
+                type="button"
+                role="option"
+                aria-selected={index === highlightedCommandIndex}
+                aria-disabled={!agentRunning}
+                className={`chat-skill-menu-item chat-command-menu-item${index === highlightedCommandIndex ? " chat-skill-menu-item--highlighted" : ""}${!agentRunning ? " chat-command-menu-item--disabled" : ""}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlightedCommandIndex(index)}
+                onClick={() => handleCommandMenuSelect(command)}
+              >
+                <span className="chat-skill-menu-item-name">{command.trigger}</span>
+                <span className="chat-skill-menu-item-description">
+                  {agentRunning
+                    ? command.description
+                    : t("chat.commandNoRunningAgentHint", "No running agent to steer")}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
       <div className="task-planner-chat-composer">
         <textarea
           className="input task-planner-chat-input"
           aria-label={t("taskDetail.plannerChat.inputLabel", "Message planner chat")}
-          placeholder={t("taskDetail.plannerChat.placeholder", "Ask the planner about this task…")}
+          placeholder={t("taskDetail.plannerChat.placeholder", "Ask the planner about this task… Type / for commands")}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={handleDraftChange}
           onKeyDown={handleKeyDown}
           disabled={composerState === "sending"}
           rows={1}
@@ -879,7 +1112,13 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           classNameStop="btn btn-primary task-planner-chat-send chat-input-stop"
           sendLabel={t("taskDetail.plannerChat.send", "Send")}
           stopLabel={t("chat.stopGeneration", "Stop generation")}
-          showSendText
+          // FNXC:TaskPlannerChat 2026-07-08-00:00: FN-7685 made the idle send button
+          // icon-only (no visible "Send" text span) to match regular chat's TaskChatTab;
+          // sendLabel above still feeds the button's aria-label so the accessible name
+          // stays "Send" for screen readers.
+          // FNXC:TaskPlannerChat 2026-07-07-00:00: planner stop button is icon-only
+          // per FN-7655 — aria-label above keeps the accessible name "Stop generation".
+          showStopText={false}
         />
       </div>
     </section>

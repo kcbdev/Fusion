@@ -5,13 +5,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { GIT_INSTALL_URL, isGhAvailable, isGhAuthenticated, probeGitCliStatus } from "@fusion/core";
 import { probeClaudeCli } from "../claude-cli-probe.js";
 import { probeDroidCli } from "../droid-cli-probe.js";
-import { probeCursorCliProvider } from "../runtime-provider-probes.js";
+import { probeCursorCliProvider, probeGrokCliProvider } from "../runtime-provider-probes.js";
 import { probeLlamaCpp } from "../llama-cpp-probe.js";
 import { ApiError, badRequest, conflict } from "../api-error.js";
 import { clearUsageCache } from "../usage.js";
 import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js";
 import type { AuthStorageLike } from "../routes.js";
 import type { ApiRouteRegistrar } from "./types.js";
+import {
+  STATIC_API_KEY_PROVIDER_CATALOG,
+  STATIC_OAUTH_PROVIDER_CATALOG,
+  unionProviderCatalog,
+} from "./auth-provider-catalog.js";
 
 export type DeviceCodeInfo = {
   userCode: string;
@@ -52,6 +57,24 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
 
   async function probeCursorCliWithStoredBinary() {
     return probeCursorCliProvider({ binaryPath: await readCursorCliBinaryPath() });
+  }
+
+  /*
+  FNXC:GrokCli 2026-07-08-00:00:
+  Mirrors normalizeCursorCliBinaryPath/readCursorCliBinaryPath/probeCursorCliWithStoredBinary above (FN-7705). Auth provider list, status, enable, and path-save validation must all probe the same trimmed global Grok CLI binary override before falling back to PATH candidates.
+  */
+  function normalizeGrokCliBinaryPath(value: unknown): string | undefined {
+    return typeof value === "string" ? value.trim() || undefined : undefined;
+  }
+
+  async function readGrokCliBinaryPath(): Promise<string | undefined> {
+    if (!store) return undefined;
+    const globalSettings = await store.getGlobalSettingsStore().getSettings();
+    return normalizeGrokCliBinaryPath((globalSettings as Record<string, unknown>).grokCliBinaryPath);
+  }
+
+  async function probeGrokCliWithStoredBinary() {
+    return probeGrokCliProvider({ binaryPath: await readGrokCliBinaryPath() });
   }
 
   /**
@@ -512,7 +535,15 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
       const storage = getAuthStorage();
       storage.reload();
-      const oauthProviders = storage.getOAuthProviders();
+      /*
+      FNXC:ProviderAuth 2026-07-07-00:00:
+      FN-7625: enumerate OAuth + API-key providers from the static catalog
+      UNIONED with whatever storage currently reports, so a connected
+      runtime plugin narrowing storage.getOAuthProviders()/getApiKeyProviders()
+      never removes a provider from the list — only per-provider status below
+      may vary with runtime/auth state. See auth-provider-catalog.ts.
+      */
+      const oauthProviders = unionProviderCatalog(STATIC_OAUTH_PROVIDER_CATALOG, storage.getOAuthProviders());
       const providers: {
         id: string;
         name: string;
@@ -564,9 +595,13 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         };
       }));
 
-      // Include API-key-backed providers if supported
-      if (storage.getApiKeyProviders) {
-        const apiKeyProviders = storage.getApiKeyProviders();
+      // Include API-key-backed providers. Presence is the static catalog
+      // unioned with anything storage additionally reports (FN-7625) —
+      // storage.getApiKeyProviders may be absent/narrowed, but the catalog
+      // entries must still surface as present-but-unauthenticated.
+      {
+        const runtimeApiKeyProviders = storage.getApiKeyProviders ? storage.getApiKeyProviders() : [];
+        const apiKeyProviders = unionProviderCatalog(STATIC_API_KEY_PROVIDER_CATALOG, runtimeApiKeyProviders);
         for (const p of apiKeyProviders) {
           let keyHint: string | undefined;
           if (storage.get) {
@@ -644,6 +679,36 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
           id: "cursor-cli",
           name: "Cursor — via Cursor CLI",
           authenticated: cursorEnabled && cursorBinary.available,
+          type: "cli" as const,
+        });
+      }
+
+      /*
+      FNXC:GrokCli 2026-07-09-00:00:
+      FN-7716: inject the synthetic "Grok — via Grok CLI" provider, mirroring
+      the cursor-cli injection above EXACTLY — `authenticated` derives from
+      toggle+binary availability only. The `grok` CLI resolves its own
+      credentials from more sources than Fusion can see (env var, project
+      `.env`, `GROK_BASE_URL`, `grok -k`, sandbox secrets), so requiring a
+      Fusion-visible API key produced false "not authenticated" states for
+      operators with a fully working CLI. Key presence is exposed only via
+      `grokBinary.apiKeyDetected` as a non-blocking informational field on the
+      status route (see GET /providers/grok-cli/status below) — it never
+      gates this `authenticated` flag.
+      */
+      if (store) {
+        let grokEnabled = false;
+        try {
+          const globalSettings = await store.getGlobalSettingsStore().getSettings();
+          grokEnabled = (globalSettings as Record<string, unknown>).useGrokCli === true;
+        } catch {
+          // best effort
+        }
+        const grokBinary = await probeGrokCliWithStoredBinary();
+        providers.push({
+          id: "grok-cli",
+          name: "Grok — via Grok CLI",
+          authenticated: grokEnabled && grokBinary.available,
           type: "cli" as const,
         });
       }
@@ -1028,6 +1093,94 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
     }
   });
 
+  /*
+  FNXC:GrokCli 2026-07-08-00:00:
+  FN-7705: POST /auth/grok-cli mirrors POST /auth/cursor-cli's enable/disable +
+  binaryPath contract exactly. "Cannot enable" only requires the binary to be
+  available (mirroring Cursor) — API-key presence is surfaced via the probe's
+  `authenticated`/`reason` fields on the status route rather than blocking
+  enable, since an operator may enable routing before setting GROK_API_KEY.
+  */
+  router.post("/auth/grok-cli", async (req, res) => {
+    try {
+      if (!store) {
+        throw new ApiError(500, "Settings store unavailable");
+      }
+      const requestedEnabled = req.body?.enabled;
+      const hasEnabledPatch = Object.prototype.hasOwnProperty.call(req.body ?? {}, "enabled");
+      const requestedBinaryPath = req.body?.binaryPath;
+      const hasBinaryPathPatch = Object.prototype.hasOwnProperty.call(req.body ?? {}, "binaryPath");
+      if (!hasEnabledPatch && !hasBinaryPathPatch) {
+        throw badRequest("enabled or binaryPath is required");
+      }
+      if (hasEnabledPatch && typeof requestedEnabled !== "boolean") {
+        throw badRequest("enabled must be a boolean");
+      }
+      if (hasBinaryPathPatch && requestedBinaryPath !== null && typeof requestedBinaryPath !== "string") {
+        throw badRequest("binaryPath must be a string or null");
+      }
+
+      const currentSettings = await store.getGlobalSettingsStore().getSettings();
+      const enabled = hasEnabledPatch ? requestedEnabled : (currentSettings as Record<string, unknown>).useGrokCli === true;
+      const currentBinaryPath = normalizeGrokCliBinaryPath((currentSettings as Record<string, unknown>).grokCliBinaryPath);
+      const nextBinaryPath = hasBinaryPathPatch
+        ? normalizeGrokCliBinaryPath(requestedBinaryPath)
+        : currentBinaryPath;
+
+      if (hasBinaryPathPatch && nextBinaryPath) {
+        const binary = await probeGrokCliProvider({ binaryPath: nextBinaryPath });
+        if (!binary.available || !binary.usingConfiguredBinaryPath) {
+          throw new ApiError(400, `Cannot save Grok CLI binary path: ${binary.reason ?? "configured binary not available"}`);
+        }
+      }
+
+      if (enabled) {
+        const binary = await probeGrokCliProvider({ binaryPath: nextBinaryPath });
+        if (!binary.available) {
+          throw new ApiError(400, `Cannot enable Grok CLI routing: ${binary.reason ?? "grok binary not available"}`);
+        }
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (hasEnabledPatch) {
+        patch.useGrokCli = enabled;
+      }
+      if (hasBinaryPathPatch) {
+        patch.grokCliBinaryPath = nextBinaryPath ?? null;
+      }
+      const settings = await store.updateGlobalSettings(patch);
+      invalidateAllGlobalSettingsCaches();
+      res.json({
+        enabled: (settings as Record<string, unknown>).useGrokCli === true,
+        binaryPath: normalizeGrokCliBinaryPath((settings as Record<string, unknown>).grokCliBinaryPath),
+        restartRequired: false,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  router.get("/providers/grok-cli/status", async (_req, res) => {
+    try {
+      const binaryPath = await readGrokCliBinaryPath();
+      const binary = await probeGrokCliProvider({ binaryPath });
+      let enabled = false;
+      if (store) {
+        try {
+          const globalSettings = await store.getGlobalSettingsStore().getSettings();
+          enabled = (globalSettings as Record<string, unknown>).useGrokCli === true;
+        } catch {
+          // best effort
+        }
+      }
+      res.json({ binary, enabled, binaryPath, extension: null, ready: enabled && binary.available });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
   router.post("/auth/llama-cpp", async (req, res) => {
     try {
       if (!store) {
@@ -1149,7 +1302,19 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       const oauthProviders = storage.getOAuthProviders();
       const found = oauthProviders.find((p) => p.id === provider || p.id === storageProvider);
       if (!found) {
-        throw badRequest(`Unknown provider: ${provider}`);
+        /*
+         * FNXC:ProviderAuth 2026-07-07-00:00:
+         * FN-7624: `github` is NOT a dashboard-managed OAuth provider — pi's OAuth registry only
+         * ships `anthropic`, `github-copilot`, and `openai-codex` (see @earendil-works/pi-ai/oauth via
+         * packages/engine/src/auth-storage.ts). Fusion's real GitHub integration is gh CLI / token
+         * based (`githubAuthMode: "gh-cli" | "token"`), so the onboarding/settings UI must never offer
+         * a dashboard OAuth login for `github`. If this branch is ever reached for `github` anyway
+         * (e.g. a stale client build), return a clear, actionable message naming the provider and that
+         * no OAuth flow exists for it — never a generic/misleading error like "model not found".
+         */
+        throw badRequest(
+          `Unknown provider: "${provider}" has no registered OAuth login flow. Registered dashboard OAuth providers are: ${oauthProviders.map((p) => p.id).join(", ") || "none"}. GitHub integration uses the GitHub CLI (run \`gh auth login\`) or a token, not dashboard OAuth.`,
+        );
       }
       const loginProvider = found.id === provider ? provider : storageProvider;
 

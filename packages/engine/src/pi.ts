@@ -42,8 +42,11 @@ import {
   getProjectRootFromWorktree,
   reconcileClaudeCliPaths,
   reconcileDroidCliPaths,
+  mergeBuiltInGrokProviderModels,
   mergeBuiltInZaiProviderModels,
   mergeSupplementalAnthropicModels,
+  mergeSupplementalOpenAiCodexModels,
+  registerBuiltInGrokProvider,
   registerBuiltInZaiProvider,
   resolvePiExtensionProjectRoot,
 } from "@fusion/core";
@@ -63,6 +66,7 @@ import { applyClaudeAcpEnable } from "./claude-acp-enable.js";
 import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
 import { piLog, extensionsLog } from "./logger.js";
 import { readCustomProviders } from "./custom-providers.js";
+import { buildCustomProviderModels } from "./custom-provider-registry.js";
 import {
   buildGateRejection,
   evaluateAgentActionGate,
@@ -1029,6 +1033,11 @@ export interface AgentOptions {
   fallbackProvider?: string;
   /** Optional fallback model ID used with `fallbackProvider`. */
   fallbackModelId?: string;
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+   * Fallback model swaps must honor the fallback model's configured thinking level while preserving the lane/default thinking level when no fallback-specific value is set.
+   */
+  fallbackThinkingLevel?: string;
   /** Default thinking effort level (e.g. "medium", "high"). When provided, sets the session's thinking level after creation. */
   defaultThinkingLevel?: string;
   /** Optional pre-configured SessionManager. When provided, the agent session
@@ -1462,6 +1471,7 @@ function resolveVendoredDroidCliEntry(): string | null {
 
 async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegistry): Promise<void> {
   registerBuiltInZaiProvider(modelRegistry, (message) => extensionsLog.warn(message));
+  registerBuiltInGrokProvider(modelRegistry, (message) => extensionsLog.warn(message));
 
   try {
     const agentDir = getPackageManagerAgentDir();
@@ -1524,6 +1534,7 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
 
     extensionsResult.runtime.pendingProviderRegistrations = [];
     mergeBuiltInZaiProviderModels(modelRegistry, (message) => extensionsLog.warn(message));
+    mergeBuiltInGrokProviderModels(modelRegistry, (message) => extensionsLog.warn(message));
     modelRegistry.refresh();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1861,10 +1872,16 @@ export function wrapToolsWithPermanentAgentGating(
 
           let approvalRequest = await gating.findPendingApprovalRequest?.(dedupeKey);
           if (!approvalRequest && gating.createApprovalRequest) {
+            // FNXC:AgentGating 2026-07-05-00:00:
+            // FN-7609: pass the dedupe key through so the gating closure can persist
+            // it into targetAction.context.approvalDedupeKey — without this, the
+            // findPendingApprovalRequest lookup above can never match and every
+            // retrying heartbeat tick mints a fresh duplicate approval request.
             approvalRequest = await gating.createApprovalRequest({
               category: normalizeApprovalRequestCategory(decision.category),
               toolName: decision.toolName,
               args: params,
+              approvalDedupeKey: dedupeKey,
             });
           }
 
@@ -1952,13 +1969,27 @@ export function wrapToolsWithActionGate(
           );
         }
 
+        /*
+        FNXC:AgentGating 2026-07-05-00:00:
+        FN-7608: pauseForApproval (which pauses the task AND suspends the
+        in-flight session — see executor.ts buildActionGateContext) must run
+        for BOTH the newly-created-request sub-case and the reused-pending
+        sub-case. Previously it only ran when a fresh approval request was
+        minted, so a second identical gated call that resolved to an already-
+        pending request (dedupe working as designed) never paused/suspended
+        the session — the agent's turn kept going and it hunted for ungated
+        workarounds instead of stopping. resolveGateOutcome() already
+        guarantees no duplicate request is created on the reused-pending path
+        (gateOutcome.approvalRequestId is set from the existing pending row),
+        so this only ever pauses once per distinct approval request.
+        */
         let approvalRequestId = gateOutcome.approvalRequestId;
         if (!approvalRequestId) {
           const created = await gateContext.createApprovalRequest(decision, params) as { id?: string } | null;
           approvalRequestId = created?.id;
-          if (approvalRequestId) {
-            await gateContext.pauseForApproval?.({ approvalRequestId, decision });
-          }
+        }
+        if (approvalRequestId) {
+          await gateContext.pauseForApproval?.({ approvalRequestId, decision });
         }
 
         return buildGateRejection(
@@ -1970,7 +2001,7 @@ export function wrapToolsWithActionGate(
               dedupeKey: decision.approvalDedupeKey,
             },
           },
-          `Action requires approval (request ${approvalRequestId ?? "pending"}). Agent and task have been paused; will resume once a decision is made.`,
+          `Action requires approval (request ${approvalRequestId ?? "pending"}). Task paused and session suspended awaiting decision; do not attempt alternatives.`,
         );
       },
     };
@@ -2072,24 +2103,20 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   for (const provider of customProviders) {
     try {
       const registryKey = customProviderRegistryKey(provider, customProviders);
+      const api = resolveCustomProviderApiType(provider.apiType);
+      // FNXC:ProviderAuth 2026-07-08-00:00:
+      // FN-7689: reuse the shared `buildCustomProviderModels` helper (custom-provider-registry.ts)
+      // instead of building the model list inline here. This is registration path B (the
+      // `createFnAgent` inline path); path A is `custom-provider-registry.ts`'s `toProviderConfig`.
+      // Before this fix path B set no `compat` at all, so an opted-in provider's
+      // `anthropicPromptCaching` flag only took effect via path A and silently dropped here —
+      // exactly the drift risk called out for FN-7689. Sharing the builder makes that
+      // impossible to reintroduce.
       modelRegistry.registerProvider(registryKey, {
         baseUrl: provider.baseUrl,
-        api: resolveCustomProviderApiType(provider.apiType),
+        api,
         apiKey: provider.apiKey,
-        models: (provider.models ?? []).map((model) => ({
-          id: model.id,
-          name: model.name,
-          reasoning: false,
-          input: ["text" as const],
-          cost: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-          },
-          contextWindow: 128000,
-          maxTokens: 16384,
-        })),
+        models: buildCustomProviderModels(provider, api),
       });
       piLog.log(`Registered custom provider "${provider.name}" (key=${registryKey}, id=${provider.id})`);
     } catch (error) {
@@ -2100,6 +2127,11 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   }
   modelRegistry.refresh();
   mergeSupplementalAnthropicModels(modelRegistry, (message) => extensionsLog.warn(message));
+  /*
+   * FNXC:ModelCatalog 2026-07-09-00:00:
+   * FN-7754 mirrors the dashboard register-model-routes.ts supplemental merge seam so the GPT-5.6 codenamed OpenAI-Codex models surface on the engine createFnAgent registry-seeding path, not just /api/models. FN-7745 only wired the dashboard surface; this merge is additive and dedupe-safe, so pinned catalog rows win and no duplicate ids are added.
+   */
+  mergeSupplementalOpenAiCodexModels(modelRegistry, (message) => extensionsLog.warn(message));
 
   // Build the pi built-in tool set. We deliberately do NOT use the bundled
   // `createCodingTools` / `createReadOnlyTools` presets — they're missing
@@ -2498,11 +2530,18 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
   let thinkingCompatibilityDisabled = false;
   const applyThinkingLevelIfSupported = (targetSession: AgentSession, sourceModel: string): void => {
-    if (!options.defaultThinkingLevel || thinkingCompatibilityDisabled) {
+    /*
+     * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+     * Fallback-swap sessions apply the fallback model's configured thinking level, or transparently keep the lane/default level when no fallback-specific value exists. The compatibility-disable guard remains shared so thinking/reasoning conflicts disable explicit thinking for both primary and fallback paths.
+     */
+    const effectiveThinkingLevel = usingFallback
+      ? options.fallbackThinkingLevel ?? options.defaultThinkingLevel
+      : options.defaultThinkingLevel;
+    if (!effectiveThinkingLevel || thinkingCompatibilityDisabled) {
       return;
     }
     try {
-      (targetSession as PromptableSession).setThinkingLevel(options.defaultThinkingLevel as any);
+      (targetSession as PromptableSession).setThinkingLevel(effectiveThinkingLevel as any);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       if (!isThinkingReasoningConflictError(message)) {

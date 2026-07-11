@@ -109,6 +109,15 @@ export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurr
         <small>{t("settings.scheduling.timeoutInMinutesForDetectingStuckTasksWhen", "Timeout in minutes for detecting stuck tasks. When a task's agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10. Default: 10 minutes (600000ms).")}</small>
       </div>
       <div className="form-group">
+        <label htmlFor="buildTimeoutMs">{t("settings.scheduling.buildTimeoutMinutes", "Build/Verification Timeout (minutes)")}</label>
+        <input id="buildTimeoutMs" type="number" min={1} step={1} value={form.buildTimeoutMs ? Math.round(form.buildTimeoutMs / 60000) : ""} onChange={(e) => {
+            const val = e.target.value;
+            const num = Number(val);
+            setForm((f) => ({ ...f, buildTimeoutMs: val && num > 0 ? num * 60000 : undefined }));
+        }}/>
+        <small>{t("settings.scheduling.maximumTimeInMinutesForBuildVerificationCommands", "Maximum time in minutes for build/verification commands before they are killed. Raise for large monorepo or Docker builds. Default: 5.")}</small>
+      </div>
+      <div className="form-group">
         <label htmlFor="staleHighFanoutBlockerAgeThresholdMs">{t("settings.scheduling.staleHighFanOutEscalationHours", "Stale High Fan-out Escalation (hours)")}</label>
         <input id="staleHighFanoutBlockerAgeThresholdMs" type="number" min={1} step={1} value={form.staleHighFanoutBlockerAgeThresholdMs ? Math.round(form.staleHighFanoutBlockerAgeThresholdMs / 3600000) : ""} onChange={(e) => {
             const val = e.target.value;
@@ -170,6 +179,21 @@ export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurr
           <option value="full">{t("settings.scheduling.fullAgentLog", "Full agent log")}</option>
         </select>
         <small>{t("settings.scheduling.compactModeKeepsArchiveSizeLowWhilePreserving", "Compact mode keeps archive size low while preserving recent agent activity for context. Default: compact.")}</small>
+      </div>
+      {/**
+       * FNXC:DuplicateIntake 2026-07-07-00:00 (FN-7658):
+       * Operators do not want same-agent duplicate tasks (FN-4892 intake heuristic)
+       * silently archived on creation — they want visibility and a chance to decide
+       * via the near-duplicate flag/UI. Default off; this toggle restores the old
+       * aggressive auto-archive behavior when enabled.
+       */}
+      <div className="form-group">
+        <label htmlFor="autoArchiveDuplicateTasksEnabled" className="checkbox-label">
+          <input id="autoArchiveDuplicateTasksEnabled" type="checkbox" checked={form.autoArchiveDuplicateTasksEnabled ?? false} onChange={(e) => setForm((f) => ({
+            ...f,
+            autoArchiveDuplicateTasksEnabled: e.target.checked,
+        }))}/>{t("settings.scheduling.autoArchiveDuplicateTasks", " Automatically archive duplicate tasks ")}</label>
+        <small>{t("settings.scheduling.autoArchiveDuplicateTasksHelp", "Automatically archive tasks detected as same-agent duplicates on creation (off by default). When disabled, duplicates are flagged in place with the yellow Duplicate chip and Keep/Archive actions instead of being archived automatically.")}</small>
       </div>
       <div className="form-group">
         <label htmlFor="maxStuckKills">{t("settings.scheduling.maxStuckRetries", "Max Stuck Retries")}</label>

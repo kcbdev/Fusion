@@ -110,6 +110,42 @@ describe("ChatManager room hybrid responder resolution", () => {
     expect(result.ambient.map((agent: any) => agent.id)).toEqual(["agent-a"]);
   });
 
+  it("passes configured default grok-cli model to model-less room responders", async () => {
+    mockChatStore.listRoomMembers.mockReturnValue([
+      { roomId: "room-1", agentId: "agent-a", role: "member", addedAt: "2026-01-01" },
+    ]);
+    mockAgentStore.listAgents.mockResolvedValue([{ id: "agent-a", name: "Alpha", role: "executor", runtimeConfig: {} }]);
+    let createOptions: any;
+
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn(),
+          dispose: vi.fn(),
+          state: {
+            messages: [{ role: "assistant", content: "Room reply" }],
+          },
+        },
+      } as any;
+    });
+
+    const manager = new ChatManager(
+      mockChatStore as any,
+      "/tmp",
+      mockAgentStore as any,
+      undefined,
+      async () => ({ defaultProvider: "grok-cli", defaultModelId: "grok-cli/grok-4.5" }),
+    );
+    await manager.sendRoomMessage("room-1", "hello room");
+
+    expect(createOptions).toMatchObject({
+      sessionPurpose: "heartbeat",
+      defaultProvider: "grok-cli",
+      defaultModelId: "grok-cli/grok-4.5",
+    });
+  });
+
   it("persists assistant room replies for resolved responders", async () => {
     mockChatStore.listRoomMembers.mockReturnValue([
       { roomId: "room-1", agentId: "agent-a", role: "member", addedAt: "2026-01-01" },

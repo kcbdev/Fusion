@@ -18,6 +18,7 @@ import type {
   ChatMention,
   ChatAttachment,
   ChatInFlightGenerationState,
+  ChatMessage,
   ChatStore,
   ChatRoomMessage,
   ChatSession,
@@ -28,7 +29,7 @@ import type {
   TaskStore,
 } from "@fusion/core";
 import type { SkillSelectionContext } from "@fusion/engine";
-import { summarizeTitle } from "@fusion/core";
+import { summarizeTitle, FUSION_RUNTIME_SELF_AWARENESS } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
@@ -53,6 +54,7 @@ import {
   createChatTaskDocumentTools,
   createWorkflowAuthoringTools,
   resolveMcpServersForStore,
+  resolveExecutorThinkingLevel,
 } from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
 
@@ -211,7 +213,9 @@ async function ensureEngineReady(): Promise<void> {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /** Chat system prompt for the AI agent */
-export const CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into the fn task board system. You help users with questions about their project, code, architecture, and tasks. You have access to project files and can read them to provide informed responses, including referencing specific file paths and line numbers when possible. Response length policy: default to a short, crisp reply (a few sentences or a short bulleted list) that directly answers the user; avoid preamble, restating the question, and filler. If a thorough answer genuinely needs long-form content (for example multi-step plans, design proposals, deep analyses, or long file excerpts), keep the chat reply brief with a one- or two-sentence summary and then send the full write-up via \`fn_send_message\` using \`type: "agent-to-user"\` and \`to_id: "dashboard"\`. That mailbox follow-up must add new substantive detail and must not duplicate the chat reply.`;
+export const CHAT_SYSTEM_PROMPT = `${FUSION_RUNTIME_SELF_AWARENESS}
+
+You are a helpful AI assistant integrated into the fn task board system. You help users with questions about their project, code, architecture, and tasks. You have access to project files and can read them to provide informed responses, including referencing specific file paths and line numbers when possible. Response length policy: default to a short, crisp reply (a few sentences or a short bulleted list) that directly answers the user; avoid preamble, restating the question, and filler. If a thorough answer genuinely needs long-form content (for example multi-step plans, design proposals, deep analyses, or long file excerpts), keep the chat reply brief with a one- or two-sentence summary and then send the full write-up via \`fn_send_message\` using \`type: "agent-to-user"\` and \`to_id: "dashboard"\`. That mailbox follow-up must add new substantive detail and must not duplicate the chat reply.`;
 
 export const CHAT_AGENT_MESSAGE_ROUTING_GUIDANCE = `## Messaging Semantics\n\nYour chat reply is the primary response to the user. Do not also call \`fn_send_message\` with the same content just to mirror your chat response into mailbox.\n\nUse \`fn_send_message\` only when either (a) the user explicitly asks for mailbox/inbox/notification delivery (for example: "send me this in mail", "ntfy me when…", or "leave me a note in my inbox"), or (b) you are sending a genuinely longer follow-up that did not fit in a short chat reply. In either case, send with \`type: "agent-to-user"\` and target the dashboard user alias (\`to_id: "dashboard"\` is preferred), and ensure the mailbox message is additive rather than a duplicate of the chat reply. Never route that as a user/CLI → agent message.`;
 
@@ -1054,6 +1058,10 @@ export class ChatManager {
       | "fallbackModelId"
       | "defaultProvider"
       | "defaultModelId"
+      | "defaultThinkingLevel"
+      | "defaultThinkingLevelOverride"
+      | "executionThinkingLevel"
+      | "executionGlobalThinkingLevel"
       | "chatRoomRecentVerbatimMessages"
       | "chatRoomCompactionFetchLimit"
       | "chatRoomSummaryMaxChars"
@@ -1063,6 +1071,10 @@ export class ChatManager {
       | "fallbackModelId"
       | "defaultProvider"
       | "defaultModelId"
+      | "defaultThinkingLevel"
+      | "defaultThinkingLevelOverride"
+      | "executionThinkingLevel"
+      | "executionGlobalThinkingLevel"
       | "chatRoomRecentVerbatimMessages"
       | "chatRoomCompactionFetchLimit"
       | "chatRoomSummaryMaxChars"
@@ -1153,6 +1165,10 @@ export class ChatManager {
     fallbackModelId?: string;
     defaultProvider?: string;
     defaultModelId?: string;
+    defaultThinkingLevel?: Settings["defaultThinkingLevel"];
+    defaultThinkingLevelOverride?: Settings["defaultThinkingLevelOverride"];
+    executionThinkingLevel?: Settings["executionThinkingLevel"];
+    executionGlobalThinkingLevel?: Settings["executionGlobalThinkingLevel"];
   }> {
     if (!this.getSettings) {
       return {};
@@ -1165,6 +1181,10 @@ export class ChatManager {
         fallbackModelId: settings?.fallbackModelId ?? undefined,
         defaultProvider: settings?.defaultProvider ?? undefined,
         defaultModelId: settings?.defaultModelId ?? undefined,
+        defaultThinkingLevel: settings?.defaultThinkingLevel ?? undefined,
+        defaultThinkingLevelOverride: settings?.defaultThinkingLevelOverride ?? undefined,
+        executionThinkingLevel: settings?.executionThinkingLevel ?? undefined,
+        executionGlobalThinkingLevel: settings?.executionGlobalThinkingLevel ?? undefined,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1705,9 +1725,13 @@ export class ChatManager {
     const roomPrompt = roomPromptParts.join("\n\n");
 
     const responderRuntimeModel = extractRuntimeModel(input.responder.runtimeConfig);
-    const effectiveModelProvider = input.modelProvider ?? responderRuntimeModel.provider;
-    const effectiveModelId = input.modelId ?? responderRuntimeModel.modelId;
     const chatModelSettings = await this.getChatModelSettings();
+    /*
+     * FNXC:GrokCliRouting 2026-07-09-22:10:
+     * Room responders with no explicit send-time or responder runtime model still need the configured chat/project default to reach createResolvedAgentSession. Without forwarding a defaultProvider of grok-cli, the no-visible-key auto-derive seam cannot route to the Grok CLI runtime and pi can surface the direct xAI missing-key error.
+     */
+    const effectiveModelProvider = input.modelProvider ?? responderRuntimeModel.provider ?? chatModelSettings.defaultProvider;
+    const effectiveModelId = input.modelId ?? responderRuntimeModel.modelId ?? chatModelSettings.defaultModelId;
     /*
      * FNXC:ChatModels 2026-07-01-16:42:
      * Room responders should pass configured fallback models even when the room send chose an explicit model. The engine still swaps only for retryable provider/model-selection failures, so an unavailable Sonnet 5 can recover without making ordinary prompt errors ambiguous.
@@ -1774,7 +1798,13 @@ export class ChatManager {
       );
 
       type AgentMessage = { role?: string; type?: string; content?: string | Array<{ type?: string; text?: string }> };
-      const messages = (resolvedSession.session.state.messages as AgentMessage[]) ?? [];
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtime sessions (grok/droid/cursor) expose top-level `messages` and stream via `onText` without a pi-shaped `state`, so room responders must read messages null-safely while preserving pi/openclaw state-backed sessions.
+       */
+      const roomSessionState = resolvedSession.session.state as { messages?: AgentMessage[]; errorMessage?: string } | undefined;
+      const roomTopLevelMessages = (resolvedSession.session as { messages?: AgentMessage[] }).messages;
+      const messages = roomSessionState?.messages ?? roomTopLevelMessages ?? [];
       const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant" || message.type === "assistant");
       let content = "";
       if (typeof lastAssistant?.content === "string") {
@@ -1785,7 +1815,7 @@ export class ChatManager {
           .join("");
       }
 
-      const stateError = (resolvedSession.session.state as { errorMessage?: string } | undefined)?.errorMessage;
+      const stateError = roomSessionState?.errorMessage;
       if (stateError?.trim()) {
         throw new Error(stateError.trim());
       }
@@ -1984,13 +2014,15 @@ export class ChatManager {
       const mentions = hasMentionCandidates ? await this.parseMentions(content, mentionAgents) : [];
 
       // Persist user message
+      let persistedUserMessageId: string | undefined;
       try {
-        this.chatStore.addMessage(sessionId, {
+        const persistedUserMessage = this.chatStore.addMessage(sessionId, {
           role: "user",
           content,
           metadata: mentions.length > 0 ? { mentions } : undefined,
           attachments,
         });
+        persistedUserMessageId = persistedUserMessage.id;
       } catch (err) {
         this.flushInFlightGenerationPersist(sessionId, null);
         chatStreamManager.broadcast(sessionId, {
@@ -2150,7 +2182,36 @@ export class ChatManager {
       // first user message we create a fresh, file-backed session and persist
       // its path; subsequent messages reopen the same file.
       const sessionManager = this.resolveCliSessionManager(session);
+
+      /*
+       * FNXC:ChatMessageEdit 2026-07-07-09:00:
+       * Capture the pi SessionManager leaf BEFORE prompt() appends the user turn (and the
+       * assistant reply) as children of it. Persisting this parent-leaf id onto the just-saved
+       * user message is what lets a later edit rewind losslessly via SessionManager.branch()/
+       * resetLeaf() (null when this is the first turn) instead of falling back to a lossy
+       * text-only session rebuild. Best-effort: a persistence failure must not block sending.
+       */
+      const parentLeafId = sessionManager.getLeafId();
+      if (persistedUserMessageId) {
+        try {
+          this.chatStore.updateMessageMetadata(persistedUserMessageId, { piParentLeafId: parentLeafId });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          diagnostics.warn(
+            `Failed to record pi parent-leaf id for chat ${sessionId} message ${persistedUserMessageId}: ${message}`,
+          );
+        }
+      }
+
       const chatModelSettings = await this.getChatModelSettings();
+      /*
+       * FNXC:GrokCliRouting 2026-07-09-22:10:
+       * Model-less Chat/QuickChat sessions must pass the configured default model into the shared engine session helper. This keeps grok-cli defaults on the Grok CLI runtime when Fusion has no visible key instead of bypassing FN-7753/FN-7758 routing by omitting defaultProvider entirely.
+       */
+      effectiveModelProvider ??= chatModelSettings.defaultProvider;
+      effectiveModelId ??= chatModelSettings.defaultModelId;
+      failureContextProvider = effectiveModelProvider;
+      failureContextModelId = effectiveModelId;
       const usesConfiguredDefaultModel =
         requestedModelProvider === chatModelSettings.defaultProvider
         && requestedModelId === chatModelSettings.defaultModelId
@@ -2164,6 +2225,11 @@ export class ChatManager {
         !hasExplicitAgentRuntimeModel
         || usesConfiguredDefaultModel
         || !!(requestedModelProvider && requestedModelId);
+      /*
+       * FNXC:Chat-ThinkingLevel 2026-07-10-00:00:
+       * Model-loop chat sessions apply the per-session thinking level through the engine `defaultThinkingLevel` session option; an empty session value inherits the project/global execution default resolved by resolveExecutorThinkingLevel.
+       */
+      const effectiveThinkingLevel = resolveExecutorThinkingLevel(session.thinkingLevel ?? undefined, chatModelSettings);
 
       const messagingTools = agent?.id && this.messageStore
         ? [
@@ -2216,6 +2282,7 @@ export class ChatManager {
               defaultModelId: effectiveModelId,
             }
           : {}),
+        ...(effectiveThinkingLevel ? { defaultThinkingLevel: effectiveThinkingLevel } : {}),
         ...(allowFallback && chatModelSettings.fallbackProvider && chatModelSettings.fallbackModelId
           ? {
               fallbackProvider: chatModelSettings.fallbackProvider,
@@ -2331,10 +2398,16 @@ export class ChatManager {
         return;
       }
 
-      // Some runtimes (e.g. plugin-backed Codex/openclaw) signal provider failures
-      // by setting session.state.errorMessage rather than throwing. Surface that
-      // as an error event instead of persisting a blank assistant reply.
-      const sessionErrorMessage = (agentResult.session.state as { errorMessage?: unknown }).errorMessage;
+      interface AgentMessage {
+        role: string;
+        content?: string | Array<{ type: string; text: string }>;
+      }
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtime sessions (grok/droid/cursor) expose top-level `messages` and stream via `onText` without a pi-shaped `state`; keep `state.errorMessage` optional so successful streams do not become TypeErrors, while pi/openclaw/hermes provider errors still surface when set.
+       */
+      const agentSessionState = agentResult.session.state as { errorMessage?: unknown; messages?: AgentMessage[] } | undefined;
+      const sessionErrorMessage = agentSessionState?.errorMessage;
       if (typeof sessionErrorMessage === "string" && sessionErrorMessage.trim().length > 0
           && !accumulatedText && !accumulatedThinking && toolCallsAccum.length === 0) {
         const failureInfo = addModelContextToFailureInfo(
@@ -2353,11 +2426,12 @@ export class ChatManager {
 
       // Extract response text from agent state
       let responseText = "";
-      interface AgentMessage {
-        role: string;
-        content?: string | Array<{ type: string; text: string }>;
-      }
-      const lastMessage = (agentResult.session.state.messages as AgentMessage[])
+      /*
+       * FNXC:Chat 2026-07-10-00:00:
+       * Plugin CLI runtimes can omit `state` entirely; use streamed text first, then fall back through state-backed messages and top-level session messages so no-state sessions persist successful replies instead of crashing during extraction.
+       */
+      const agentMessages = agentSessionState?.messages ?? (agentResult.session as { messages?: AgentMessage[] }).messages ?? [];
+      const lastMessage = agentMessages
         .filter((m: AgentMessage) => m.role === "assistant")
         .pop();
 
@@ -2555,6 +2629,127 @@ export class ChatManager {
    */
   getGeneratingSessionIds(): string[] {
     return [...this.activeGenerations.keys()];
+  }
+
+  /**
+   * FNXC:ChatMessageEdit 2026-07-07-09:00:
+   * Rewind a direct (model-loop) chat session so an edit to an earlier user message resumes
+   * the conversation from that point with everything after it — the edited turn included —
+   * forgotten. This is a two-part invariant: (1) the persisted `chat_messages` rows are
+   * truncated via `ChatStore.deleteMessagesFrom`, and (2) the pi SessionManager leaf is rewound
+   * so `buildSessionContext()` no longer includes the discarded turns, otherwise the model would
+   * still "remember" content that the UI claims was forgotten. Regeneration is NOT triggered
+   * here — callers resend the edited content through the existing streaming `sendMessage` path.
+   */
+  async rewindSessionForEdit(sessionId: string, fromMessageId: string): Promise<{ retained: ChatMessage[] }> {
+    const session = this.chatStore.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Chat session ${sessionId} not found`);
+    }
+
+    const target = this.chatStore.getMessage(fromMessageId);
+    if (!target || target.sessionId !== sessionId) {
+      throw new Error(`Message ${fromMessageId} not found in session ${sessionId}`);
+    }
+    if (target.role !== "user") {
+      throw new Error(`Message ${fromMessageId} is not a user message and cannot be edited`);
+    }
+
+    // Guard against racing a live stream: rewinding mid-generation would pull the pi session
+    // leaf out from under the in-flight prompt() call.
+    if (this.activeGenerations.has(sessionId)) {
+      throw new Error(`Cannot edit message ${fromMessageId}: a generation is currently in progress for session ${sessionId}`);
+    }
+
+    const parentLeafId = (target.metadata as { piParentLeafId?: string | null } | null)?.piParentLeafId;
+    const hasRecordedParentLeaf = target.metadata != null && Object.prototype.hasOwnProperty.call(target.metadata, "piParentLeafId");
+
+    const { retained } = this.chatStore.deleteMessagesFrom(sessionId, fromMessageId);
+
+    if (hasRecordedParentLeaf) {
+      /*
+       * Primary path. `SessionManager.branch()`/`resetLeaf()` only mutate the calling
+       * instance's IN-MEMORY leaf pointer — nothing is written to disk, and a fresh
+       * `SessionManager.open()` on the next turn recomputes the leaf from the file itself, which
+       * would silently undo the rewind. Persisting the truncation therefore requires materializing
+       * a NEW session file: `createBranchedSession(leafId)` writes a file containing only the
+       * root→leafId path, which we then adopt as the chat's `cliSessionFile`. The abandoned turns
+       * remain physically present in the OLD file (never mutated) but are no longer reachable from
+       * the new file, so `buildSessionContext()` on the next open cannot include them.
+       */
+      try {
+        const sessionManager = this.resolveCliSessionManager(session);
+        if (parentLeafId) {
+          const branchedFile = sessionManager.createBranchedSession(parentLeafId);
+          if (!branchedFile) {
+            throw new Error("createBranchedSession returned no file (non-persisting session)");
+          }
+          this.chatStore.setCliSessionFile(sessionId, branchedFile);
+        } else {
+          // First-turn edit: nothing precedes the edited message, so there is no path to
+          // branch from. A brand-new empty session is the correct "forget everything" state.
+          const fresh = SessionManager.create(this.rootDir);
+          this.chatStore.setCliSessionFile(sessionId, fresh.getSessionFile() ?? null);
+        }
+        return { retained };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        diagnostics.warn(
+          `Failed to branch pi session for chat ${sessionId} at leaf ${String(parentLeafId)} (${message}); rebuilding session from retained history`,
+        );
+      }
+    }
+
+    // Fallback path: legacy sessions with no recorded parent-leaf id (created before this
+    // feature shipped), or a failed branch/resetLeaf above. Best-effort: rebuild a fresh
+    // session containing only the retained (pre-edit) turns as text-only messages — tool-call
+    // and thinking fidelity is a documented limitation of this path. On ANY failure, fall back
+    // further to a clean, empty session rather than risk leaving the model able to recall a
+    // turn the UI says was discarded.
+    try {
+      const rebuilt = SessionManager.create(this.rootDir);
+      for (const message of retained) {
+        if (message.role === "user") {
+          rebuilt.appendMessage({
+            role: "user",
+            content: message.content,
+            timestamp: Date.parse(message.createdAt) || Date.now(),
+          });
+        } else if (message.role === "assistant") {
+          rebuilt.appendMessage({
+            role: "assistant",
+            content: [{ type: "text", text: message.content }],
+            api: "chat",
+            provider: session.modelProvider ?? "unknown",
+            model: session.modelId ?? "unknown",
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "stop",
+            timestamp: Date.parse(message.createdAt) || Date.now(),
+          });
+        }
+      }
+      const rebuiltFile = rebuilt.getSessionFile();
+      this.chatStore.setCliSessionFile(sessionId, rebuiltFile ?? null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      diagnostics.warn(
+        `Failed to rebuild pi session for chat ${sessionId} from retained history (${message}); clearing CLI session file so no discarded turn can be recalled`,
+      );
+      try {
+        this.chatStore.setCliSessionFile(sessionId, null);
+      } catch {
+        // best-effort; nothing further we can do here
+      }
+    }
+
+    return { retained };
   }
 }
 

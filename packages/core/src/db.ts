@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { mkdirSync, existsSync, statSync, renameSync, rmSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { unrefQmdChildProcess } from "./memory-backend.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { PluginOnSchemaInit } from "./plugin-types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
@@ -183,7 +184,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 140;
+const SCHEMA_VERSION = 142;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -1521,6 +1522,7 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     projectId: "TEXT",
     modelProvider: "TEXT",
     modelId: "TEXT",
+    thinkingLevel: "TEXT",
     createdAt: "TEXT NOT NULL",
     updatedAt: "TEXT NOT NULL",
     cliSessionFile: "TEXT",
@@ -1799,6 +1801,18 @@ export function quickCheckSqliteFile(dbPath: string): { ok: boolean; verified: b
  * would strand the background scheduler's shared entry and pin every
  * participant's `integrityCheckPending` true forever. AbortSignal.timeout's
  * internal timer is unref'd, so it never keeps the process alive on shutdown.
+ *
+ * FNXC:Database 2026-07-08-00:00:
+ * This spawn is reached fire-and-forget from `scheduleBackgroundIntegrityCheck`'s
+ * `void (async () => …)()` — nothing here is guaranteed to be awaited by a live
+ * caller. A short-lived process (e.g. a `fn` one-shot CLI command) that opens a
+ * disk-backed `Database` and exits before the 60s scheduling delay elapses must
+ * not be pinned alive by this child's stdio pipes. Unref the child (+ stdio)
+ * immediately after spawn via the shared `unrefQmdChildProcess` helper — see its
+ * doc comment in `memory-backend.ts` for why a plain `spawn()` (not
+ * `promisify(execFile)`) is required for the unref to actually stick (FN-7706).
+ * This does not affect resolve/reject semantics: long-lived callers that DO stay
+ * alive still see the promise settle normally on `close`/`error` (FN-7709).
  */
 const INTEGRITY_CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -1824,6 +1838,11 @@ export function integrityCheckSqliteFileAsync(
         // option-validation errors, e.g. an already-aborted signal.)
         signal: AbortSignal.timeout(INTEGRITY_CHECK_TIMEOUT_MS),
       });
+      // FNXC:Database 2026-07-08-00:00: unref synchronously right after spawn — a
+      // manual unref later (e.g. inside a `data`/`close` handler) would race the
+      // execFile-style nextTick stdio re-ref; see the doc comment above this
+      // function (FN-7709 / FN-7706).
+      unrefQmdChildProcess(child);
     } catch {
       resolve({ ok: true, verified: false });
       return;
@@ -2579,6 +2598,22 @@ export class Database {
         );
       } catch (error) {
         console.warn("[fusion:db] Failed to prune operational log table agentConfigRevisions", error);
+      }
+    }
+
+    /*
+     * FNXC:TelemetryRetention 2026-07-08-00:00:
+     * usage_events is an append-only per-tool telemetry log. Unlike the OPERATIONAL_LOG_TABLES set it originally had NO retention, so it grew unbounded and became the dominant driver of .fusion DB bloat once runAuditEvents was already 30-day capped (observed ~187k rows / ~28MB with no aged-out rows because nothing ever deleted them).
+     * Prune it on the same operationalLogRetentionDays cadence as the other operational logs. Its timestamp column is `ts` (not `timestamp`), so it cannot join the generic OPERATIONAL_LOG_TABLES loop above and gets its own delete here alongside the other column-name exceptions (agentRuns.endedAt, agentConfigRevisions.createdAt).
+     */
+    if (this.tableExists("usage_events")) {
+      try {
+        recordChanges(
+          "usage_events",
+          this.db.prepare("DELETE FROM usage_events WHERE ts < ?").run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table usage_events", error);
       }
     }
 
@@ -5612,9 +5647,37 @@ export class Database {
     }
 
     if (version < 140) {
+      /*
+       * FNXC:Chat-ThinkingLevel 2026-07-10-00:00:
+       * Chat sessions store an optional per-session reasoning-effort level so model-loop chats can pass it as the engine `defaultThinkingLevel`; NULL means inherit the resolved project/global default.
+       */
+      this.applyMigration(140, () => {
+        if (this.hasTable("chat_sessions")) {
+          this.addColumnIfMissing("chat_sessions", "thinkingLevel", "TEXT");
+        }
+      });
+    }
+
+    if (version < 141) {
+      /*
+       * FNXC:Chat-ThinkingLevelRepair 2026-07-11-03:40:
+       * Some live project databases reached schemaVersion 140 without the
+       * chat_sessions.thinkingLevel column, which made POST /api/chat/sessions
+       * fail with "table chat_sessions has no column named thinkingLevel".
+       * Re-run the additive column repair under a fresh schema version so
+       * already-v140 databases converge instead of being skipped forever.
+       */
+      this.applyMigration(141, () => {
+        if (this.hasTable("chat_sessions")) {
+          this.addColumnIfMissing("chat_sessions", "thinkingLevel", "TEXT");
+        }
+      });
+    }
+
+    if (version < 142) {
       // Per-mission ticket id prefix (e.g. "ERR") for triaged tasks; NULL means
       // inherit the project-wide taskPrefix setting. Additive-only, no backfill.
-      this.applyMigration(140, () => {
+      this.applyMigration(142, () => {
         this.addColumnIfMissing("missions", "taskPrefix", "TEXT");
       });
     }
@@ -5907,6 +5970,14 @@ export class Database {
           Database.sharedIntegrityChecks.delete(this.dbPath);
         });
     }, 60_000);
+    // FNXC:Database 2026-07-08-00:00: unref the 60s scheduling delay so a
+    // short-lived caller (e.g. a `fn` one-shot CLI command that opens a
+    // disk-backed Database and exits before this fires) is not pinned alive
+    // waiting for a background check it never asked to block on (FN-7709).
+    // The check itself still fires normally for any process that stays alive
+    // past the delay — unref only affects whether the handle keeps the event
+    // loop open, not whether/when the timer callback runs.
+    shared.timer.unref?.();
 
     Database.sharedIntegrityChecks.set(this.dbPath, shared);
   }

@@ -30,6 +30,7 @@ import { existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { detectProjectFromCwd, setDefaultProject } from "../project-context.js";
 import { maybeInstallClaudeSkillForNewProject } from "./claude-skills-runner.js";
+import { retryOnLock } from "../lock-retry.js";
 
 const VALID_ISOLATION_MODES: IsolationMode[] = ["in-process", "child-process"];
 
@@ -120,13 +121,28 @@ function formatLastActivity(timestamp?: string | null): string {
 }
 
 /**
- * Get task counts by column for a project.
+ * FNXC:CliBoardMutation 2026-07-09-00:00:
+ * FN-7740 audit finding: `getTaskCounts` builds an UNCACHED `new
+ * TaskStore(projectPath)` per call and never closed it. `runProjectList`
+ * calls this once per registered project in a `Promise.all` map, so an
+ * N-project registry leaked N never-closed SQLite/WAL handles — each one
+ * keeping the CLI event loop alive after `fn project list`'s real work was
+ * done. Add an explicit `finally { store.close() }` so every call tears its
+ * store down regardless of success/failure, keeping the existing outer
+ * soft-catch (a genuinely unreadable project still reports empty counts
+ * rather than failing the whole `list`/`show`). `listTasks` is additionally
+ * wrapped in `retryOnLock` (FN-7731) so a momentary `database is locked`
+ * from an active engine/agent writer does not silently masquerade as "zero
+ * tasks" via the outer catch — it rides out the lock instead.
  */
 async function getTaskCounts(projectPath: string): Promise<TaskCountSummary> {
+  const store = new TaskStore(projectPath);
   try {
-    const store = new TaskStore(projectPath);
     await store.init();
-    const tasks = await store.listTasks({ slim: true });
+    const tasks = await retryOnLock(
+      () => store.listTasks({ slim: true }),
+      { id: projectPath, action: "count tasks" },
+    );
 
     const counts: Record<string, number> = {};
     for (const col of COLUMNS) {
@@ -137,8 +153,15 @@ async function getTaskCounts(projectPath: string): Promise<TaskCountSummary> {
     }
     return { byColumn: counts, runningAgentCount: countRunningAgentTasks(tasks) };
   } catch {
-    // Return empty counts if we can't read the project
+    // Return empty counts if we can't read the project (not-found, corrupt
+    // store, or lock-retry exhaustion — all fail soft here by design).
     return { byColumn: {}, runningAgentCount: 0 };
+  } finally {
+    try {
+      await store.close();
+    } catch {
+      // Best-effort: an already-closed/never-initialized store must not throw.
+    }
   }
 }
 
@@ -316,6 +339,15 @@ export async function runProjectAdd(
           // Initialize the project
           const store = new TaskStore(absolutePath);
           await store.init();
+          // FNXC:CliBoardMutation 2026-07-09-00:00: FN-7740 — this init-only
+          // store was never closed, leaking a handle for the rest of the
+          // process lifetime. Close it right after init; nothing downstream
+          // in this handler uses it.
+          try {
+            await store.close();
+          } catch {
+            // Best-effort.
+          }
           console.log(`  ✓ Initialized fn at ${absolutePath}`);
         } else {
           console.log("\n  Cancelled. Run `fn init` to initialize a project first.\n");

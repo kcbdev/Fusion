@@ -6,6 +6,7 @@ import {
   fetchChatMessages,
   updateChatSession,
   deleteChatSession,
+  editChatMessage,
   attachChatStream,
   streamChatResponse,
   cancelChatResponse,
@@ -36,6 +37,7 @@ export interface ChatSessionInfo {
   status: string;
   modelProvider?: string | null;
   modelId?: string | null;
+  thinkingLevel?: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessagePreview?: string;
@@ -50,6 +52,13 @@ export interface ChatSessionInfo {
   cliExecutorAdapterId?: string | null;
   /** Native CLI session id linkage (used as the terminal attach id for resume). */
   cliSessionFile?: string | null;
+  /**
+   * FNXC:ChatSearch 2026-07-07-00:00:
+   * Set only when this session's inclusion in `filteredSessions` (content mode) was driven by
+   * a server-side message-content match rather than the title/agentId filter, so the sidebar
+   * can show "why did this match" without a second round trip.
+   */
+  matchedMessagePreview?: string;
 }
 
 // Re-export shared chat types so existing consumers (`import { ChatMessageInfo } from "../hooks/useChat"`)
@@ -84,7 +93,7 @@ export interface UseChatReturn {
   // Session operations
   selectSession: (id: string, sessionOverride?: ChatSessionInfo) => void;
   createSession: (
-    input: { agentId: string; title?: string; modelProvider?: string; modelId?: string },
+    input: { agentId: string; title?: string; modelProvider?: string; modelId?: string; thinkingLevel?: string },
   ) => Promise<ChatSessionInfo>;
   archiveSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
@@ -93,6 +102,14 @@ export interface UseChatReturn {
   // Message operations
   /** Send a message, optionally with file attachments to upload with the prompt. */
   sendMessage: (content: string, attachments?: File[]) => void;
+  /**
+   * FNXC:ChatMessageEdit 2026-07-07-09:00:
+   * Edit an earlier user message: truncates local + persisted history from that message onward
+   * (server also rewinds the pi session context so the model forgets discarded turns), then
+   * resends the edited content through the normal `sendMessage` streaming path. No-ops while a
+   * generation is streaming or when there is no active session.
+   */
+  editMessageAndResend: (messageId: string, newContent: string) => Promise<void>;
   stopStreaming: () => void;
   clearPendingMessage: (index?: number) => void;
   loadMoreMessages: () => Promise<void>;
@@ -101,6 +118,12 @@ export interface UseChatReturn {
   // Search/filter
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  /**
+   * FNXC:ChatSearch 2026-07-07-12:00:
+   * Search always matches session title/agentId AND message content via a debounced server
+   * round trip; matched sessions are unioned into `filteredSessions`. There is no client toggle
+   * to restrict search back to title-only (FN-7651 removed the "Search in title only" button).
+   */
   filteredSessions: ChatSessionInfo[];
 
   // Refresh
@@ -327,6 +350,15 @@ export function useChat(
 
   // Search/filter
   const [searchQuery, setSearchQuery] = useState("");
+  /*
+  FNXC:ChatSearch 2026-07-07-12:00:
+  Content mode is always on: the query matches title/agentId AND message content. There is no
+  client toggle to restrict this back to title/agentId-only (FN-7651 removed the button).
+  */
+  const [contentMatchedPreviews, setContentMatchedPreviews] = useState<Map<string, string>>(new Map());
+  // Monotonic request counter: guards against an out-of-order/superseded debounced content
+  // search response overwriting a newer query's results.
+  const contentSearchRequestIdRef = useRef(0);
 
   // Pagination
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -726,7 +758,12 @@ export function useChat(
       if (id) {
         void fetchChatSession(id, projectId)
           .then(({ session: refreshedSession }) => {
-            if (!refreshedSession.isGenerating || !refreshedSession.inFlightGeneration) {
+            if (!refreshedSession.isGenerating) {
+              return;
+            }
+            // Only act if the user hasn't navigated away from this session
+            // while the authoritative refresh was in flight.
+            if (activeSessionRef.current?.id !== id) {
               return;
             }
             setActiveSession((prev) => {
@@ -738,6 +775,21 @@ export function useChat(
                 ...refreshedSession,
               };
             });
+            /*
+            FNXC:ChatStreaming 2026-07-07-00:00:
+            FN-7656: returning to a session with an in-flight generation must restore the
+            working/"Thinking…" indicator immediately, even before the first response delta.
+            The local `sessions` cache's `isGenerating` flag is often stale (chat:session:updated
+            SSE payloads lack the route-level isGenerating/inFlightGeneration enrichment), and
+            early in a generation the server reports isGenerating:true with inFlightGeneration
+            still null (no delta emitted yet). Reattach on isGenerating alone via this
+            authoritative fetchChatSession refresh rather than requiring inFlightGeneration too;
+            attachIfGenerating already handles a null inFlightGeneration snapshot gracefully and
+            guards against double-attach via streamRef.current.
+            */
+            if (!streamRef.current) {
+              attachIfGenerating(id, refreshedSession.inFlightGeneration, { silent: true });
+            }
           })
           .catch(() => {
             // Ignore stale-cache recovery fetch failures.
@@ -837,7 +889,7 @@ export function useChat(
 
   // Create a new session
   const createSession = useCallback(
-    async (input: { agentId: string; title?: string; modelProvider?: string; modelId?: string }) => {
+    async (input: { agentId: string; title?: string; modelProvider?: string; modelId?: string; thinkingLevel?: string }) => {
       const previousSessionId = activeSessionRef.current?.id;
       const data = await apiCreateChatSession(input, projectId);
 
@@ -853,6 +905,7 @@ export function useChat(
         status: data.session.status,
         modelProvider: data.session.modelProvider,
         modelId: data.session.modelId,
+        thinkingLevel: data.session.thinkingLevel,
         createdAt: data.session.createdAt,
         updatedAt: data.session.updatedAt,
       };
@@ -1222,14 +1275,126 @@ export function useChat(
 
   sendMessageRef.current = sendMessage;
 
-  // Filter sessions based on search query
-  const filteredSessions = searchQuery
-    ? sessions.filter(
-        (s) =>
-          s.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.agentId.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-    : sessions;
+  /*
+   * FNXC:ChatMessageEdit 2026-07-07-09:00:
+   * Editing an earlier message must resume the conversation from that point, forgetting
+   * everything after it, so future responses are not biased by discarded turns. The optimistic
+   * local truncation happens first (immediate UI feedback), then the server truncates its
+   * persisted rows AND rewinds the pi session context (ChatManager.rewindSessionForEdit) before
+   * we resend the edited content through the normal streaming sendMessage path. Blocked while
+   * streaming so an edit cannot race a live generation.
+   */
+  const editMessageAndResend = useCallback(
+    async (messageId: string, newContent: string) => {
+      if (isStreamingRef.current || !activeSession) {
+        return;
+      }
+
+      const trimmed = newContent.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      const sessionId = activeSession.id;
+      const previousMessages = messagesRef.current;
+      const targetIndex = previousMessages.findIndex((m) => m.id === messageId);
+      if (targetIndex === -1) {
+        return;
+      }
+
+      // Optimistic truncation: drop the edited message and everything after it immediately.
+      setMessages(previousMessages.slice(0, targetIndex));
+
+      try {
+        await editChatMessage(sessionId, messageId, trimmed, projectId);
+      } catch (error) {
+        console.error("[useChat] Failed to edit message:", error);
+        addToast?.("Failed to edit message", "error");
+        // Restore truthful state from the server rather than trusting the optimistic truncation.
+        await loadMessages(sessionId);
+        return;
+      }
+
+      const cacheKey = getChatMessagesCacheKey(projectId, sessionId);
+      if (cacheKey) {
+        clearCache(cacheKey);
+      }
+
+      sendMessage(trimmed);
+    },
+    [activeSession, projectId, addToast, loadMessages, getChatMessagesCacheKey, sendMessage],
+  );
+
+  /*
+  FNXC:ChatSearch 2026-07-07-12:00:
+  Content search requires a server round trip (message bodies are not fully loaded
+  client-side), so it is debounced (300ms) and guarded against out-of-order responses via a
+  monotonic request id: a superseded query (typed-ahead) invalidates in-flight responses
+  instead of letting a stale result flash in. Clearing the query resets
+  `contentMatchedPreviews` synchronously so there is no stale-result flash while the
+  (now-irrelevant) debounced fetch is still pending/aborted.
+  */
+  const trimmedSearchQuery = searchQuery.trim();
+  useEffect(() => {
+    if (!trimmedSearchQuery) {
+      contentSearchRequestIdRef.current++;
+      setContentMatchedPreviews(new Map());
+      return;
+    }
+
+    const requestId = ++contentSearchRequestIdRef.current;
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        try {
+          const data = await fetchChatSessions(projectId, undefined, {
+            q: trimmedSearchQuery,
+            titleOnly: false,
+          });
+          if (contentSearchRequestIdRef.current !== requestId) return;
+          const previews = new Map<string, string>();
+          for (const s of data.sessions) {
+            if (s.matchedMessagePreview) previews.set(s.id, s.matchedMessagePreview);
+          }
+          setContentMatchedPreviews(previews);
+        } catch {
+          if (contentSearchRequestIdRef.current === requestId) {
+            setContentMatchedPreviews(new Map());
+          }
+        }
+      })();
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [trimmedSearchQuery, projectId]);
+
+  // Filter sessions based on search query: title/agentId match always applies; content
+  // matches (from contentMatchedPreviews) are always unioned in.
+  const filteredSessions = (() => {
+    if (!trimmedSearchQuery) return sessions;
+
+    const lowerQuery = trimmedSearchQuery.toLowerCase();
+    const titleMatched = sessions.filter(
+      (s) =>
+        s.title?.toLowerCase().includes(lowerQuery) ||
+        s.agentId.toLowerCase().includes(lowerQuery),
+    );
+
+    if (contentMatchedPreviews.size === 0) {
+      return titleMatched;
+    }
+
+    const merged = new Map<string, ChatSessionInfo>();
+    for (const s of titleMatched) merged.set(s.id, s);
+    for (const session of sessions) {
+      const preview = contentMatchedPreviews.get(session.id);
+      if (preview === undefined) continue;
+      const existing = merged.get(session.id);
+      merged.set(session.id, { ...(existing ?? session), matchedMessagePreview: preview });
+    }
+    return Array.from(merged.values()).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    );
+  })();
 
   useEffect(() => {
     if (!activeSession?.id || activeSession.isGenerating !== true || streamRef.current) {
@@ -1486,6 +1651,7 @@ export function useChat(
     renameSession,
     deleteSession,
     sendMessage,
+    editMessageAndResend,
     stopStreaming,
     clearPendingMessage,
     loadMoreMessages,

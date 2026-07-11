@@ -40,6 +40,7 @@ const mockGetSettings = vi.fn();
 const mockGlobalInit = vi.fn();
 const mockTaskStoreInit = vi.fn();
 const mockTaskStoreListTasks = vi.fn();
+const mockTaskStoreClose = vi.fn();
 const mockEnsureMemoryFileWithBackend = vi.fn();
 
 // Mock @fusion/core
@@ -63,7 +64,13 @@ vi.mock("@fusion/core", () => ({
   TaskStore: makeConstructibleMock(() => ({
     init: mockTaskStoreInit,
     listTasks: mockTaskStoreListTasks,
+    close: mockTaskStoreClose,
   })),
+  // FN-7740: `getTaskCounts`/`runProjectAdd`'s interactive-init store now
+  // close via `store.close()` and `listTasks` is wrapped in `retryOnLock`
+  // (which imports `isSqliteLockError` from @fusion/core) — stub it per
+  // project memory's mocked-module pitfall.
+  isSqliteLockError: vi.fn(() => false),
   countRunningAgentTasks: (tasks: Array<{ column: string; status?: string; paused?: boolean }>) => tasks.filter((task) => (
     task.column === "in-progress" ||
     (task.column === "triage" && task.status === "planning" && !task.paused) ||
@@ -118,6 +125,7 @@ describe("project commands", () => {
     mockGetProjectHealth.mockResolvedValue(undefined);
     mockTaskStoreInit.mockResolvedValue(undefined);
     mockTaskStoreListTasks.mockResolvedValue([]);
+    mockTaskStoreClose.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

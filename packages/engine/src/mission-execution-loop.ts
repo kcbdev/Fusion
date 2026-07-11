@@ -36,6 +36,17 @@ import { createLogger } from "./logger.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+
+/** Shell-quote a single argument for a `git` invocation (mirror of the local
+ * helper in branch-conflicts.ts — kept local rather than shared per repo
+ * convention). */
+function quoteShellArg(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 /** Logger for the mission execution loop subsystem. */
 export const loopLog = createLogger("mission-loop");
@@ -249,7 +260,21 @@ export class MissionExecutionLoop extends EventEmitter {
           for (const slice of milestone.slices) {
             if (slice.status !== "active") continue;
 
+            const supersededFixes = this.missionStore.reconcileSupersededGeneratedFixFeatures(slice.id);
+            const supersededFeatureIds = new Set(supersededFixes.featureIds);
+            if (supersededFixes.supersededCount > 0) {
+              loopLog.warn(
+                `Recovery: superseded ${supersededFixes.supersededCount} generated Fix Features in slice ${slice.id} `
+                + "because an ancestor feature already passed validation",
+              );
+              recoveredCount += supersededFixes.supersededCount;
+            }
+
             for (const feature of slice.features) {
+              if (supersededFeatureIds.has(feature.id)) {
+                continue;
+              }
+
               // Features in validating state need to be re-validated
               if (feature.loopState === "validating") {
                 loopLog.log(`Recovery: re-queuing validating feature ${feature.id}`);
@@ -512,6 +537,18 @@ export class MissionExecutionLoop extends EventEmitter {
             run.id,
             `linked task ${feature.taskId} is still "${premergeColumn}" (code not merged yet) — validation deferred`,
           );
+        } else if (await this.isValidationWorkspaceStale(feature)) {
+          // Even when the task column shows "done", the judge session ran in
+          // this.rootDir — if that working copy never fetched/reset to the
+          // merged commit (merge landed on remote or another worktree), the
+          // validator read PRE-merge files → a spurious fail. Defer instead of
+          // minting a bogus Fix Feature; a later validation judges the merged
+          // code. Only affirmative staleness evidence defers (fail-open).
+          await this.handleValidationInconclusive(
+            feature.id,
+            run.id,
+            `validation workspace predates the merged code for ${feature.taskId} — validation deferred`,
+          );
         } else {
           await this.handleValidationFail(feature.id, run.id, result);
         }
@@ -545,6 +582,30 @@ export class MissionExecutionLoop extends EventEmitter {
     const column = linkedTask?.column;
     if (!column || column === "done" || column === "archived") return null;
     return column;
+  }
+
+  /**
+   * Affirmative-evidence check that the judged checkout (this.rootDir HEAD)
+   * predates the linked task's merged code. True ONLY when the integration SHA
+   * is resolvable AND is NOT an ancestor of rootDir HEAD. Fails open (returns
+   * false = trust the fail) on unresolvable SHA / unknown object / any git
+   * error — the guard may only ever defer a fail, never suppress one.
+   */
+  private async isValidationWorkspaceStale(feature: MissionFeature): Promise<boolean> {
+    const integrationSha = await this.resolveIntegrationSha(feature);
+    if (!integrationSha) return false; // no evidence → trust the fail
+    try {
+      await execAsync(`git merge-base --is-ancestor ${quoteShellArg(integrationSha)} HEAD`, {
+        cwd: this.rootDir,
+        timeout: 30_000,
+      });
+      return false; // exit 0 → ancestor → workspace is fresh
+    } catch (err) {
+      // `--is-ancestor` exits 1 = NOT an ancestor (affirmatively stale); exit
+      // 128 = bad object / not a repo (unknown → fail-open). execAsync's thrown
+      // error carries `.code` = process exit code. ONLY code === 1 defers.
+      return (err as { code?: number })?.code === 1;
+    }
   }
 
   /**

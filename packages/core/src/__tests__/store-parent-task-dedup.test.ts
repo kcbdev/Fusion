@@ -18,7 +18,10 @@ describe("TaskStore parent-task duplicate intake", () => {
     await harness.afterEach();
   });
 
-  it("auto-archives a sibling created by the same parent task with similar description", async () => {
+  it("auto-archives a sibling created by the same parent task with similar description when autoArchiveDuplicateTasksEnabled is true", async () => {
+    // FN-7658: default is now flag-in-place; explicitly opt back into the legacy
+    // auto-archive behavior to cover it is still reachable.
+    await store.updateSettings({ autoArchiveDuplicateTasksEnabled: true });
     const parentId = "FN-PARENT";
 
     const first = await store.createTask({

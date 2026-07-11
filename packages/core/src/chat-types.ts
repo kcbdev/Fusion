@@ -56,6 +56,8 @@ export interface ChatSession {
   modelProvider: string | null;
   /** AI model ID for this session (optional, overrides defaults) */
   modelId: string | null;
+  /** Optional thinking/reasoning-effort override for this session (optional, overrides defaults) */
+  thinkingLevel: string | null;
   /** When the session was created */
   createdAt: string;
   /** When the session was last updated */
@@ -97,6 +99,14 @@ export type EnrichedChatSession = ChatSession & {
   lastMessageAt?: string;
   /** Whether a generation is currently in progress for this session */
   isGenerating?: boolean;
+  /**
+   * FNXC:ChatSearch 2026-07-07-00:00:
+   * When a session is included in `GET /chat/sessions` because its message content (not
+   * title) matched a server-side content search, this carries a truncated preview of the
+   * matching message so the UI can show "why did this match" without a second round trip.
+   * Absent when the session was not returned via content search.
+   */
+  matchedMessagePreview?: string;
 };
 
 /** A parsed @ mention of an agent in a chat message */
@@ -204,6 +214,8 @@ export interface ChatSessionCreateInput {
   modelProvider?: string | null;
   /** Optional model ID override */
   modelId?: string | null;
+  /** Optional thinking/reasoning-effort override */
+  thinkingLevel?: string | null;
   /** Optional cli-agent adapter id; when set the chat is CLI-backed (U12) */
   cliExecutorAdapterId?: string | null;
 }
@@ -221,6 +233,8 @@ export interface ChatSessionUpdateInput {
   modelProvider?: string | null;
   /** Model ID override */
   modelId?: string | null;
+  /** Thinking/reasoning-effort override */
+  thinkingLevel?: string | null;
 }
 
 /**

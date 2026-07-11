@@ -128,7 +128,7 @@ describe("POST /tasks workflowId (U6/R3)", () => {
 
   it.each([
     ["default coding", "builtin:coding", ["plan-review", "code-review"]],
-    ["legacy coding", "builtin:legacy-coding", ["code-review"]],
+    ["legacy coding", "builtin:legacy-coding", ["plan-review", "code-review"]],
     ["coding per-step review", "builtin:stepwise-coding", ["plan-review", "code-review"]],
   ])("%s workflow create/select/resolve works end to end", async (_label, workflowId, defaultSteps) => {
     const res = await post("/api/tasks", {

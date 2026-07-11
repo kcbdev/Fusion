@@ -299,6 +299,25 @@ export function fetchTasks(
   return api<Task[]>(`/tasks${suffix}`);
 }
 
+/**
+ * FNXC:ArchivePagination 2026-07-08-00:00:
+ * Dedicated paged read for the Archived board column (FN-7659). Returns
+ * one bounded page (default 100) ordered `archivedAt DESC` plus `total`/
+ * `hasMore` so the caller can drive a "Show more" affordance without ever
+ * fetching the whole archive in one request.
+ */
+export function fetchArchivedTasks(
+  projectId?: string,
+  limit?: number,
+  offset?: number,
+): Promise<{ tasks: Task[]; total: number; hasMore: boolean }> {
+  const search = new URLSearchParams();
+  if (limit !== undefined) search.set("limit", String(limit));
+  if (offset !== undefined) search.set("offset", String(offset));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return api<{ tasks: Task[]; total: number; hasMore: boolean }>(withProjectId(`/tasks/archived${suffix}`, projectId));
+}
+
 export async function fetchTaskDetail(id: string, projectId?: string): Promise<TaskDetail> {
   const maxAttempts = 2; // 1 initial + 1 retry
   const url = buildApiUrl(withProjectId(`/tasks/${id}`, projectId));
@@ -314,6 +333,29 @@ export async function fetchTaskDetail(id: string, projectId?: string): Promise<T
   }
   // unreachable
   throw new Error("Request failed");
+}
+
+export interface TaskRuntimeFallbackResponse {
+  taskId: string;
+  hasEvent: boolean;
+  wasConfigured: boolean | null;
+  runtimeHint: string | null;
+  reason: string | null;
+  eventId: string | null;
+  timestamp: string | null;
+  showFallbackBadge: boolean;
+}
+
+/**
+ * Fetch the most recent session:runtime-resolved audit event for a task,
+ * normalized for the runtime-fallback badge/toast affordance. Used by
+ * useRuntimeFallbackStatus.
+ */
+export async function fetchTaskRuntimeFallback(
+  taskId: string,
+  projectId?: string,
+): Promise<TaskRuntimeFallbackResponse> {
+  return api<TaskRuntimeFallbackResponse>(withProjectId(`/tasks/${taskId}/runtime-fallback`, projectId));
 }
 
 export interface UpdateTaskReviewRequest {
@@ -787,6 +829,21 @@ export type RecoverBranchBindingOutcome =
 
 export function retryTask(id: string, projectId?: string): Promise<Task> {
   return api<Task>(withProjectId(`/tasks/${id}/retry`, projectId), { method: "POST" });
+}
+
+/*
+FNXC:ReviewLaneBypass 2026-07-09-00:00:
+Operator/privileged review-lane bypass primitive (FN-7720). Bypasses the latest
+failed pre-merge review step of an in-review task so it can advance past the
+gate; a non-empty `reason` is mandatory and audited server-side. Mirrors
+`retryTask`'s client shape.
+*/
+export function bypassReview(id: string, reason: string, projectId?: string): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/bypass-review`, projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export function relaunchCliSession(sessionId: string, projectId?: string): Promise<{ ok: boolean; taskId?: string }> {
@@ -1926,6 +1983,27 @@ export interface CursorCliStatus {
   ready: boolean;
 }
 
+export interface GrokCliStatus {
+  binary: {
+    available: boolean;
+    /** FNXC:GrokCli 2026-07-09-00:00: FN-7716 — "ready" (binary available), not "key present"; the grok CLI owns auth. */
+    authenticated?: boolean;
+    /** FNXC:GrokCli 2026-07-09-00:00: FN-7716 — non-blocking informational hint that Fusion detected a Grok API key. Never gates readiness. */
+    apiKeyDetected?: boolean;
+    version?: string;
+    binaryPath?: string;
+    configuredBinaryPath?: string;
+    usingConfiguredBinaryPath?: boolean;
+    diagnostics?: string[];
+    reason?: string;
+    probeDurationMs: number;
+  };
+  enabled: boolean;
+  binaryPath?: string;
+  extension: null;
+  ready: boolean;
+}
+
 export interface LlamaCppStatus {
   enabled: boolean;
   extension: {
@@ -1996,6 +2074,10 @@ export function fetchDroidCliStatus(): Promise<DroidCliStatus> {
 
 export function fetchCursorCliStatus(): Promise<CursorCliStatus> {
   return api<CursorCliStatus>("/providers/cursor-cli/status");
+}
+
+export function fetchGrokCliStatus(): Promise<GrokCliStatus> {
+  return api<GrokCliStatus>("/providers/grok-cli/status");
 }
 
 /** Probe llama.cpp server + setting + extension state. */
@@ -2280,6 +2362,24 @@ export function setCursorCliBinaryPath(
   });
 }
 
+export function setGrokCliEnabled(
+  enabled: boolean,
+): Promise<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }> {
+  return api<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }>("/auth/grok-cli", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export function setGrokCliBinaryPath(
+  binaryPath: string | null,
+): Promise<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }> {
+  return api<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }>("/auth/grok-cli", {
+    method: "POST",
+    body: JSON.stringify({ binaryPath }),
+  });
+}
+
 /** Enable or disable the llama.cpp provider. */
 export function setLlamaCppEnabled(
   enabled: boolean,
@@ -2296,6 +2396,12 @@ export interface CustomProvider {
   apiType: "openai-compatible" | "anthropic-compatible" | "google-generative-ai" | "openai-responses";
   baseUrl: string;
   apiKey?: string;
+  /**
+   * FNXC:ProviderAuth 2026-07-08-00:00:
+   * FN-7689: dashboard-local mirror of @fusion/core's CustomProvider.anthropicPromptCaching
+   * opt-in. Keep in sync with packages/core/src/types.ts.
+   */
+  anthropicPromptCaching?: boolean;
   models?: { id: string; name: string }[];
 }
 
@@ -2310,6 +2416,7 @@ export async function fetchCustomProviders(): Promise<CustomProviderConfig[] & {
       : provider.apiType === "openai-responses" ? "openai-responses"
       : "openai-completions",
     apiKey: provider.apiKey,
+    anthropicPromptCaching: provider.anthropicPromptCaching,
     models: (provider.models ?? []).map((model) => ({ id: model.id, name: model.name })),
   } satisfies CustomProviderConfig));
   return Object.assign(legacyProviders, { providers: legacyProviders });
@@ -2331,6 +2438,9 @@ export function updateCustomProvider(
     ...(typeof legacy.name === "string" ? { name: legacy.name } : {}),
     ...(typeof legacy.baseUrl === "string" ? { baseUrl: legacy.baseUrl } : {}),
     ...(typeof legacy.apiKey === "string" ? { apiKey: legacy.apiKey } : {}),
+    ...("anthropicPromptCaching" in (updates as Record<string, unknown>)
+      ? { anthropicPromptCaching: (updates as Partial<Omit<CustomProvider, "id">>).anthropicPromptCaching }
+      : {}),
     ...(Array.isArray(legacy.models)
       ? {
           models: legacy.models.map((model) => ({
@@ -2391,6 +2501,8 @@ export interface CustomProviderConfig {
   baseUrl: string;
   api: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
   apiKey?: string;
+  /** FNXC:ProviderAuth 2026-07-08-00:00: FN-7689 caching opt-in, carried through the legacy shape. */
+  anthropicPromptCaching?: boolean;
   models: CustomProviderModelInput[];
 }
 
@@ -6160,7 +6272,7 @@ export interface AgentPromptSizePoint {
   totalChars: number;
 }
 
-function withProjectId(path: string, projectId?: string): string {
+export function withProjectId(path: string, projectId?: string): string {
   if (!projectId) return path;
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}projectId=${encodeURIComponent(projectId)}`;
@@ -10021,11 +10133,30 @@ export interface ChatRoomMessageResponse {
   message: ChatRoomMessage;
 }
 
+/**
+ * FNXC:ChatSearch 2026-07-07-00:00:
+ * `q`/`titleOnly` mirror the server's GET /chat/sessions content-search params (see
+ * register-chat-routes.ts). `q` triggers server-side message-content search; `titleOnly=true`
+ * (or omitting `q`) preserves the pre-existing client-side title/agent-only filtering.
+ */
+export interface FetchChatSessionsOptions {
+  status?: string;
+  q?: string;
+  titleOnly?: boolean;
+}
+
 /** Fetch all chat sessions for a project */
-export function fetchChatSessions(projectId?: string, status?: string): Promise<ChatSessionListResponse> {
+export function fetchChatSessions(
+  projectId?: string,
+  status?: string,
+  options?: FetchChatSessionsOptions,
+): Promise<ChatSessionListResponse> {
   const search = new URLSearchParams();
   if (projectId) search.set("projectId", projectId);
-  if (status) search.set("status", status);
+  const resolvedStatus = options?.status ?? status;
+  if (resolvedStatus) search.set("status", resolvedStatus);
+  if (options?.q && options.q.trim()) search.set("q", options.q.trim());
+  if (options?.titleOnly) search.set("titleOnly", "true");
   const qs = search.toString();
   return api<ChatSessionListResponse>(`/chat/sessions${qs ? `?${qs}` : ""}`);
 }
@@ -10071,7 +10202,7 @@ export async function fetchResumeChatSession(
 
 /** Create a new chat session */
 export function createChatSession(
-  input: { agentId: string; title?: string; modelProvider?: string; modelId?: string },
+  input: { agentId: string; title?: string; modelProvider?: string; modelId?: string; thinkingLevel?: string },
   projectId?: string,
 ): Promise<ChatSessionResponse> {
   return api<ChatSessionResponse>(withProjectId("/chat/sessions", projectId), {
@@ -10186,6 +10317,28 @@ export function deleteChatMessage(
     withProjectId(`/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`, projectId),
     {
       method: "DELETE",
+    },
+  );
+}
+
+/**
+ * FNXC:ChatMessageEdit 2026-07-07-09:00:
+ * Edit an earlier user message in a direct (model-loop) chat session. Truncates the persisted
+ * transcript from (and including) the target message onward AND rewinds the pi session context
+ * server-side, so the returned `retained` list is the surviving pre-edit history. Does NOT
+ * trigger regeneration — the caller resends the edited content via the existing streaming send.
+ */
+export function editChatMessage(
+  sessionId: string,
+  messageId: string,
+  content: string,
+  projectId?: string,
+): Promise<{ retained: ChatMessage[] }> {
+  return api<{ retained: ChatMessage[] }>(
+    withProjectId(`/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`, projectId),
+    {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
     },
   );
 }

@@ -5,6 +5,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 const apiMock = vi.fn();
 vi.mock("../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => apiMock(path, opts),
+  withProjectId: (path: string, projectId?: string) =>
+    projectId ? `${path}${path.includes("?") ? "&" : "?"}projectId=${encodeURIComponent(projectId)}` : path,
 }));
 
 import { SdlcFunnel } from "../SdlcFunnel";
@@ -53,6 +55,20 @@ beforeEach(() => {
 });
 
 describe("SdlcFunnel", () => {
+  it("appends projectId to the activity request when supplied, and omits it when not", async () => {
+    apiMock.mockResolvedValue(activityFixture(fullFunnel()));
+    const { unmount } = render(<SdlcFunnel range={range7d} projectId="proj-funnel" />);
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    expect(apiMock.mock.calls.at(-1)?.[0]).toBe("/command-center/activity?from=2026-06-08&projectId=proj-funnel");
+    unmount();
+
+    apiMock.mockClear();
+    apiMock.mockResolvedValue(activityFixture(fullFunnel()));
+    render(<SdlcFunnel range={range7d} />);
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    expect(apiMock.mock.calls.at(-1)?.[0]).toBe("/command-center/activity?from=2026-06-08");
+  });
+
   it("fetches the activity endpoint and renders per-stage counts", async () => {
     apiMock.mockResolvedValue(activityFixture(fullFunnel()));
     render(<SdlcFunnel range={range7d} />);
@@ -61,7 +77,7 @@ describe("SdlcFunnel", () => {
     expect(apiMock).toHaveBeenCalledWith(expect.stringContaining("/command-center/activity"), undefined);
 
     // Funnel bars carry an accessible label per stage with its count.
-    expect(screen.getByLabelText("Triage: 4")).toBeTruthy();
+    expect(screen.getByLabelText("Planning: 4")).toBeTruthy();
     expect(screen.getByLabelText("In progress: 3")).toBeTruthy();
     expect(screen.getByLabelText("Done: 2")).toBeTruthy();
     // Unknown-trait columns surface under "Other".
@@ -73,7 +89,7 @@ describe("SdlcFunnel", () => {
     render(<SdlcFunnel range={range7d} />);
 
     await screen.findByTestId("cc-area-funnel");
-    expect(screen.getByRole("img", { name: "Completion rate for in-range triage entrants" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Completion rate for in-range planning entrants" })).toBeTruthy();
     expect(screen.getByTestId("cc-funnel-completion-rate").textContent).toContain("50%");
     expect(screen.getByTestId("cc-funnel-done").textContent).toContain("2");
     expect(screen.getByTestId("cc-funnel-entered").textContent).toContain("4");
@@ -102,7 +118,7 @@ describe("SdlcFunnel", () => {
     render(<SdlcFunnel range={range7d} />);
 
     await screen.findByTestId("cc-area-funnel");
-    expect(screen.getByRole("img", { name: "Completion rate for in-range triage entrants" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Completion rate for in-range planning entrants" })).toBeTruthy();
     expect(screen.getByTestId("cc-funnel-completion-rate").textContent).toContain("—");
   });
 

@@ -66,7 +66,7 @@ import {
   traitListParams,
 } from "@fusion/engine";
 import * as dashboard from "@fusion/dashboard";
-import { resolve, basename, extname, join } from "node:path";
+import { resolve, relative, isAbsolute, sep, basename, extname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -828,13 +828,21 @@ export default function kbExtension(pi: ExtensionAPI) {
             ? task.description.slice(0, 80) + "…"
             : task.description;
 
+        /*
+        FNXC:Workflows 2026-07-05-00:00:
+        The response text must reflect the ACTUAL resolved landing column (task.column),
+        not a hardcoded "triage" string. store.createTask already resolves intake correctly
+        (this call never overrides `column`), so a custom workflow's non-triage intake
+        column (e.g. "Inbox") must be echoed back to the caller instead of a fixed value
+        that would misreport where the card actually landed.
+        */
         return {
           content: [
             {
               type: "text",
               text:
                 `Created ${task.id}: ${label}${workflowId ? ` (workflow: ${workflowId})` : ""}\n` +
-                `Column: triage\n` +
+                `Column: ${task.column}\n` +
                 (task.dependencies.length
                   ? `Dependencies: ${task.dependencies.join(", ")}\n`
                   : "") +
@@ -963,6 +971,16 @@ export default function kbExtension(pi: ExtensionAPI) {
         updatedFields.push("agentId");
       }
       if (params.nodeId !== undefined) {
+        /*
+        FNXC:StateMachine 2026-07-07-12:00:
+        Signature 2 (FN-7641 / NEXT-322 / NEXT-375 / NEXT-340): nodeId='end' after an
+        out-of-band merge must never silently no-op here either. Pre-validate exactly like
+        the dashboard route so the CLI tool returns an explicit isError instead of a "success"
+        response that changed nothing when there is no durable merge proof. When proof exists,
+        `store.updateTask` below performs the real finalize-to-done move (shared logic in
+        TaskStore.updateTask / node-override-guard.ts), so this tool, the dashboard route, and
+        store.updateTask all exhibit identical behavior.
+        */
         const normalizedNodeId = normalizeNullableStringInput(params.nodeId);
         const validation = validateNodeOverrideChange(task, normalizedNodeId ?? null);
         if (!validation.allowed) {
@@ -1218,6 +1236,27 @@ export default function kbExtension(pi: ExtensionAPI) {
         );
       }
 
+      /*
+       * FNXC:CliTaskAttach 2026-07-05-00:00:
+       * fn_task_attach must confine reads to the task worktree boundary (ctx.cwd) to
+       * prevent a path-traversal / absolute-path read-boundary bypass — an agent could
+       * previously pass "../../../etc/hosts" or an absolute path (with an allowed
+       * extension) and exfiltrate arbitrary files into a task's attachments. The guard
+       * must run BEFORE readFile so an out-of-boundary path is never opened, even to
+       * fail. The boundary is intentionally ctx.cwd (the worktree) — not a broader
+       * project root — to avoid re-exposing sibling worktrees. (FN-7619, flagged
+       * out-of-scope during FN-7608.)
+       */
+      const boundaryRoot = resolve(ctx.cwd);
+      const rel = relative(boundaryRoot, filePath);
+      const escapesBoundary =
+        rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+      if (escapesBoundary) {
+        throw new Error(
+          `Refusing to attach file outside the task worktree boundary: ${params.path}`,
+        );
+      }
+
       let content: Buffer;
       try {
         content = await readFile(filePath);
@@ -1416,6 +1455,65 @@ export default function kbExtension(pi: ExtensionAPI) {
     },
   });
 
+  // ── fn_task_bypass_review ────────────────────────────────────────
+
+  /*
+   * FNXC:ReviewLaneBypass 2026-07-09-00:00:
+   * Policy-gated escape hatch (FN-7720) for a card stranded in `in-review`
+   * solely by a failed pre-merge review step — the leading real-world cause
+   * being the Runfusion/Fusion#1946 `(no feedback captured)` no-verdict
+   * dispatch defect. Registered ONLY on this pi-extension/CLI operator tool
+   * surface — deliberately NOT wired into packages/engine/src/executor.ts or
+   * packages/engine/src/agent-heartbeat.ts autonomous per-role tool lists, and
+   * NOT part of packages/dashboard/src/planning-board-tools.ts read-only
+   * planning tools — so headless executor/reviewer/triage agent runs never
+   * gain the bypass. Requires a mandatory reason; audit-logged via
+   * store.bypassFailedPreMergeReviewStep's run-audit event.
+   */
+  pi.registerTool({
+    name: "fn_task_bypass_review",
+    label: "fn: Bypass Failed Review Step",
+    description:
+      "Policy-gated escape hatch for an in-review task stranded solely by a failed pre-merge " +
+      "review lane (leading real-world cause: the Runfusion/Fusion#1946 '(no feedback captured)' " +
+      "no-verdict dispatch defect), not a real REVISE. Rewrites the latest failed pre-merge " +
+      "WorkflowStepResult to a terminal non-blocking status with explicit bypass audit metadata " +
+      "(who/when/why/prior status) — it never fabricates a reviewer verdict. Requires a mandatory " +
+      "reason and is audit-logged. Clears ONLY the failed-pre-merge-step merge blocker; paused, " +
+      "incomplete-step, blocking-status, and still-pending conditions still block, and an " +
+      "autoMerge:false task is not force-merged.",
+    promptSnippet:
+      "Bypass a failed pre-merge review step on an in-review Fusion task (policy-gated, mandatory reason, audit-logged)",
+    parameters: Type.Object({
+      id: Type.String({ description: "Task ID (e.g. FN-001)" }),
+      reason: Type.String({ description: "Mandatory justification for the bypass (audit-logged)" }),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const fnCtx = ctx as typeof ctx & { agentId?: string };
+      const actor = fnCtx.agentId ?? "cli-operator";
+
+      try {
+        const task = await store.bypassFailedPreMergeReviewStep(params.id, {
+          reason: params.reason,
+          actor,
+        });
+        return {
+          content: [{ type: "text", text: `Bypassed failed pre-merge review step for ${task.id}` }],
+          details: { taskId: task.id },
+        };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `ERROR: Failed to bypass review lane for ${params.id}: ${err?.message ?? err}` }],
+          isError: true,
+          details: { taskId: params.id, error: String(err?.message ?? err) },
+        };
+      }
+    },
+  });
+
   // ── fn_task_duplicate ─────────────────────────────────────────────
 
   pi.registerTool({
@@ -1491,20 +1589,33 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Archive Task",
     description:
       "Archive a task from any live column (move to archived). " +
-      "Archived tasks are preserved for historical reference but moved out of the main board view.",
+      "Archived tasks are preserved for historical reference but moved out of the main board view. " +
+      "If the task is still referenced as a lineage parent by another task, archiving is rejected unless removeLineageReferences:true is passed.",
     promptSnippet: "Archive a Fusion task from any live column (moves to archived column)",
     promptGuidelines: [
       "Use to clean up tasks from any live board column when you want them hidden from active views",
       "Already archived tasks cannot be archived again",
       "Archived tasks can be unarchived later if needed",
+      "If archiving fails because the task is still referenced as a lineage parent by another task, retry with removeLineageReferences:true to clear that reference and unblock the archive",
     ],
+    /*
+    FNXC:TaskLifecycleTools 2026-07-07-00:00:
+    fn_task_archive and fn_task_delete both gate on store.TaskHasLineageChildrenError, whose message tells the
+    caller to pass { removeLineageReferences: true } — but neither tool schema exposed that parameter, leaving
+    lineage-parent tasks permanently stuck (FN-7661). Expose it on both tools' Type.Object schema and forward it
+    to the store call so the recovery path the error message advertises is actually reachable by agents. Keep
+    this in sync with store.archiveTask / store.deleteTask option shapes if they change.
+    */
     parameters: Type.Object({
       id: Type.String({ description: "Task ID to archive from any live column (e.g. FN-001)." }),
+      removeLineageReferences: Type.Optional(Type.Boolean({ description: "When true, clear incoming lineage-parent references (child sourceParentTaskId) before archiving, so a task still referenced as a lineage parent can be archived." })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
-      const task = await store.archiveTask(params.id);
+      const task = await store.archiveTask(params.id, {
+        removeLineageReferences: params.removeLineageReferences === true,
+      });
 
       return {
         content: [{ type: "text", text: `Archived ${task.id} → ${columnLabel(task.column)}` }],
@@ -1548,7 +1659,8 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Delete Task",
     description:
       "Soft-delete a task from active Fusion board views. " +
-      "The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation.",
+      "The task row and artifacts are preserved; optional allowResurrection marks the ID for intentional recreation. " +
+      "If the task is still referenced as a lineage parent by another task, deletion is rejected unless removeLineageReferences:true is passed.",
     promptSnippet: "Soft-delete a Fusion task",
     promptGuidelines: [
       "Use for cleaning up test tasks or tasks created in error when you want the task hidden from active board views",
@@ -1556,10 +1668,17 @@ export default function kbExtension(pi: ExtensionAPI) {
       "Use allowResurrection:true when operators want the deleted task ID to be intentionally reusable on future createTask calls",
       "Use fn_task_archive for completed work you want to keep referenceable in the board",
       "True hard removal is handled by archive cleanup paths (archiveTaskAndCleanup / cleanupArchivedTasks), not fn_task_delete",
+      "If deletion fails because the task is still referenced as a lineage parent by another task, retry with removeLineageReferences:true to clear that reference and unblock the delete",
     ],
+    /*
+    FNXC:TaskLifecycleTools 2026-07-07-00:00:
+    See matching comment on fn_task_archive above (FN-7661): the store's TaskHasLineageChildrenError message
+    advertises { removeLineageReferences: true } as the recovery path, so this tool must expose and forward it too.
+    */
     parameters: Type.Object({
       id: Type.String({ description: "Task ID to delete (e.g. FN-001)" }),
       allowResurrection: Type.Optional(Type.Boolean({ description: "When true, mark this tombstone as explicitly reusable for future recreation." })),
+      removeLineageReferences: Type.Optional(Type.Boolean({ description: "When true, clear incoming lineage-parent references (child sourceParentTaskId) before deleting, so a task still referenced as a lineage parent can be removed." })),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1567,6 +1686,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const callerTaskId = (ctx as { taskId?: string }).taskId;
       const task = await store.deleteTask(params.id, {
         allowResurrection: params.allowResurrection === true,
+        removeLineageReferences: params.removeLineageReferences === true,
         auditContext: {
           agentId: "pi-extension",
           runId: `synthetic-pi-delete-${params.id}-${Date.now()}`,

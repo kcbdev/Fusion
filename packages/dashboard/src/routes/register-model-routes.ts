@@ -1,9 +1,12 @@
 import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { customProviderRegistryKey, mergeSupplementalAnthropicModels, resolvePlanningSettingsModel } from "@fusion/core";
+import { customProviderRegistryKey, mergeSupplementalAnthropicModels, mergeSupplementalOpenAiCodexModels, resolvePlanningSettingsModel } from "@fusion/core";
 import type { CustomProvider } from "@fusion/core";
 import { ApiError } from "../api-error.js";
+import { getCursorPickerModels, CURSOR_PICKER_PROVIDER_ID } from "../cursor-model-cache.js";
+import { getGrokPickerModels, GROK_PICKER_PROVIDER_ID } from "../grok-model-cache.js";
+import { getHermesPickerModels, HERMES_PICKER_PROVIDER_ID } from "../hermes-model-cache.js";
 import type { AuthStorageLike } from "../routes.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
@@ -160,6 +163,9 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
     let useDroidCli = false;
     let useLlamaCpp = false;
     let useCursorCli = false;
+    let cursorCliBinaryPath: string | undefined;
+    let useGrokCli = false;
+    let grokCliBinaryPath: string | undefined;
     let resolvedPlanningProvider: string | undefined;
     let resolvedPlanningModelId: string | undefined;
     let customProviders: CustomProvider[] = [];
@@ -175,6 +181,30 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         useDroidCli = globalSettings.useDroidCli === true;
         useLlamaCpp = globalSettings.useLlamaCpp === true;
         useCursorCli = (globalSettings as Record<string, unknown>).useCursorCli === true;
+        /*
+        FNXC:CursorCli 2026-07-08-00:20:
+        FN-7699 (follow-up to FN-7696): the machine-local `cursorCliBinaryPath`
+        operator override must apply to model-picker discovery too, not just
+        the auth/probe/status paths (register-auth-routes.ts's
+        normalizeCursorCliBinaryPath). Mirror the same trim/blank->undefined
+        normalization here so a blank/unset override preserves PATH
+        auto-detection byte-for-byte, and a set override threads through to
+        getCursorPickerModels below so discovery spawns the exact same
+        cursor-agent executable the settings card already validated.
+        */
+        const rawCursorCliBinaryPath = (globalSettings as Record<string, unknown>).cursorCliBinaryPath;
+        cursorCliBinaryPath =
+          typeof rawCursorCliBinaryPath === "string" ? rawCursorCliBinaryPath.trim() || undefined : undefined;
+        useGrokCli = (globalSettings as Record<string, unknown>).useGrokCli === true;
+        /*
+        FNXC:GrokCli 2026-07-08-00:20:
+        FN-7705: mirror the cursorCliBinaryPath override handling above so a
+        machine-local grokCliBinaryPath override applies to model-picker
+        discovery, not just the auth/probe/status paths.
+        */
+        const rawGrokCliBinaryPath = (globalSettings as Record<string, unknown>).grokCliBinaryPath;
+        grokCliBinaryPath =
+          typeof rawGrokCliBinaryPath === "string" ? rawGrokCliBinaryPath.trim() || undefined : undefined;
         customProviders = globalSettings.customProviders ?? [];
 
         const mergedSettings = await store.getSettingsFast();
@@ -215,6 +245,14 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       options.modelRegistry.refresh();
       if (options.modelRegistry.registerProvider) {
         mergeSupplementalAnthropicModels(options.modelRegistry as Parameters<typeof mergeSupplementalAnthropicModels>[0], (message) => runtimeLogger.child("models").warn(message));
+        /*
+         * FNXC:ModelCatalog 2026-07-09-12:30:
+         * FN-7745: additively merge the GPT-5.6 codenamed OpenAI Codex variants
+         * (gpt-5.6-luna/sol/terra), mirroring the mergeSupplementalAnthropicModels call
+         * above. Strictly additive/dedupe-safe — an existing pinned-catalog row for any
+         * of the three ids always wins, no row is displaced or duplicated.
+         */
+        mergeSupplementalOpenAiCodexModels(options.modelRegistry as unknown as Parameters<typeof mergeSupplementalOpenAiCodexModels>[0], (message) => runtimeLogger.child("models").warn(message));
       }
       let models = options.modelRegistry.getAvailable().map((m) => ({
         provider: m.provider,
@@ -254,6 +292,112 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       if (!useCursorCli) {
         models = models.filter((m) => m.provider !== "cursor-cli");
       }
+      if (!useGrokCli) {
+        models = models.filter((m) => m.provider !== "grok-cli");
+      }
+
+      /*
+      FNXC:ModelCatalog 2026-07-07-09:05:
+      FN-7636 (deferred item 1 of FN-7630/GitHub #1931): additively surface
+      Hermes-configured models (`hermes profile list`) under the stable
+      "hermes" provider id so picker selections route to the Hermes runtime
+      (HERMES_RUNTIME_ID). Fetched through getHermesPickerModels, which is
+      backed by a short-TTL, single-flight cache — this call NEVER spawns the
+      `hermes` CLI per request, and NEVER throws (a missing/failed binary
+      degrades to []). Hermes rows are merged respecting the existing
+      seenModelKeys provider/id dedup so an existing row always wins over a
+      colliding Hermes row — this is purely additive and must never displace,
+      overwrite, or filter out an existing row.
+      */
+      const hermesModels = await getHermesPickerModels();
+      // Track "configured" by profile presence, not by how many rows survived
+      // the seenModelKeys dedup: even when every Hermes-derived id collides
+      // with an already-present row (existing row wins, see FN-7636 Surface
+      // Enumeration), the user still has Hermes profiles configured, so the
+      // "hermes" provider must remain selectable below.
+      const hermesRowsAdded = hermesModels.length > 0;
+      for (const hermesModel of hermesModels) {
+        const key = `${hermesModel.provider}/${hermesModel.id}`;
+        if (seenModelKeys.has(key)) continue;
+        seenModelKeys.add(key);
+        models.push(hermesModel);
+      }
+
+      /*
+      FNXC:ModelCatalog 2026-07-08-00:05:
+      FN-7696: additively surface Cursor CLI-discovered models
+      (`cursor-agent models --json`, with text/`model list` fallbacks) under
+      the stable "cursor-cli" provider id, mirroring the FN-7636 Hermes merge
+      above. Unlike Hermes (whose profile presence IS the enable signal),
+      Cursor has its own settings toggle (useCursorCli) — the toggle IS the
+      signal here, so discovery is only attempted when useCursorCli is true.
+      Fetched through getCursorPickerModels, backed by a short-TTL,
+      single-flight cache keyed by binary path — this call NEVER spawns
+      cursor-agent per request, and NEVER throws (a missing/failed/
+      unavailable binary degrades to []). Cursor rows are merged respecting
+      the existing seenModelKeys provider/id dedup so an existing row always
+      wins over a colliding Cursor row — purely additive, must never
+      displace, overwrite, or filter out an existing row.
+
+      FNXC:CursorCli 2026-07-08-00:20:
+      FN-7699: thread the normalized cursorCliBinaryPath operator override
+      (see the globalSettings read block above) into getCursorPickerModels so
+      discovery spawns the exact same machine-local cursor-agent executable
+      already validated by the auth/probe/status paths. Blank/undefined
+      preserves PATH auto-detection unchanged; the cache is keyed per
+      resolved binary path so the override participates correctly in
+      TTL/single-flight caching.
+      */
+      if (useCursorCli) {
+        // getCursorPickerModels never throws by contract (see
+        // cursor-model-cache.ts), but this try/catch is a defensive belt so
+        // a Cursor discovery failure can never reject the /models handler or
+        // drop existing rows — degrade to zero Cursor rows instead.
+        try {
+          const cursorModels = await getCursorPickerModels({ binaryPath: cursorCliBinaryPath });
+          for (const cursorModel of cursorModels) {
+            const key = `${cursorModel.provider}/${cursorModel.id}`;
+            if (seenModelKeys.has(key)) continue;
+            seenModelKeys.add(key);
+            models.push(cursorModel);
+          }
+        } catch (cursorErr: unknown) {
+          const message = cursorErr instanceof Error ? cursorErr.message : String(cursorErr);
+          runtimeLogger.child("models").warn(`Failed to load cursor-cli models: ${message}`);
+        }
+      }
+
+      /*
+      FNXC:GrokCli 2026-07-08-00:05:
+      FN-7705: additively surface Grok CLI-discovered models (`grok models`)
+      under the stable "grok-cli" provider id, mirroring the cursor-cli merge
+      above. Grok has its own settings toggle (useGrokCli) — the toggle IS the
+      signal here, so discovery is only attempted when useGrokCli is true.
+      Fetched through getGrokPickerModels, backed by a short-TTL, single-flight
+      cache keyed by binary path — this call NEVER spawns grok per request, and
+      NEVER throws (a missing/failed/unavailable binary degrades to []). Grok
+      rows are merged respecting the existing seenModelKeys provider/id dedup
+      so an existing row always wins over a colliding Grok row — purely
+      additive, must never displace, overwrite, or filter out an existing row.
+      */
+      if (useGrokCli) {
+        // getGrokPickerModels never throws by contract (see
+        // grok-model-cache.ts), but this try/catch is a defensive belt so a
+        // Grok discovery failure can never reject the /models handler or drop
+        // existing rows — degrade to zero Grok rows instead.
+        try {
+          const grokModels = await getGrokPickerModels({ binaryPath: grokCliBinaryPath });
+          for (const grokModel of grokModels) {
+            const key = `${grokModel.provider}/${grokModel.id}`;
+            if (seenModelKeys.has(key)) continue;
+            seenModelKeys.add(key);
+            models.push(grokModel);
+          }
+        } catch (grokErr: unknown) {
+          const message = grokErr instanceof Error ? grokErr.message : String(grokErr);
+          runtimeLogger.child("models").warn(`Failed to load grok-cli models: ${message}`);
+        }
+      }
 
       // Filter to only providers the user has explicitly configured in Fusion.
       // getAvailable() checks supplemental credential stores (Codex CLI,
@@ -261,10 +405,39 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       // have set up in Fusion. We restrict to providers with credentials
       // in Fusion's own auth stores (primary + legacy .pi + models.json),
       // plus any providers enabled via settings toggles (Claude CLI, etc.).
+      /*
+      FNXC:ModelCatalog 2026-07-07-08:00:
+      FN-7630 (GitHub #1931): the Hermes Runtime plugin must be strictly additive
+      — connecting/activating or disconnecting it must never narrow this
+      configuredProviders allow-set. This block only ever ADDS provider ids
+      (auth-storage-derived, CLI-toggle-derived, and customProviders-derived); it
+      never removes an entry based on any runtime-plugin connection state, and no
+      Hermes-specific branch exists here by design. customProviders' registry keys
+      are added unconditionally (regardless of whether Hermes is loaded/connected)
+      so a connected Hermes runtime can never deactivate independently-configured
+      custom Fusion providers/models. See register-model-routes-hermes-additive.test.ts.
+      */
       const configuredProviders = await getConfiguredProviderNames(options?.authStorage);
       if (useClaudeCli) configuredProviders.add("pi-claude-cli");
       if (useDroidCli) configuredProviders.add("droid-cli");
       if (useLlamaCpp) configuredProviders.add("llama-server");
+      // FNXC:ModelCatalog 2026-07-08-00:05 (FN-7696): allow-list "cursor-cli"
+      // through the final filter whenever the toggle is on — independent of
+      // any auth.json/models.json cursor-cli entry and independent of
+      // whether discovery actually contributed rows (mirrors
+      // useClaudeCli/useDroidCli/useLlamaCpp exactly; unlike hermesRowsAdded,
+      // Cursor's own toggle IS the signal, not row presence). This closes the
+      // previously-missing configuredProviders.add("cursor-cli") gap that
+      // silently dropped Cursor rows even when the plugin surfaced them.
+      if (useCursorCli) configuredProviders.add(CURSOR_PICKER_PROVIDER_ID);
+      // FNXC:GrokCli 2026-07-08-00:05 (FN-7705): allow-list "grok-cli" through
+      // the final filter whenever the toggle is on, mirroring cursor-cli above.
+      if (useGrokCli) configuredProviders.add(GROK_PICKER_PROVIDER_ID);
+      // FNXC:ModelCatalog 2026-07-07-09:05 (FN-7636): only allow-list "hermes"
+      // through the final filter when Hermes rows were actually contributed
+      // above, mirroring the useClaudeCli/useDroidCli toggle pattern (Hermes
+      // has no separate settings toggle — profile presence IS the signal).
+      if (hermesRowsAdded) configuredProviders.add(HERMES_PICKER_PROVIDER_ID);
       // Custom providers are configured in Fusion's global settings rather than
       // the auth.json/models.json stores, so add their registry keys explicitly.
       for (const provider of customProviders) {

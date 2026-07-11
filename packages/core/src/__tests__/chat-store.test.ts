@@ -74,6 +74,7 @@ describe("ChatStore", () => {
       projectId: string | null;
       modelProvider: string | null;
       modelId: string | null;
+      thinkingLevel: string | null;
     }>,
   ) {
     return store.createSession({
@@ -82,6 +83,7 @@ describe("ChatStore", () => {
       projectId: overrides?.projectId ?? null,
       modelProvider: overrides?.modelProvider ?? null,
       modelId: overrides?.modelId ?? null,
+      thinkingLevel: overrides?.thinkingLevel ?? null,
     });
   }
 
@@ -99,6 +101,7 @@ describe("ChatStore", () => {
         expect(session.projectId).toBeNull();
         expect(session.modelProvider).toBeNull();
         expect(session.modelId).toBeNull();
+        expect(session.thinkingLevel).toBeNull();
         expect(session.createdAt).toBeTruthy();
         expect(session.updatedAt).toBeTruthy();
         expect(session.inFlightGeneration).toBeNull();
@@ -111,6 +114,7 @@ describe("ChatStore", () => {
           projectId: "proj-123",
           modelProvider: "anthropic",
           modelId: "claude-3",
+          thinkingLevel: "high",
         });
 
         expect(session.agentId).toBe("agent-test");
@@ -118,6 +122,9 @@ describe("ChatStore", () => {
         expect(session.projectId).toBe("proj-123");
         expect(session.modelProvider).toBe("anthropic");
         expect(session.modelId).toBe("claude-3");
+        expect(session.thinkingLevel).toBe("high");
+        expect(store.getSession(session.id)?.thinkingLevel).toBe("high");
+        expect(store.listSessions().find((listed) => listed.id === session.id)?.thinkingLevel).toBe("high");
       });
 
       it("generates unique IDs", () => {
@@ -390,15 +397,18 @@ describe("ChatStore", () => {
         expect(updated!.status).toBe("archived");
       });
 
-      it("updates model fields", () => {
+      it("updates model and thinking-level fields", () => {
         const session = createTestSession(store);
         const updated = store.updateSession(session.id, {
           modelProvider: "openai",
           modelId: "gpt-4o",
+          thinkingLevel: "off",
         });
 
         expect(updated!.modelProvider).toBe("openai");
         expect(updated!.modelId).toBe("gpt-4o");
+        expect(updated!.thinkingLevel).toBe("off");
+        expect(store.getSession(session.id)?.thinkingLevel).toBe("off");
       });
 
       it("returns undefined for non-existent session", () => {
@@ -411,17 +421,20 @@ describe("ChatStore", () => {
           title: "Has title",
           modelProvider: "anthropic",
           modelId: "claude",
+          thinkingLevel: "high",
         });
 
         const updated = store.updateSession(session.id, {
           title: null,
           modelProvider: null,
           modelId: null,
+          thinkingLevel: null,
         });
 
         expect(updated!.title).toBeNull();
         expect(updated!.modelProvider).toBeNull();
         expect(updated!.modelId).toBeNull();
+        expect(updated!.thinkingLevel).toBeNull();
       });
     });
 
@@ -903,6 +916,177 @@ describe("ChatStore", () => {
         expect(new Date(afterDeleteUpdatedAt).getTime()).toBeGreaterThan(
           new Date(afterAddUpdatedAt).getTime(),
         );
+      });
+    });
+
+    describe("deleteMessagesFrom", () => {
+      it("deletes a middle message and everything after it, retaining the earlier tail", () => {
+        const session = createTestSession(store);
+        const m1 = store.addMessage(session.id, { role: "user", content: "one" });
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+        const m3 = store.addMessage(session.id, { role: "user", content: "three" });
+        const m4 = store.addMessage(session.id, { role: "assistant", content: "four" });
+
+        const result = store.deleteMessagesFrom(session.id, m3.id);
+
+        expect(result.deletedIds.sort()).toEqual([m3.id, m4.id].sort());
+        expect(result.retained.map((m) => m.id)).toEqual([m1.id, m2.id]);
+
+        const remaining = store.getMessages(session.id);
+        expect(remaining.map((m) => m.id)).toEqual([m1.id, m2.id]);
+      });
+
+      it("deletes only itself when the target is the last message", () => {
+        const session = createTestSession(store);
+        const m1 = store.addMessage(session.id, { role: "user", content: "one" });
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+
+        const result = store.deleteMessagesFrom(session.id, m2.id);
+
+        expect(result.deletedIds).toEqual([m2.id]);
+        expect(result.retained.map((m) => m.id)).toEqual([m1.id]);
+        expect(store.getMessages(session.id).map((m) => m.id)).toEqual([m1.id]);
+      });
+
+      it("deletes everything when the target is the first message", () => {
+        const session = createTestSession(store);
+        const m1 = store.addMessage(session.id, { role: "user", content: "one" });
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+
+        const result = store.deleteMessagesFrom(session.id, m1.id);
+
+        expect(result.deletedIds.sort()).toEqual([m1.id, m2.id].sort());
+        expect(result.retained).toEqual([]);
+        expect(store.getMessages(session.id)).toEqual([]);
+      });
+
+      it("is a no-op (no events) for a non-existent message id", () => {
+        const session = createTestSession(store);
+        store.addMessage(session.id, { role: "user", content: "one" });
+
+        const deletedListener = vi.fn();
+        const updatedListener = vi.fn();
+        store.on("chat:message:deleted", deletedListener);
+        store.on("chat:session:updated", updatedListener);
+
+        const result = store.deleteMessagesFrom(session.id, "msg-nonexistent");
+
+        expect(result.deletedIds).toEqual([]);
+        expect(deletedListener).not.toHaveBeenCalled();
+        expect(updatedListener).not.toHaveBeenCalled();
+      });
+
+      it("is a no-op (no events) when the message belongs to a different session", () => {
+        const session1 = createTestSession(store);
+        const session2 = createTestSession(store);
+        const otherMsg = store.addMessage(session2.id, { role: "user", content: "elsewhere" });
+        store.addMessage(session1.id, { role: "user", content: "here" });
+
+        const deletedListener = vi.fn();
+        store.on("chat:message:deleted", deletedListener);
+
+        const result = store.deleteMessagesFrom(session1.id, otherMsg.id);
+
+        expect(result.deletedIds).toEqual([]);
+        expect(deletedListener).not.toHaveBeenCalled();
+        expect(store.getMessages(session2.id)).toHaveLength(1);
+      });
+
+      it("tie-breaks deterministically when messages share an identical createdAt", () => {
+        startFakeClock();
+        const session = createTestSession(store);
+        // All four messages inserted at the exact same timestamp (fake clock frozen).
+        const m1 = store.addMessage(session.id, { role: "user", content: "one" });
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+        const m3 = store.addMessage(session.id, { role: "user", content: "three" });
+        const m4 = store.addMessage(session.id, { role: "assistant", content: "four" });
+
+        expect(new Set([m1.createdAt, m2.createdAt, m3.createdAt, m4.createdAt]).size).toBe(1);
+
+        const result = store.deleteMessagesFrom(session.id, m3.id);
+
+        // Insertion-order (rowid) tiebreak must still put m3/m4 after m1/m2, deleting exactly the tail.
+        expect(result.retained.map((m) => m.id)).toEqual([m1.id, m2.id]);
+        expect(result.deletedIds.sort()).toEqual([m3.id, m4.id].sort());
+      });
+
+      it("emits chat:message:deleted per removed id and exactly one chat:session:updated", () => {
+        const session = createTestSession(store);
+        const m1 = store.addMessage(session.id, { role: "user", content: "one" });
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+        const m3 = store.addMessage(session.id, { role: "user", content: "three" });
+
+        const deletedListener = vi.fn();
+        const updatedListener = vi.fn();
+        store.on("chat:message:deleted", deletedListener);
+        store.on("chat:session:updated", updatedListener);
+
+        store.deleteMessagesFrom(session.id, m2.id);
+
+        expect(deletedListener).toHaveBeenCalledTimes(2);
+        expect(deletedListener.mock.calls.map((c) => c[0]).sort()).toEqual([m2.id, m3.id].sort());
+        expect(updatedListener).toHaveBeenCalledTimes(1);
+        void m1;
+      });
+
+      it("bumps the parent session's updatedAt", () => {
+        startFakeClock();
+        const session = createTestSession(store);
+        store.addMessage(session.id, { role: "user", content: "one" });
+        const beforeUpdatedAt = store.getSession(session.id)!.updatedAt;
+
+        advanceClock(10);
+        const m2 = store.addMessage(session.id, { role: "assistant", content: "two" });
+
+        advanceClock(10);
+        store.deleteMessagesFrom(session.id, m2.id);
+
+        const afterUpdatedAt = store.getSession(session.id)!.updatedAt;
+        expect(new Date(afterUpdatedAt).getTime()).toBeGreaterThan(new Date(beforeUpdatedAt).getTime());
+      });
+    });
+
+    describe("updateMessageMetadata", () => {
+      it("merges new metadata onto existing metadata by default", () => {
+        const session = createTestSession(store);
+        const message = store.addMessage(session.id, {
+          role: "user",
+          content: "hi",
+          metadata: { mentions: ["agent-1"] },
+        });
+
+        const updated = store.updateMessageMetadata(message.id, { piParentLeafId: "leaf-1" });
+
+        expect(updated.metadata).toEqual({ mentions: ["agent-1"], piParentLeafId: "leaf-1" });
+      });
+
+      it("replaces metadata wholesale when merge=false", () => {
+        const session = createTestSession(store);
+        const message = store.addMessage(session.id, {
+          role: "user",
+          content: "hi",
+          metadata: { mentions: ["agent-1"] },
+        });
+
+        const updated = store.updateMessageMetadata(message.id, { piParentLeafId: "leaf-1" }, { merge: false });
+
+        expect(updated.metadata).toEqual({ piParentLeafId: "leaf-1" });
+      });
+
+      it("emits chat:message:updated", () => {
+        const session = createTestSession(store);
+        const message = store.addMessage(session.id, { role: "user", content: "hi" });
+
+        const listener = vi.fn();
+        store.on("chat:message:updated", listener);
+
+        store.updateMessageMetadata(message.id, { piParentLeafId: null });
+
+        expect(listener).toHaveBeenCalledTimes(1);
+      });
+
+      it("throws for a non-existent message id", () => {
+        expect(() => store.updateMessageMetadata("msg-nonexistent", { a: 1 })).toThrow("not found");
       });
     });
   });

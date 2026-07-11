@@ -57,7 +57,6 @@
       "mergeWorktreeReacquired": "合并工作树已重新获取",
       "nearDuplicateFlagged": "近似重复已标记",
       "projectIsolationTransition": "项目隔离转换",
-      "releaseAuthorizationRequired": "",
       "settingsUpdated": "设置已更新",
       "taskCreated": "任务已创建",
       "taskDeleted": "任务已删除",
@@ -169,6 +168,10 @@
       "taskAgentMutation": {
         "description": "任务状态变更、委派或代理生命周期操作。",
         "label": "任务/代理变更"
+      },
+      "fileScope": {
+        "description": "",
+        "label": ""
       }
     },
     "categoryExamples": "{{label}} 示例",
@@ -1287,6 +1290,7 @@
     "loadingOlderMessages": "正在加载更早的消息…",
     "loadingSessions": "正在加载会话……",
     "loadingSkills": "正在加载技能……",
+    "matchedInMessage": "Matched: \"{{preview}}\"",
     "mentionNonMember": "不是 {{roomName}} 的成员",
     "messageAgentPlaceholder": "发送消息至 {{name}}",
     "messageModelPlaceholder": "发送消息至 {{name}}",
@@ -1382,7 +1386,8 @@
     "untitledSession": "无标题",
     "workingStatus": "处理中……",
     "you": "你",
-    "contextWindowAria": "Estimated {{used}} of {{total}} context tokens"
+    "contextWindowAria": "Estimated {{used}} of {{total}} context tokens",
+    "noMessage": ""
   },
   "chatRooms": {
     "error": {
@@ -2277,7 +2282,9 @@
     "closeLightbox": "Close artifact preview",
     "expandArtifact": "Expand {{title}}",
     "expandArtifactHint": "Click to expand",
-    "lightboxLabel": "Artifact media preview"
+    "lightboxLabel": "Artifact media preview",
+    "readOnly": "",
+    "readOnlyHint": ""
   },
   "droidCli": {
     "active": "活跃",
@@ -3029,6 +3036,7 @@
     "savedProbeFailed": "已保存，但探测失败。",
     "settingsSaved": "设置已保存。",
     "statusDetected": "✓ 已检测{{version}}{{path}}",
+    "statusDisabledInPluginManager": "已在插件管理器中禁用",
     "statusNotDetected": "✗ {{reason}}",
     "subname": "由 Nous Research 提供",
     "testFailed": "测试失败 — 见上方状态。",
@@ -3417,6 +3425,7 @@
     "dreamProcessingFailed": "运行梦境处理失败",
     "dreamsEnabledHint": "将每日笔记转换为 DREAMS.md，并将可复用的经验提升到 MEMORY.md。",
     "dreamsEnabledLabel": "从每日记忆中处理梦境",
+    "dreamsEnabledTooltip": "每日笔记会被提炼到 DREAMS.md，可复用的经验会被提升到 MEMORY.md。",
     "dreamsScheduleHint": "梦境处理的 Cron 表达式。",
     "dreamsScheduleLabel": "梦境计划",
     "editorDefaultDescription": "编辑所选记忆文件。",
@@ -3952,7 +3961,8 @@
       "medium": "中等",
       "minimal": "最小",
       "off": "关闭",
-      "xhigh": "极高"
+      "xhigh": "极高",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "选择执行器模型…",
@@ -3988,6 +3998,8 @@
     "preset": "预设",
     "reviewerModel": "审查模型",
     "reviewerPlaceholder": "选择审查模型…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "选择模型",
     "useDefault": "使用默认",
     "usingDefault": "使用默认"
@@ -4021,6 +4033,7 @@
     "moreSheetTitle": "导航",
     "noScriptsAddOne": "无脚本 — 添加一个…",
     "planning": "规划",
+    "planningNeedsInputAriaLabel": "规划需要您的输入",
     "primaryNavAriaLabel": "主导航",
     "projects": "项目",
     "research": "研究",
@@ -4390,6 +4403,7 @@
     "savedNotFound": "已保存 · ✗ openclaw 未找到",
     "savedProbeFailed": "已保存，但探测失败。",
     "statusDetected": "✓ 已检测到{{version}}{{path}}",
+    "statusDisabledInPluginManager": "已在插件管理器中禁用",
     "statusNotFound": "✗ 在 PATH 上未检测到",
     "subprocess": "CLI 子进程超时（毫秒）",
     "subprocessHint": "Fusion 端限制，超时后 CLI 子进程被终止（默认：{{default}}s）。",
@@ -4453,6 +4467,7 @@
     "statusCliDiscoveryFailed": "CLI 发现失败：{{reason}}",
     "statusConnected": "已连接",
     "statusConnectedAs": "已连接为 {{agentName}}{{roleInfo}}{{companyInfo}}",
+    "statusDisabledInPluginManager": "已在插件管理器中禁用",
     "statusProbing": "正在探测 Paperclip 服务器…",
     "statusUnreachable": "{{reason}}",
     "tabApi": "API(URL + 令牌)",
@@ -4649,6 +4664,7 @@
     "author": "作者：",
     "backToList": "返回插件列表",
     "browseRegistry": "",
+    "builtinDisabled": "已禁用",
     "builtinInstalledGlobally": "{{name}} 已全局安装",
     "builtinInstallFailed": "安装 {{name}} 失败：{{error}}",
     "builtinMetadataOnly": "仅内置元数据",
@@ -6520,6 +6536,8 @@
       "addIgnoredPath": "",
       "archiveAgentLog": "",
       "archiveCompletedTasksAfterDays": "",
+      "autoArchiveDuplicateTasks": "",
+      "autoArchiveDuplicateTasksHelp": "",
       "backlogNoTaskAutoClaimIsExecutorOnly": "",
       "browse": "",
       "closeParenPeriod": "",
@@ -6823,6 +6841,7 @@
     "githubCliAuthBody": "GitHub CLI is installed but not authenticated on the Fusion host. Run this command in the environment where Fusion is running, then return here and continue.",
     "githubCliAuthTitle": "Authenticate GitHub CLI",
     "githubCliInstallBody": "Fusion could not find `gh` on the host running Fusion. Install GitHub CLI there to import issues and track pull requests with CLI authentication.",
+    "githubCliInstallShowInstructions": "显示安装说明",
     "githubCliInstallLink": "Open GitHub CLI releases",
     "githubCliInstallLinux": "Linux: install `gh` with your distribution package manager or the packages from cli.github.com.",
     "githubCliInstallMac": "macOS: `brew install gh` or download the installer from GitHub CLI releases.",
@@ -6902,12 +6921,14 @@
     "projectRegisteredSuccess": "您的项目已成功注册。",
     "projectRequired": "在可以使用第一个任务操作之前，需要先有一个项目。",
     "projectSelected": "已选择项目——任务创建和导入功能已可用。",
+    "projectStepContext": "第 3 步（共 5 步）— 项目 · Fusion 设置",
     "projectSetupDescription": "在创建或导入任务之前，请选择您的第一个项目。您可以注册现有的本地目录，或通过设置向导克隆 GitHub 仓库 URL。",
     "providersConnectedSummary": "✓ {{total}} 个提供商中已连接 {{connected}} 个",
     "providersSkippedSummary_one_one": "",
     "providersSkippedSummary_one_other": "",
     "providersSkippedSummary_other_one": "",
     "providersSkippedSummary_other_other": "",
+    "quickStartAllConnected": "所有快速开始提供商均已连接。",
     "quickStartProviders": "快速启动提供商",
     "readinessAiProviderConnected": "{{name}} 已连接——AI 代理可以处理任务",
     "readinessAiProviderLabel": "AI 提供商",
@@ -6939,6 +6960,7 @@
     "retry": "重试",
     "reviewStep": "查看{{label}}",
     "runtimeNode": "运行时节点",
+    "runtimeNodeHint": "运行时节点是运行此项目任务的机器。\"本地节点\"即这台电脑；选择远程节点可在其他地方运行任务。",
     "savedProfileButFailedToActivate": "配置文件已保存但激活失败",
     "saveKey": "保存",
     "saveRemoteServer": "保存远程服务器",
@@ -7378,6 +7400,11 @@
       "skipped": "{{id}} 的分支重新绑定已跳过：{{reason}}",
       "skippedResult": "重新绑定已跳过：{{reason}}"
     },
+    "bypassReview": {
+      "btn": "跳过失败的评审",
+      "promptMessage": "跳过失败的合并前评审步骤的原因（必填，将被审计记录）：",
+      "success": "已为 {{id}} 跳过失败的评审通道"
+    },
     "cacheBreakdown": "（读取 {{read}} / 写入 {{write}} / 输入 {{input}}）",
     "cacheHitRatio": "缓存命中率：",
     "cacheRead": "缓存读取",
@@ -7593,8 +7620,7 @@
       "rejected": "计划已拒绝 — {{id}} 已返回规划阶段重新规划",
       "rejectMessage": "拒绝此计划？规范将被丢弃并重新生成。",
       "rejectTitle": "拒绝计划",
-      "replanning": "正在为 {{id}} 重新规划…",
-      "releaseAuthorizationHold": ""
+      "replanning": "正在为 {{id}} 重新规划…"
     },
     "pr": {
       "awaitingChecks": "等待 PR 检查",
@@ -8234,7 +8260,6 @@
     "addressPrFeedbackStarted": "",
     "addressPrFeedbackTitle": "",
     "addressingPrFeedback": "",
-    "awaitingReleaseAuthorization": "",
     "revert": "",
     "revertAiCreated": "",
     "revertAlreadyOpen": "",

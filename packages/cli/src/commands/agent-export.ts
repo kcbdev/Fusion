@@ -11,23 +11,43 @@ import { resolve } from "node:path";
 
 import { AgentStore, exportAgentsToDirectory } from "@fusion/core";
 
-import { resolveProject } from "../project-context.js";
+import { resolveProjectPathOnly } from "../project-context.js";
 
 /**
- * Get the project path for agent operations.
- * Falls back to process.cwd() if no project is specified.
+ * FNXC:CliAgentControl 2026-07-09-00:00:
+ * FN-7740 audit finding: `getProjectPath` only ever needs the resolved
+ * `projectPath` — it never uses `context.store`. The prior `resolveProject`
+ * call still constructed (and, for registered/CWD-detected projects,
+ * cached) a `TaskStore` that was never closed, leaking a SQLite/WAL handle
+ * that keeps the CLI event loop alive after export finishes. Use
+ * `resolveProjectPathOnly` (FN-7731/FN-7738), which closes+evicts the store
+ * it constructs internally.
  */
 async function getProjectPath(projectName?: string): Promise<string> {
   if (projectName) {
-    const context = await resolveProject(projectName);
-    return context.projectPath;
+    return resolveProjectPathOnly(projectName);
   }
 
   try {
-    const context = await resolveProject(undefined);
-    return context.projectPath;
+    return await resolveProjectPathOnly(undefined);
   } catch {
     return process.cwd();
+  }
+}
+
+/**
+ * FNXC:CliAgentControl 2026-07-09-00:00:
+ * Mirrors `agent.ts`'s private `closeAgentStoreSafely` (FN-7704) — kept as
+ * a tiny local copy here per FN-7740 File Scope (do NOT edit `agent.ts`,
+ * and do NOT fork the `TaskStore` retry/teardown logic; this only closes
+ * the `AgentStore` this file itself opens). Best-effort: an already-closed
+ * store must never throw here.
+ */
+function closeAgentStoreSafely(agentStore: AgentStore): void {
+  try {
+    agentStore.close();
+  } catch {
+    // Best-effort teardown — never let a close failure block exit.
   }
 }
 
@@ -70,21 +90,26 @@ export async function runAgentExport(
   const agentStore = new AgentStore({ rootDir: projectPath + "/.fusion" });
   await agentStore.init();
 
-  const allAgents = await agentStore.listAgents();
-  const filterIds = options?.agentIds?.filter((id) => id.trim().length > 0);
-  const agents = filterIds && filterIds.length > 0
-    ? allAgents.filter((agent) => filterIds.includes(agent.id))
-    : allAgents;
+  try {
+    const allAgents = await agentStore.listAgents();
+    const filterIds = options?.agentIds?.filter((id) => id.trim().length > 0);
+    const agents = filterIds && filterIds.length > 0
+      ? allAgents.filter((agent) => filterIds.includes(agent.id))
+      : allAgents;
 
-  if (agents.length === 0) {
-    console.error("No agents found to export");
-    process.exit(1);
+    if (agents.length === 0) {
+      console.error("No agents found to export");
+      closeAgentStoreSafely(agentStore);
+      process.exit(1);
+    }
+
+    const result = await exportAgentsToDirectory(agents, resolve(outputDir), {
+      companyName: options?.companyName,
+      companySlug: options?.companySlug,
+    });
+
+    printSummary(result);
+  } finally {
+    closeAgentStoreSafely(agentStore);
   }
-
-  const result = await exportAgentsToDirectory(agents, resolve(outputDir), {
-    companyName: options?.companyName,
-    companySlug: options?.companySlug,
-  });
-
-  printSummary(result);
 }

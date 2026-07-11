@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Agent } from "../api";
@@ -8,6 +8,8 @@ import "./ActiveAgentsPanel.css";
 import { useLiveTranscript } from "../hooks/useLiveTranscript";
 import { resolveHeartbeatIntervalMs } from "../utils/heartbeatIntervals";
 import { AgentTaskBadge } from "./AgentTaskBadge";
+import { RuntimeFallbackBadge } from "./RuntimeFallbackBadge";
+import { getCanonicalStepNumber } from "../lib/step-display";
 
 interface LiveAgentCardProps {
   agent: Agent;
@@ -22,6 +24,34 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
   const { t } = useTranslation("app");
   const { entries, isConnected } = useLiveTranscript(agent.taskId, projectId);
   const [task, setTask] = useState<TaskDetail | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [isInViewport, setIsInViewport] = useState(false);
+
+  /*
+  FNXC:RuntimeFallback 2026-07-08-00:00:
+  Gate the RuntimeFallbackBadge's polling to visible cards only, matching
+  TaskCard.tsx's pattern -- without this, every live agent card (including
+  ones scrolled off-screen) polls the runtime-fallback endpoint forever.
+  */
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") {
+      setIsInViewport(true);
+      return;
+    }
+
+    const element = cardRef.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsInViewport(entry?.isIntersecting ?? true);
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [agent.id]);
 
   // Poll the agent's task so the empty state can show real run progress
   // (current step, executor model) instead of just "Connecting..." while the
@@ -71,9 +101,10 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
     return t("agents.nextHeartbeat", "Next heartbeat in {{elapsed}}", { elapsed: formatElapsed(deltaSec) });
   })();
 
-  const currentStep = task?.steps?.[task.currentStep ?? 0];
-  const totalSteps = task?.steps?.length ?? 0;
-  const stepNumber = (task?.currentStep ?? 0) + 1;
+  // FNXC:TaskStepNumbering 2026-07-05-00:00: use the canonical (0-based, PROMPT-numbered) step
+  // number so this indicator agrees with the Activity tab for the same underlying step (FN-7612).
+  const { stepNumber, totalSteps } = getCanonicalStepNumber(task);
+  const currentStep = task?.steps?.[stepNumber];
   const executorModel = task?.modelId;
 
   const handleSelect = () => {
@@ -98,6 +129,7 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
 
   return (
     <div
+      ref={cardRef}
       className="live-agent-card"
       onClick={handleSelect}
       onKeyDown={handleKeyDown}
@@ -115,6 +147,9 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
         </div>
         {agent.taskId && (
           <span className="live-agent-task badge"><AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} /></span>
+        )}
+        {agent.taskId && (
+          <RuntimeFallbackBadge taskId={agent.taskId} isInViewport={isInViewport} projectId={projectId} />
         )}
       </div>
       <div className="live-agent-card-transcript">

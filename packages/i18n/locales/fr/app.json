@@ -57,7 +57,6 @@
       "mergeWorktreeReacquired": "Arbre de travail de fusion réacquis",
       "nearDuplicateFlagged": "Quasi-doublon signalé",
       "projectIsolationTransition": "Transition d'isolation de projet",
-      "releaseAuthorizationRequired": "",
       "settingsUpdated": "Paramètres mis à jour",
       "taskCreated": "Tâche créée",
       "taskDeleted": "Tâche supprimée",
@@ -169,6 +168,10 @@
       "taskAgentMutation": {
         "description": "Changements d'état des tâches, délégations ou actions du cycle de vie des agents.",
         "label": "Mutation tâche/agent"
+      },
+      "fileScope": {
+        "description": "",
+        "label": ""
       }
     },
     "categoryExamples": "Exemples {{label}}",
@@ -1287,6 +1290,7 @@
     "loadingOlderMessages": "Chargement des messages plus anciens…",
     "loadingSessions": "Chargement des sessions…",
     "loadingSkills": "Chargement des compétences…",
+    "matchedInMessage": "Matched: \"{{preview}}\"",
     "mentionNonMember": "Pas membre de {{roomName}}",
     "messageAgentPlaceholder": "Message à {{name}}",
     "messageModelPlaceholder": "Message à {{name}}",
@@ -1382,7 +1386,8 @@
     "untitledSession": "Sans titre",
     "workingStatus": "Traitement en cours…",
     "you": "Vous",
-    "contextWindowAria": "Estimated {{used}} of {{total}} context tokens"
+    "contextWindowAria": "Estimated {{used}} of {{total}} context tokens",
+    "noMessage": ""
   },
   "chatRooms": {
     "error": {
@@ -2277,7 +2282,9 @@
     "closeLightbox": "Close artifact preview",
     "expandArtifact": "Expand {{title}}",
     "expandArtifactHint": "Click to expand",
-    "lightboxLabel": "Artifact media preview"
+    "lightboxLabel": "Artifact media preview",
+    "readOnly": "",
+    "readOnlyHint": ""
   },
   "droidCli": {
     "active": "Actif",
@@ -3029,6 +3036,7 @@
     "savedProbeFailed": "Enregistré, mais la sonde a échoué.",
     "settingsSaved": "Paramètres enregistrés.",
     "statusDetected": "✓ Détecté{{version}}{{path}}",
+    "statusDisabledInPluginManager": "Désactivé dans le gestionnaire de plugins",
     "statusNotDetected": "✗ {{reason}}",
     "subname": "par Nous Research",
     "testFailed": "Le test a échoué — voir le statut ci-dessus.",
@@ -3417,6 +3425,7 @@
     "dreamProcessingFailed": "Échec du traitement des rêves",
     "dreamsEnabledHint": "Transforme les notes quotidiennes en DREAMS.md et promeut les leçons réutilisables dans MEMORY.md.",
     "dreamsEnabledLabel": "Traiter les rêves depuis la mémoire quotidienne",
+    "dreamsEnabledTooltip": "Les notes quotidiennes sont distillées dans DREAMS.md et les leçons réutilisables sont promues dans MEMORY.md.",
     "dreamsScheduleHint": "Expression cron pour le traitement des rêves.",
     "dreamsScheduleLabel": "Planification des rêves",
     "editorDefaultDescription": "Modifie le fichier mémoire sélectionné.",
@@ -3952,7 +3961,8 @@
       "medium": "Moyen",
       "minimal": "Minimal",
       "off": "Désactivé",
-      "xhigh": "Très élevé"
+      "xhigh": "Très élevé",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "Sélectionnez un modèle d'exécuteur…",
@@ -3988,6 +3998,8 @@
     "preset": "Préréglage",
     "reviewerModel": "Modèle réviseur",
     "reviewerPlaceholder": "Sélectionner le modèle réviseur…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "Sélectionner les modèles",
     "useDefault": "Utiliser par défaut",
     "usingDefault": "Par défaut"
@@ -4021,6 +4033,7 @@
     "moreSheetTitle": "Naviguer",
     "noScriptsAddOne": "Aucun script — en ajouter un…",
     "planning": "Planification",
+    "planningNeedsInputAriaLabel": "La planification nécessite votre saisie",
     "primaryNavAriaLabel": "Navigation principale",
     "projects": "Projets",
     "research": "Recherche",
@@ -4390,6 +4403,7 @@
     "savedNotFound": "Enregistré · ✗ openclaw non trouvé",
     "savedProbeFailed": "Enregistré, mais la sonde a échoué.",
     "statusDetected": "✓ Détecté{{version}}{{path}}",
+    "statusDisabledInPluginManager": "Désactivé dans le gestionnaire de plugins",
     "statusNotFound": "✗ non détecté sur PATH",
     "subprocess": "Délai d'expiration du sous-processus CLI (ms)",
     "subprocessHint": "Limite côté Fusion avant la suppression du sous-processus CLI (par défaut: {{default}}s).",
@@ -4453,6 +4467,7 @@
     "statusCliDiscoveryFailed": "Échec de la découverte CLI : {{reason}}",
     "statusConnected": "Connecté",
     "statusConnectedAs": "Connecté en tant que {{agentName}}{{roleInfo}}{{companyInfo}}",
+    "statusDisabledInPluginManager": "Désactivé dans le gestionnaire de plugins",
     "statusProbing": "Sondage du serveur Paperclip…",
     "statusUnreachable": "{{reason}}",
     "tabApi": "API (URL + jeton)",
@@ -4649,6 +4664,7 @@
     "author": "Auteur :",
     "backToList": "Retour à la liste des plugins",
     "browseRegistry": "",
+    "builtinDisabled": "Désactivé",
     "builtinInstalledGlobally": "{{name}} installé globalement",
     "builtinInstallFailed": "Échec de l'installation de {{name}} : {{error}}",
     "builtinMetadataOnly": "Métadonnées intégrées uniquement",
@@ -6520,6 +6536,8 @@
       "addIgnoredPath": "",
       "archiveAgentLog": "",
       "archiveCompletedTasksAfterDays": "",
+      "autoArchiveDuplicateTasks": "",
+      "autoArchiveDuplicateTasksHelp": "",
       "backlogNoTaskAutoClaimIsExecutorOnly": "",
       "browse": "",
       "closeParenPeriod": "",
@@ -6823,6 +6841,7 @@
     "githubCliAuthBody": "GitHub CLI is installed but not authenticated on the Fusion host. Run this command in the environment where Fusion is running, then return here and continue.",
     "githubCliAuthTitle": "Authenticate GitHub CLI",
     "githubCliInstallBody": "Fusion could not find `gh` on the host running Fusion. Install GitHub CLI there to import issues and track pull requests with CLI authentication.",
+    "githubCliInstallShowInstructions": "Afficher les instructions d'installation",
     "githubCliInstallLink": "Open GitHub CLI releases",
     "githubCliInstallLinux": "Linux: install `gh` with your distribution package manager or the packages from cli.github.com.",
     "githubCliInstallMac": "macOS: `brew install gh` or download the installer from GitHub CLI releases.",
@@ -6902,12 +6921,14 @@
     "projectRegisteredSuccess": "Votre projet a été enregistré avec succès.",
     "projectRequired": "Un projet est requis avant que les actions de première tâche soient disponibles.",
     "projectSelected": "Projet sélectionné — la création de tâches et les imports sont disponibles.",
+    "projectStepContext": "Étape 3 sur 5 — Projet · Configuration de Fusion",
     "projectSetupDescription": "Choisissez votre premier projet avant de créer ou d'importer des tâches. Vous pouvez enregistrer un répertoire local existant ou cloner une URL de dépôt GitHub via l'assistant de configuration.",
     "providersConnectedSummary": "✓ {{connected}} fournisseur(s) sur {{total}} connecté(s)",
     "providersSkippedSummary_one_one": "",
     "providersSkippedSummary_one_other": "",
     "providersSkippedSummary_other_one": "",
     "providersSkippedSummary_other_other": "",
+    "quickStartAllConnected": "Tous les fournisseurs de démarrage rapide sont déjà connectés.",
     "quickStartProviders": "Fournisseurs de démarrage rapide",
     "readinessAiProviderConnected": "{{name}} connecté — les agents IA peuvent travailler sur les tâches",
     "readinessAiProviderLabel": "Fournisseur IA",
@@ -6939,6 +6960,7 @@
     "retry": "Réessayer",
     "reviewStep": "Revoir {{label}}",
     "runtimeNode": "Nœud d'exécution",
+    "runtimeNodeHint": "Un nœud d'exécution est la machine où s'exécutent les tâches de ce projet. « Nœud local » désigne cet ordinateur ; choisissez un nœud distant pour exécuter les tâches ailleurs.",
     "savedProfileButFailedToActivate": "Profil enregistré mais échec de l'activation",
     "saveKey": "Enregistrer",
     "saveRemoteServer": "Enregistrer le serveur distant",
@@ -7378,6 +7400,11 @@
       "skipped": "Rattachement de branche ignoré pour {{id}} : {{reason}}",
       "skippedResult": "Rattachement ignoré : {{reason}}"
     },
+    "bypassReview": {
+      "btn": "Contourner la revue échouée",
+      "promptMessage": "Motif du contournement de l'étape de revue pré-fusion échouée (obligatoire, journalisé) :",
+      "success": "Revue échouée contournée pour {{id}}"
+    },
     "cacheBreakdown": "(lus {{read}} / écrits {{write}} / entrée {{input}})",
     "cacheHitRatio": "Taux de hits du cache :",
     "cacheRead": "Lecture du cache",
@@ -7593,8 +7620,7 @@
       "rejected": "Plan rejeté — {{id}} renvoyé en planification pour replanning",
       "rejectMessage": "Rejeter ce plan ? La spécification sera supprimée et régénérée.",
       "rejectTitle": "Rejeter le plan",
-      "replanning": "Replanning de {{id}}…",
-      "releaseAuthorizationHold": ""
+      "replanning": "Replanning de {{id}}…"
     },
     "pr": {
       "awaitingChecks": "En attente des vérifications du PR",
@@ -8234,7 +8260,6 @@
     "addressPrFeedbackStarted": "",
     "addressPrFeedbackTitle": "",
     "addressingPrFeedback": "",
-    "awaitingReleaseAuthorization": "",
     "revert": "",
     "revertAiCreated": "",
     "revertAlreadyOpen": "",

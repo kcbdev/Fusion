@@ -64,6 +64,7 @@ const plugin = {
   hooks: {},
   tools: ${JSON.stringify(plugin.tools || [])},
   routes: ${JSON.stringify(plugin.routes || [])},
+  skills: ${JSON.stringify(plugin.skills || [])},
 };
 
 export default plugin;
@@ -915,12 +916,62 @@ export default plugin;
       await pluginStore.registerPlugin({ manifest: disabledPlugin.manifest, path: disabledPath });
       await pluginStore.disablePlugin("disabled-plugin");
 
+      const { loggerMap } = mockStructuredLoggerFactory();
       const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
       const result = await loader.loadAllPlugins();
 
       expect(result).toEqual({ loaded: 1, errors: 0 });
       expect(loader.isPluginLoaded("enabled-plugin")).toBe(true);
       expect(loader.isPluginLoaded("disabled-plugin")).toBe(false);
+      expect(loggerMap.get("plugin-loader")?.warn).toHaveBeenCalledWith(
+        "Skipped disabled plugin during loadAllPlugins: disabled-plugin",
+      );
+    });
+
+    /*
+     * FNXC:PluginLoader 2026-07-07-00:00:
+     * FN-7629 — regression coverage for the built-in runtime disable durability invariant.
+     * Symptom: with no plugin_installs row, a built-in runtime (e.g. Hermes) could not be
+     * disabled from the dashboard, and once registered+enabled it re-activated on every restart.
+     * The register-then-disable UI path (installPlugin + disablePlugin) relies on this store/loader
+     * contract: once a plugin's project state is enabled=false, loadAllPlugins must skip it on
+     * every subsequent load pass (i.e. every process restart) and must never record an activation
+     * event for it, even though the plugin_installs row itself persists untouched.
+     */
+    it("keeps a user-disabled runtime built-in skipped and unactivated across repeated loadAllPlugins passes (restart simulation)", async () => {
+      await pluginStore.init();
+
+      const pluginDir = join(rootDir, "plugins");
+      const runtimePlugin = makePlugin(makeManifest({ id: "fusion-plugin-fake-runtime" }));
+      const runtimePath = await writePluginModule(pluginDir, "fake-runtime.js", runtimePlugin);
+
+      // Mirrors the UI's durable-disable path: register (defaults to enabled=true,
+      // same as installPlugin/registerPlugin), then immediately disable.
+      await pluginStore.registerPlugin({ manifest: runtimePlugin.manifest, path: runtimePath });
+      await pluginStore.disablePlugin("fusion-plugin-fake-runtime");
+
+      const firstLoader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const firstResult = await firstLoader.loadAllPlugins();
+
+      expect(firstResult).toEqual({ loaded: 0, errors: 0 });
+      expect(firstLoader.isPluginLoaded("fusion-plugin-fake-runtime")).toBe(false);
+      expect(mockTaskStore.recordPluginActivation).not.toHaveBeenCalledWith(
+        expect.objectContaining({ pluginId: "fusion-plugin-fake-runtime" }),
+      );
+
+      // Simulate a second restart with a brand-new PluginLoader instance against the
+      // same persisted store — the disabled decision must still be honored.
+      mockTaskStore.recordPluginActivation.mockClear();
+      const secondLoader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const secondResult = await secondLoader.loadAllPlugins();
+
+      expect(secondResult).toEqual({ loaded: 0, errors: 0 });
+      expect(secondLoader.isPluginLoaded("fusion-plugin-fake-runtime")).toBe(false);
+      expect(mockTaskStore.recordPluginActivation).not.toHaveBeenCalled();
+
+      // The install row itself must still exist and remain disabled (durable, not deleted).
+      const stored = await pluginStore.getPlugin("fusion-plugin-fake-runtime");
+      expect(stored.enabled).toBe(false);
     });
 
     it("returns error count for failed plugins", async () => {
@@ -2540,6 +2591,70 @@ export default plugin;
           skill: { skillId: "browser", name: "Browser", description: "Web", skillFiles: ["./SKILL.md"] },
         },
       ]);
+    });
+
+    it("loads plugin skills according to each project's enablement scope", async () => {
+      await pluginStore.init();
+      const projectDir = join(rootDir, "managed-project");
+      await mkdir(projectDir, { recursive: true });
+      const projectPluginStore = new PluginStore(projectDir, { centralGlobalDir: rootDir });
+      await projectPluginStore.init();
+
+      const pluginDir = join(rootDir, "plugins");
+      const daemonPlugin = makePlugin(makeManifest({ id: "daemon-skill-plugin" }));
+      daemonPlugin.skills = [{ skillId: "daemon", name: "daemon-only", skillFiles: ["./SKILL.md"] }];
+      const projectPlugin = makePlugin(makeManifest({ id: "project-skill-plugin" }));
+      projectPlugin.skills = [{ skillId: "project", name: "project-only", skillFiles: ["./SKILL.md"] }];
+      const sharedPlugin = makePlugin(makeManifest({ id: "shared-skill-plugin" }));
+      sharedPlugin.skills = [{ skillId: "shared", name: "shared-skill", skillFiles: ["./SKILL.md"] }];
+      const disabledPlugin = makePlugin(makeManifest({ id: "disabled-everywhere-skill-plugin" }));
+      disabledPlugin.skills = [{ skillId: "disabled", name: "disabled-skill", skillFiles: ["./SKILL.md"] }];
+
+      await pluginStore.registerPlugin({
+        manifest: daemonPlugin.manifest,
+        path: await writePluginModule(pluginDir, "daemon-skill.js", daemonPlugin),
+      });
+      const projectRelativePluginDir = join(projectDir, "plugins");
+      await pluginStore.registerPlugin({
+        manifest: projectPlugin.manifest,
+        path: "plugins/project-skill.js",
+      });
+      await writePluginModule(projectRelativePluginDir, "project-skill.js", projectPlugin);
+      await pluginStore.registerPlugin({
+        manifest: sharedPlugin.manifest,
+        path: await writePluginModule(pluginDir, "shared-skill.js", sharedPlugin),
+      });
+      await pluginStore.registerPlugin({
+        manifest: disabledPlugin.manifest,
+        path: await writePluginModule(pluginDir, "disabled-skill.js", disabledPlugin),
+      });
+
+      await pluginStore.disablePlugin("project-skill-plugin");
+      await pluginStore.disablePlugin("disabled-everywhere-skill-plugin");
+      await projectPluginStore.enablePlugin("project-skill-plugin");
+      await projectPluginStore.enablePlugin("shared-skill-plugin");
+
+      const daemonTaskStore = { ...mockTaskStore, getRootDir: () => rootDir };
+      const projectTaskStore = { ...mockTaskStore, getRootDir: () => projectDir };
+      const daemonLoader = new PluginLoader({ pluginStore, taskStore: daemonTaskStore });
+      const projectLoader = new PluginLoader({ pluginStore: projectPluginStore, taskStore: projectTaskStore });
+
+      await daemonLoader.loadAllPlugins();
+      await projectLoader.loadAllPlugins();
+
+      expect(daemonLoader.getPluginSkills().map((entry) => `${entry.pluginId}:${entry.skill.name}`).sort()).toEqual([
+        "daemon-skill-plugin:daemon-only",
+        "shared-skill-plugin:shared-skill",
+      ]);
+      expect(projectLoader.getPluginSkills().map((entry) => `${entry.pluginId}:${entry.skill.name}`).sort()).toEqual([
+        "project-skill-plugin:project-only",
+        "shared-skill-plugin:shared-skill",
+      ]);
+      expect(projectLoader.getPluginSkills().some((entry) => entry.pluginId === "daemon-skill-plugin")).toBe(false);
+      expect(daemonLoader.getPluginSkills().some((entry) => entry.pluginId === "project-skill-plugin")).toBe(false);
+      expect(projectLoader.getPluginSkills().some((entry) => entry.pluginId === "disabled-everywhere-skill-plugin")).toBe(false);
+
+      projectPluginStore.close();
     });
 
     it("returns workflow steps, prompt contributions, and setup info", async () => {

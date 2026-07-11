@@ -1,6 +1,6 @@
 {
   "name": "@fusion/core",
-  "version": "0.56.1",
+  "version": "0.57.0",
   "license": "MIT",
   "description": "Fusion core: task store, scheduler, settings, and shared domain types backing the Fusion AI coding agent.",
   "homepage": "https://github.com/Runfusion/Fusion#readme",
@@ -39,6 +39,7 @@
     "test": "vitest run --silent=passed-only --reporter=dot"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@types/dockerode": "^3.3.41",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.1.0",

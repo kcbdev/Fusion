@@ -294,10 +294,10 @@ describe("createHeartbeatTools", () => {
 
     const result = await createTool.execute("call-1", { description: "Follow-up task" }, undefined as any, undefined as any, undefined as any);
 
+    // FN-7536+: createTask input no longer carries `column` (defaulted server-side to triage) and now forwards `githubTracking`; objectContaining tolerates the extra key.
     expect(mockTaskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
       description: "Follow-up task",
       dependencies: undefined,
-      column: "triage",
       priority: undefined,
       summarize: true,
       source: expect.objectContaining({
@@ -956,6 +956,41 @@ describe("room-message prompt injection", () => {
       rmSync(rootDir, { recursive: true, force: true });
       rmSync(globalDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Runtime self-awareness preamble (FN-7675)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("heartbeat base prompts runtime self-awareness", () => {
+  it("prepends the shared FUSION_RUNTIME_SELF_AWARENESS preamble to both heartbeat base prompts", async () => {
+    const { FUSION_RUNTIME_SELF_AWARENESS } = await import("@fusion/core");
+    expect(HEARTBEAT_SYSTEM_PROMPT.startsWith(FUSION_RUNTIME_SELF_AWARENESS)).toBe(true);
+    expect(HEARTBEAT_NO_TASK_SYSTEM_PROMPT.startsWith(FUSION_RUNTIME_SELF_AWARENESS)).toBe(true);
+  });
+
+  it("lands the preamble in the stable (cacheable) layer via buildPromptLayers", async () => {
+    const { buildPromptLayers } = await import("../prompt-layers.js");
+    const { FUSION_RUNTIME_SELF_AWARENESS } = await import("@fusion/core");
+
+    const taskLayers = buildPromptLayers({
+      basePrompt: HEARTBEAT_SYSTEM_PROMPT,
+      agentInstructions: "per-session instructions that must not affect the stable prefix",
+    });
+    expect(taskLayers.stable).toBe(HEARTBEAT_SYSTEM_PROMPT);
+    expect(taskLayers.stable.startsWith(FUSION_RUNTIME_SELF_AWARENESS)).toBe(true);
+    expect(taskLayers.dynamic).not.toContain(FUSION_RUNTIME_SELF_AWARENESS);
+
+    const noTaskLayers = buildPromptLayers({ basePrompt: HEARTBEAT_NO_TASK_SYSTEM_PROMPT });
+    expect(noTaskLayers.stable).toBe(HEARTBEAT_NO_TASK_SYSTEM_PROMPT);
+    expect(noTaskLayers.stable.startsWith(FUSION_RUNTIME_SELF_AWARENESS)).toBe(true);
+  });
+
+  it("carries the shutdown-boundary clauses", () => {
+    const lower = HEARTBEAT_SYSTEM_PROMPT.toLowerCase();
+    expect(lower).toContain("cannot** perform any action after fusion is shut down".toLowerCase());
+    expect(lower).toContain("standalone artifact the user runs themselves");
   });
 });
 

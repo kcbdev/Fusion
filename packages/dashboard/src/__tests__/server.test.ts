@@ -276,6 +276,125 @@ describe("createServer options", () => {
     expect(engineStore.listTasks).toHaveBeenCalledWith({ slim: true });
     expect(store.listTasks).not.toHaveBeenCalled();
   });
+
+  /*
+  FNXC:ProviderAuth 2026-07-09-00:00:
+  FN-7747 / #1948 regression coverage: createServer() must derive a fallback `authStorage`
+  from `engine.getAuthStorage()` when a host wires an `engine` but does not pass its own
+  `authStorage`, so auth routes resolve through the derived storage instead of
+  register-auth-routes.ts's "Authentication is not configured" throw. Explicit
+  `options.authStorage` must still win over the engine-derived value.
+  */
+  it("derives authStorage from engine.getAuthStorage() when not explicitly provided", async () => {
+    const mockAuthStorage = {
+      reload: vi.fn(),
+      getOAuthProviders: vi.fn().mockReturnValue([]),
+      hasAuth: vi.fn().mockReturnValue(false),
+      login: vi.fn(),
+      logout: vi.fn(),
+      getApiKeyProviders: vi.fn().mockReturnValue([{ id: "openai", name: "OpenAI" }]),
+      setApiKey: vi.fn(),
+      clearApiKey: vi.fn(),
+      hasApiKey: vi.fn().mockReturnValue(false),
+      getApiKey: vi.fn(),
+      get: vi.fn(),
+    };
+    const engineBase = {
+      onMerge: vi.fn(),
+      getAutomationStore: vi.fn().mockReturnValue(undefined),
+      getRuntime: vi.fn().mockReturnValue({
+        getMissionAutopilot: vi.fn().mockReturnValue(undefined),
+        getMissionExecutionLoop: vi.fn().mockReturnValue(undefined),
+        getMessageStore: vi.fn().mockReturnValue(undefined),
+      }),
+      getAuthStorage: vi.fn().mockReturnValue(mockAuthStorage),
+      getHeartbeatMonitor: vi.fn().mockReturnValue(undefined),
+      getSelfHealingManager: vi.fn().mockReturnValue(undefined),
+      getRoutineStore: vi.fn().mockReturnValue(undefined),
+      getRoutineRunner: vi.fn().mockReturnValue(undefined),
+      getWorkingDirectory: vi.fn().mockReturnValue("/fake/root"),
+      getMessageStore: vi.fn().mockReturnValue(undefined),
+    };
+    // Proxy: any other engine method createServer happens to probe defensively
+    // (e.g. optional subsystem getters not exercised by this scenario) resolves
+    // to a no-op returning undefined, so this test only asserts the authStorage
+    // derivation behavior under test rather than enumerating every engine getter.
+    const engine = new Proxy(engineBase, {
+      get(target, prop, receiver) {
+        if (prop in target) return Reflect.get(target, prop, receiver);
+        return vi.fn();
+      },
+    });
+
+    const store = createMockStore();
+    const app = createServer(store, { engine: engine as unknown as import("@fusion/engine").ProjectEngine });
+
+    expect(engineBase.getAuthStorage).toHaveBeenCalled();
+
+    const res = await REQUEST(app, "POST", "/api/auth/api-key", JSON.stringify({
+      provider: "openai",
+      apiKey: "sk-test-not-a-real-secret",
+    }), { "Content-Type": "application/json" });
+
+    // Must NOT be the register-auth-routes.ts "Authentication is not configured" failure.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(expect.objectContaining({ success: true }));
+    expect(mockAuthStorage.setApiKey).toHaveBeenCalledWith("openai", "sk-test-not-a-real-secret");
+  });
+
+  it("prefers an explicit authStorage over the engine-derived one", async () => {
+    const explicitAuthStorage = {
+      reload: vi.fn(),
+      getOAuthProviders: vi.fn().mockReturnValue([]),
+      hasAuth: vi.fn().mockReturnValue(false),
+      login: vi.fn(),
+      logout: vi.fn(),
+      getApiKeyProviders: vi.fn().mockReturnValue([{ id: "openai", name: "OpenAI" }]),
+      setApiKey: vi.fn(),
+      clearApiKey: vi.fn(),
+      hasApiKey: vi.fn().mockReturnValue(false),
+      getApiKey: vi.fn(),
+      get: vi.fn(),
+    };
+    const engineAuthStorage = { ...explicitAuthStorage, setApiKey: vi.fn() };
+    const engineBase = {
+      onMerge: vi.fn(),
+      getAutomationStore: vi.fn().mockReturnValue(undefined),
+      getRuntime: vi.fn().mockReturnValue({
+        getMissionAutopilot: vi.fn().mockReturnValue(undefined),
+        getMissionExecutionLoop: vi.fn().mockReturnValue(undefined),
+        getMessageStore: vi.fn().mockReturnValue(undefined),
+      }),
+      getAuthStorage: vi.fn().mockReturnValue(engineAuthStorage),
+      getHeartbeatMonitor: vi.fn().mockReturnValue(undefined),
+      getSelfHealingManager: vi.fn().mockReturnValue(undefined),
+      getRoutineStore: vi.fn().mockReturnValue(undefined),
+      getRoutineRunner: vi.fn().mockReturnValue(undefined),
+      getWorkingDirectory: vi.fn().mockReturnValue("/fake/root"),
+      getMessageStore: vi.fn().mockReturnValue(undefined),
+    };
+    const engine = new Proxy(engineBase, {
+      get(target, prop, receiver) {
+        if (prop in target) return Reflect.get(target, prop, receiver);
+        return vi.fn();
+      },
+    });
+
+    const store = createMockStore();
+    const app = createServer(store, {
+      engine: engine as unknown as import("@fusion/engine").ProjectEngine,
+      authStorage: explicitAuthStorage as any,
+    });
+
+    const res = await REQUEST(app, "POST", "/api/auth/api-key", JSON.stringify({
+      provider: "openai",
+      apiKey: "sk-test-not-a-real-secret",
+    }), { "Content-Type": "application/json" });
+
+    expect(res.status).toBe(200);
+    expect(explicitAuthStorage.setApiKey).toHaveBeenCalledWith("openai", "sk-test-not-a-real-secret");
+    expect(engineAuthStorage.setApiKey).not.toHaveBeenCalled();
+  });
 });
 
 describe("createServer AI session startup cleanup diagnostics", () => {
@@ -1099,6 +1218,82 @@ describe("createServer health and headless mode", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ resetAt: "2026-05-13T12:00:00.000Z" });
     expect(updateSettings).toHaveBeenCalledWith({ reliabilityStatsResetAt: "2026-05-13T12:00:00.000Z" });
+
+    vi.useRealTimers();
+  });
+
+  // FNXC:ReliabilityHealth 2026-07-10-11:15:
+  // FUX-042 regression: reliability GET/reset must read/write the per-project store, not the shared root store.
+  // Enumerated surfaces: (1) GET with projectId reads project store, (2) GET without projectId falls back to root, (3) POST reset with projectId writes project store.
+  it("FUX-042: GET /api/health/reliability reads the project-scoped store, not the root store", async () => {
+    const rootStore = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ reliabilityStatsResetAt: "2026-01-01T00:00:00.000Z" }),
+      getRunAuditEvents: vi.fn().mockReturnValue([]),
+    });
+    const projectStore = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ reliabilityStatsResetAt: "2026-05-10T00:00:00.000Z" }),
+      getRunAuditEvents: vi.fn().mockReturnValue([]),
+    });
+    const getEngine = vi.fn((projectId: string) =>
+      projectId === "proj_a" ? { getTaskStore: vi.fn(() => projectStore) } : undefined,
+    );
+    const app = createServer(rootStore, {
+      engineManager: { getEngine } as unknown as import("@fusion/engine").ProjectEngineManager,
+    });
+
+    const res = await GET(app, "/api/health/reliability?projectId=proj_a");
+
+    expect(res.status).toBe(200);
+    expect((res.body as { resetAt: string }).resetAt).toBe("2026-05-10T00:00:00.000Z");
+    expect(projectStore.getSettings).toHaveBeenCalled();
+    expect(projectStore.getRunAuditEvents).toHaveBeenCalled();
+    expect(rootStore.getSettings).not.toHaveBeenCalled();
+    expect(rootStore.getRunAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("FUX-042: GET /api/health/reliability without projectId falls back to the root store", async () => {
+    const rootStore = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ reliabilityStatsResetAt: "2026-01-01T00:00:00.000Z" }),
+      getRunAuditEvents: vi.fn().mockReturnValue([]),
+    });
+    const projectStore = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ reliabilityStatsResetAt: "2026-05-10T00:00:00.000Z" }),
+      getRunAuditEvents: vi.fn().mockReturnValue([]),
+    });
+    const getEngine = vi.fn((projectId: string) =>
+      projectId === "proj_a" ? { getTaskStore: vi.fn(() => projectStore) } : undefined,
+    );
+    const app = createServer(rootStore, {
+      engineManager: { getEngine } as unknown as import("@fusion/engine").ProjectEngineManager,
+    });
+
+    const res = await GET(app, "/api/health/reliability");
+
+    expect(res.status).toBe(200);
+    expect((res.body as { resetAt: string }).resetAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(rootStore.getSettings).toHaveBeenCalled();
+    expect(projectStore.getSettings).not.toHaveBeenCalled();
+  });
+
+  it("FUX-042: POST /api/health/reliability/reset writes the project-scoped store, not the root store", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+
+    const rootStore = createMockStore({ updateSettings: vi.fn().mockResolvedValue({}) });
+    const projectStore = createMockStore({ updateSettings: vi.fn().mockResolvedValue({}) });
+    const getEngine = vi.fn((projectId: string) =>
+      projectId === "proj_a" ? { getTaskStore: vi.fn(() => projectStore) } : undefined,
+    );
+    const app = createServer(rootStore, {
+      engineManager: { getEngine } as unknown as import("@fusion/engine").ProjectEngineManager,
+    });
+
+    const res = await REQUEST(app, "POST", "/api/health/reliability/reset?projectId=proj_a");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ resetAt: "2026-05-13T12:00:00.000Z" });
+    expect(projectStore.updateSettings).toHaveBeenCalledWith({ reliabilityStatsResetAt: "2026-05-13T12:00:00.000Z" });
+    expect(rootStore.updateSettings).not.toHaveBeenCalled();
 
     vi.useRealTimers();
   });

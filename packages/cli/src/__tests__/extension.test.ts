@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -287,6 +287,7 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
         "fn_task_pause",
         "fn_task_unpause",
         "fn_task_retry",
+        "fn_task_bypass_review",
         "fn_task_duplicate",
         "fn_task_refine",
         "fn_task_import_github",
@@ -1181,6 +1182,137 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       expect(result.content[0].text).toContain("test.txt");
       expect(result.details.attachment).toBeDefined();
       expect(result.details.attachment.originalName).toBe("test.txt");
+    });
+
+    it("attaches a file from an in-boundary nested subdirectory", async () => {
+      const createTool = api.tools.get("fn_task_create")!;
+      await createTool.execute(
+        "c1",
+        { description: "A task" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      await mkdir(join(tmpDir, "nested", "dir"), { recursive: true });
+      const testFile = join(tmpDir, "nested", "dir", "inner.txt");
+      await writeFile(testFile, "inner content");
+
+      const attachTool = api.tools.get("fn_task_attach")!;
+      const result = await attachTool.execute(
+        "call-1",
+        { id: "FN-001", path: "nested/dir/inner.txt" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.content[0].text).toContain("Attached to FN-001");
+      expect(result.details.attachment.originalName).toBe("inner.txt");
+    });
+
+    /*
+     * FNXC:CliTaskAttach 2026-07-05-00:00:
+     * Regression coverage for FN-7619 — fn_task_attach must reject any path
+     * (relative traversal, absolute, or @-prefixed traversal) that resolves
+     * outside the task worktree boundary (ctx.cwd), and must never create an
+     * attachment when it does.
+     */
+    describe("worktree boundary guard (FN-7619)", () => {
+      let outsideDir: string;
+      let outsideFile: string;
+
+      beforeEach(async () => {
+        outsideDir = await mkdtemp(join(tmpdir(), "kb-ext-test-outside-"));
+        outsideFile = join(outsideDir, "secret.txt");
+        await writeFile(outsideFile, "top secret contents");
+      });
+
+      afterEach(async () => {
+        await rm(outsideDir, { recursive: true, force: true });
+      });
+
+      it("rejects a relative traversal path escaping the worktree", async () => {
+        const createTool = api.tools.get("fn_task_create")!;
+        await createTool.execute(
+          "c1",
+          { description: "A task" },
+          undefined,
+          undefined,
+          makeCtx(tmpDir),
+        );
+
+        const relPath = join(relative(tmpDir, outsideDir), "secret.txt");
+
+        const attachTool = api.tools.get("fn_task_attach")!;
+        await expect(
+          attachTool.execute(
+            "call-1",
+            { id: "FN-001", path: relPath },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          ),
+        ).rejects.toThrow(/boundary|outside/i);
+
+        const store = new TaskStore(tmpDir);
+        const task = await store.getTask("FN-001");
+        expect(task?.attachments ?? []).toHaveLength(0);
+      });
+
+      it("rejects an absolute path outside the worktree", async () => {
+        const createTool = api.tools.get("fn_task_create")!;
+        await createTool.execute(
+          "c1",
+          { description: "A task" },
+          undefined,
+          undefined,
+          makeCtx(tmpDir),
+        );
+
+        const attachTool = api.tools.get("fn_task_attach")!;
+        await expect(
+          attachTool.execute(
+            "call-1",
+            { id: "FN-001", path: outsideFile },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          ),
+        ).rejects.toThrow(/boundary|outside/i);
+
+        const store = new TaskStore(tmpDir);
+        const task = await store.getTask("FN-001");
+        expect(task?.attachments ?? []).toHaveLength(0);
+      });
+
+      it("rejects an @-prefixed traversal path escaping the worktree", async () => {
+        const createTool = api.tools.get("fn_task_create")!;
+        await createTool.execute(
+          "c1",
+          { description: "A task" },
+          undefined,
+          undefined,
+          makeCtx(tmpDir),
+        );
+
+        const relPath = join(relative(tmpDir, outsideDir), "secret.txt");
+
+        const attachTool = api.tools.get("fn_task_attach")!;
+        await expect(
+          attachTool.execute(
+            "call-1",
+            { id: "FN-001", path: `@${relPath}` },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          ),
+        ).rejects.toThrow(/boundary|outside/i);
+
+        const store = new TaskStore(tmpDir);
+        const task = await store.getTask("FN-001");
+        expect(task?.attachments ?? []).toHaveLength(0);
+      });
     });
 
     it("rejects unsupported file types", async () => {
@@ -3386,6 +3518,65 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
         undefined,
         makeCtx(tmpDir),
       );
+      expect(show.details.task.nodeId).toBeUndefined();
+    });
+
+    // FNXC:StateMachine 2026-07-07-12:00: FN-7641 Signature 2 CLI regression — nodeId='end'
+    // must finalize-on-proof or return an explicit isError, never a silent "Updated" no-op
+    // (NEXT-322 / NEXT-375 / NEXT-340).
+    it("finalizes an in-review task to done when setting nodeId='end' with merge proof", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const task = await store.createTask({ description: "out-of-band merge repro" });
+      await store.updateTask(task.id, { steps: [{ name: "Only step", status: "done" }] });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, { mergeDetails: { mergeConfirmed: true } });
+      store.close();
+
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "finalize-node-end",
+        { id: task.id, nodeId: "end" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).not.toBe(true);
+
+      const showTool = api.tools.get("fn_task_show")!;
+      const show = await showTool.execute("show-finalized", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+      expect(show.details.task.column).toBe("done");
+      expect(show.details.task.nodeId).toBe("end");
+    });
+
+    it("returns an explicit isError instead of a silent no-op when setting nodeId='end' without merge proof", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const task = await store.createTask({ description: "no proof repro" });
+      await store.updateTask(task.id, { steps: [{ name: "Only step", status: "done" }] });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      store.close();
+
+      const updateTool = api.tools.get("fn_task_update")!;
+      const result = await updateTool.execute(
+        "reject-node-end",
+        { id: task.id, nodeId: "end" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text.toLowerCase()).toContain("merge");
+
+      const showTool = api.tools.get("fn_task_show")!;
+      const show = await showTool.execute("show-rejected", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+      expect(show.details.task.column).toBe("in-review");
       expect(show.details.task.nodeId).toBeUndefined();
     });
   });

@@ -252,7 +252,20 @@ export interface ServerOptions {
   maxConcurrent?: number;
   /** Optional GitHub token for PR operations — falls back to GITHUB_TOKEN env var */
   githubToken?: string;
-  /** Optional AuthStorage instance for auth routes — if not provided, one is created internally */
+  /**
+   * Optional AuthStorage instance for auth routes. If not provided explicitly and an `engine`
+   * is provided, one is derived from `engine.getAuthStorage()` (see the engine-derivation
+   * block below); explicit `authStorage` always overrides the engine-derived value.
+   *
+   * FNXC:ProviderAuth 2026-07-09-00:00:
+   * FN-7747 / #1948: the engine-derived instance is the RAW createFusionAuthStorage() (no
+   * API-key/custom-provider wrapping), so it restores credential *persistence* but not the
+   * full provider catalog — hosts needing the full catalog (e.g. the desktop app's
+   * seedDashboardProviders() output) must still pass their own wrapped `authStorage` here,
+   * exactly as packages/desktop already does. This fallback exists so that a host which
+   * wires an `engine` but forgets `authStorage` does not silently regress into
+   * register-auth-routes.ts's "Authentication is not configured" throw.
+   */
   authStorage?: AuthStorageLike;
   /** Optional ModelRegistry instance for the models API — if not provided, the endpoint returns an empty list */
   modelRegistry?: ModelRegistryLike;
@@ -756,6 +769,26 @@ export function wireCliRelaunchListener(options: {
   });
 }
 
+/*
+FNXC:GrokCliRouting 2026-07-10-00:00:
+Select the PluginRunner the default (no-project) ChatManager uses for runtime
+resolution. Grok CLI routing (deriveGrokRuntimeHintForNoVisibleKey → resolveRuntime)
+calls `getRuntimeById` and `createRuntimeContext`, which exist only on a real
+PluginRunner — a bare PluginLoader (what `options.pluginRunner` is in the CLI
+`dashboard` command) lacks them, so a `grok-cli/*` chat with no Fusion-visible
+GROK_API_KEY threw "getRuntimeById is not a function" and surfaced the misleading
+"requires the bundled Grok CLI runtime" error. Prefer the engine's PluginRunner
+(the same runner the project-scoped chat path already uses via
+engine.getPluginRunner()); fall back to `options.pluginRunner` only in UI-only
+mode where no engine exists.
+*/
+export function resolveChatManagerPluginRunner(
+  options?: Pick<ServerOptions, "engine" | "pluginRunner">,
+): ServerOptions["pluginRunner"] {
+  const engineRunner = options?.engine?.getPluginRunner?.();
+  return (engineRunner as ServerOptions["pluginRunner"] | undefined) ?? options?.pluginRunner;
+}
+
 export function createServer(store: TaskStore, options?: ServerOptions): ReturnType<typeof express> {
   // Register the universal post-create hook so every task-creation path
   // (HTTP routes, CLI, pi extension, mission triage, etc.) triggers
@@ -777,6 +810,19 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     }
     if (!options!.automationStore) {
       options = { ...options, automationStore: engine.getAutomationStore() };
+    }
+    /*
+    FNXC:ProviderAuth 2026-07-09-00:00:
+    FN-7747 / #1948: derive a fallback authStorage from the engine (mirroring the other
+    subsystem derivations here) so a host that wires an `engine` but forgets to pass its own
+    `authStorage` still gets a working, persisting credential store instead of
+    register-auth-routes.ts's "Authentication is not configured" throw. Explicit
+    options.authStorage always overrides. Optional chaining tolerates engine test doubles
+    without getAuthStorage().
+    */
+    if (!options!.authStorage) {
+      const as = engine.getAuthStorage?.();
+      if (as) options = { ...options, authStorage: as };
     }
     if (!options!.missionAutopilot) {
       const ma = engine.getRuntime().getMissionAutopilot();
@@ -1348,12 +1394,24 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   // Create AgentStore for chat prompt enrichment (initialized lazily by ChatManager)
   const chatAgentStore = new AgentStore({ rootDir: store.getFusionDir() });
 
-  // Create ChatManager for AI chat message handling
+  // Create ChatManager for AI chat message handling.
+  /*
+  FNXC:GrokCliRouting 2026-07-10-00:00:
+  The default (no-project) ChatManager must receive a real PluginRunner — not the
+  bare PluginLoader passed as `options.pluginRunner`. Grok CLI routing
+  (deriveGrokRuntimeHintForNoVisibleKey → resolveRuntime) calls `getRuntimeById`
+  and `createRuntimeContext`, which exist only on PluginRunner; a PluginLoader
+  lacks them, so a `grok-cli/*` chat with no visible GROK_API_KEY threw
+  "getRuntimeById is not a function" → the misleading "requires the bundled Grok
+  CLI runtime" error. Prefer the engine's PluginRunner (the same runner the
+  project-scoped chat path already uses via engine.getPluginRunner()), falling
+  back to the loader only in UI-only mode where no engine exists.
+  */
   const chatManager = options?.chatManager ?? new ChatManager(
     chatStore,
     store.getRootDir(),
     chatAgentStore,
-    options?.pluginRunner,
+    resolveChatManagerPluginRunner(options),
     () => store.getSettings(),
     options?.engine?.getMessageStore(),
     store,
@@ -1595,6 +1653,20 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   });
 
   app.get("/api/health/reliability", async (req, res) => {
+    const projectId = getProjectIdFromRequest(req);
+    /*
+    FNXC:ReliabilityHealth 2026-07-10-11:15:
+    Reliability GET/reset must read/write the per-project store so multi-project servers report per-project stats.
+    Use the in-scope resolveProjectScopedStore helper (createServer scope) — NOT the badge-websocket getScopedStore, which lives in a different function and is not visible here.
+    Store creation can fail (getOrCreateProjectStore throwing on a DB error); mirror the project SSE handler and return a targeted 500 instead of letting the failure fall through to the generic Express error handler with a vague message.
+    */
+    let scopedStore: TaskStore;
+    try {
+      scopedStore = await resolveProjectScopedStore(projectId);
+    } catch (err: unknown) {
+      sendErrorResponse(res, 500, err instanceof Error ? err.message : "Failed to resolve project store");
+      return;
+    }
     const rawWindowDays = req.query.windowDays;
     const parsedWindowDays = rawWindowDays === undefined ? 7 : Number.parseInt(String(rawWindowDays), 10);
 
@@ -1606,7 +1678,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       return;
     }
 
-    const settings = await store.getSettings();
+    const settings = await scopedStore.getSettings();
     const resetAt = typeof settings.reliabilityStatsResetAt === "string" ? settings.reliabilityStatsResetAt : null;
 
     const nowMs = Date.now();
@@ -1617,11 +1689,11 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     const endIso = new Date(nowMs).toISOString();
 
     const [runAuditEvents, enteredByDay, bouncedByDay, durationEvents, mergedTaskIds] = await Promise.all([
-      Promise.resolve(store.getRunAuditEvents({ startTime: startIso, endTime: endIso, limit: 50_000 })),
-      store.getTaskMovedCountsByDay({ since: startIso, until: endIso, toColumn: "in-review" }),
-      store.getTaskMovedCountsByDay({ since: startIso, until: endIso, fromColumn: "in-review", toColumn: "in-progress" }),
-      store.getInReviewDurationEvents({ since: startIso, until: endIso }),
-      store.getTaskMergedTaskIds({ since: startIso, until: endIso }),
+      Promise.resolve(scopedStore.getRunAuditEvents({ startTime: startIso, endTime: endIso, limit: 50_000 })),
+      scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, toColumn: "in-review" }),
+      scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, fromColumn: "in-review", toColumn: "in-progress" }),
+      scopedStore.getInReviewDurationEvents({ since: startIso, until: endIso }),
+      scopedStore.getTaskMergedTaskIds({ since: startIso, until: endIso }),
     ]);
 
     const postMergeByDay = postMergeAuditFailuresPerDay(runAuditEvents, effectiveStartMs, nowMs);
@@ -1698,9 +1770,21 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     });
   });
 
-  app.post("/api/health/reliability/reset", async (_req, res) => {
+  app.post("/api/health/reliability/reset", async (req, res) => {
+    const projectId = getProjectIdFromRequest(req);
+    /*
+    FNXC:ReliabilityHealth 2026-07-10-11:15:
+    Same in-scope resolveProjectScopedStore + guard as the GET handler so the reset writes reliabilityStatsResetAt to the per-project store and a store-creation failure returns a targeted 500 rather than a vague generic error.
+    */
+    let scopedStore: TaskStore;
+    try {
+      scopedStore = await resolveProjectScopedStore(projectId);
+    } catch (err: unknown) {
+      sendErrorResponse(res, 500, err instanceof Error ? err.message : "Failed to resolve project store");
+      return;
+    }
     const resetAt = new Date().toISOString();
-    await store.updateSettings({ reliabilityStatsResetAt: resetAt });
+    await scopedStore.updateSettings({ reliabilityStatsResetAt: resetAt });
     res.json({ resetAt });
   });
 

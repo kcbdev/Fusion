@@ -109,8 +109,15 @@ function resolveArtifactMediaPath(scopedStore: TaskStore, artifact: { taskId?: s
 
   const anchorDir = artifact.taskId ? scopedStore.getTaskDir(artifact.taskId) : scopedStore.getFusionDir();
   const expectedArtifactsDir = resolve(anchorDir, "artifacts");
+  const expectedAttachmentsDir = artifact.taskId ? resolve(anchorDir, "attachments") : null;
   const mediaPath = resolve(anchorDir, artifact.uri);
-  if (mediaPath !== expectedArtifactsDir && !mediaPath.startsWith(`${expectedArtifactsDir}${sep}`)) {
+  const underArtifacts = mediaPath === expectedArtifactsDir || mediaPath.startsWith(`${expectedArtifactsDir}${sep}`);
+  const underAttachments = expectedAttachmentsDir !== null && (mediaPath === expectedAttachmentsDir || mediaPath.startsWith(`${expectedAttachmentsDir}${sep}`));
+  /*
+   * FNXC:ArtifactRegistry 2026-07-10-00:00:
+   * Attachment-sourced image artifacts intentionally store `attachments/<file>` URIs so /media streams the original task attachment bytes without a second artifact copy. Keep the resolver anchored to task-owned artifact/attachment directories only; task-less artifacts still resolve exclusively under `.fusion/artifacts/`.
+   */
+  if (!underArtifacts && !underAttachments) {
     throw badRequest("Invalid artifact media path");
   }
   return mediaPath;
@@ -972,6 +979,38 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const taskIds = tasks.map((t) => t.id);
       const payload = await buildBoardWorkflowsPayload(scopedStore, taskIds, settings);
       res.json(payload);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * FNXC:ArchivePagination 2026-07-08-00:00:
+   * Dedicated paged read for the Archived board column: newest-first
+   * (`archivedAt DESC`) in chunks of 100 by default via SQL LIMIT/OFFSET,
+   * so a large archive is never loaded into memory in one pass. This is a
+   * sibling to GET /tasks (which stays byte-identical for its existing
+   * merged-listing consumers) rather than a replacement for it.
+   */
+  router.get("/tasks/archived", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const limit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
+      const offset = typeof req.query.offset === "string" ? Number.parseInt(req.query.offset, 10) : undefined;
+
+      if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+        throw badRequest("limit must be a positive integer");
+      }
+      if (offset !== undefined && (!Number.isFinite(offset) || offset < 0)) {
+        throw badRequest("offset must be a non-negative integer");
+      }
+
+      const { tasks, total, hasMore } = await scopedStore.listArchivedTasks({ limit, offset, slim: true });
+
+      res.json({ tasks, total, hasMore });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -2389,6 +2428,43 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /*
+   * FNXC:ReviewLaneBypass 2026-07-09-00:00:
+   * Operator/privileged escape hatch for a card stranded in `in-review` solely
+   * by a failed pre-merge review lane (Runfusion/Fusion#1946 no-verdict
+   * dispatch defect). Mirrors the `/tasks/:id/retry` route shape but delegates
+   * all eligibility/mutation logic to `store.bypassFailedPreMergeReviewStep`
+   * (FN-7720). This route is intentionally NOT part of the executor/reviewer
+   * agent tool surface — dashboard/operator only.
+   */
+  router.post("/tasks/:id/bypass-review", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { reason, actor } = (req.body ?? {}) as { reason?: unknown; actor?: unknown };
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        throw badRequest("reason is required to bypass a failed pre-merge review step");
+      }
+      const resolvedActor = typeof actor === "string" && actor.trim().length > 0 ? actor.trim() : "dashboard-operator";
+      const updated = await scopedStore.bypassFailedPreMergeReviewStep(req.params.id, {
+        reason: reason.trim(),
+        actor: resolvedActor,
+      });
+      res.json(updated);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("not found")) {
+        throw notFound(message);
+      }
+      if (message.includes("Cannot bypass review lane") || message.includes("requires a non-empty reason")) {
+        throw conflict(message);
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   // Nuclear reset — erase all progress and allocate a fresh worktree+branch on next run
   router.post("/tasks/:id/reset", async (req, res) => {
     try {
@@ -2882,6 +2958,77 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /**
+   * GET /api/tasks/:id/runtime-fallback
+   * Return the most recent "session:runtime-resolved" run-audit event for
+   * this task, normalized for the runtime-fallback badge/toast affordance.
+   *
+   * `showFallbackBadge` is true only when the most recent event has
+   * `wasConfigured === false` AND a non-empty configured `runtimeHint` — a
+   * missing hint (no runtime was ever configured) is not a misconfiguration
+   * and must not surface a badge. Older fallback events are superseded by
+   * any later successful resolution because only the single most recent
+   * event (limit: 1, store-ordered most-recent-first) is considered.
+   *
+   * Response: TaskRuntimeFallbackResponse (see routes.ts)
+   */
+  router.get("/tasks/:id/runtime-fallback", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const taskId = req.params.id;
+
+      // Verify task exists so callers get a clean 404 instead of an empty
+      // "no event yet" response for a nonexistent task ID.
+      await scopedStore.getTask(taskId);
+
+      const [latest] = scopedStore.getRunAuditEvents({
+        taskId,
+        mutationType: "session:runtime-resolved",
+        limit: 1,
+      });
+
+      if (!latest) {
+        res.json({
+          taskId,
+          hasEvent: false,
+          wasConfigured: null,
+          runtimeHint: null,
+          reason: null,
+          eventId: null,
+          timestamp: null,
+          showFallbackBadge: false,
+        });
+        return;
+      }
+
+      const metadata = latest.metadata ?? {};
+      const wasConfigured = metadata.wasConfigured === true;
+      const runtimeHintRaw = typeof metadata.runtimeHint === "string" ? metadata.runtimeHint.trim() : "";
+      const runtimeHint = runtimeHintRaw.length > 0 ? runtimeHintRaw : null;
+      const reason = typeof metadata.reason === "string" ? metadata.reason : null;
+
+      res.json({
+        taskId,
+        hasEvent: true,
+        wasConfigured,
+        runtimeHint,
+        reason,
+        eventId: latest.id,
+        timestamp: latest.timestamp,
+        showFallbackBadge: wasConfigured === false && runtimeHint !== null,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw notFound(`Task ${req.params.id} not found`);
+      } else {
+        rethrowAsApiError(err);
+      }
+    }
+  });
+
   router.get("/tasks/stranded-refinements", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -3140,19 +3287,11 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (task.status !== "awaiting-approval") {
         throw badRequest("Task must have status 'awaiting-approval' to approve plan");
       }
-      // FNXC:ReleaseAuthorizationGate 2026-07-04-22:30:
-      // FN-6481 requires a release-class task to carry an explicit
-      // "**Release Authorized By User:** yes" marker before it can dispatch.
-      // FN-7559 parks such tasks with awaitingApprovalReason === "release-authorization"
-      // (distinct from an ordinary manual plan-approval hold) and hides the
-      // Approve/Reject Plan buttons in the dashboard UI, but a direct API call bypasses
-      // that UI protection. Enforce the gate here too so no client can dispatch a
-      // release-class task without the authorization marker.
-      if (task.awaitingApprovalReason === "release-authorization") {
-        throw badRequest(
-          "This task is held for release authorization. Add the **Release Authorized By User:** yes marker to its PROMPT.md and resubmit the spec instead of approving the plan.",
-        );
-      }
+      // FNXC:ReleaseAuthorizationGate 2026-07-09-00:00:
+      // The triage release-authorization gate was removed (it over-fired and stranded
+      // ordinary tasks). The approve-plan guard that refused any task carrying the legacy
+      // awaitingApprovalReason === "release-authorization" is gone too, so tasks parked by
+      // the old gate can now be approved normally instead of staying stuck with no exit.
 
       // Log the approval
       await scopedStore.logEntry(task.id, "Plan approved by user");
@@ -3208,16 +3347,9 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (task.status !== "awaiting-approval") {
         throw badRequest("Task must have status 'awaiting-approval' to reject plan");
       }
-      // FNXC:ReleaseAuthorizationGate 2026-07-04-22:30:
-      // Mirror of the approve-plan guard above: a release-authorization hold
-      // (FN-7559's awaitingApprovalReason discriminator) must not be rejectable
-      // through the API either, since rejecting would wipe/regenerate the spec
-      // without the operator ever acknowledging the FN-6481 authorization gate.
-      if (task.awaitingApprovalReason === "release-authorization") {
-        throw badRequest(
-          "This task is held for release authorization. Add the **Release Authorized By User:** yes marker to its PROMPT.md and resubmit the spec instead of rejecting the plan.",
-        );
-      }
+      // FNXC:ReleaseAuthorizationGate 2026-07-09-00:00:
+      // Release-authorization gate removed — see the approve-plan handler above. A task
+      // carrying the legacy release-authorization hold can now be rejected normally.
 
       // Log the rejection
       await scopedStore.logEntry(task.id, "Plan rejected by user", "Specification will be regenerated");
@@ -4306,6 +4438,16 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         updates.sourceMetadataPatch = { nearDuplicateDismissed: true };
       }
 
+      /*
+      FNXC:WorkflowRouting 2026-07-07-12:00:
+      Signature 2 (FN-7641 / NEXT-322 / NEXT-375 / NEXT-340): setting nodeId='end' after a
+      human/agent merges the branch tip directly into main (out-of-band, bypassing the merge
+      node) must never silently no-op. Pre-validate here so the caller gets an explicit 409
+      instead of a 200 that changed nothing when there is no durable merge proof. When proof
+      exists (`validation.allowed === true`), `scopedStore.updateTask` below performs the real
+      finalize-to-done move itself (shared logic in TaskStore.updateTask / node-override-guard.ts)
+      so this route, the CLI task-update tool, and store.updateTask all exhibit identical behavior.
+      */
       if (hasBodyField("nodeId") && validatedNodeId !== undefined) {
         const currentTask = await scopedStore.getTask(req.params.id);
         if (!currentTask) {

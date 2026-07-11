@@ -660,6 +660,47 @@ describe("token-analytics", () => {
     expect(result.series?.[0].cost).toEqual({ usd: 12.5, unavailable: true, stale: false });
   });
 
+  it("prices current OpenAI Codex runtime identities across token analytics surfaces", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 200_000, cachedTokens: 500_000, cacheWriteTokens: 100_000 };
+    const expected = costFor(usage, { provider: "openai-codex", model: "gpt-5.5" });
+    expect(expected).toEqual({ usd: 11.25, unavailable: false, stale: false });
+
+    insertTask(db, {
+      id: "codex-current",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedTokens: usage.cachedTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      totalTokens: 1_800_000,
+      lastUsedAt: "2026-03-01T00:00:00.000Z",
+      tokenUsageModelProvider: "openai-codex",
+      tokenUsageModelId: "gpt-5.5",
+      tokenUsagePerModel: [
+        {
+          modelProvider: "openai-codex",
+          modelId: "gpt-5.5",
+          ...usage,
+          totalTokens: 1_800_000,
+          lastUsedAt: "2026-03-01T00:00:00.000Z",
+        },
+      ],
+      modelProvider: "openai",
+      modelId: "gpt-4o-mini",
+      nodeId: "node-codex",
+      agentId: "agent-codex",
+    });
+
+    const byModel = aggregateTokenAnalytics(db, { groupBy: "model" });
+    expect(byModel.cost).toEqual(expected);
+    expect(byModel.groups.find((group) => group.key === "gpt-5.5")?.cost).toEqual(expected);
+
+    const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
+    expect(byProvider.groups.find((group) => group.key === "openai-codex")?.cost).toEqual(expected);
+
+    const byDay = aggregateTokenAnalytics(db, { granularity: "day" });
+    expect(byDay.series?.[0].cost).toEqual(expected);
+  });
+
   it("prices resolved-model token usage costs from the usage snapshot across analytics surfaces", () => {
     const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedTokens: 0, cacheWriteTokens: 0 };
     const expected = costFor(usage, { provider: "openai", model: "gpt-4o" });

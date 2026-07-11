@@ -6,12 +6,14 @@ import type {
 } from "@fusion/core";
 import {
   COMMAND_EXECUTION_FN_TOOLS,
+  FILE_SCOPE_FN_TOOLS,
   FILE_WRITE_BUILTIN_TOOLS,
   FILE_WRITE_DELETE_FN_TOOLS,
   NETWORK_API_TOOLS,
   PERMANENT_AGENT_TASK_MUTATION_TOOLS,
   READONLY_BUILTIN_TOOLS,
   READONLY_FN_TOOLS,
+  REVIEW_GATE_BYPASS_FN_TOOLS,
   isGitWriteCommand,
 } from "./gating-classifications.js";
 
@@ -33,6 +35,10 @@ const FILE_WRITE_TOOLS = FILE_WRITE_BUILTIN_TOOLS;
 const TASK_AGENT_MUTATION_TOOLS = PERMANENT_AGENT_TASK_MUTATION_TOOLS;
 const FILE_WRITE_DELETE_TOOLS = FILE_WRITE_DELETE_FN_TOOLS;
 const COMMAND_EXECUTION_TOOLS = COMMAND_EXECUTION_FN_TOOLS;
+// FNXC:ToolGovernance 2026-07-09-00:00: FN-7728 — mirror agent-action-gate.ts's review_gate_bypass classification here so the permanent-agent gate resolves fn_task_bypass_review identically (no two-path drift).
+const REVIEW_GATE_BYPASS_TOOLS = REVIEW_GATE_BYPASS_FN_TOOLS;
+// FNXC:ToolGovernance 2026-07-09-08:30: FN-7737 — mirror agent-action-gate.ts's file_scope classification here so the permanent-agent gate resolves fn_task_file_scope_add identically (no two-path drift).
+const FILE_SCOPE_TOOLS = FILE_SCOPE_FN_TOOLS;
 
 function normalizeArgs(args: unknown): Record<string, unknown> {
   return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -41,6 +47,59 @@ function normalizeArgs(args: unknown): Record<string, unknown> {
 function extractShellCommand(args: Record<string, unknown>): string {
   const command = args.command;
   return typeof command === "string" ? command.trim() : "";
+}
+
+const GATED_SUMMARY_COMMAND_MAX_LENGTH = 200;
+
+function truncateForSummary(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, maxLength - 1)}\u2026`;
+}
+
+function renderCompactArgs(args: Record<string, unknown>): string {
+  const entries = Object.entries(args).filter(([, value]) => value !== undefined);
+  if (entries.length === 0) {
+    return "";
+  }
+  const rendered = entries
+    .slice(0, 4)
+    .map(([key, value]) => {
+      const stringValue = typeof value === "string" ? value : JSON.stringify(value);
+      return `${key}: ${truncateForSummary(String(stringValue ?? ""), 60)}`;
+    })
+    .join(", ");
+  const suffix = entries.length > 4 ? ", \u2026" : "";
+  return `{${rendered}${suffix}}`;
+}
+
+/**
+ * FNXC:AgentGating 2026-07-05-00:00:
+ * FN-7609: operators approving a gated agent action need to see the real
+ * payload (shell command line, or tool arguments), not just a generic
+ * "Agent gated action for <tool>" placeholder. This pure helper builds a
+ * payload-bearing, human-readable summary shared by both permanent-agent
+ * gating context builders (executor.ts and agent-heartbeat.ts) so approval
+ * cards are actionable instead of blank.
+ */
+export function buildAgentGatedActionSummary(toolName: string, args: unknown): string {
+  const normalizedArgs = normalizeArgs(args);
+
+  if (toolName === "bash") {
+    const command = extractShellCommand(normalizedArgs);
+    if (command) {
+      return `Run: ${truncateForSummary(command, GATED_SUMMARY_COMMAND_MAX_LENGTH)}`;
+    }
+  }
+
+  const compactArgs = renderCompactArgs(normalizedArgs);
+  if (compactArgs) {
+    return `${toolName} ${compactArgs}`;
+  }
+
+  return `Agent gated action for ${toolName}`;
 }
 
 
@@ -57,6 +116,12 @@ export function classifyPermanentAgentToolCall(
   }
   if (READONLY_BUILTIN_TOOLS.has(toolName)) {
     return { category: "none", recognized: true };
+  }
+  if (REVIEW_GATE_BYPASS_TOOLS.has(toolName)) {
+    return { category: "review_gate_bypass", recognized: true };
+  }
+  if (FILE_SCOPE_TOOLS.has(toolName)) {
+    return { category: "file_scope", recognized: true };
   }
   if (TASK_AGENT_MUTATION_TOOLS.has(toolName)) {
     return { category: "task_agent_mutation", recognized: true };

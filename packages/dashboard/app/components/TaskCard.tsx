@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight, Eye } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight, Eye, MoreHorizontal } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, MergeResult, PlannerOversightLevel } from "@fusion/core";
 import {
   DEFAULT_PLANNER_OVERSIGHT_LEVEL,
@@ -23,6 +23,7 @@ import { resolveEffectivePlannerOversightLevel } from "../../../core/src/workflo
 import { addressPrFeedback, fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent, rebuildTaskSpec, refreshPrStatus, fetchWorkflowSettingValues, type WorkflowFieldDefinition, type RevertTaskOptions, type RevertTaskResult } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { GitLabBadge } from "./GitLabBadge";
+import { RuntimeFallbackBadge } from "./RuntimeFallbackBadge";
 import { PrCreateModal } from "./PrCreateModal";
 import { ProviderIcon } from "./ProviderIcon";
 import { PluginSlot } from "./PluginSlot";
@@ -914,6 +915,13 @@ function TaskCardComponent({
   const touchOpenHandledRef = useRef(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  /*
+  FNXC:TaskCardMenu 2026-07-10-12:00:
+  Ref for the visible card actions (⋯) button, so the context-menu outside-pointerdown closer can
+  ignore presses on the button itself — otherwise pointerdown would close the menu and the following
+  click would immediately reopen it, breaking the toggle affordance.
+  */
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sendBackRef = useRef<HTMLDivElement>(null);
   const [isInViewport, setIsInViewport] = useState(false);
   const { badgeUpdates, subscribeToBadge, unsubscribeFromBadge } = useBadgeWebSocket(projectId);
@@ -1268,16 +1276,9 @@ function TaskCardComponent({
   const stalePausedReviewCopy = task.stalePausedReview ? getStalePausedReviewCopy(task.stalePausedReview) : undefined;
   const hasTaskAgeStaleness = shouldShowTaskAgeStalenessBadge(task);
   const taskAgeStalenessCopy = getTaskAgeStalenessCopy(task.ageStaleness);
+  // A legacy row carrying awaitingApprovalReason === "release-authorization" renders
+  // as an ordinary manual plan-approval hold (FN-7732) — no distinct badge/class.
   const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
-  /*
-   * FNXC:PlanApproval 2026-07-04-21:35:
-   * FN-7559: release-authorization holds and manual plan-approval holds both use
-   * status "awaiting-approval" (auto-approve-all intentionally bypasses only the
-   * manual gate — see FNXC:PlanApproval in types.ts). Distinguish them for the
-   * operator via the awaitingApprovalReason discriminator instead of showing the
-   * generic manual-approval badge/label for both.
-   */
-  const isReleaseAuthorizationHold = isAwaitingApproval && task.awaitingApprovalReason === "release-authorization";
   const isAwaitingInput = task.status === "awaiting-user-input";
   const isArchived = task.column === "archived";
   const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && !isStuck && !isAwaitingApproval && !isAwaitingInput && (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
@@ -1376,12 +1377,11 @@ function TaskCardComponent({
     [unifiedProgress.items],
   );
   /*
-  FNXC:TaskCardWorkflowProgress 2026-07-04-09:08:
-  Prompt Reviewer / Plan Review can run before a task leaves Triage. Show the existing card progress affordance when Triage has an actually active unified progress item, but keep enabled-only workflow steps hidden so idle review gates do not create false active indicators or empty progress shells.
+  FNXC:TaskCardWorkflowProgress 2026-07-08-hh:mm:
+  FN-7676 — cards in the Planning/`triage` column must not surface the steps breakdown (progress bar, active badge, step-count toggle, expandable list); enumerated implementation steps are premature planning artifacts, not execution progress. The affordance now appears only after the task leaves Planning (`in-progress` / `executing`), matching `ListView.shouldShowTaskProgress`. A running Plan Review while still in `triage` intentionally no longer surfaces the card progress indicator — the header `planning` status badge remains the only in-flight signal.
   */
   const showProgressSection =
-    unifiedProgress.total > 0 &&
-    (task.status === "executing" || task.column === "in-progress" || (task.column === "triage" && activeProgressCount > 0));
+    unifiedProgress.total > 0 && (task.status === "executing" || task.column === "in-progress");
 
   useEffect(() => {
     if (task.column !== "in-progress" && task.column !== "in-review") {
@@ -2450,6 +2450,26 @@ function TaskCardComponent({
   }, [clearLongPressTimer]);
 
   /*
+  FNXC:TaskCardMenu 2026-07-10-12:00:
+  First-run review: the card's Edit/Delete/Review/New chat/Interventions actions were ONLY reachable
+  via right-click (or touch long-press), which the user never discovered. Add a visible ⋯ button that
+  opens the SAME portaled TaskContextMenu (same `contextMenuActions` model — no duplicated item
+  logic), anchored under the button. Toggles closed when the menu is already open. Rendered only when
+  `hasContextMenuActions` so no empty button shell appears on handler-less surfaces (e.g. read-only
+  docks). Hover-revealed on desktop, always visible on mobile/touch (see TaskCard.css).
+  */
+  const handleMenuButtonClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (contextMenuPosition) {
+      closeContextMenu();
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    suppressNextCardClickRef.current = true;
+    openContextMenuAt(rect.left, rect.bottom + MENU_BUTTON_MENU_GAP);
+  }, [closeContextMenu, contextMenuPosition, openContextMenuAt]);
+
+  /*
   FNXC:TaskContextMenu 2026-07-01-00:00:
   Board columns intentionally clip and scroll their bodies, so card context menus must be portaled to document.body and positioned in viewport coordinates. Clamp after render using the measured menu size so right-click, keyboard, and long-press menus escape column borders without weakening board overflow containment.
   */
@@ -2471,6 +2491,9 @@ function TaskCardComponent({
     if (!contextMenuPosition) return;
     const handleDocumentPointerDown = (event: PointerEvent) => {
       if (contextMenuRef.current?.contains(event.target as Node)) return;
+      // FNXC:TaskCardMenu 2026-07-10-12:00: let the ⋯ button's own click handler toggle the menu closed
+      // instead of racing it shut on pointerdown (see menuButtonRef comment above).
+      if (menuButtonRef.current?.contains(event.target as Node)) return;
       closeContextMenu();
     };
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
@@ -2711,7 +2734,6 @@ function TaskCardComponent({
    */
   const hasCardMetaBadges = showPriorityBadge
     || task.executionMode === "fast"
-    || isAgentCreated
     // FNXC:PlannerOversight 2026-07-04-00:00: the oversight badge is opt-in
     // metadata (absent for the common "off" default) — include it in the wrapper
     // guard so `.card-meta-badges` only renders when it has a real child.
@@ -2802,9 +2824,9 @@ function TaskCardComponent({
         )}
         {!isPaused && visualStatus && visualStatus !== "queued" && (
           <span
-            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${isReleaseAuthorizationHold ? " awaiting-release-authorization" : ""}${isAwaitingInput ? " awaiting-input" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
+            className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${isAwaitingInput ? " awaiting-input" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
-            {isStuck ? t("tasks.stuck", "Stuck") : isReleaseAuthorizationHold ? t("tasks.awaitingReleaseAuthorization", "Awaiting Release Authorization") : isAwaitingApproval ? t("tasks.awaitingApproval", "Awaiting Approval") : isAwaitingInput ? t("tasks.needsInput", "Needs input") : visualStatus === "merging-fix" ? t("tasks.statusMergingFix", "Merging fixes…") : getTaskStatusLabel(visualStatus, t)}
+            {isStuck ? t("tasks.stuck", "Stuck") : isAwaitingApproval ? t("tasks.awaitingApproval", "Awaiting Approval") : isAwaitingInput ? t("tasks.needsInput", "Needs input") : visualStatus === "merging-fix" ? t("tasks.statusMergingFix", "Merging fixes…") : getTaskStatusLabel(visualStatus, t)}
           </span>
         )}
         {/*
@@ -2937,6 +2959,7 @@ function TaskCardComponent({
         {task.gitlabTracking?.item && (
           <GitLabBadge item={task.gitlabTracking.item} />
         )}
+        <RuntimeFallbackBadge taskId={task.id} isInViewport={isInViewport} projectId={projectId} />
         {prNode && (
           prNode.state === "failed" ? (
             <button
@@ -2987,17 +3010,6 @@ function TaskCardComponent({
               >
                 <Zap aria-hidden="true" />
                 <span className="visually-hidden">{t("tasks.fastMode", "Fast mode")}</span>
-              </span>
-            )}
-            {isAgentCreated && (
-              <span
-                className="card-agent-created-badge"
-                title={agentCreatedTitle}
-                aria-label={agentCreatedTitle}
-              >
-                <Bot size={11} aria-hidden="true" />
-                <span className="visually-hidden">{agentCreatedTitle}</span>
-                <span aria-hidden="true">{agentCreatedVisibleLabel}</span>
               </span>
             )}
             {showOversightBadge && (
@@ -3136,6 +3148,29 @@ function TaskCardComponent({
             <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
               {task.size}
             </span>
+          )}
+          {/*
+          FNXC:TaskCardMenu 2026-07-10-12:00:
+          Visible entry point for the card's action menu (Edit/Delete/Review/New chat/Interventions…)
+          — previously right-click/long-press only and therefore undiscoverable. Opens the same
+          portaled TaskContextMenu anchored at this button. Only rendered when the menu has actions
+          (no empty shell); applies on every surface that renders TaskCard (Board columns, worktree
+          groups, dock task lists).
+          */}
+          {hasContextMenuActions && (
+            <button
+              ref={menuButtonRef}
+              type="button"
+              className="card-menu-btn"
+              onClick={handleMenuButtonClick}
+              title={t("tasks.taskActions", "Task actions")}
+              aria-label={t("tasks.taskActions", "Task actions")}
+              aria-haspopup="menu"
+              aria-expanded={contextMenuPosition != null}
+              data-testid={`card-menu-btn-${task.id}`}
+            >
+              <MoreHorizontal size={14} />
+            </button>
           )}
         </div>
       </div>
@@ -3550,6 +3585,23 @@ function TaskCardComponent({
           {showInReviewMoveControl && !metaRowVisible && renderInReviewMoveControl()}
         </div>
       )}
+      {isAgentCreated && (
+        <div className="card-agent-badge-row" data-testid="card-agent-badge-row">
+          {/**
+           * FNXC:TaskCardLayout 2026-07-10-00:00:
+           * FN-7780 moves the created-by-agent chip below the task content and before the workflow identity row so the header keeps only ID/status/actions metadata and no longer wraps on narrow/mobile cards. The badge content, tooltip, and accessible name remain unchanged.
+           */}
+          <span
+            className="card-agent-created-badge"
+            title={agentCreatedTitle}
+            aria-label={agentCreatedTitle}
+          >
+            <Bot size={11} aria-hidden="true" />
+            <span className="visually-hidden">{agentCreatedTitle}</span>
+            <span aria-hidden="true">{agentCreatedVisibleLabel}</span>
+          </span>
+        </div>
+      )}
       {hasWorkflowBadge && (
         <div className="card-workflow-badge-row" data-testid="card-workflow-badge-row">
           {/*
@@ -3591,6 +3643,8 @@ const TOUCH_TAP_MAX_DURATION = 300; // milliseconds
 const TOUCH_CONTEXT_MENU_DELAY_MS = 550; // milliseconds
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
 const KEYBOARD_CONTEXT_MENU_OFFSET = 32;
+// FNXC:TaskCardMenu 2026-07-10-12:00: vertical gap between the ⋯ button and the menu it anchors.
+const MENU_BUTTON_MENU_GAP = 4;
 const MAX_TITLE_LENGTH = 140;
 
 function truncate(s: string | undefined, max: number): string {

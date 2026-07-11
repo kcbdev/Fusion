@@ -35,6 +35,48 @@ describe("TaskStore", () => {
       expect(settings.defaultProvider).toBeUndefined();
       expect(settings.defaultModelId).toBeUndefined();
     });
+
+    it("round-trips per-lane thinking overrides and clears them with null-as-delete", async () => {
+      await harness.store().updateSettings({
+        defaultThinkingLevelOverride: "high",
+        titleSummarizerThinkingLevel: "low",
+      });
+      await harness.store().updateGlobalSettings({
+        executionGlobalThinkingLevel: "medium",
+        titleSummarizerGlobalThinkingLevel: "minimal",
+      });
+
+      let settings = await harness.store().getSettings();
+      expect(settings.defaultThinkingLevelOverride).toBe("high");
+      expect(settings.titleSummarizerThinkingLevel).toBe("low");
+      expect(settings.executionGlobalThinkingLevel).toBe("medium");
+      expect(settings.titleSummarizerGlobalThinkingLevel).toBe("minimal");
+
+      const scoped = await harness.store().getSettingsByScope();
+      expect(scoped.project.defaultThinkingLevelOverride).toBe("high");
+      expect(scoped.project.titleSummarizerThinkingLevel).toBe("low");
+      expect(scoped.global.executionGlobalThinkingLevel).toBe("medium");
+      expect(scoped.global.titleSummarizerGlobalThinkingLevel).toBe("minimal");
+
+      await harness.store().updateSettings({
+        // @ts-expect-error - null intentionally clears optional project settings.
+        defaultThinkingLevelOverride: null,
+        // @ts-expect-error - null intentionally clears optional project settings.
+        titleSummarizerThinkingLevel: null,
+      });
+      await harness.store().updateGlobalSettings({
+        // @ts-expect-error - null intentionally clears optional global settings.
+        executionGlobalThinkingLevel: null,
+        // @ts-expect-error - null intentionally clears optional global settings.
+        titleSummarizerGlobalThinkingLevel: null,
+      });
+
+      settings = await harness.store().getSettings();
+      expect(settings.defaultThinkingLevelOverride).toBeUndefined();
+      expect(settings.titleSummarizerThinkingLevel).toBeUndefined();
+      expect(settings.executionGlobalThinkingLevel).toBeUndefined();
+      expect(settings.titleSummarizerGlobalThinkingLevel).toBeUndefined();
+    });
   });
 
   describe("worktreeInitCommand setting", () => {

@@ -1,9 +1,9 @@
 import type { Agent } from "@fusion/core";
-import React, { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUpToLine, Bot, File, Send, TriangleAlert } from "lucide-react";
+import { ArrowUpToLine, Bot, File, Pencil, Send, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ChatMessageInfo, FailureInfo, ToolCallInfo } from "../hooks/chatTypes";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
@@ -33,6 +33,21 @@ export interface StandardChatMessageItemProps {
   submittedQuestionAnswer?: string;
   onQuestionSubmit?: (answerText: string, structured: Record<string, unknown>) => void;
   toolCallRenderer?: (toolCall: ToolCallInfo, index: number) => ReactNode | undefined;
+  /**
+   * FNXC:ChatMessageEdit 2026-07-07-09:00:
+   * When set together with `canEdit`, a user message renders an edit affordance that swaps its
+   * content for an inline textarea. Saving calls this with the edited text; the caller is
+   * responsible for truncating server + local history from this message onward and resending
+   * (see useChat.editMessageAndResend) so the model forgets everything after the edited turn.
+   * Only rendered for `role === "user"` messages — never for assistant/system messages.
+   */
+  onEditMessage?: (messageId: string, newContent: string) => void | Promise<void>;
+  /**
+   * Gate for whether editing is currently supported/allowed for this message's surface (direct
+   * model-loop chat, not Rooms or CLI-agent sessions) and state (not while streaming). When
+   * false or `onEditMessage` is absent, no affordance renders at all — never a disabled/dead one.
+   */
+  canEdit?: boolean;
 }
 
 export interface StandardStreamingMessageProps {
@@ -60,6 +75,15 @@ export interface StandardChatActionButtonProps {
   classNameSend?: string;
   classNameStop?: string;
   showSendText?: boolean;
+  /**
+   * FNXC:StandardChatSurface 2026-07-07-00:00:
+   * Send and Stop visible-text are independently controllable so callers like
+   * the planner (FN-7655) can render the Stop button icon-only while keeping
+   * the Send button's text label. Defaults to `showSendText` when unset so
+   * existing callers keep prior combined behavior (accessible name via
+   * aria-label is always preserved regardless of this flag).
+   */
+  showStopText?: boolean;
   sendTestId?: string;
   stopTestId?: string;
 }
@@ -325,10 +349,58 @@ export const StandardChatMessageItem = memo(function StandardChatMessageItem({
   submittedQuestionAnswer,
   onQuestionSubmit,
   toolCallRenderer,
+  onEditMessage,
+  canEdit = false,
 }: StandardChatMessageItemProps) {
   const { t } = useTranslation("app");
   const isAssistantMessage = message.role === "assistant";
+  const isUserMessage = message.role === "user";
+  /*
+   * FNXC:ChatMessageEdit 2026-07-07-09:00:
+   * Edit affordance is scoped strictly to user messages on surfaces that opt in via both
+   * `canEdit` and `onEditMessage`; absent either, `showEditAction` is false and nothing renders
+   * (no dead button, no empty shell) — e.g. assistant/system messages, Rooms, CLI-agent chat, or
+   * while a generation is streaming.
+   */
+  const showEditAction = isUserMessage && canEdit && Boolean(onEditMessage);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedText, setEditedText] = useState(message.content);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const startEditing = useCallback(() => {
+    setEditedText(message.content);
+    setIsEditing(true);
+  }, [message.content]);
+
+  const cancelEditing = useCallback(() => {
+    setIsEditing(false);
+    setEditedText(message.content);
+  }, [message.content]);
+
+  const saveEdit = useCallback(() => {
+    const trimmed = editedText.trim();
+    if (!trimmed || trimmed === message.content) return;
+    setIsEditing(false);
+    void onEditMessage?.(message.id, trimmed);
+  }, [editedText, message.content, message.id, onEditMessage]);
+
+  useEffect(() => {
+    if (isEditing) {
+      editTextareaRef.current?.focus();
+      editTextareaRef.current?.select();
+    }
+  }, [isEditing]);
   const failureInfo = isAssistantMessage ? message.failureInfo : undefined;
+  /*
+   * FNXC:ChatEmptyMessage 2026-07-10-00:00:
+   * Empty assistant responses, including Grok CLI runs that finish with no text, must show a muted "No message" placeholder instead of a blank bubble. Only final persisted assistant messages with no renderable body qualify; tool calls, thinking output, attachments, or failure info already carry meaningful content and must not trigger the placeholder.
+   */
+  const isEmptyAssistantMessage = isAssistantMessage
+    && message.content.trim().length === 0
+    && !failureInfo
+    && (!message.toolCalls || message.toolCalls.length === 0)
+    && !message.thinkingOutput
+    && (!message.attachments || message.attachments.length === 0);
   const showAssistantIdentity = isAssistantMessage && (!hideAssistantIdentity || Boolean(failureInfo));
   const renderedUserContent = useMemo<ReactNode>(() => {
     if (isAssistantMessage) return null;
@@ -374,13 +446,42 @@ export const StandardChatMessageItem = memo(function StandardChatMessageItem({
     if (failureInfo) {
       return <div className="chat-message-content chat-message-content--failure"><div className="chat-message-failure-summary-row"><span className="status-dot status-dot--error" aria-hidden="true" /><span className="chat-message-failure-label">{t("chat.responseFailed", "Response failed")}</span></div><div className="chat-message-failure-summary">{failureInfo.summary}</div>{(failureInfo.errorClass || failureInfo.code) && <div className="chat-message-failure-badges">{failureInfo.errorClass && <span className="chat-message-failure-badge">{failureInfo.errorClass}</span>}{failureInfo.code && <span className="chat-message-failure-badge">{failureInfo.code}</span>}</div>}{(failureInfo.detail || failureInfo.reference) && <details className="chat-message-failure-details"><summary><TriangleAlert size={14} aria-hidden="true" /><span>{t("chat.failureDetails", "Failure details")}</span></summary>{failureInfo.detail && <pre className="chat-message-failure-detail">{linkifyFilePaths(failureInfo.detail)}</pre>}{renderFailureReference(failureInfo.reference, t)}</details>}</div>;
     }
+    if (isEmptyAssistantMessage) {
+      return <div className="chat-message-content chat-message-content--empty" data-testid="chat-message-empty">{t("chat.noMessage", "No message")}</div>;
+    }
     return renderStandardAssistantContent(message.content, forcePlain);
-  }, [failureInfo, forcePlain, isAssistantMessage, message.content, t]);
+  }, [failureInfo, forcePlain, isAssistantMessage, isEmptyAssistantMessage, message.content, t]);
   return (
-    <div className={`chat-message chat-message--${message.role}${failureInfo ? " chat-message--failure" : ""}`} data-testid={`chat-message-${message.id}`} data-message-id={message.id}>
+    <div className={`chat-message chat-message--${message.role}${failureInfo ? " chat-message--failure" : ""}${isEditing ? " chat-message--editing" : ""}`} data-testid={`chat-message-${message.id}`} data-message-id={message.id}>
       {showAssistantIdentity && <div className="chat-message-avatar">{activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="sm" /> : <Bot size={14} />}<span>{agentName}</span>{showAssistantModelTag && activeModelTag && <span className="chat-model-tag">{activeModelTag}</span>}</div>}
-      {isAssistantMessage ? assistantBody : <div className="chat-message-content">{renderedUserContent}</div>}
+      {isEditing ? (
+        <div className="chat-message-edit-editor" data-testid={`chat-message-edit-editor-${message.id}`}>
+          <textarea
+            ref={editTextareaRef}
+            className="input chat-message-edit-textarea"
+            value={editedText}
+            onChange={(event) => setEditedText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelEditing();
+              } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                saveEdit();
+              }
+            }}
+            rows={3}
+          />
+          <div className="chat-message-edit-actions">
+            <button type="button" className="btn btn-sm" onClick={cancelEditing}>{t("chat.editMessageCancel", "Cancel")}</button>
+            <button type="button" className="btn btn-sm btn-primary" disabled={!editedText.trim() || editedText.trim() === message.content} onClick={saveEdit}>{t("chat.editMessageSave", "Save")}</button>
+          </div>
+        </div>
+      ) : (
+        isAssistantMessage ? assistantBody : <div className="chat-message-content">{renderedUserContent}</div>
+      )}
       {isAssistantMessage && !failureInfo && (copyAction || onScrollToTop) && <div className="chat-message-actions">{copyAction}{onScrollToTop && <button type="button" className="btn-icon chat-message-scroll-to-top-action" aria-label={t("chat.scrollMessageToTop", "Scroll message to top")} data-testid={`chat-message-scroll-to-top-${message.id}`} onClick={() => onScrollToTop(message.id)}><ArrowUpToLine size={14} /></button>}</div>}
+      {showEditAction && !isEditing && <div className="chat-message-actions chat-message-actions--user"><button type="button" className="btn-icon chat-message-edit-action" aria-label={t("chat.editMessage", "Edit message")} data-testid={`chat-message-edit-${message.id}`} onClick={startEditing}><Pencil size={14} /></button></div>}
       {renderStandardToolCalls(message.toolCalls, t, { isAwaitingAnswer: isAwaitingQuestionAnswer, submittedAnswer: submittedQuestionAnswer, onQuestionSubmit, toolCallRenderer })}
       {message.thinkingOutput && <details className="chat-message-thinking"><summary>{t("chat.thinking", "Thinking")}</summary><pre className="chat-message-thinking-content">{linkifyFilePaths(message.thinkingOutput)}</pre></details>}
       {renderedAttachments}
@@ -436,11 +537,14 @@ export function useStandardChatActionGesture() {
   return { beginTouchActionGesture, markHandledSendTouch, consumeHandledSendTouch };
 }
 
-export function StandardChatActionButton({ isStreaming, canSend, onSend, onStop, sendLabel, stopLabel, classNameSend = "chat-input-send", classNameStop = "chat-input-stop", showSendText = false, sendTestId = "chat-send-btn", stopTestId = "chat-stop-btn" }: StandardChatActionButtonProps) {
+export function StandardChatActionButton({ isStreaming, canSend, onSend, onStop, sendLabel, stopLabel, classNameSend = "chat-input-send", classNameStop = "chat-input-stop", showSendText = false, showStopText, sendTestId = "chat-send-btn", stopTestId = "chat-stop-btn" }: StandardChatActionButtonProps) {
   const { t } = useTranslation("app");
   const { beginTouchActionGesture, markHandledSendTouch, consumeHandledSendTouch } = useStandardChatActionGesture();
+  // FNXC:StandardChatSurface 2026-07-07-00:00: resolve the Stop button's visible-text flag
+  // independently of Send's, defaulting to showSendText when the caller doesn't opt in (FN-7655).
+  const showStop = showStopText ?? showSendText;
   if (isStreaming) {
-    return <button type="button" className={classNameStop} onPointerDown={(event) => { if (event.pointerType && event.pointerType !== "mouse") { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); onStop?.(); } }} onTouchStart={(event) => { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); onStop?.(); }} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (consumeHandledSendTouch()) return; onStop?.(); }} aria-label={stopLabel ?? t("chat.stopGeneration", "Stop generation")} data-testid={stopTestId} style={{ touchAction: "manipulation" }}><span className="chat-input-stop-icon" aria-hidden="true" />{showSendText && <span>{stopLabel ?? t("chat.stopGeneration", "Stop generation")}</span>}</button>;
+    return <button type="button" className={classNameStop} onPointerDown={(event) => { if (event.pointerType && event.pointerType !== "mouse") { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); onStop?.(); } }} onTouchStart={(event) => { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); onStop?.(); }} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (consumeHandledSendTouch()) return; onStop?.(); }} aria-label={stopLabel ?? t("chat.stopGeneration", "Stop generation")} data-testid={stopTestId} style={{ touchAction: "manipulation" }}><span className="chat-input-stop-icon" aria-hidden="true" />{showStop && <span>{stopLabel ?? t("chat.stopGeneration", "Stop generation")}</span>}</button>;
   }
   return <button type="button" className={classNameSend} onPointerDown={(event) => { if (event.pointerType && event.pointerType !== "mouse") { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); void onSend(); } }} onTouchStart={(event) => { event.preventDefault(); if (!beginTouchActionGesture()) return; markHandledSendTouch(); void onSend(); }} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (consumeHandledSendTouch()) return; void onSend(); }} disabled={!canSend} data-testid={sendTestId} aria-label={sendLabel ?? t("chat.send", "Send")} style={{ touchAction: "manipulation" }}><Send size={16} />{showSendText && <span>{sendLabel ?? t("chat.send", "Send")}</span>}</button>;
 }

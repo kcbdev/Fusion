@@ -39,6 +39,12 @@ const unrestrictedPolicy: AgentPermissionPolicy = {
     "command_execution": "allow",
     "network_api": "allow",
     "task_agent_mutation": "allow",
+    // FN-7728: review_gate_bypass is intentionally allow here so tests targeting this fixture's other
+    // categories are unaffected; dedicated review_gate_bypass disposition coverage lives below.
+    "review_gate_bypass": "allow",
+    // FN-7737: file_scope is intentionally allow here (matches its uniform grant-all default); dedicated
+    // file_scope disposition coverage lives below.
+    "file_scope": "allow",
   },
 };
 
@@ -50,6 +56,8 @@ const lockedDownPolicy: AgentPermissionPolicy = {
     "command_execution": "block",
     "network_api": "block",
     "task_agent_mutation": "block",
+    "review_gate_bypass": "block",
+    "file_scope": "block",
   },
 };
 
@@ -62,6 +70,8 @@ const approvalPolicy: AgentPermissionPolicy = {
     "command_execution": "require-approval",
     "network_api": "require-approval",
     "task_agent_mutation": "require-approval",
+    "review_gate_bypass": "require-approval",
+    "file_scope": "require-approval",
   },
 };
 
@@ -134,6 +144,87 @@ describe("agent-action-gate", () => {
     expect(approvalDecision.disposition).toBe("require-approval");
     expect(blockedDecision.category).toBe("task_agent_mutation");
     expect(blockedDecision.disposition).toBe("block");
+  });
+
+  // FN-7728: fn_task_bypass_review must classify as its own review_gate_bypass category,
+  // not task_agent_mutation, and must never fall through to the unrecognized-tool exempt fallback.
+  it("classifies fn_task_bypass_review as review_gate_bypass, distinct from task_agent_mutation and exempt", () => {
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_bypass_review", args: {}, permissionPolicy: unrestrictedPolicy });
+    expect(decision.category).toBe("review_gate_bypass");
+    expect(decision.category).not.toBe("task_agent_mutation");
+    expect(decision.category).not.toBe("exempt");
+    expect(decision.resourceType).toBe("task");
+  });
+
+  it.each([
+    ["allow" as const, "allow" as const],
+    ["require-approval" as const, "require-approval" as const],
+    ["block" as const, "block" as const],
+  ])("honors review_gate_bypass disposition %s for fn_task_bypass_review", (ruleDisposition, expectedDisposition) => {
+    const policy: AgentPermissionPolicy = {
+      ...unrestrictedPolicy,
+      presetId: "custom",
+      rules: { ...unrestrictedPolicy.rules, review_gate_bypass: ruleDisposition },
+    };
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_bypass_review", args: {}, permissionPolicy: policy });
+    expect(decision.category).toBe("review_gate_bypass");
+    expect(decision.disposition).toBe(expectedDisposition);
+  });
+
+  it("lets an exact toolRules.fn_task_bypass_review override win over the review_gate_bypass category rule", () => {
+    const policy: AgentPermissionPolicy = {
+      ...unrestrictedPolicy,
+      presetId: "custom",
+      rules: { ...unrestrictedPolicy.rules, review_gate_bypass: "block" },
+      toolRules: { fn_task_bypass_review: "allow" },
+    };
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_bypass_review", args: {}, permissionPolicy: policy });
+    expect(decision.category).toBe("review_gate_bypass");
+    expect(decision.disposition).toBe("allow");
+    expect(decision.metadata).toMatchObject({
+      permissionPolicyMatch: { type: "toolRule", toolName: "fn_task_bypass_review", disposition: "allow" },
+    });
+  });
+
+  // FN-7737: fn_task_file_scope_add must classify as its own file_scope category,
+  // not task_agent_mutation/file_write_delete, and must never fall through to the unrecognized-tool exempt fallback.
+  it("classifies fn_task_file_scope_add as file_scope, distinct from task_agent_mutation/file_write_delete and exempt", () => {
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_file_scope_add", args: {}, permissionPolicy: unrestrictedPolicy });
+    expect(decision.category).toBe("file_scope");
+    expect(decision.category).not.toBe("task_agent_mutation");
+    expect(decision.category).not.toBe("file_write_delete");
+    expect(decision.category).not.toBe("exempt");
+    expect(decision.resourceType).toBe("file");
+  });
+
+  it.each([
+    ["allow" as const, "allow" as const],
+    ["require-approval" as const, "require-approval" as const],
+    ["block" as const, "block" as const],
+  ])("honors file_scope disposition %s for fn_task_file_scope_add", (ruleDisposition, expectedDisposition) => {
+    const policy: AgentPermissionPolicy = {
+      ...unrestrictedPolicy,
+      presetId: "custom",
+      rules: { ...unrestrictedPolicy.rules, file_scope: ruleDisposition },
+    };
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_file_scope_add", args: {}, permissionPolicy: policy });
+    expect(decision.category).toBe("file_scope");
+    expect(decision.disposition).toBe(expectedDisposition);
+  });
+
+  it("lets an exact toolRules.fn_task_file_scope_add override win over the file_scope category rule", () => {
+    const policy: AgentPermissionPolicy = {
+      ...unrestrictedPolicy,
+      presetId: "custom",
+      rules: { ...unrestrictedPolicy.rules, file_scope: "block" },
+      toolRules: { fn_task_file_scope_add: "allow" },
+    };
+    const decision = evaluateAgentActionGate({ agentId: "a1", toolName: "fn_task_file_scope_add", args: {}, permissionPolicy: policy });
+    expect(decision.category).toBe("file_scope");
+    expect(decision.disposition).toBe("allow");
+    expect(decision.metadata).toMatchObject({
+      permissionPolicyMatch: { type: "toolRule", toolName: "fn_task_file_scope_add", disposition: "allow" },
+    });
   });
 
   it("uses exact tool overrides before task-agent category rules", () => {
@@ -269,6 +360,88 @@ describe("agent-action-gate", () => {
     expect(createApprovalRequest).toHaveBeenCalledTimes(1);
     expect(pauseForApproval).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+  FNXC:AgentGating 2026-07-05-00:25:
+  FN-7608 regression coverage: an identical gated `bash` call issued twice
+  (same command — the original symptom was `pnpm install` re-issued while the
+  first request sat pending) must NOT mint a second approval request, and
+  BOTH the newly-created and reused-pending sub-cases must invoke
+  pauseForApproval so the executor's session-abort wiring actually runs every
+  time a gate resolves to wait-for-approval — not only on first creation.
+  Uses a tiny in-memory fake backed by the real findLatestByDedupeKey
+  contract shape (id + status) to drive resolveGateOutcome's dedupe reuse.
+  */
+  it("dedupes identical pending bash approvals and pauses on both the created and reused-pending path", async () => {
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const tool = { name: "bash", label: "Bash", description: "", parameters: {}, execute };
+    const { wrapToolsWithActionGate } = await import("../pi.js");
+
+    const requests = new Map<string, { id: string; status: "pending" | "approved" | "denied" }>();
+    let nextId = 0;
+    const createApprovalRequest = vi.fn(async (decision: { approvalDedupeKey: string }) => {
+      const id = `apr-${++nextId}`;
+      requests.set(decision.approvalDedupeKey, { id, status: "pending" });
+      return { id };
+    });
+    const findApprovalByDedupeKey = vi.fn(async (dedupeKey: string) => requests.get(dedupeKey) ?? null);
+    const pauseForApproval = vi.fn();
+
+    const gated = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: approvalPolicy,
+      createApprovalRequest,
+      findApprovalByDedupeKey,
+      pauseForApproval,
+    });
+
+    const first = await (gated[0] as any).execute("call-1", { command: "pnpm install" });
+    expect(first.isError).toBe(true);
+    expect(createApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(pauseForApproval).toHaveBeenCalledTimes(1);
+    const firstApprovalId = first.decision.metadata.approvalRequestId;
+    expect(firstApprovalId).toBe("apr-1");
+
+    // Second identical call: same dedupe key, request still pending -> must
+    // reuse the existing request (no second createApprovalRequest call) but
+    // must STILL invoke pauseForApproval so the session is suspended again.
+    const second = await (gated[0] as any).execute("call-2", { command: "pnpm install" });
+    expect(second.isError).toBe(true);
+    expect(createApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(pauseForApproval).toHaveBeenCalledTimes(2);
+    expect(second.decision.metadata.approvalRequestId).toBe(firstApprovalId);
+    expect(execute).not.toHaveBeenCalled();
+
+    // A denied request must block and must never retry/execute.
+    requests.set(second.decision.metadata.dedupeKey, { id: firstApprovalId, status: "denied" });
+    const third = await (gated[0] as any).execute("call-3", { command: "pnpm install" });
+    expect(third.isError).toBe(true);
+    expect(third.error).toMatch(/denied/i);
+    expect(execute).not.toHaveBeenCalled();
+    expect(createApprovalRequest).toHaveBeenCalledTimes(1);
+
+    // An approved request executes exactly once, then completes.
+    requests.set(second.decision.metadata.dedupeKey, { id: firstApprovalId, status: "approved" });
+    const markApprovalCompleted = vi.fn();
+    const approvedGate = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: approvalPolicy,
+      createApprovalRequest,
+      findApprovalByDedupeKey,
+      pauseForApproval,
+      markApprovalCompleted,
+    });
+    const fourth = await (approvedGate[0] as any).execute("call-4", { command: "pnpm install" });
+    expect(fourth).toEqual({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(markApprovalCompleted).toHaveBeenCalledWith(firstApprovalId);
   });
 
   it.each([

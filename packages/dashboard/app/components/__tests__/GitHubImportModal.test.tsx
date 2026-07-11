@@ -139,6 +139,37 @@ describe("GitHubImportModal", () => {
     expect(source).toContain(".modal.github-import-modal:not(.github-import-modal--embedded) {");
   });
 
+  it("FN-7694: does not viewport-cap the embedded preview pane in the tablet @media (max-width: 860px) band", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    const tabletBlock = source.match(/@media \(max-width: 860px\) \{[\s\S]*?\n\}\n/)?.[0] ?? "";
+    expect(tabletBlock).not.toBe("");
+
+    // The regressed leak: an UNSCOPED `.github-import-preview-pane { ... max-height: 50% ... }`
+    // (or `.github-import-list-pane`) rule inside the tablet media block would apply to the
+    // embedded surface too, clipping a tall selected issue/PR preview (FN-7694 symptom).
+    expect(tabletBlock).not.toMatch(/(?:^|\n)\s*\.github-import-preview-pane\s*\{[^}]*max-height:\s*50%/);
+    expect(tabletBlock).not.toMatch(/(?:^|\n)\s*\.github-import-list-pane\s*\{[^}]*max-height:\s*50%/);
+
+    // Every pane/layout rule in the tablet block must be scoped to the non-embedded dialog only.
+    expect(tabletBlock).toContain(
+      ".github-import-modal:not(.github-import-modal--embedded) .github-import-preview-pane {\n    flex: none;\n    max-height: 50%;\n  }",
+    );
+    expect(tabletBlock).toContain(".github-import-modal:not(.github-import-modal--embedded) .github-import-list-pane {");
+    expect(tabletBlock).toContain(".github-import-modal:not(.github-import-modal--embedded) .github-import-workspace {");
+    expect(tabletBlock).toContain(".github-import-modal:not(.github-import-modal--embedded) .github-import-workspace__resize-handle {");
+
+    // Guard: the dialog path must still receive the tablet stacking/cap behavior (unchanged for non-embedded).
+    expect(tabletBlock).toMatch(
+      /\.github-import-modal:not\(\.github-import-modal--embedded\) \.github-import-list-pane \{[^}]*max-height:\s*50%[^}]*\}/,
+    );
+
+    // The embedded wide two-pane preview rule must keep its own non-capped layout so the fix
+    // cannot be silently reverted by re-adding a viewport cap.
+    const wideContainerBlock = source.match(/@container github-import-embedded \(min-width: 720px\) \{[\s\S]*?\n\}\n/)?.[0] ?? "";
+    expect(wideContainerBlock).toContain(".github-import-modal--embedded .github-import-preview-pane {\n    flex: 1 1 auto;\n    min-height: 0;\n  }");
+    expect(wideContainerBlock).not.toContain("max-height: 50%");
+  });
+
   it("styles import type tabs like the Artifacts button bar", () => {
     const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
     const tabsRule = source.match(/\.github-import-tabs\s*\{[^}]*\}/)?.[0] ?? "";
@@ -154,8 +185,25 @@ describe("GitHubImportModal", () => {
     expect(activeRule).toContain("background: color-mix(in srgb, var(--todo) 12%, transparent);");
   });
 
+  /*
+   * FNXC:GitHubImport 2026-07-07-00:00:
+   * FN-7657 introduced per-project persistence for the import view (provider/tab/labels/remote/selection) under
+   * `kb-dashboard-github-import-state` (unscoped when no projectId is passed, `kb:{projectId}:...` otherwise). Most
+   * pre-existing tests in this file render without a projectId and therefore share the SAME unscoped storage key, so
+   * that key (and the projectIds exercised anywhere in this file) must be cleared before EVERY test or state written
+   * by one test would leak into the next test's initial render.
+   */
+  const GITHUB_IMPORT_STATE_KEY = "kb-dashboard-github-import-state";
+  const clearAllPersistedImportState = () => {
+    window.localStorage.removeItem(GITHUB_IMPORT_STATE_KEY);
+    for (const projectId of ["project-1", "project-2", "project-a", "project-b"]) {
+      window.localStorage.removeItem(`kb:${projectId}:${GITHUB_IMPORT_STATE_KEY}`);
+    }
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    clearAllPersistedImportState();
     vi.mocked(fetchGitRemotes).mockReset();
     vi.mocked(apiFetchGitHubIssues).mockReset();
     vi.mocked(apiImportGitHubIssue).mockReset();
@@ -2229,6 +2277,271 @@ describe("GitHubImportModal", () => {
         // Should show 2 pull requests, 0 imported
         expect(screen.getByText("2 pull requests")).toBeTruthy();
         expect(screen.getByText("0 imported")).toBeTruthy();
+      });
+    });
+  });
+
+  /*
+   * FNXC:GitHubImport 2026-07-07-00:00:
+   * FN-7657 symptom verification. The embedded Import Tasks view fully unmounts on navigation away (e.g. to Board) and
+   * remounts fresh on return; before this fix every one of these fields reset to defaults on remount. These tests
+   * unmount + remount a fresh instance with the SAME projectId to simulate exactly that, and assert restoration.
+   */
+  describe("import state retention on exit and return (FN-7657)", () => {
+    const GITHUB_IMPORT_STATE_KEY = "kb-dashboard-github-import-state";
+    const originalInnerWidth = window.innerWidth;
+
+    const clearImportState = (projectId?: string) => {
+      const key = projectId ? `kb:${projectId}:${GITHUB_IMPORT_STATE_KEY}` : GITHUB_IMPORT_STATE_KEY;
+      window.localStorage.removeItem(key);
+    };
+
+    beforeEach(() => {
+      clearImportState("project-1");
+      clearImportState("project-2");
+      clearImportState(undefined);
+    });
+
+    afterEach(() => {
+      clearImportState("project-1");
+      clearImportState("project-2");
+      clearImportState(undefined);
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    it("restores the active tab, label filter, and selected issue after unmount and remount for the same project", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValue([
+        { number: 1, title: "Persisted Issue", body: "Body", html_url: "https://github.com/dustinbyrne/kb/issues/1", labels: [] },
+      ]);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Persisted Issue")).toBeTruthy();
+      });
+
+      fireEvent.change(screen.getByPlaceholderText(/Filter:/), { target: { value: "bug" } });
+      // The label change re-triggers auto-load (briefly disabling the list); wait for it to settle before selecting.
+      await waitFor(() => {
+        expect(screen.getByRole("radio", { name: /Select issue #1/i })).not.toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Persisted Issue")).toBeTruthy();
+      });
+
+      // Simulate navigating away from the embedded view (component fully unmounts).
+      first.unmount();
+
+      // Simulate returning to the view: a brand-new instance mounts for the same project.
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect((screen.getByPlaceholderText(/Filter:/) as HTMLInputElement).value).toBe("bug");
+      });
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Persisted Issue")).toBeTruthy();
+      });
+    });
+
+    it("restores the Pull Requests tab and selected PR after unmount and remount", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValue(mockPulls);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Test PR")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Test PR")).toBeTruthy();
+      });
+
+      first.unmount();
+
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      // Restored straight to the Pull Requests tab, with the prior PR selection re-applied.
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: /Pull Requests/i })).toHaveAttribute("aria-selected", "true");
+      });
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Test PR")).toBeTruthy();
+      });
+    });
+
+    it("restores GitLab provider, resource inputs, and selection after unmount and remount", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue([]);
+      vi.mocked(apiFetchGitLabProjectIssues).mockResolvedValue([
+        { resourceKind: "project_issue", id: 1, iid: 2, projectId: 3, projectPath: "group/project", title: "GitLab bug", description: "Body", webUrl: "https://gitlab.example.com/group/project/-/issues/2", state: "opened", labels: ["bug"] },
+      ]);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: "GitLab" }));
+      fireEvent.change(screen.getByLabelText("GitLab project path or ID"), { target: { value: "group/project" } });
+      fireEvent.click(screen.getByRole("button", { name: /Load/ }));
+
+      fireEvent.click(await screen.findByText(/#2 GitLab bug/));
+      await waitFor(() => {
+        expect(screen.getByTestId("gitlab-import-preview-card")).toBeTruthy();
+      });
+
+      first.unmount();
+
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      // Provider tab and GitLab project input are restored immediately from persisted state.
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "GitLab" })).toHaveAttribute("aria-pressed", "true");
+      });
+      await waitFor(() => {
+        expect((screen.getByLabelText("GitLab project path or ID") as HTMLInputElement).value).toBe("group/project");
+      });
+      // The hydrated-on-mount auto-load re-fetches the list and re-applies the restored selection.
+      await waitFor(() => {
+        expect(screen.getByTestId("gitlab-import-preview-card")).toBeTruthy();
+      });
+    });
+
+    it("keeps the existing default remote auto-detect behavior when no state has ever been persisted", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([
+        { number: 9, title: "Fresh Issue", body: "", html_url: "https://github.com/dustinbyrne/kb/issues/9", labels: [] },
+      ]);
+
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      // No persisted state exists for this project: the single detected remote is still auto-selected and its issues load.
+      await waitFor(() => {
+        expect(screen.getByTestId("github-import-single-remote")).toBeTruthy();
+        expect(apiFetchGitHubIssues).toHaveBeenCalledWith("dustinbyrne", "kb", 30, undefined);
+        expect(screen.getByText("Fresh Issue")).toBeTruthy();
+      });
+    });
+
+    it("does not leak persisted state across different projects", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValue([
+        { number: 1, title: "Project One Issue", body: "", html_url: "https://github.com/dustinbyrne/kb/issues/1", labels: [] },
+      ]);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+      await waitFor(() => expect(screen.getByText("Project One Issue")).toBeTruthy());
+      fireEvent.change(screen.getByPlaceholderText(/Filter:/), { target: { value: "bug" } });
+      // The label change re-triggers auto-load (briefly disabling the list); wait for it to settle before selecting.
+      await waitFor(() => {
+        expect(screen.getByRole("radio", { name: /Select issue #1/i })).not.toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Project One Issue")).toBeTruthy();
+      });
+      first.unmount();
+
+      // (project-1's own selection is verified above; now assert isolation for project-2.)
+      // A different project must NOT see project-1's persisted filter/selection.
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-2" presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect((screen.getByPlaceholderText(/Filter:/) as HTMLInputElement).value).toBe("");
+      });
+      expect(screen.getByTestId("github-import-preview-empty")).toBeTruthy();
+    });
+
+    it("clears gracefully when a persisted selection is no longer present in the reloaded list", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([
+        { number: 1, title: "Will Vanish", body: "", html_url: "https://github.com/dustinbyrne/kb/issues/1", labels: [] },
+      ]);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+      await waitFor(() => expect(screen.getByText("Will Vanish")).toBeTruthy());
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+      await waitFor(() => {
+        expect(within(screen.getByTestId("github-import-preview-card")).getByText("Will Vanish")).toBeTruthy();
+      });
+      first.unmount();
+
+      // On return, the reloaded list no longer contains issue #1 (e.g. closed/merged/deleted upstream).
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([
+        { number: 2, title: "Still Here", body: "", html_url: "https://github.com/dustinbyrne/kb/issues/2", labels: [] },
+      ]);
+
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      // No crash and no stuck preview: the stale selection is dropped and the list/empty-preview state renders cleanly.
+      await waitFor(() => {
+        expect(screen.getByText("Still Here")).toBeTruthy();
+      });
+      expect(screen.getByTestId("github-import-preview-empty")).toBeTruthy();
+    });
+
+    it("does not strand a restored selection on an empty mobile preview pane after remount", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 480,
+      });
+      window.dispatchEvent(new Event("resize"));
+
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValue([
+        { number: 1, title: "Mobile Persisted Issue", body: "", html_url: "https://github.com/dustinbyrne/kb/issues/1", labels: [] },
+      ]);
+
+      const first = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+      await waitFor(() => expect(screen.getByText("Mobile Persisted Issue")).toBeTruthy());
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+      first.unmount();
+
+      render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation="embedded" />,
+      );
+
+      // A fresh mount always starts on the list pane (never the preview pane), so a restored selection can never strand
+      // the user staring at a bare/empty preview — the list (with the restored selection re-applied) is visible instead.
+      await waitFor(() => {
+        const listPane = screen.getByTestId("github-import-list-pane");
+        expect(listPane.classList.contains("active")).toBe(true);
+        expect(screen.getByTestId("github-import-preview-pane").classList.contains("active")).toBe(false);
+      });
+      await waitFor(() => {
+        const radio = screen.getByRole("radio", { name: /Select issue #1/i }) as HTMLInputElement;
+        expect(radio.checked).toBe(true);
       });
     });
   });

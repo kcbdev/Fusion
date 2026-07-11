@@ -2,6 +2,24 @@ export { AgentLogger, type AgentLoggerOptions, summarizeToolArgs } from "./agent
 export { reloadExemptTools, addToExemptTools, getExemptToolNames } from "./agent-action-gate.js";
 export { createFusionAuthStorage, createFusionModelRegistry } from "./auth-storage.js";
 export {
+  wrapAuthStorageWithApiKeyProviders,
+  mergeAuthStorageReads,
+  createReadOnlyAuthFileStorage,
+  type LoginCallbacks,
+  type DashboardAuthStorage,
+} from "./provider-auth.js";
+export {
+  resolveApiType,
+  registerCustomProviders,
+  reregisterCustomProviders,
+} from "./custom-provider-registry.js";
+export {
+  seedDashboardProviders,
+  type SeedDashboardProvidersStore,
+  type SeedDashboardProvidersOptions,
+  type SeedDashboardProvidersResult,
+} from "./provider-registration.js";
+export {
   createTaskCreateTool,
   createTaskListTool,
   createTaskShowTool,
@@ -816,6 +834,12 @@ export {
   createResolvedAgentSession,
   promptWithAutoRetry,
   describeAgentModel,
+  resolveExecutorThinkingLevel,
+  resolveExecutorFallbackThinkingLevel,
+  resolvePlanningFallbackThinkingLevel,
+  resolveValidatorFallbackThinkingLevel,
+  resolveTitleSummarizerFallbackThinkingLevel,
+  resolveMergerFallbackThinkingLevel,
   extractRuntimeHint,
   extractRuntimeModel,
   type ResolvedSessionOptions,
