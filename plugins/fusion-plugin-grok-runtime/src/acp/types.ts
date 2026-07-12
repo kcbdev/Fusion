@@ -1,3 +1,4 @@
+/* Vendored ACP client from fusion-plugin-acp-runtime — see ./VENDORED.md (FNXC:GrokAcp 2026-07-11-16:00). */
 // Local types for the ACP (Agent Client Protocol) runtime plugin.
 //
 // The wire protocol types come from `@agentclientprotocol/sdk` (the `schema`

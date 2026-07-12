@@ -1,3 +1,4 @@
+/* Vendored ACP client from fusion-plugin-acp-runtime — see ./VENDORED.md (FNXC:GrokAcp 2026-07-11-16:00). */
 // ACP connection layer: spawn → ClientSideConnection → initialize handshake.
 //
 // U2 establishes the transport and completes the `initialize` handshake with
