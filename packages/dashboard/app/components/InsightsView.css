@@ -488,7 +488,34 @@ insight row is hovered, keeping the title as the dominant element.
 }
 
 /* Mobile responsive: stack panes vertically; sidebar becomes a horizontal scroller */
-@media (max-width: 768px) {
+@media (max-width: 768px), (max-height: 480px) {
+  /*
+  FNXC:Insights 2026-07-11-20:27:
+  FN-7830: Insights has the widest ViewHeader actions cluster, so mobile must give the title its own full-width row and wrap actions below it instead of shrinking the title to an `I…` ellipsis or crowding touch targets.
+  */
+  .insights-view .view-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-sm) var(--space-md);
+  }
+
+  .insights-view .view-header__title {
+    flex: 1 0 100%;
+    min-width: 100%;
+  }
+
+  .insights-view .view-header__title span {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .insights-view .view-header__actions {
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+  }
+
   .insights-body {
     flex-direction: column;
   }
