@@ -336,13 +336,18 @@ export class GrokRuntimeAdapter implements AgentRuntime {
     const hasConnection =
       acp && "connection" in session && Boolean((session as { connection?: unknown }).connection);
 
+    /*
+    FNXC:GrokAcp 2026-07-12-06:15:
+    Dead / disposed sessions have no ACP connection. Follow-up prompts must not
+    append a user message and return silently — always re-surface a diagnostic
+    via onText + assistant message so multi-turn chat stays visible. Prefer the
+    previous errorMessage when present so operators still see the root cause.
+    */
     if (!hasConnection) {
       const existing = grokSession.state.errorMessage?.trim();
-      if (existing) {
-        return;
-      }
-      const diagnostic =
-        "Grok ACP session has no live connection. The `grok agent stdio` process failed to start or was disposed.";
+      const diagnostic = existing
+        ? `Grok ACP session has no live connection (previous error: ${existing}). Start a new session to retry.`
+        : "Grok ACP session has no live connection. The `grok agent stdio` process failed to start or was disposed.";
       grokSession.state.errorMessage = diagnostic;
       grokSession.callbacks.onText?.(diagnostic);
       appendMessage(grokSession, "assistant", diagnostic);
