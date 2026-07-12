@@ -113,12 +113,21 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       if (!options?.chatManager) throw new ApiError(503, "Chat manager not available");
       return options.chatManager;
     }
-    const projectStore = await getOrCreateProjectStore(projectId);
-    const chatStore = getOrCreateScopedChatStore(projectStore);
+    /*
+    FNXC:GrokAcp 2026-07-11-17:00:
+    Chat list/create use resolveProjectChatContext, which falls back to the host
+    default store when no engine is running for the project (nested dashboard /
+    lockfile-blocked engines). ChatManager must use that same store/chatStore
+    pair — getOrCreateProjectStore alone pointed at a different fusion dir, so
+    sessions visible in the UI 404'd on sendMessage ("Chat session not found").
+    Prefer the engine plugin runner when available; otherwise the host runner
+    (e.g. Grok ACP 0.2) so CLI runtimes still resolve.
+    */
+    const { store: scopedStore, chatStore } = await resolveScopedChatStore(projectId);
     const engine = options?.engineManager?.getEngine(projectId);
     const projectPluginRunner = engine?.getPluginRunner?.();
     const pluginRunner = projectPluginRunner ?? options?.pluginRunner;
-    return getOrCreateScopedChatManager(projectStore, chatStore, pluginRunner, Boolean(projectPluginRunner));
+    return getOrCreateScopedChatManager(scopedStore, chatStore, pluginRunner, Boolean(projectPluginRunner));
   }
   const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
 

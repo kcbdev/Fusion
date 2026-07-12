@@ -1,3 +1,4 @@
+/* Vendored ACP client from fusion-plugin-acp-runtime — see ./VENDORED.md (FNXC:GrokAcp 2026-07-11-16:00). */
 // Resolves the ACP agent launch configuration from plugin settings.
 //
 // Unlike the Claude/Droid CLIs (one fixed binary per plugin), ACP is a protocol:

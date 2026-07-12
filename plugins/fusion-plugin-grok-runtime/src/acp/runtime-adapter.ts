@@ -1,3 +1,4 @@
+/* Vendored ACP client from fusion-plugin-acp-runtime — see ./VENDORED.md (FNXC:GrokAcp 2026-07-11-16:00). */
 // AgentRuntime adapter for the ACP runtime.
 //
 // U3 implements the real session lifecycle: createSession spawns + handshakes
