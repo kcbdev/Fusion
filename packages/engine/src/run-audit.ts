@@ -434,6 +434,8 @@ export type DatabaseMutationType =
   | "task:steering-comment:add"
   | "task:assign"
   | "task:checkout"
+  | "agent:auto-recover-error-state"
+  | "agent:error-retry-exhausted"
   | "task:release"
   | "task:pause"
   | "task:unpause"

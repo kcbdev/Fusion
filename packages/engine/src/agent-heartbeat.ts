@@ -34,6 +34,7 @@ import { resolveHeartbeatPromptTemplate, resolveHeartbeatScopeDisciplineMode, se
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { createLogger, heartbeatLog, formatError } from "./logger.js";
+import { classifyError, isOperatorActionableAgentError } from "./transient-error-detector.js";
 
 /**
  * FNXC:WorktreeAcquisition 2026-07-09-00:00:
@@ -51,6 +52,17 @@ import { createLogger, heartbeatLog, formatError } from "./logger.js";
  * as the cross-heartbeat counter.
  */
 const MAX_HEARTBEAT_WORKTREE_ACQUISITION_RETRIES = 3;
+
+/*
+FNXC:HeartbeatRecovery 2026-07-11-00:00:
+FN-7835 requires durable heartbeat-managed agents in error state to retry on their next heartbeat instead of staying stranded. Recovery is intentionally bounded by a consecutive-attempt budget so persistent failures park the agent instead of forming an infinite retry loop.
+
+FNXC:HeartbeatRecovery 2026-07-11-00:00:
+FN-7672 requires durable agent error recovery to stay classification-gated: only transient, non-operator-actionable lastError values may be retried automatically. Credential, quota, model-access, and permanent configuration failures must remain parked for operator action instead of burning heartbeat retries.
+*/
+export const MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS = 5;
+export const HEARTBEAT_ERROR_RECOVERY_METADATA_KEY = "heartbeatErrorRecovery";
+export const HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON = "error-retry-exhausted";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
@@ -1723,14 +1735,66 @@ export class HeartbeatMonitor {
     if (!completionResult.skipStateTransition) {
       try {
         if (completionResult.status === "failed") {
-          await this.store.updateAgentState(agentId, "error");
-          await this.store.updateAgent(agentId, { lastError: completionResult.stderrExcerpt ?? "Run failed" });
+          const latestAgent = await this.store.getAgent(agentId);
+          const errorRecoveryLimit = this.taskStore
+            ? resolveErrorRecoveryLimit(await this.taskStore.getSettings().catch((settingsErr) => {
+              heartbeatLog.warn(`Agent ${agentId} error-recovery limit lookup failed: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)} — using default limit`);
+              return undefined;
+            }))
+            : MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS;
+          const retryCount = latestAgent ? readHeartbeatErrorRetryCount(latestAgent) : 0;
+          const failedWithRecoverableError = isHeartbeatErrorRecoverable({ lastError: completionResult.stderrExcerpt ?? "Run failed" });
+          /*
+          FNXC:HeartbeatRecovery 2026-07-11-19:57:
+          FN-7835's primary timer path cannot rely on a future heartbeat to perform exhaustion bookkeeping: once retryCount reaches the limit, timer eligibility intentionally stops dispatching error-state agents. Park the agent paused on the failing boundary run so the bounded retry contract is reachable in production.
+          */
+          if (
+            latestAgent
+            && isHeartbeatManaged(latestAgent)
+            && latestAgent.runtimeConfig?.enabled !== false
+            && retryCount >= errorRecoveryLimit
+            && retryCount > 0
+            && failedWithRecoverableError
+          ) {
+            await this.store.updateAgentState(agentId, "paused");
+            await this.store.updateAgent(agentId, {
+              lastError: completionResult.stderrExcerpt ?? "Run failed",
+              pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+            });
+            heartbeatLog.warn(`Agent ${agentId} error recovery exhausted after ${retryCount}/${errorRecoveryLimit} attempts — pausing`);
+            if (this.taskStore) {
+              try {
+                const runWithSource = run as unknown as { source?: unknown };
+                const runSource = typeof runWithSource.source === "string" ? runWithSource.source : undefined;
+                const audit = createRunAuditor(this.taskStore, {
+                  runId,
+                  agentId,
+                  phase: "heartbeat",
+                  source: runSource,
+                });
+                await audit.database({
+                  type: "agent:error-retry-exhausted",
+                  target: agentId,
+                  metadata: { agentId, attempts: retryCount, limit: errorRecoveryLimit, source: runSource },
+                });
+              } catch (auditErr) {
+                heartbeatLog.warn(`Agent ${agentId} error-retry exhaustion audit failed: ${auditErr instanceof Error ? auditErr.message : String(auditErr)} — continuing`);
+              }
+            }
+          } else {
+            await this.store.updateAgentState(agentId, "error");
+            await this.store.updateAgent(agentId, { lastError: completionResult.stderrExcerpt ?? "Run failed" });
+          }
         } else if (completionResult.status === "terminated") {
           await this.store.updateAgentState(agentId, "paused");
         } else {
           // Completed successfully - back to active and clear any stale failure marker.
           await this.store.updateAgentState(agentId, "active");
-          await this.store.updateAgent(agentId, { lastError: undefined });
+          const latestAgent = await this.store.getAgent(agentId);
+          await this.store.updateAgent(agentId, {
+            lastError: undefined,
+            ...(latestAgent ? { metadata: resetHeartbeatErrorRecoveryMetadata(latestAgent) } : {}),
+          });
         }
       } catch (stateTransErr) {
         heartbeatLog.warn(`Agent ${agentId} state transition failed: ${stateTransErr instanceof Error ? stateTransErr.message : String(stateTransErr)} — continuing`);
@@ -2174,7 +2238,7 @@ export class HeartbeatMonitor {
         }
 
         // Resolve agent
-        const agent = preloadedAgent ?? await this.store.getAgent(agentId);
+        let agent = preloadedAgent ?? await this.store.getAgent(agentId);
         if (!agent) {
           heartbeatLog.warn(`Agent ${agentId} not found — completing run as failed`);
           await this.completeRun(agentId, run.id, {
@@ -2182,6 +2246,66 @@ export class HeartbeatMonitor {
             stderrExcerpt: `Agent ${agentId} not found`,
           });
           return (await this.store.getRunDetail(agentId, run.id))!;
+        }
+
+        if (agent.state === "error") {
+          const errorRecoveryLimit = resolveErrorRecoveryLimit(heartbeatModelSettings);
+          const currentRetryCount = readHeartbeatErrorRetryCount(agent);
+          const canAttemptErrorRecovery = isErrorRecoveryEligible(agent, errorRecoveryLimit);
+          const recoveryBudgetExhausted = isHeartbeatManaged(agent)
+            && agent.runtimeConfig?.enabled !== false
+            && isHeartbeatErrorRecoverable(agent)
+            && currentRetryCount >= errorRecoveryLimit;
+
+          if (canAttemptErrorRecovery) {
+            const attempt = currentRetryCount + 1;
+            const metadata = incrementHeartbeatErrorRecoveryMetadata(agent);
+            try {
+              await this.store.updateAgentState(agentId, "active");
+              await this.store.updateAgent(agentId, { lastError: undefined, metadata });
+              heartbeatLog.log(`Agent ${agentId} auto-recovered from error state for heartbeat retry attempt ${attempt}/${errorRecoveryLimit}`);
+              await audit.database({
+                type: "agent:auto-recover-error-state",
+                target: agentId,
+                metadata: { agentId, attempt, limit: errorRecoveryLimit, source },
+              });
+              agent = (await this.store.getAgent(agentId)) ?? { ...agent, state: "active", lastError: undefined, metadata };
+            } catch (recoveryErr) {
+              heartbeatLog.warn(`Agent ${agentId} error-state recovery bookkeeping failed: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)} — continuing with existing state`);
+            }
+          } else if (recoveryBudgetExhausted) {
+            try {
+              await this.store.updateAgentState(agentId, "paused");
+              await this.store.updateAgent(agentId, { pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON });
+              heartbeatLog.warn(`Agent ${agentId} error recovery exhausted after ${currentRetryCount}/${errorRecoveryLimit} attempts — pausing`);
+              await audit.database({
+                type: "agent:error-retry-exhausted",
+                target: agentId,
+                metadata: { agentId, attempts: currentRetryCount, limit: errorRecoveryLimit, source },
+              });
+            } catch (exhaustionErr) {
+              heartbeatLog.warn(`Agent ${agentId} error-retry exhaustion bookkeeping failed: ${exhaustionErr instanceof Error ? exhaustionErr.message : String(exhaustionErr)} — completing run without retry`);
+            }
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, attempts: currentRetryCount, limit: errorRecoveryLimit },
+              skipStateTransition: true,
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          } else {
+            heartbeatLog.log(`Agent ${agentId} state is "error" but lastError is not eligible for heartbeat recovery — graceful exit`);
+            try {
+              await this.store.updateAgentState(agentId, "error");
+            } catch (restoreErr) {
+              heartbeatLog.warn(`Agent ${agentId} non-recoverable error-state restore failed: ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)} — preserving run completion`);
+            }
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: "invalid_state", state: agent.state, recoveryEligible: false },
+              skipStateTransition: true,
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          }
         }
 
         // Check if agent has identity (used later for no-task run decisions)
@@ -3950,12 +4074,67 @@ function isHeartbeatManaged(agent: Agent): boolean {
   return !isEphemeralAgent(agent);
 }
 
+type HeartbeatErrorRecoveryMetadata = {
+  consecutiveAttempts: number;
+  updatedAt?: string;
+};
+
+export function resolveErrorRecoveryLimit(settings: Settings | null | undefined): number {
+  const raw = (settings as { heartbeatErrorRecoveryAttempts?: unknown } | null | undefined)?.heartbeatErrorRecoveryAttempts;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS;
+  }
+  return Math.max(1, Math.floor(raw));
+}
+
+export function readHeartbeatErrorRetryCount(agent: Pick<Agent, "metadata">): number {
+  const metadata = (agent.metadata ?? {}) as Record<string, unknown>;
+  const raw = metadata[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY];
+  if (!raw || typeof raw !== "object") {
+    return 0;
+  }
+  const candidate = raw as Record<string, unknown>;
+  const count = candidate.consecutiveAttempts;
+  return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+export function buildHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">, consecutiveAttempts: number): Record<string, unknown> {
+  return {
+    ...(agent.metadata ?? {}),
+    [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: {
+      consecutiveAttempts: Math.max(0, Math.floor(consecutiveAttempts)),
+      updatedAt: new Date().toISOString(),
+    } satisfies HeartbeatErrorRecoveryMetadata,
+  };
+}
+
+export function incrementHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">): Record<string, unknown> {
+  return buildHeartbeatErrorRecoveryMetadata(agent, readHeartbeatErrorRetryCount(agent) + 1);
+}
+
+export function resetHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">): Record<string, unknown> {
+  return buildHeartbeatErrorRecoveryMetadata(agent, 0);
+}
+
+export function isHeartbeatErrorRecoverable(agent: Pick<Agent, "lastError">): boolean {
+  const lastError = agent.lastError ?? "";
+  return classifyError(lastError) === "transient" && !isOperatorActionableAgentError(lastError);
+}
+
+export function isErrorRecoveryEligible(agent: Agent, limit: number): boolean {
+  return agent.state === "error"
+    && isHeartbeatManaged(agent)
+    && agent.runtimeConfig?.enabled !== false
+    && isHeartbeatErrorRecoverable(agent)
+    && readHeartbeatErrorRetryCount(agent) < Math.max(1, Math.floor(limit));
+}
+
 /**
  * HeartbeatTriggerScheduler manages timer-based heartbeat triggers for agents.
  *
  * Timers are armed only for durable agents where all of the following hold:
  * - `runtimeConfig.enabled !== false`
- * - `state ∈ {active, running, idle}`
+ * - `state ∈ {active, running, idle}` or `state === "error"` with retry budget remaining
  *
  * Any other state, or any ephemeral/task-worker agent, clears the timer.
  * State changes and heartbeat config updates are observed via AgentStore
@@ -3998,6 +4177,7 @@ export class HeartbeatTriggerScheduler {
   private callback: TriggerCallback;
   private taskStore?: TaskStore;
   private timers: Map<string, AgentTimer> = new Map();
+  private errorRecoveryLimit = MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS;
   private pendingAssignments: Map<string, PendingAssignment> = new Map();
   private registrationEpochs: Map<string, number> = new Map();
   private running = false;
@@ -4501,10 +4681,15 @@ export class HeartbeatTriggerScheduler {
     }
   }
 
+  private updateErrorRecoveryLimit(settings: Settings | null | undefined): number {
+    this.errorRecoveryLimit = resolveErrorRecoveryLimit(settings);
+    return this.errorRecoveryLimit;
+  }
+
   private isTimerEligibleAgent(agent: Agent): boolean {
     return isHeartbeatManaged(agent)
       && agent.runtimeConfig?.enabled !== false
-      && isTickableState(agent.state);
+      && (isTickableState(agent.state) || isErrorRecoveryEligible(agent, this.errorRecoveryLimit));
   }
 
   private getAgentTimerConfig(agent: Agent): AgentHeartbeatConfig {
@@ -4727,6 +4912,7 @@ export class HeartbeatTriggerScheduler {
         ? await this.taskStore.getSettings()
         : null;
       const staleMultiplier = this.resolveRepairStaleMultiplier(settings);
+      this.updateErrorRecoveryLimit(settings);
       const agents = await this.store.listAgents();
       let rearmedCount = 0;
       let zombieRearmedCount = 0;
@@ -4851,8 +5037,16 @@ export class HeartbeatTriggerScheduler {
         this.unregisterAgent(agentId);
         return;
       }
-      if (!isHeartbeatManaged(agent) || !isTickableState(agent.state)) {
+      if (!isHeartbeatManaged(agent) || (agent.state !== "error" && !isTickableState(agent.state))) {
         heartbeatLog.log(`Timer tick skipped for ${agentId} (state=${agent.state})`);
+        this.unregisterAgent(agentId);
+        return;
+      }
+
+      const settings = this.taskStore ? await this.taskStore.getSettings() : null;
+      const errorRecoveryLimit = this.updateErrorRecoveryLimit(settings);
+      if (agent.state === "error" && !isErrorRecoveryEligible(agent, errorRecoveryLimit)) {
+        heartbeatLog.log(`Timer tick skipped for ${agentId} (state=${agent.state}, error recovery ineligible)`);
         this.unregisterAgent(agentId);
         return;
       }
@@ -4885,7 +5079,6 @@ export class HeartbeatTriggerScheduler {
 
       // Global/engine pause guard: scheduler should not dispatch timer callbacks
       // while globally paused (hard stop) or engine paused (soft stop for timers).
-      const settings = this.taskStore ? await this.taskStore.getSettings() : null;
       if (settings?.globalPause) {
         heartbeatLog.log(`Timer tick skipped for ${agentId} (global pause active)`);
         return;
