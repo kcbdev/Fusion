@@ -71,7 +71,7 @@ never grows the page; the page must not scroll horizontally (pre wraps).
 
 .cc-syscontrols-banner--error {
   justify-content: space-between;
-  border-color: var(--danger, #f87171);
+  border-color: var(--color-error);
 }
 
 .cc-syscontrols-job-status {
@@ -84,7 +84,7 @@ never grows the page; the page must not scroll horizontally (pre wraps).
 }
 
 .cc-syscontrols-job-status--failed {
-  color: var(--danger, #f87171);
+  color: var(--color-error);
 }
 
 .cc-syscontrols-output {
@@ -115,11 +115,11 @@ never grows the page; the page must not scroll horizontally (pre wraps).
 }
 
 .cc-syscontrols-log-line--warn .cc-syscontrols-log-message {
-  color: var(--warning, #facc15);
+  color: var(--color-warning);
 }
 
 .cc-syscontrols-log-line--error .cc-syscontrols-log-message {
-  color: var(--danger, #f87171);
+  color: var(--color-error);
 }
 
 .cc-syscontrols-log-time {
