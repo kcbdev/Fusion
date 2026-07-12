@@ -67,6 +67,30 @@ export class HandshakeTimeoutError extends Error {
   }
 }
 
+/*
+FNXC:GrokAcp 2026-07-12-07:00:
+Grok ACP emits vendor extension notifications such as `_x.ai/session_notification`
+and `_x.ai/session/update` for hook_execution status (post_tool_use, etc.).
+@agentclientprotocol/sdk routes non-spec methods to Client.extNotification /
+extMethod; when those are absent the SDK logs Method not found (-32601) for
+every hook even though hooks themselves succeeded. Accept extensions as no-ops
+so Fusion clients stay forward-compatible without claiming Grok-only features.
+Do not forward into sessionUpdate: hook_execution is not a standard
+sessionUpdate tag and would fail zSessionNotification validation.
+*/
+
+/** No-op ACP extension handlers so vendor notifications do not Method-not-found. */
+function acceptAcpExtensions(): Pick<Client, "extMethod" | "extNotification"> {
+  return {
+    async extMethod(_method: string, _params: Record<string, unknown>) {
+      return {};
+    },
+    async extNotification(_method: string, _params: Record<string, unknown>) {
+      // Intentionally empty — informational Grok hooks / x.ai session extensions.
+    },
+  };
+}
+
 /**
  * Minimal default client handler. Later units (U3/U4/U5/U7) supply the real one
  * that bridges `session/update` into Fusion callbacks and routes permission
@@ -81,6 +105,7 @@ export function createDefaultClientHandler(): Client {
     async requestPermission() {
       return { outcome: { outcome: "cancelled" } };
     },
+    ...acceptAcpExtensions(),
   };
 }
 
@@ -182,6 +207,9 @@ export function createBridgingClientHandler(
         );
       });
     },
+    // FNXC:GrokAcp 2026-07-12-07:00: swallow `_x.ai/*` extension notifications
+    // (hook_execution, session admin, …) so ACP SDK does not log -32601.
+    ...acceptAcpExtensions(),
   };
 
   // Register fs handlers ONLY when enabled, so the advertised capability and the
