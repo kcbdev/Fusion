@@ -4087,18 +4087,30 @@ export function resolveErrorRecoveryLimit(settings: Settings | null | undefined)
   return Math.max(1, Math.floor(raw));
 }
 
-export function readHeartbeatErrorRetryCount(agent: Pick<Agent, "metadata">): number {
+export function readHeartbeatErrorRetryCount(agent: { metadata?: Record<string, unknown> | null }): number {
+  /*
+  FNXC:AgentHeartbeat 2026-07-11-22:42:
+  FN-7844 requires the heartbeat timer and self-healing sweep to honor one durable-agent error-recovery budget. Read the legacy durableErrorRecovery attempt count as part of the shared budget so agents recovered by either entry path cannot receive separate retry pools.
+  */
   const metadata = (agent.metadata ?? {}) as Record<string, unknown>;
   const raw = metadata[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY];
-  if (!raw || typeof raw !== "object") {
-    return 0;
-  }
-  const candidate = raw as Record<string, unknown>;
-  const count = candidate.consecutiveAttempts;
-  return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  const heartbeatCount = raw && typeof raw === "object"
+    ? (raw as Record<string, unknown>).consecutiveAttempts
+    : 0;
+  const legacyRaw = metadata.durableErrorRecovery;
+  const legacyCount = legacyRaw && typeof legacyRaw === "object"
+    ? (legacyRaw as Record<string, unknown>).attempts
+    : 0;
+  const normalizedHeartbeatCount = typeof heartbeatCount === "number" && Number.isFinite(heartbeatCount) && heartbeatCount > 0
+    ? Math.floor(heartbeatCount)
+    : 0;
+  const normalizedLegacyCount = typeof legacyCount === "number" && Number.isFinite(legacyCount) && legacyCount > 0
+    ? Math.floor(legacyCount)
+    : 0;
+  return Math.max(normalizedHeartbeatCount, normalizedLegacyCount);
 }
 
-export function buildHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">, consecutiveAttempts: number): Record<string, unknown> {
+export function buildHeartbeatErrorRecoveryMetadata(agent: { metadata?: Record<string, unknown> | null }, consecutiveAttempts: number): Record<string, unknown> {
   return {
     ...(agent.metadata ?? {}),
     [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: {
@@ -4108,12 +4120,13 @@ export function buildHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata
   };
 }
 
-export function incrementHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">): Record<string, unknown> {
+export function incrementHeartbeatErrorRecoveryMetadata(agent: { metadata?: Record<string, unknown> | null }): Record<string, unknown> {
   return buildHeartbeatErrorRecoveryMetadata(agent, readHeartbeatErrorRetryCount(agent) + 1);
 }
 
-export function resetHeartbeatErrorRecoveryMetadata(agent: Pick<Agent, "metadata">): Record<string, unknown> {
-  return buildHeartbeatErrorRecoveryMetadata(agent, 0);
+export function resetHeartbeatErrorRecoveryMetadata(agent: { metadata?: Record<string, unknown> | null }): Record<string, unknown> {
+  const { durableErrorRecovery: _legacyDurableErrorRecovery, ...metadata } = (agent.metadata ?? {}) as Record<string, unknown>;
+  return buildHeartbeatErrorRecoveryMetadata({ metadata }, 0);
 }
 
 export function isHeartbeatErrorRecoverable(agent: Pick<Agent, "lastError">): boolean {

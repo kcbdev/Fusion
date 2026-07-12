@@ -44,7 +44,14 @@ import {
   isRecoverableMissingWorktreeReviewFailureWithProgress,
   MERGE_ACTIVE_MISSING_WORKTREE_STATUSES,
 } from "./restart-recovery-coordinator.js";
-import { classifyError, extractMissingModulePath, isNonContinuableSessionError, isOperatorActionableAgentError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
+import { extractMissingModulePath, isNonContinuableSessionError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
+import {
+  buildHeartbeatErrorRecoveryMetadata,
+  HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+  isHeartbeatErrorRecoverable,
+  readHeartbeatErrorRetryCount,
+  resolveErrorRecoveryLimit,
+} from "./agent-heartbeat.js";
 import { classifyForeignOnlyContamination, deriveTaskIdFromFusionBranch, inspectBranchConflict, listUniqueBranchCommits } from "./branch-conflicts.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type RunAuditor } from "./run-audit.js";
 import { finalizeProvenAutoMergeTask, validateWorkflowDoneMergeProof } from "./auto-merge-finalization.js";
@@ -509,7 +516,6 @@ const DEADLOCK_RECOVERY_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS = 5 * 60_000;
 const DEFAULT_STALE_MERGING_FANOUT_MIN_AGE_MS = 15 * 60_000;
 const DEFAULT_UNBACKED_MERGING_FANOUT_GRACE_MS = 60_000;
-const DURABLE_ERROR_RECOVERY_MAX_RETRIES = 5;
 const DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS = 30_000;
 const DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS = 15 * 60_000;
 const RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS = PARKED_AGENT_LINK_FRESH_RUN_MS;
@@ -10231,13 +10237,11 @@ export class SelfHealingManager {
   } {
     const metadata = agent.metadata ?? {};
     const raw = metadata.durableErrorRecovery;
-    if (!raw || typeof raw !== "object") {
-      return { attempts: 0, consecutiveMissingModulePathCount: 0 };
-    }
-    const record = raw as Record<string, unknown>;
-    const attempts = typeof record.attempts === "number" && Number.isFinite(record.attempts)
+    const record = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const durableAttempts = typeof record.attempts === "number" && Number.isFinite(record.attempts)
       ? Math.max(0, Math.floor(record.attempts))
       : 0;
+    const attempts = Math.max(durableAttempts, readHeartbeatErrorRetryCount(agent));
     const consecutiveMissingModulePathCount =
       typeof record.consecutiveMissingModulePathCount === "number" && Number.isFinite(record.consecutiveMissingModulePathCount)
         ? Math.max(0, Math.floor(record.consecutiveMissingModulePathCount))
@@ -10255,6 +10259,36 @@ export class SelfHealingManager {
     const clampedAttempts = Math.max(1, attempts);
     const exponential = DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS * Math.pow(2, clampedAttempts - 1);
     return Math.min(exponential, DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS);
+  }
+
+  private async emitDurableAgentErrorRecoveryAudit(options: {
+    agentId: string;
+    type: "agent:auto-recover-error-state" | "agent:error-retry-exhausted";
+    attempt?: number;
+    attempts?: number;
+    limit: number;
+    source: "self-healing";
+  }): Promise<void> {
+    try {
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("durable-agent-error-recovery", options.agentId),
+        agentId: "self-healing",
+        phase: "durable-agent-error-recovery",
+        source: options.source,
+      }).database({
+        type: options.type as DatabaseMutationType,
+        target: options.agentId,
+        metadata: {
+          agentId: options.agentId,
+          ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
+          ...(options.attempts !== undefined ? { attempts: options.attempts } : {}),
+          limit: options.limit,
+          source: options.source,
+        },
+      });
+    } catch (error) {
+      log.warn(`Failed to emit durable-agent error recovery audit for ${options.agentId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async emitStaleAgentAssignmentAudit(options: {
@@ -10429,6 +10463,7 @@ export class SelfHealingManager {
 
     try {
       const settings = await this.store.getSettings();
+      const errorRecoveryLimit = resolveErrorRecoveryLimit(settings);
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!Number.isFinite(timeoutMs) || timeoutMs === undefined || timeoutMs <= 0) {
         return 0;
@@ -10485,10 +10520,7 @@ export class SelfHealingManager {
           if (this.options.hasActiveAgentExecution?.(agent.id) === true) {
             return false;
           }
-          if (classifyError(agent.lastError ?? "") !== "transient" && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")) {
-            return false;
-          }
-          if (isOperatorActionableAgentError(agent.lastError ?? "")) {
+          if (!isHeartbeatErrorRecoverable(agent) && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")) {
             return false;
           }
 
@@ -10549,11 +10581,15 @@ export class SelfHealingManager {
               continue;
             }
             const nextAttempts = recoveryState.attempts + 1;
-            const exhausted = nextAttempts >= DURABLE_ERROR_RECOVERY_MAX_RETRIES;
+            const exhausted = nextAttempts >= errorRecoveryLimit;
             const nextRetryAt = new Date(Date.now() + this.computeDurableAgentRecoveryCooldownMs(nextAttempts)).toISOString();
+            /*
+            FNXC:AgentHeartbeat 2026-07-11-22:42:
+            FN-7844 consolidates durable-agent error recovery accounting across the heartbeat timer and self-healing sweep. The sweep keeps its cooldown/stale-path metadata, but writes the shared heartbeatErrorRecovery counter and audit event so a single retry budget applies regardless of which recovery entry path fires.
+            */
             await agentStore.updateAgent(agent.id, {
               metadata: {
-                ...(agent.metadata ?? {}),
+                ...buildHeartbeatErrorRecoveryMetadata(agent, nextAttempts),
                 durableErrorRecovery: {
                   attempts: nextAttempts,
                   lastAttemptAt: new Date().toISOString(),
@@ -10566,6 +10602,15 @@ export class SelfHealingManager {
               },
             });
             if (exhausted) {
+              await this.emitDurableAgentErrorRecoveryAudit({
+                agentId: agent.id,
+                type: "agent:error-retry-exhausted",
+                attempts: nextAttempts,
+                limit: errorRecoveryLimit,
+                source: "self-healing",
+              });
+              await agentStore.updateAgentState(agent.id, "paused");
+              await agentStore.updateAgent(agent.id, { pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON });
               log.warn(`Suppressed durable-agent auto-restart for ${agent.id}: retry budget exhausted`);
               continue;
             }
@@ -10575,6 +10620,20 @@ export class SelfHealingManager {
           await agentStore.updateAgent(agent.id, {
             lastError: undefined,
           });
+
+          if (agent.state === "error") {
+            const attempt = this.getDurableAgentRecoveryState(agent).attempts + 1;
+            await this.emitDurableAgentErrorRecoveryAudit({
+              agentId: agent.id,
+              type: "agent:auto-recover-error-state",
+              attempt,
+              limit: errorRecoveryLimit,
+              source: "self-healing",
+            });
+            if (!this.options.restartDurableAgentHeartbeat) {
+              log.log(`Durable-agent transient recovery heartbeat restart unavailable for ${agent.id}; state reset only`);
+            }
+          }
 
           if (agent.state === "error" && this.options.restartDurableAgentHeartbeat) {
             const restartOk = await this.options.restartDurableAgentHeartbeat(agent.id, {

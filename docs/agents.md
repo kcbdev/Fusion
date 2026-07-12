@@ -351,25 +351,25 @@ If a heartbeat cannot create/run a session due to unavailable provider credentia
 
 ### Durable-agent transient error auto-recovery
 
-Self-healing may auto-recover **durable (non-ephemeral)** agents stuck in `state="error"` when all eligibility checks pass:
+Durable-agent error recovery is coordinated between the heartbeat timer path and the self-healing sweep. Either entry path may auto-recover **durable (non-ephemeral)** agents stuck in `state="error"` only when all eligibility checks pass:
 
 - agent is non-ephemeral (`isEphemeralAgent(...) === false`)
 - heartbeat runtime is enabled (`runtimeConfig.enabled !== false`)
 - no active heartbeat execution is already running for the agent
 - `lastError` classifies as transient network/infrastructure failure
 - `lastError` is **not** operator-actionable (credentials/model/billing-style failures)
+- stale worktree/module-resolution failures remain suppressed instead of auto-restarted
 
-When eligible, self-healing uses bounded retries with persisted metadata at `agent.metadata.durableErrorRecovery`:
+Both paths use the same persisted retry budget, `agent.metadata.heartbeatErrorRecovery.consecutiveAttempts`, with the default cap of `5` attempts (settings-overridable through `heartbeatErrorRecoveryAttempts`). The timer path provides fast recovery on the agent's own interval; the self-healing sweep is the backstop for stale `error` agents whose timer was lost, delayed, or did not re-tick. Self-healing still persists `agent.metadata.durableErrorRecovery` for sweep-specific cooldown and stale-path details:
 
 - exponential cooldown (`30s` base, capped at `15m`)
-- retry budget cap (`5` attempts)
-- persisted `attempts`, `lastAttemptAt`, `nextRetryAt`, `exhausted`, and `lastReason`
+- persisted `attempts`, `lastAttemptAt`, `nextRetryAt`, `exhausted`, `lastReason`, and stale missing-module path counters
 
-On restart attempts, the runtime triggers the normal heartbeat pipeline with `source: "automation"` and a structured `contextSnapshot.selfHealing` payload so operators can audit recovery runs in heartbeat history.
+On restart attempts, the runtime triggers the normal heartbeat pipeline with `source: "automation"` and a structured `contextSnapshot.selfHealing` payload so operators can audit recovery runs in heartbeat history. The sweep flips `error → active` before calling `executeHeartbeat`, so the heartbeat run does not re-enter run-entry error recovery or double-count the same recovery.
 
-Self-healing intentionally leaves agents in `error` (no auto-restart) when blockers are operator-actionable or non-transient, when cooldown has not elapsed, when active execution is present, or when retry budget is exhausted.
+Self-healing intentionally leaves agents in `error` (or parks them `paused` when the shared retry budget is exhausted) when blockers are operator-actionable or non-transient, when stale worktree/module-resolution suppression applies, when cooldown has not elapsed, when active execution is present, or when retry budget is exhausted.
 
-**Manager presence does not gate this sweep (FN-7672):** eligibility for durable `state="error"` recovery does *not* depend on whether the agent's `reportsTo` manager is present/active. `HeartbeatTriggerScheduler` clears timers entirely once an agent enters `state="error"`, so this recovery sweep is the *only* path back to a healthy heartbeat for a durable agent stuck in `error` — a present manager does not make the agent any less stuck. (A separate, unrelated `managerMissing` check still gates recovery of orphaned `state="running"` agents — a different failure mode where a live process's manager row was deleted.) FN-7672 root-caused a correlated 4-agent error cluster reporting to one active manager (a transient upstream auth/session blip) that could never have self-healed under the old manager-missing-only gate, even once the underlying cause resolved.
+**Manager presence does not gate this sweep (FN-7672/FN-7844):** eligibility for durable `state="error"` recovery does *not* depend on whether the agent's `reportsTo` manager is present/active. The timer path is now the fast path for heartbeat-managed error agents, while this recovery sweep remains the maintenance backstop for durable agents that are still stale in `error`; a present manager does not make the agent any less stuck. (A separate, unrelated `managerMissing` check still gates recovery of orphaned `state="running"` agents — a different failure mode where a live process's manager row was deleted.) FN-7672 root-caused a correlated 4-agent error cluster reporting to one active manager (a transient upstream auth/session blip) that could never have self-healed under the old manager-missing-only gate, even once the underlying cause resolved.
 
 - **Timer trigger:** run completes and the durable agent returns to `state="active"` (recoverable soft-fail).
 - **Assignment / on-demand trigger:** run completes with `resultJson.actionRequired = true`, then the durable agent is paused with `pauseReason="heartbeat-model-unavailable"` and `lastError` set to actionable credential guidance (including the missing provider name when detectable).

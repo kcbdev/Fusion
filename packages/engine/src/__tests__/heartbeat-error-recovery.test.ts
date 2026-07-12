@@ -42,6 +42,7 @@ import {
   HeartbeatTriggerScheduler,
   incrementHeartbeatErrorRecoveryMetadata,
   isErrorRecoveryEligible,
+  isHeartbeatErrorRecoverable,
   readHeartbeatErrorRetryCount,
   resetHeartbeatErrorRecoveryMetadata,
   resolveErrorRecoveryLimit,
@@ -143,7 +144,7 @@ describe("heartbeat error-recovery primitives", () => {
     expect(resolveErrorRecoveryLimit({ heartbeatErrorRecoveryAttempts: Number.NaN } as never)).toBe(5);
   });
 
-  it("reads, increments, and resets the counter without clobbering unrelated metadata", () => {
+  it("reads, increments, and resets the shared counter without clobbering unrelated metadata", () => {
     const agent = baseAgent({ metadata: { heartbeatTimerRepair: { repairedAt: "now" } } });
     expect(readHeartbeatErrorRetryCount(agent)).toBe(0);
 
@@ -154,8 +155,15 @@ describe("heartbeat error-recovery primitives", () => {
     const forced = buildHeartbeatErrorRecoveryMetadata({ metadata: incremented }, 4);
     expect(readHeartbeatErrorRetryCount({ metadata: forced })).toBe(4);
 
-    const reset = resetHeartbeatErrorRecoveryMetadata({ metadata: forced });
+    const legacySweepMetadata = {
+      ...forced,
+      durableErrorRecovery: { attempts: 5, exhausted: true },
+    };
+    expect(readHeartbeatErrorRetryCount({ metadata: legacySweepMetadata })).toBe(5);
+
+    const reset = resetHeartbeatErrorRecoveryMetadata({ metadata: legacySweepMetadata });
     expect(reset.heartbeatTimerRepair).toEqual({ repairedAt: "now" });
+    expect(reset.durableErrorRecovery).toBeUndefined();
     expect(readHeartbeatErrorRetryCount({ metadata: reset })).toBe(0);
     expect(reset[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]).toMatchObject({ consecutiveAttempts: 0 });
   });
@@ -168,6 +176,7 @@ describe("heartbeat error-recovery primitives", () => {
     expect(isErrorRecoveryEligible(baseAgent({ metadata: buildHeartbeatErrorRecoveryMetadata(baseAgent(), 5), lastError: "socket hang up" }), 5)).toBe(false);
     expect(isErrorRecoveryEligible(baseAgent({ lastError: "invalid api key" }), 5)).toBe(false);
     expect(isErrorRecoveryEligible(baseAgent({ lastError: "SyntaxError: Unexpected token" }), 5)).toBe(false);
+    expect(isHeartbeatErrorRecoverable({ lastError: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/deleted/node_modules/@runfusion/fusion/dist/bin.js' imported from /tmp/deleted/packages/engine/src/pi.ts" })).toBe(false);
   });
 });
 

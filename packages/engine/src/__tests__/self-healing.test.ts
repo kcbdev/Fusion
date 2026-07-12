@@ -112,6 +112,7 @@ vi.mock("../merger.js", () => ({
 }));
 
 import { SelfHealingManager, isBranchAheadOfBase, MAX_AUTO_MERGE_RETRIES } from "../self-healing.js";
+import { HEARTBEAT_ERROR_RECOVERY_METADATA_KEY, HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON } from "../agent-heartbeat.js";
 import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
@@ -1091,6 +1092,7 @@ describe("SelfHealingManager", () => {
         "orphan-1",
         expect.objectContaining({
           metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 1 }),
             durableErrorRecovery: expect.objectContaining({
               attempts: 1,
               exhausted: false,
@@ -1099,6 +1101,11 @@ describe("SelfHealingManager", () => {
           }),
         }),
       );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "orphan-1",
+        metadata: expect.objectContaining({ agentId: "orphan-1", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("orphan-1", { reason: "transient-error", attempt: 1 });
       managerWithAgents.stop();
     });
@@ -1317,18 +1324,67 @@ describe("SelfHealingManager", () => {
       const result = await managerWithAgents.recoverOrphanedAgents();
 
       expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-exhausted", "paused");
       expect(agentStore.updateAgent).toHaveBeenCalledWith(
         "agent-exhausted",
         expect.objectContaining({
           metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 5 }),
             durableErrorRecovery: expect.objectContaining({
+              attempts: 5,
               exhausted: true,
               lastReason: "retry-budget-exhausted",
             }),
           }),
         }),
       );
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("agent-exhausted", { pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-retry-exhausted",
+        target: "agent-exhausted",
+        metadata: expect.objectContaining({ agentId: "agent-exhausted", attempts: 5, limit: 5, source: "self-healing" }),
+      }));
+      managerWithAgents.stop();
+    });
+
+    it("honors heartbeat timer recovery attempts when the self-healing sweep checks exhaustion", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-shared-budget",
+          state: "error",
+          lastError: "socket hang up",
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: { [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: { consecutiveAttempts: 4 } },
+        } as unknown as Agent,
+      ]);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(restartDurableAgentHeartbeat).not.toHaveBeenCalled();
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-shared-budget", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-shared-budget",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 5 }),
+            durableErrorRecovery: expect.objectContaining({ attempts: 5, exhausted: true }),
+          }),
+        }),
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-retry-exhausted",
+        target: "agent-shared-budget",
+        metadata: expect.objectContaining({ attempts: 5, limit: 5, source: "self-healing" }),
+      }));
       managerWithAgents.stop();
     });
 
