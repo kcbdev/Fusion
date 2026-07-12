@@ -439,6 +439,77 @@ describe("DocumentsView", () => {
     expect(legacyGroup.querySelector(".documents-group-status")).not.toBeInTheDocument();
   });
 
+  /*
+  FNXC:DocumentsView 2026-07-11-21:12:
+  FN-7836 regression coverage targets the browser-only failure mode: real data can load while 50+ flexed task-card groups shrink under overflow clipping into border-only lines. Keep the test tied to the task-scoped CSS contract (`flex-shrink: 0`) plus visible group/row content so a loaded-but-blank sidebar cannot recur without failing close to the defect.
+  */
+  it("renders many loaded task-document groups without flex-shrinking cards into blank lines", async () => {
+    const manyTaskDocuments: TaskDocumentWithTask[] = Array.from({ length: 54 }, (_, index) => {
+      const taskNumber = String(index + 1).padStart(3, "0");
+      return {
+        id: `many-doc-${taskNumber}`,
+        taskId: `FN-MANY-${taskNumber}`,
+        key: index === 0 ? "plan" : "notes",
+        content: `Document content ${taskNumber}`,
+        revision: index + 1,
+        author: "agent",
+        createdAt: `2026-04-19T10:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        updatedAt: `2026-04-19T12:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        taskTitle: index === 53 ? undefined : `Loaded task ${taskNumber}`,
+        taskColumn: index === 52 || index === 53 ? undefined : index % 2 === 0 ? "done" : "todo",
+      };
+    });
+    manyTaskDocuments.push({
+      id: "many-doc-001-notes",
+      taskId: "FN-MANY-001",
+      key: "notes",
+      content: "Second document content",
+      revision: 2,
+      author: "agent",
+      createdAt: "2026-04-19T09:00:00.000Z",
+      updatedAt: "2026-04-19T11:59:00.000Z",
+      taskTitle: "Loaded task 001",
+      taskColumn: "done",
+    });
+
+    mockUseProjectMarkdownFiles.mockReturnValue({
+      files: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+    mockUseDocuments.mockReturnValue({
+      documents: manyTaskDocuments,
+      projectFiles: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
+    fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
+
+    const sidebar = screen.getByLabelText("Task documents");
+    const groups = Array.from(sidebar.querySelectorAll<HTMLElement>(".documents-task-sidebar-group"));
+    expect(groups).toHaveLength(54);
+    expect(screen.queryByText("Loading task documents…")).not.toBeInTheDocument();
+    expect(screen.queryByText("No task documents yet.")).not.toBeInTheDocument();
+    expect(screen.getByText("Select a task document to view its content.")).toBeInTheDocument();
+
+    const firstGroup = screen.getByRole("heading", { name: /FN-MANY-001.*Loaded task 001/i }).closest(".documents-task-sidebar-group") as HTMLElement;
+    expect(getComputedStyle(firstGroup).flexShrink).toBe("0");
+    expect(within(firstGroup).getByText("FN-MANY-001")).toHaveTextContent("FN-MANY-001");
+    expect(within(firstGroup).getByText("Loaded task 001")).toHaveTextContent("Loaded task 001");
+    expect(within(firstGroup).getAllByRole("button", { name: /open FN-MANY-001/i })).toHaveLength(2);
+
+    const legacyGroup = screen.getByRole("heading", { name: /FN-MANY-054.*Untitled/i }).closest(".documents-task-sidebar-group") as HTMLElement;
+    expect(within(legacyGroup).getByText("Untitled")).toBeInTheDocument();
+    expect(legacyGroup.querySelector(".documents-group-status")).not.toBeInTheDocument();
+
+    fireEvent.click(within(firstGroup).getByRole("button", { name: "Open FN-MANY-001 plan" }));
+    expect(await screen.findByText("Document content 001")).toBeInTheDocument();
+  });
+
   it("selecting a task document loads content and marks the sidebar entry current", () => {
     render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
 

@@ -373,6 +373,9 @@ FN-7811 reuses the Project Files shell for Task Documents, while task-scoped sid
 
 FNXC:DocumentsView 2026-07-11-19:03:
 FN-7834 requires task-document groups to scan as discrete task containers, not a flat sequence of peer rows. Keep the stronger card/header hierarchy and inter-group gap scoped under .documents-task-documents-sidebar so Project Files' shared .markdown-file-item list and the Artifacts gallery remain visually unchanged.
+
+FNXC:DocumentsView 2026-07-11-21:12:
+FN-7836 requires loaded Task Documents to render visible task-card groups even when 50+ tasks exist. The sidebar is a scrolling flex column; each card must opt out of flex shrink before overflow is clipped, otherwise browser layout compresses every group into border-only lines while the DOM/text still exists.
 */
 .documents-task-documents-sidebar {
   display: flex;
@@ -383,6 +386,7 @@ FN-7834 requires task-document groups to scan as discrete task containers, not a
 }
 
 .documents-task-sidebar-group {
+  flex: 0 0 auto;
   overflow: hidden;
   border: thin solid var(--border);
   border-radius: var(--radius-lg);
