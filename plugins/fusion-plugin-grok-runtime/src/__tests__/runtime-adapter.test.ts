@@ -226,10 +226,44 @@ describe("GrokRuntimeAdapter (ACP)", () => {
     expect(session.state.errorMessage).toContain("ENOENT grok");
     expect(onText).toHaveBeenCalledWith(expect.stringContaining("ENOENT grok"));
 
-    // Second prompt must not duplicate the diagnostic bubble.
+    /*
+    FNXC:GrokAcp 2026-07-12-06:15:
+    Follow-up prompts on a dead session must re-surface a diagnostic (including
+    the prior error) rather than appending the user turn and returning silently.
+    */
     onText.mockClear();
     await adapter.promptWithFallback(session, "hi");
-    expect(onText).not.toHaveBeenCalled();
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining("no live connection"));
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining("ENOENT grok"));
+    expect(session.state.errorMessage).toContain("ENOENT grok");
+  });
+
+  it("re-surfaces diagnostics on follow-up prompts after connection is dropped", async () => {
+    const adapter = new GrokRuntimeAdapter({ createAcpAdapter: makeFakeAcpAdapter() });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    // Drop the live ACP connection (simulates dispose / process death mid-session).
+    delete (session as { connection?: unknown }).connection;
+    session.state.errorMessage = "ACP bridge hung up";
+
+    onText.mockClear();
+    await expect(adapter.promptWithFallback(session, "still there?")).resolves.toBeUndefined();
+    expect(onText).toHaveBeenCalledTimes(1);
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining("no live connection"));
+    expect(onText).toHaveBeenCalledWith(expect.stringContaining("ACP bridge hung up"));
+    expect(session.state.messages?.some((m) => typeof m === "object" && m !== null && (m as { role?: string }).role === "user")).toBe(
+      true,
+    );
+    expect(
+      session.state.messages?.some(
+        (m) =>
+          typeof m === "object" &&
+          m !== null &&
+          (m as { role?: string; content?: string }).role === "assistant" &&
+          String((m as { content?: string }).content ?? "").includes("no live connection"),
+      ),
+    ).toBe(true);
   });
 
   it("describeModel formats grok prefix", async () => {

@@ -7,6 +7,14 @@ Grok loads skills from trusted `--plugin-dir` / `_meta.pluginDirs` plugins
   - skills from engine additionalSkillPaths / skill roots
 Requested skill names are also listed in runtime context rules so the agent
 still sees the selection when a skill file cannot be resolved on disk.
+
+FNXC:GrokAcp 2026-07-12-06:15:
+Packaged `@runfusion/fusion` publishes `skill/**` (not only monorepo
+`packages/cli/skill/fusion`). Expand fusion-skill candidates so CLI installs under
+`dist/plugins/fusion-plugin-grok-runtime/` still resolve `skill/fusion` at the
+package root, via parent walks, createRequire of `@runfusion/fusion/package.json`,
+and optional `FUSION_SKILL_SOURCE`. Missing fusion skill must not fail session
+create — rules still list requested skills via buildGrokSkillRules.
 */
 
 import {
@@ -19,6 +27,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,21 +44,84 @@ function isSkillDir(dir: string): boolean {
   return existsSync(join(dir, "SKILL.md"));
 }
 
-export function getFusionSkillSourceCandidates(moduleUrl = import.meta.url): string[] {
-  const here = fileURLToPath(moduleUrl);
-  const moduleDir = dirname(here);
-  return [
-    // Monorepo source checkout: packages/cli/skill/fusion
-    resolve(moduleDir, "..", "..", "..", "packages", "cli", "skill", FUSION_SKILL_NAME),
-    // Bundled CLI layout: dist/skill/fusion or sibling skill/
-    resolve(moduleDir, "..", "..", "skill", FUSION_SKILL_NAME),
-    resolve(moduleDir, "..", "skill", FUSION_SKILL_NAME),
-    resolve(moduleDir, "..", "..", "..", "skill", FUSION_SKILL_NAME),
-  ];
+function pushUnique(out: string[], candidate: string | null | undefined): void {
+  if (!candidate) return;
+  const resolved = resolve(candidate);
+  if (!out.includes(resolved)) out.push(resolved);
 }
 
-export function resolveBundledFusionSkillSource(): string | null {
-  for (const candidate of getFusionSkillSourceCandidates()) {
+function pushSkillLayoutsAtRoot(out: string[], root: string): void {
+  pushUnique(out, join(root, "skill", FUSION_SKILL_NAME));
+  pushUnique(out, join(root, "packages", "cli", "skill", FUSION_SKILL_NAME));
+}
+
+function walkAncestorSkillCandidates(out: string[], startDir: string, maxParents = 8): void {
+  let dir = startDir;
+  for (let i = 0; i < maxParents; i++) {
+    pushSkillLayoutsAtRoot(out, dir);
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+}
+
+function pushPackageRequireCandidates(out: string[], from: string): void {
+  try {
+    const require = createRequire(from);
+    const pkgJson = require.resolve("@runfusion/fusion/package.json");
+    pushUnique(out, join(dirname(pkgJson), "skill", FUSION_SKILL_NAME));
+  } catch {
+    // Package not resolvable from this origin (plugin-only tree, tests, etc.).
+  }
+}
+
+/**
+ * Ordered candidate directories for the bundled Fusion skill (`skill/fusion` with SKILL.md).
+ * First existing skill dir wins in resolveBundledFusionSkillSource.
+ */
+export function getFusionSkillSourceCandidates(moduleUrl = import.meta.url): string[] {
+  const candidates: string[] = [];
+  const envSource = process.env.FUSION_SKILL_SOURCE?.trim();
+  if (envSource) {
+    pushUnique(candidates, envSource);
+  }
+
+  const here = fileURLToPath(moduleUrl);
+  const moduleDir = dirname(here);
+
+  // Monorepo source checkout relative to plugins/fusion-plugin-grok-runtime/src
+  pushUnique(candidates, resolve(moduleDir, "..", "..", "..", "packages", "cli", "skill", FUSION_SKILL_NAME));
+  // Relative siblings used in various dist layouts
+  pushUnique(candidates, resolve(moduleDir, "..", "..", "skill", FUSION_SKILL_NAME));
+  pushUnique(candidates, resolve(moduleDir, "..", "skill", FUSION_SKILL_NAME));
+  pushUnique(candidates, resolve(moduleDir, "..", "..", "..", "skill", FUSION_SKILL_NAME));
+  /*
+  FNXC:GrokAcp 2026-07-12-06:15:
+  Published package layout: dist/plugins/fusion-plugin-grok-runtime/* → ../../../skill/fusion
+  at the @runfusion/fusion package root (files includes skill/**).
+  */
+  pushUnique(candidates, resolve(moduleDir, "..", "..", "..", "skill", FUSION_SKILL_NAME));
+  pushUnique(candidates, resolve(moduleDir, "../../../skill", FUSION_SKILL_NAME));
+
+  walkAncestorSkillCandidates(candidates, moduleDir, 8);
+  pushPackageRequireCandidates(candidates, moduleUrl);
+
+  const argv1 = typeof process.argv[1] === "string" ? process.argv[1].trim() : "";
+  if (argv1) {
+    try {
+      const argvPath = resolve(argv1);
+      pushPackageRequireCandidates(candidates, argvPath);
+      walkAncestorSkillCandidates(candidates, dirname(argvPath), 8);
+    } catch {
+      // ignore bad argv paths
+    }
+  }
+
+  return candidates;
+}
+
+export function resolveBundledFusionSkillSource(moduleUrl = import.meta.url): string | null {
+  for (const candidate of getFusionSkillSourceCandidates(moduleUrl)) {
     if (isSkillDir(candidate)) return candidate;
   }
   return null;
