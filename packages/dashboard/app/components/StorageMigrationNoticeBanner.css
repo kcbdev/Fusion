@@ -37,6 +37,23 @@
   color: var(--text-muted);
 }
 
+.storage-migration-notice-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.storage-migration-notice-banner__help {
+  align-self: flex-start;
+  text-decoration: none;
+}
+
+.storage-migration-notice-banner__help:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
 .storage-migration-notice-banner__dismiss {
   display: inline-flex;
   align-items: center;
@@ -65,6 +82,15 @@
 @media (max-width: 768px) {
   .storage-migration-notice-banner {
     align-items: stretch;
+  }
+
+  .storage-migration-notice-banner__actions {
+    align-items: stretch;
+  }
+
+  .storage-migration-notice-banner__help {
+    justify-content: center;
+    width: 100%;
   }
 
   .storage-migration-notice-banner__dismiss {

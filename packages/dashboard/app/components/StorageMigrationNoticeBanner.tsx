@@ -8,6 +8,9 @@ export const STORAGE_MIGRATION_NOTICE_DISMISS_KEY = "fusion:storage-migration-no
 /*
 FNXC:StorageMigrationNotice 2026-07-12-00:00:
 The dashboard must announce the next-version SQLite → embedded Postgres storage change before operators upgrade. Dismissal is global rather than project-scoped because the notice describes an app-wide on-disk storage engine change, not a per-project condition; localStorage persistence makes the one-time acknowledgement permanent on this browser profile.
+
+FNXC:StorageMigrationNotice 2026-07-12-00:10:
+Operators need immediate support and clear storage-impact wording from the notice itself, so the banner links to the hardened Fusion Discord destination and states that project databases will be served from the central Fusion database instead of each project's local SQLite file.
 */
 function isDismissed(): boolean {
   if (typeof window === "undefined") return false;
@@ -48,9 +51,20 @@ export function StorageMigrationNoticeBanner() {
         <p className="storage-migration-notice-banner__text">
           {t(
             "storageMigrationNotice.body",
-            "The next Fusion version will replace the current SQLite data store with an embedded Postgres backend for data storage. No migration runs from this notice; it is an advance heads-up for operators who rely on the current .fusion/fusion.db SQLite file.",
+            "The next Fusion version will replace the current SQLite data store with an embedded Postgres backend for data storage, and project databases will be served from the central Fusion database instead of each project's local .fusion/fusion.db SQLite file. No migration runs from this notice; it is an advance heads-up for operators who rely on the current storage layout.",
           )}
         </p>
+        <div className="storage-migration-notice-banner__actions">
+          <a
+            className="storage-migration-notice-banner__help btn btn-sm"
+            href="https://discord.gg/ksrfuy7WYR"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t("storageMigrationNotice.getHelpLabel", "Get help on Discord")}
+          >
+            {t("storageMigrationNotice.getHelp", "Get help")}
+          </a>
+        </div>
       </div>
       <button
         type="button"
