@@ -5387,8 +5387,12 @@ async function executeAiPromptStep(
   /*
    * FNXC:McpConfig 2026-06-26-00:00:
    * Manual AI-prompt workflow runs are operator-triggered coding-agent sessions, so they must receive the task-store resolved MCP set just like task executor lanes. Do not log resolved MCP payloads because env/header values may contain materialized secrets.
+   *
+   * FNXC:Automations 2026-07-12-20:30:
+   * Manual/inline automation AI runs bypass CronRunner's executor seam, so they must pass the persisted step thinking level directly as createFnAgent.defaultThinkingLevel. Undefined or blank values preserve inherited defaults.
    */
   const mcpServers = await resolveManualAiPromptMcpServers(taskStore);
+  const defaultThinkingLevel = step.thinkingLevel?.trim() || undefined;
 
   const { session } = await createFnAgent({
     cwd: process.cwd(),
@@ -5397,6 +5401,7 @@ async function executeAiPromptStep(
     toolsAllowlist: step.allowedTools,
     defaultProvider: modelProvider,
     defaultModelId: modelId,
+    defaultThinkingLevel,
     mcpServers,
     onText: (delta: string) => {
       responseText += delta;
@@ -5464,12 +5469,17 @@ async function executeCreateTaskStep(
   }
 
   try {
+    /*
+    FNXC:Automations 2026-07-12-20:30:
+    Manual/inline create-task automation runs map the persisted step thinking level onto the created task so manual execution matches scheduled and routine behavior.
+    */
     const task = await taskStore.createTask({
       title: step.taskTitle?.trim() || undefined,
       description: step.taskDescription.trim(),
       column: (step.taskColumn as import("@fusion/core").Column) || "triage",
       modelProvider: step.modelProvider?.trim() || undefined,
       modelId: step.modelId?.trim() || undefined,
+      thinkingLevel: (step.thinkingLevel?.trim() || undefined) as import("@fusion/core").TaskCreateInput["thinkingLevel"],
       source: {
         sourceType: "workflow_step",
         sourceMetadata: { stepId: step.id },
