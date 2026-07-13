@@ -1107,6 +1107,7 @@ Navigation:
 Features:
 - Category-based insight browser with run metadata and status indicators
 - Manual insight generation plus refresh actions for latest insight runs
+- The model gear beside **Generate Insights** opens a model picker with an inline **Thinking Level** selector. Both the model override and reasoning-effort choice persist in the browser, and each insight run records the selected reasoning effort so retries reuse the same setting.
 - Dismiss/archive/unarchive insight records as they age
 - Create triage tasks from selected insights directly from the view
 
