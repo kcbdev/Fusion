@@ -215,6 +215,19 @@ describe("#1409 flag ON→OFF evacuation", () => {
       diskStore = new TaskStore(rootDir, globalDir);
       await diskStore.init();
       expect((await diskStore.getTask(task.id)).column).toBe("intake");
+
+      // Store-open provenance stamp: every init records which process opened the
+      // store so mystery mutations (e.g. a stale binary's evacuation) are
+      // attributable after the fact.
+      const stampRows = (diskStore as unknown as {
+        db: { prepare: (s: string) => { all: (...a: unknown[]) => unknown[] } };
+      }).db
+        .prepare(`SELECT metadata FROM runAuditEvents WHERE mutationType = 'store:open'`)
+        .all() as Array<{ metadata: string }>;
+      expect(stampRows.length).toBeGreaterThanOrEqual(2); // first open + reopen
+      const stamp = JSON.parse(stampRows[stampRows.length - 1].metadata) as Record<string, unknown>;
+      expect(stamp.pid).toBe(process.pid);
+      expect(typeof stamp.execPath).toBe("string");
     } finally {
       diskStore.close();
       await rmDir(rootDir, { recursive: true, force: true });

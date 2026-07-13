@@ -2086,6 +2086,38 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       });
     }
 
+    /*
+    FNXC:RunAudit 2026-07-13-13:10:
+    Store-open provenance stamp. Every store open runs the init recovery passes below against
+    the SHARED project DB, and a store open by a stale binary is how the FN-7910 incident
+    happened (a pre-fix process's init evacuated Ideas cards; the run-audit row said only
+    agentId:"system", so the writer could not be identified after the fact). Stamp pid /
+    parent pid / executable / entry script / cwd / node version — ids/paths only, no prose —
+    so any future mystery mutation can be attributed to the process that opened the store.
+    Best-effort: a failed stamp never blocks startup.
+    */
+    try {
+      this.insertRunAuditEventRow({
+        agentId: "store",
+        domain: "database",
+        mutationType: "store:open",
+        target: this.rootDir,
+        metadata: {
+          pid: process.pid,
+          ppid: process.ppid,
+          execPath: process.execPath,
+          entry: process.argv[1] ?? null,
+          cwd: process.cwd(),
+          nodeVersion: process.version,
+        },
+      });
+    } catch (err) {
+      storeLog.warn("store-open provenance stamp failed during init", {
+        phase: "init:store-open-stamp",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // U12: workflow-columns integrity pass. Audit + re-home any task whose
     // stored column is no longer valid in its resolved workflow (KTD-1
     // guarantees zero rewrites for healthy legacy rows, so this is a no-op for
