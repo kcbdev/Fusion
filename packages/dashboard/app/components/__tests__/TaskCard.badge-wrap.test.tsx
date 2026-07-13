@@ -73,11 +73,17 @@ function expectSharedHeaderBaseline(container: HTMLElement) {
   expect(idStyles.alignItems).toBe("center");
   expect(idStyles.lineHeight).toBe("1");
   expect(idStyles.minHeight).toMatch(resolvedChipHeightPattern);
+  expect(idStyles.height).toMatch(resolvedChipHeightPattern);
+  expect(idStyles.maxHeight).toMatch(resolvedChipHeightPattern);
   expect(idStyles.transform).toMatch(centeredIdNudgePattern);
   expect(actionsStyles.display).toBe("flex");
   expect(actionsStyles.alignItems).toBe("center");
   expect(actionsStyles.transform).toBe(idStyles.transform);
   expect(actionsStyles.minHeight).toMatch(resolvedChipHeightPattern);
+  // Locked chip-height row so a taller ⋯ touch target cannot sink the right cluster below the task id.
+  expect(actionsStyles.height).toMatch(resolvedChipHeightPattern);
+  expect(actionsStyles.maxHeight).toMatch(resolvedChipHeightPattern);
+  expect(actionsStyles.overflow).toBe("visible");
   expect(actionsStyles.marginLeft).toBe("auto");
   expect(actionsStyles.flex).toBe("0 0 auto");
 }
@@ -479,10 +485,15 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     const actionsRule = loadedCss.match(/\.card-header-actions\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
     expect(cardHeaderRule).toContain("align-items: flex-start;");
     expect(cardIdRule).toContain("min-height: var(--card-chip-height);");
+    expect(cardIdRule).toContain("height: var(--card-chip-height);");
+    expect(cardIdRule).toContain("max-height: var(--card-chip-height);");
     expect(cardIdRule).toContain("line-height: 1;");
     expect(cardIdRule).toContain("transform: translateY(calc(var(--space-xs) / 4));");
     expect(cardIdRule).not.toMatch(/translateY\(\d/);
     expect(actionsRule).toContain("align-items: center;");
+    expect(actionsRule).toContain("height: var(--card-chip-height);");
+    expect(actionsRule).toContain("max-height: var(--card-chip-height);");
+    expect(actionsRule).toContain("overflow: visible;");
     expect(actionsRule).toContain("transform: translateY(calc(var(--space-xs) / 4));");
     expect(actionsRule).not.toMatch(/translateY\(\d/);
     expect(loadedCss).toContain(".card-id,\n  .card-header-badges,\n  .card-header-actions");
@@ -494,8 +505,16 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     const menuTouchSection = getCssBlocks(loadedCss, "max-height: 480px").join("\n");
 
     expectCssRuleToContain(mobileSection, ".card-header-actions", "min-height: var(--card-chip-height-mobile);");
+    expectCssRuleToContain(mobileSection, ".card-header-actions", "height: var(--card-chip-height-mobile);");
+    expectCssRuleToContain(mobileSection, ".card-header-actions", "max-height: var(--card-chip-height-mobile);");
+    expectCssRuleToContain(mobileSection, ".card-header-actions", "overflow: visible;");
     expectCssRuleToContain(mobileSection, ".card-header-actions", "align-items: center;");
     expectCssRuleToContain(mobileSection, ".card-header-actions", "gap: calc(var(--space-xs) / 2);");
+    // Task id and right cluster share the same locked mobile chip row so Actions/⋯/size sit on the FN-#### baseline.
+    expectCssRuleToContain(mobileSection, ".card-id", "height: var(--card-chip-height-mobile);");
+    expectCssRuleToContain(mobileSection, ".card-id", "max-height: var(--card-chip-height-mobile);");
+    expectCssRuleToContain(mobileSection, ".card-send-back", "height: 100%;");
+    expectCssRuleToContain(mobileSection, ".card-send-back", "align-items: center;");
     expectCssRuleToContain(mobileSection, ".card-send-back-btn", "line-height: 1;");
     expectCssRuleToContain(mobileSection, ".card-menu-btn", "line-height: 1;");
     expectCssRuleToContain(mobileSection, ".card-size-badge", "line-height: 1;");
@@ -507,6 +526,8 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn", "width: 28px;");
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn", "height: 28px;");
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn", "line-height: 1;");
+    // Negative vertical margin cancels residual 28px layout contribution (same pattern as .card-edit-btn/.card-delete-btn).
+    expectCssRuleToContain(menuTouchSection, ".card-menu-btn", "margin: -6px 0;");
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn svg", "width: 16px;");
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn svg", "height: 16px;");
   });
