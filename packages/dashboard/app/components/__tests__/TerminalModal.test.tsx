@@ -1089,9 +1089,9 @@ describe("TerminalModal", () => {
     const header = modal.querySelector(".terminal-header") as HTMLElement & { setPointerCapture: (pointerId: number) => void; releasePointerCapture: (pointerId: number) => void };
     header.setPointerCapture = vi.fn();
     header.releasePointerCapture = vi.fn();
-    fireEvent.pointerDown(header, { pointerId: 2, clientX: 100, clientY: 100 });
-    fireEvent.pointerMove(header, { pointerId: 2, clientX: 125, clientY: 135 });
-    fireEvent.pointerUp(header, { pointerId: 2 });
+    fireEvent.pointerDown(header, { pointerId: 2, pointerType: "touch", clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(header, { pointerId: 2, pointerType: "touch", clientX: 125, clientY: 135 });
+    fireEvent.pointerUp(header, { pointerId: 2, pointerType: "touch" });
 
     await waitFor(() => {
       expect(window.localStorage.getItem(`fusion:terminal-float-pos-${projectId}`)).toBeTruthy();
