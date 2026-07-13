@@ -8350,7 +8350,6 @@
     "decreaseFontSize": "Réduire la taille de la police du terminal",
     "exitLabel": "Sortie : {{code}}",
     "failedToStartTerminal": "Impossible de démarrer le terminal : {{error}}",
-    "helpText": "Ctrl++/- zoom • ⌨ Panneau des raccourcis • Esc fermer",
     "increaseFontSize": "Augmenter la taille de la police du terminal",
     "initializeError": "L'interface du terminal n'a pas pu s'initialiser : {{error}}",
     "newSession": "Nouvelle session",

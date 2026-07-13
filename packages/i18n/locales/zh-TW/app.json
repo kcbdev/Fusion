@@ -8350,7 +8350,6 @@
     "decreaseFontSize": "減小終端字型大小",
     "exitLabel": "退出：{{code}}",
     "failedToStartTerminal": "無法啟動終端：{{error}}",
-    "helpText": "Ctrl++/- 縮放 • ⌨ 快捷鍵面板 • Esc 關閉",
     "increaseFontSize": "增加終端字型大小",
     "initializeError": "終端 UI 初始化失敗：{{error}}",
     "newSession": "新建工作階段",

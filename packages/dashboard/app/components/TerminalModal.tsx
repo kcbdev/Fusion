@@ -2513,14 +2513,17 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         <Settings size={14} />
         <span className="terminal-action-label">{t("terminal.preferences", "Preferences")}</span>
       </button>
+      {/*
+      FNXC:Terminal 2026-07-12-00:00:
+      The terminal footer should not repeat steady-state "Connected" text or persistent zoom/shortcuts/escape help copy because the footer is crowded.
+      Keep only actionable non-connected status text here; the header status dot still conveys the connected state visually.
+      */}
       <span className={`terminal-connection-status ${connectionStatus}`}>
-        {connectionStatus === "connected" && t("terminal.statusConnected", "Connected")}
         {connectionStatus === "connecting" && t("terminal.statusConnecting", "Connecting...")}
         {connectionStatus === "reconnecting" && t("terminal.statusReconnecting", "Reconnecting...")}
         {connectionStatus === "disconnected" && t("terminal.statusDisconnected", "Disconnected")}
       </span>
       {exitCode !== null && <span className="terminal-exit-code" data-testid="terminal-exit-code">{t("terminal.exitLabel", "Exit: {{code}}", { code: exitCode })}</span>}
-      <span className="terminal-shortcuts terminal-shortcuts--header">{t("terminal.helpText", "Ctrl++/- zoom • ⌨ Shortcuts panel • Esc close")}</span>
       {!embedded && !isMobileTerminal && (
         <button
           className="terminal-clear-btn terminal-clear-btn--shortcut terminal-clear-btn--icon"

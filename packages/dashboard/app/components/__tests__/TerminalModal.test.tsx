@@ -1788,13 +1788,12 @@ describe("TerminalModal", () => {
       expect(footerRule).toContain("touch-action: pan-x pan-y;");
 
       const mobileHideBlock = terminalModalCss.match(
-        /@media \(max-width: 768px\) \{[\s\S]*?\.terminal-shortcuts--header,\s*\n\s*\.terminal-connection-status \{[\s\S]*?\}\s*\n\}/,
+        /@media \(max-width: 768px\) \{[\s\S]*?\.terminal-connection-status \{[\s\S]*?\}\s*\n\}/,
       );
       expect(mobileHideBlock).not.toBeNull();
       const tabletBlock = terminalModalCss.match(
         /@media \(min-width: 769px\) and \(max-width: 1024px\) \{([\s\S]*?)\n\}/,
       )?.[1] ?? "";
-      expect(tabletBlock).not.toMatch(/\.terminal-shortcuts--header/);
       expect(tabletBlock).not.toMatch(/\.terminal-connection-status/);
       expect(tabletBlock).not.toMatch(/\.terminal-status-bar/);
     });
@@ -1802,10 +1801,7 @@ describe("TerminalModal", () => {
     it("keeps the desktop terminal header controls on one scrollable row when narrow (FN-7823)", () => {
       // FN-7823: large viewport breakpoints can still produce narrow floating or
       // docked panels, so the desktop header must preserve horizontal scrolling
-      // instead of wrapping the help/status text into multiple rows.
-      const shortcutsHeaderRule = terminalModalCss.match(/\.terminal-shortcuts--header\s*\{([^}]*)\}/)?.[1] ?? "";
-      expect(shortcutsHeaderRule).toContain("white-space: nowrap;");
-
+      // instead of wrapping status text into multiple rows.
       const actionsRule = terminalModalCss.match(/\.terminal-actions\s*\{([^}]*)\}/)?.[1] ?? "";
       expect(actionsRule).toContain("min-width: 0;");
       expect(actionsRule).toContain("overflow-x: auto;");
@@ -1815,7 +1811,7 @@ describe("TerminalModal", () => {
       expect(connectionStatusRule).toContain("white-space: nowrap;");
 
       const mobileHideBlock = terminalModalCss.match(
-        /@media \(max-width: 768px\) \{[\s\S]*?\.terminal-shortcuts--header,\s*\n\s*\.terminal-connection-status \{([^}]*)\}/,
+        /@media \(max-width: 768px\) \{[\s\S]*?\.terminal-connection-status \{([^}]*)\}/,
       )?.[1] ?? "";
       expect(mobileHideBlock).toContain("display: none;");
     });
@@ -4077,6 +4073,7 @@ describe("TerminalModal — mobile layout contract", () => {
         const connectionStatus = footer.querySelector(".terminal-connection-status");
 
         expect(connectionStatus?.textContent).toBe("Disconnected");
+        expect(footer.querySelector(".terminal-shortcuts--header")).toBeNull();
         for (const control of [clearBtn, shortcutToggle, preferencesToggle, fontSizeValue, pinToggle, popoutToggle]) {
           expect(footer.contains(control)).toBe(true);
           expect(header?.contains(control)).toBe(false);
@@ -4084,6 +4081,30 @@ describe("TerminalModal — mobile layout contract", () => {
         expect(screen.queryByTestId("terminal-actions")).toBeNull();
         expect(header?.contains(screen.getByTestId("terminal-close-btn"))).toBe(true);
         expect(header?.contains(screen.getByTestId("terminal-tabs"))).toBe(true);
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    }
+  });
+
+  it("omits steady-state connected text and shortcut help from the shared footer controls", async () => {
+    const previousInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+
+    try {
+      mockUseTerminal.mockReturnValue(
+        createMockTerminalState({ connectionStatus: "connected" }),
+      );
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => {
+        const footer = screen.getByTestId("terminal-footer-actions");
+        const connectionStatus = footer.querySelector(".terminal-connection-status");
+
+        expect(connectionStatus).toBeTruthy();
+        expect(connectionStatus?.textContent).toBe("");
+        expect(footer.querySelector(".terminal-shortcuts--header")).toBeNull();
+        expect(screen.queryByText("Ctrl++/- zoom • ⌨ Shortcuts panel • Esc close")).toBeNull();
       });
     } finally {
       Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });

@@ -8350,7 +8350,6 @@
     "decreaseFontSize": "减小终端字体大小",
     "exitLabel": "退出：{{code}}",
     "failedToStartTerminal": "无法启动终端：{{error}}",
-    "helpText": "Ctrl++/- 缩放 • ⌨ 快捷键面板 • Esc 关闭",
     "increaseFontSize": "增加终端字体大小",
     "initializeError": "终端 UI 初始化失败：{{error}}",
     "newSession": "新建会话",

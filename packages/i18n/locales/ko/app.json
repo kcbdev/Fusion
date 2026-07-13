@@ -8350,7 +8350,6 @@
     "decreaseFontSize": "터미널 글꼴 크기 줄이기",
     "exitLabel": "종료: {{code}}",
     "failedToStartTerminal": "터미널 시작에 실패했습니다: {{error}}",
-    "helpText": "Ctrl++/- 확대/축소 • ⌨ 단축키 패널 • Esc 닫기",
     "increaseFontSize": "터미널 글꼴 크기 늘리기",
     "initializeError": "터미널 UI 초기화에 실패했습니다: {{error}}",
     "newSession": "새 세션",

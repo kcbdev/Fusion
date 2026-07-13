@@ -8399,7 +8399,6 @@ export default interface Resources {
       "decreaseFontSize": "Decrease terminal font size",
       "exitLabel": "Exit: {{code}}",
       "failedToStartTerminal": "Failed to start terminal: {{error}}",
-      "helpText": "Ctrl++/- zoom • ⌨ Shortcuts panel • Esc close",
       "increaseFontSize": "Increase terminal font size",
       "initializeError": "Terminal UI failed to initialize: {{error}}",
       "newSession": "New Session",
