@@ -225,7 +225,7 @@ function useGitHubStarCount(): number | null {
  *   2. Add a corresponding case in renderSectionFields()
  */
 /** Section entry type with optional icon */
-type SettingsSection = {
+export type SettingsSection = {
   id: string;
   label: string;
   labelKey: string;
@@ -303,11 +303,11 @@ function removeEmptySettingsGroups(sections: SettingsSection[]): SettingsSection
   });
 }
 
-function normalizeSettingsSearchText(value: string): string {
+export function normalizeSettingsSearchText(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-function sectionMatchesSettingsSearch(
+export function sectionMatchesSettingsSearch(
   section: SettingsSection,
   query: string,
   label: string,
@@ -326,7 +326,7 @@ function sectionMatchesSettingsSearch(
     .some((candidate) => candidate.includes(query));
 }
 
-function filterSettingsSectionsForSearch(
+export function filterSettingsSectionsForSearch(
   sections: SettingsSection[],
   query: string,
   translateLabel: (section: SettingsSection) => string,
@@ -413,7 +413,7 @@ function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetr
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 3;
 }
 
-const SETTINGS_SECTIONS: SettingsSection[] = [
+export const SETTINGS_SECTIONS: SettingsSection[] = [
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
   { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global", searchableText: ["global defaults", "modal outside dismiss", "agent logs", "persist tool output", "thinking logs", "GitLab instance URL", "global tracking repo"] },
@@ -484,7 +484,45 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "memory", label: "Memory", labelKey: "settings.nav.memory", scope: "project", searchableText: ["memory backend", "Dreams", "long-term memory", "qmd", "memory file", "retrieval"] },
   { id: "backups", label: "Backups", labelKey: "settings.nav.backups", scope: "project", searchableText: ["backup", "restore", "settings export", "settings import"] },
   { id: "research-project", label: "Research", labelKey: "settings.nav.researchProject", scope: "project", searchableText: ["project research", "research runs", "citations", "search limits", "fetch synthesis"] },
-  { id: "project-models", label: "Project Models", labelKey: "settings.nav.projectModels", scope: "project", searchableText: ["default provider", "default model", "workflow model lanes", "Plan/Triage", "Executor", "Reviewer", "summarization model"] },
+  /**
+   * FNXC:SettingsNavigation 2026-07-13-00:00:
+   * Project Models owns the FN-7907 Direct-chat default settings. Its shared Settings search index must advertise chat-default terms and i18n labels so desktop nav, the mobile section picker, and filtered search all surface this section when operators search for Chat defaults.
+   */
+  {
+    id: "project-models",
+    label: "Project Models",
+    labelKey: "settings.nav.projectModels",
+    scope: "project",
+    searchableText: [
+      "default provider",
+      "default model",
+      "workflow model lanes",
+      "Plan/Triage",
+      "Executor",
+      "Reviewer",
+      "summarization model",
+      "chat",
+      "new chat",
+      "new chat behavior",
+      "chat default",
+      "chat default model",
+      "chat default agent",
+      "chat model",
+      "chat agent",
+      "prompt for model",
+      "always use default",
+    ],
+    searchableKeys: [
+      "settings.projectModels.chatHeading",
+      "settings.projectModels.chatDescription",
+      "settings.projectModels.chatNewSessionMode",
+      "settings.projectModels.chatNewSessionModePrompt",
+      "settings.projectModels.chatNewSessionModeAlwaysDefault",
+      "settings.projectModels.chatDefaultKind",
+      "settings.projectModels.chatDefaultModel",
+      "settings.projectModels.chatDefaultAgent",
+    ],
+  },
   { id: "secrets", label: "Secrets", labelKey: "settings.nav.secrets", scope: "project", searchableText: ["secrets", "secret storage", "environment", "credentials"] },
   { id: "mcp", label: "MCP Servers", labelKey: "settings.nav.mcp", scope: "project", searchableText: ["project MCP servers", "workspace MCP", "project tool servers", "mcp config"] },
   { id: "prompts", label: "Prompts", labelKey: "settings.nav.prompts", scope: "project", searchableText: ["prompt instructions", "PR title prompt", "PR description prompt", "custom prompts"] },
