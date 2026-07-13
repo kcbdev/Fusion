@@ -318,3 +318,15 @@ Note: the embedded main-content views Workflows (`_WorkflowEditorView`), Import 
    The modal should be 20% wider than the first section-sidebar layout and use a taller viewport so more settings remain visible without scrolling.
    */
    ```
+
+## Cursor Cloud specific instructions
+
+Runtime prerequisites (already present on the base image): Node.js >= 22.5, `pnpm` 10.33 (pinned via `packageManager`), and `git`. Dependencies are refreshed on startup by the update script (`pnpm install --frozen-lockfile`); no other one-off setup is required.
+
+Standard lint/test/build/run commands live in `package.json` scripts, `README.md` → Development, and `docs/testing.md` — use those. Non-obvious caveats for this environment:
+
+- **Run the dev node with `pnpm local`** (starts dashboard + AI engine on the first free port at/above 4050). Port 4040 is reserved (never bind or kill it) and `pnpm local` auto-skips it. Prefer an explicit non-4040 port, e.g. `pnpm local --port 4050`. On localhost, auth is disabled automatically, so the board is reachable at `http://localhost:<port>` with no token. Health check: `GET /api/health` returns 200.
+- **`pnpm smoke:boot` requires a prior `pnpm build`** — the boot smoke runs against the built CLI/dashboard (`packages/cli/bin.mjs`, `dist/client`), not source. Run `pnpm build` first or the smoke will fail on a clean tree.
+- **No AI provider is connected by default.** The dashboard, board, CLI, task CRUD, and REST API all work without one, but planning/execution lanes cannot run real AI work until a provider is configured in Settings → Authentication (or `testMode`/mock provider is enabled to force scripted lanes). A "No AI provider connected" banner is expected, not a failure.
+- `pnpm local` auto-runs `fn init` and registers the repo as a project (creates `.fusion/fusion.db`, which is gitignored). This is expected on first run.
+- `qmd` is not installed; memory search silently falls back to local file search. This warning is benign.
