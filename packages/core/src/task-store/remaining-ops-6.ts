@@ -1050,7 +1050,7 @@ export async function upsertMergeRequestRecordImpl(store: TaskStore,
             lastError,
           })
           .onConflictDoUpdate({
-            target: schema.project.mergeRequests.taskId,
+            target: [schema.project.mergeRequests.projectId, schema.project.mergeRequests.taskId],
             set: {
               state: input.state,
               updatedAt: now,
@@ -1279,4 +1279,3 @@ export async function getWorkflowWorkItemImpl(store: TaskStore, id: string): Pro
     const row = store.db.prepare("SELECT * FROM workflow_work_items WHERE id = ?").get(id) as WorkflowWorkItemRow | undefined;
     return row ? store.rowToWorkflowWorkItem(row) : null;
 }
-

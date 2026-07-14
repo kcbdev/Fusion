@@ -53,7 +53,7 @@ export const projectSchema = pgSchema(PROJECT_SCHEMA);
 
 // ── Tasks ────────────────────────────────────────────────────────────
 export const tasks = projectSchema.table("tasks", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   /*
   FNXC:MultiProjectIsolation 2026-07-10:
   Partition key for embedded-PG multi-project isolation. In embedded mode every
@@ -67,7 +67,7 @@ export const tasks = projectSchema.table("tasks", {
   isolates via per-file storage) and legacy rows are unaffected; the filter is
   a no-op when the layer has no bound projectId (single-project / global reads).
   */
-  projectId: text("project_id"),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   lineageId: text("lineage_id"),
   title: text("title"),
   description: text("description").notNull(),
@@ -245,6 +245,7 @@ export const tasks = projectSchema.table("tasks", {
     sql`to_tsvector('simple', coalesce(id, '') || ' ' || coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(comments::text, ''))`,
   ),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   /*
   FNXC:PostgresSchema 2026-06-24-06:00:
   Eight lookup indexes on the tasks table. idx_tasks_deletedAt is the most
@@ -329,7 +330,7 @@ FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
 Retired company-board, project-auth, and task-reviewer tables remain part of the cutover preservation contract even though current runtime code no longer reads them. Keep their legacy columns queryable and add project_id to every key and relationship so multiple SQLite project databases can migrate into one shared PostgreSQL schema without collisions.
 */
 export const legacyBoards = projectSchema.table("boards", {
-  projectId: text("project_id").notNull(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   id: text("id").notNull(),
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
@@ -345,7 +346,7 @@ export const legacyBoards = projectSchema.table("boards", {
 ]);
 
 export const legacyProjectAuthUsers = projectSchema.table("project_auth_users", {
-  projectId: text("project_id").notNull(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   id: text("id").notNull(),
   email: text("email").notNull(),
   displayName: text("display_name"),
@@ -358,7 +359,7 @@ export const legacyProjectAuthUsers = projectSchema.table("project_auth_users", 
 ]);
 
 export const legacyProjectAuthMemberships = projectSchema.table("project_auth_memberships", {
-  projectId: text("project_id").notNull(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   id: text("id").notNull(),
   userId: text("user_id").notNull(),
   role: text("role").notNull(),
@@ -443,43 +444,21 @@ export const legacyTaskReviewerRuns = projectSchema.table("task_reviewer_runs", 
 
 // ── Distributed task ID allocator ────────────────────────────────────
 /*
-FNXC:CentralProjectIdentity 2026-07-13-22:40:
-distributed_task_id_state / distributed_task_id_reservations / merge_queue are
-INTENTIONALLY NOT project-partitioned (no project_id column), unlike `tasks` and
-`archived_tasks`. This is load-bearing, not an oversight:
-
-  - Task ids are a GLOBALLY-UNIQUE namespace across the entire embedded-PG
-    cluster: `tasks.id` is a global PRIMARY KEY shared by every project in the
-    one `project` schema. Two ids like "KB-123" must never coexist even across
-    different projects.
-  - The mechanism that guarantees this is the SHARED per-prefix sequence keyed
-    on `distributed_task_id_state.prefix` (PK = prefix, no project_id). Projects
-    that share a prefix share one monotonic counter, so they can never mint the
-    same id. Adding a project_id here would split the counter per project and
-    let two projects using the same prefix collide on `tasks.id`.
-  - `distributed_task_id_reservations` (unique on prefix+sequence and prefix+
-    task_id) is the reservation ledger for that shared counter; scoping it per
-    project would break the uniqueness backstop for the same reason.
-  - `merge_queue` (PK = task_id → FK tasks.id) needs no project_id BECAUSE
-    task_id is globally unique: its PK can never collide across projects, and its
-    rows are scoped to a project transitively through the joined task's
-    project_id (see async-merge-coordination taskStillInReview / taskProjectScope).
-
-Projects that share a prefix therefore share id numbering by design. The
-allocator enforces the global floor by scanning tasks/archived_tasks WITHOUT a
-project_id filter (see async-allocator computeNextSequenceFloor /
-getMaxTaskSequenceFromTable / taskIdExists).
+FNXC:ProjectTaskIdentity 2026-07-14-12:32:
+Task IDs and allocator state belong to one project. Composite ownership keys let projects reuse the same prefix and task ID without sharing sequence floors, reservations, or merge work.
 */
 export const distributedTaskIdState = projectSchema.table("distributed_task_id_state", {
-  prefix: text("prefix").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  prefix: text("prefix").notNull(),
   nextSequence: integer("next_sequence").notNull(),
   committedClusterTaskCount: integer("committed_cluster_task_count").notNull(),
   lastCommittedTaskId: text("last_committed_task_id"),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [primaryKey({ columns: [t.projectId, t.prefix] })]);
 
 export const distributedTaskIdReservations = projectSchema.table("distributed_task_id_reservations", {
-  reservationId: text("reservation_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  reservationId: text("reservation_id").notNull(),
   prefix: text("prefix").notNull(),
   nodeId: text("node_id").notNull(),
   sequence: integer("sequence").notNull(),
@@ -492,10 +471,11 @@ export const distributedTaskIdReservations = projectSchema.table("distributed_ta
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.prefix], foreignColumns: [distributedTaskIdState.prefix] })
+  primaryKey({ columns: [t.projectId, t.reservationId] }),
+  foreignKey({ columns: [t.projectId, t.prefix], foreignColumns: [distributedTaskIdState.projectId, distributedTaskIdState.prefix] })
     .onDelete("cascade"),
-  unique("distributed_task_id_reservations_prefix_sequence_unique").on(t.prefix, t.sequence),
-  unique("distributed_task_id_reservations_prefix_task_id_unique").on(t.prefix, t.taskId),
+  unique("distributed_task_id_reservations_prefix_sequence_unique").on(t.projectId, t.prefix, t.sequence),
+  unique("distributed_task_id_reservations_prefix_task_id_unique").on(t.projectId, t.prefix, t.taskId),
   check(
     "distributed_task_id_reservations_status_check",
     sql`${t.status} IN ('reserved', 'committed', 'aborted', 'expired')`,
@@ -541,11 +521,12 @@ export const workflows = projectSchema.table("workflows", {
 }, (t) => [index("idxWorkflowsCreatedAt").on(t.createdAt)]);
 
 export const taskWorkflowSelection = projectSchema.table("task_workflow_selection", {
-  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  taskId: text("task_id").notNull(),
   workflowId: text("workflow_id").notNull(),
   stepIds: jsonb("step_ids").notNull().default([]),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [primaryKey({ columns: [t.projectId, t.taskId] })]);
 
 // ── Activity log ─────────────────────────────────────────────────────
 export const activityLog = projectSchema.table("activity_log", {
@@ -581,7 +562,8 @@ export const archivedTasks = projectSchema.table("archived_tasks", {
 
 // ── Task commit associations ─────────────────────────────────────────
 export const taskCommitAssociations = projectSchema.table("task_commit_associations", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   taskLineageId: text("task_lineage_id").notNull(),
   taskIdSnapshot: text("task_id_snapshot").notNull(),
   commitSha: text("commit_sha").notNull(),
@@ -595,8 +577,9 @@ export const taskCommitAssociations = projectSchema.table("task_commit_associati
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   unique("task_commit_associations_task_lineage_id_commit_sha_matched_by_unique")
-    .on(t.taskLineageId, t.commitSha, t.matchedBy),
+    .on(t.projectId, t.taskLineageId, t.commitSha, t.matchedBy),
   check(
     "task_commit_associations_matched_by_check",
     sql`${t.matchedBy} IN ('canonical-lineage-trailer', 'legacy-task-id-trailer', 'legacy-subject', 'manual-reconciliation')`,
@@ -641,7 +624,8 @@ export const automations = projectSchema.table("automations", {
 
 // ── Agents ───────────────────────────────────────────────────────────
 export const agents = projectSchema.table("agents", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   name: text("name").notNull(),
   role: text("role").notNull(),
   state: text("state").notNull().default("idle"),
@@ -652,17 +636,20 @@ export const agents = projectSchema.table("agents", {
   metadata: jsonb("metadata").default({}),
   data: jsonb("data").default({}),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxAgentsState").on(t.state),
 ]);
 
 export const agentHeartbeats = projectSchema.table("agent_heartbeats", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: integer("id").generatedAlwaysAsIdentity().notNull(),
   agentId: text("agent_id").notNull(),
   timestamp: text("timestamp").notNull(),
   status: text("status").notNull(),
   runId: text("run_id").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
   index("idxAgentHeartbeatsAgentId").on(t.agentId),
   index("idxAgentHeartbeatsRunId").on(t.runId),
   index("idxAgentHeartbeatsAgentIdTimestamp").on(t.agentId, t.timestamp),
@@ -670,68 +657,72 @@ export const agentHeartbeats = projectSchema.table("agent_heartbeats", {
 
 export const agentRuns = projectSchema.table("agent_runs", {
   // FNXC:AnalyticsIsolation 2026-07-13-23:41: Agent-run analytics are project-scoped even though run IDs remain globally unique.
-  projectId: text("project_id").notNull(),
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   agentId: text("agent_id").notNull(),
   data: jsonb("data").notNull(),
   startedAt: text("started_at").notNull(),
   endedAt: text("ended_at"),
   status: text("status").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
   index("idxAgentRunsAgentIdStartedAt").on(t.agentId, t.startedAt),
   index("idxAgentRunsProjectStartedAt").on(t.projectId, t.startedAt),
   index("idxAgentRunsStatus").on(t.status),
 ]);
 
 export const agentTaskSessions = projectSchema.table("agent_task_sessions", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   agentId: text("agent_id").notNull(),
   taskId: text("task_id").notNull(),
   data: jsonb("data").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  primaryKey({ columns: [t.agentId, t.taskId] }),
-  foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.agentId, t.taskId] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
 ]);
 
 export const agentApiKeys = projectSchema.table("agent_api_keys", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   agentId: text("agent_id").notNull(),
   data: jsonb("data").notNull(),
   createdAt: text("created_at").notNull(),
   revokedAt: text("revoked_at"),
 }, (t) => [
-  foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
   index("idxAgentApiKeysAgentId").on(t.agentId),
 ]);
 
 export const agentConfigRevisions = projectSchema.table("agent_config_revisions", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   agentId: text("agent_id").notNull(),
   data: jsonb("data").notNull(),
   createdAt: text("created_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
   index("idxAgentConfigRevisionsAgentIdCreatedAt").on(t.agentId, t.createdAt),
 ]);
 
 export const agentBlockedStates = projectSchema.table("agent_blocked_states", {
-  agentId: text("agent_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  agentId: text("agent_id").notNull(),
   data: jsonb("data").notNull(),
   updatedAt: text("updated_at").notNull(),
-}, (t) => [foreignKey({ columns: [t.agentId], foreignColumns: [agents.id] }).onDelete("cascade")]);
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.agentId] }),
+  foreignKey({ columns: [t.projectId, t.agentId], foreignColumns: [agents.projectId, agents.id] }).onDelete("cascade"),
+]);
 
 // ── Merge queue / merge requests / handoff ───────────────────────────
-/*
-FNXC:CentralProjectIdentity 2026-07-13-22:40:
-merge_queue has NO project_id and is safe without one: its PK is task_id, which
-is globally unique across the cluster (tasks.id global PK — see the allocator
-note above), so the PK cannot collide across projects. Per-project scoping is
-applied transitively via the joined task's project_id in lease/cleanup queries.
-*/
 export const mergeQueue = projectSchema.table("merge_queue", {
-  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  taskId: text("task_id").notNull(),
   enqueuedAt: text("enqueued_at").notNull(),
   priority: text("priority").notNull().default("normal"),
   leasedBy: text("leased_by"),
@@ -740,35 +731,41 @@ export const mergeQueue = projectSchema.table("merge_queue", {
   attemptCount: integer("attempt_count").notNull().default(0),
   lastError: text("last_error"),
 }, (t) => [
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.taskId] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   index("idx_mergeQueue_lease_ready").on(t.leasedBy, t.priority, t.enqueuedAt),
   index("idx_mergeQueue_leaseExpiresAt").on(t.leaseExpiresAt),
 ]);
 
 export const mergeRequests = projectSchema.table("merge_requests", {
-  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  taskId: text("task_id").notNull(),
   state: text("state").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   attemptCount: integer("attempt_count").notNull().default(0),
   lastError: text("last_error"),
 }, (t) => [
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.taskId] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   index("idx_merge_requests_state_updatedAt").on(t.state, t.updatedAt),
 ]);
 
 export const completionHandoffMarkers = projectSchema.table("completion_handoff_markers", {
-  taskId: text("task_id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  taskId: text("task_id").notNull(),
   acceptedAt: text("accepted_at").notNull(),
   source: text("source").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.taskId] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   index("idx_completion_handoff_markers_acceptedAt").on(t.acceptedAt),
 ]);
 
 // ── Workflow work items ──────────────────────────────────────────────
 export const workflowWorkItems = projectSchema.table("workflow_work_items", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   runId: text("run_id").notNull(),
   taskId: text("task_id").notNull(),
   nodeId: text("node_id").notNull(),
@@ -783,15 +780,17 @@ export const workflowWorkItems = projectSchema.table("workflow_work_items", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   unique("workflow_work_items_run_id_task_id_node_id_kind_unique")
-    .on(t.runId, t.taskId, t.nodeId, t.kind),
+    .on(t.projectId, t.runId, t.taskId, t.nodeId, t.kind),
   index("idx_workflow_work_items_due").on(t.state, t.retryAfter, t.createdAt),
   index("idx_workflow_work_items_leaseExpiresAt").on(t.leaseExpiresAt),
   index("idx_workflow_work_items_task_run").on(t.taskId, t.runId),
 ]);
 
 export const workflowRunBranches = projectSchema.table("workflow_run_branches", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   taskId: text("task_id").notNull(),
   runId: text("run_id").notNull(),
   branchId: text("branch_id").notNull(),
@@ -799,12 +798,13 @@ export const workflowRunBranches = projectSchema.table("workflow_run_branches", 
   status: text("status").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  primaryKey({ columns: [t.taskId, t.runId, t.branchId] }),
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.taskId, t.runId, t.branchId] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   index("idx_workflow_run_branches_task_run").on(t.taskId, t.runId),
 ]);
 
 export const workflowRunStepInstances = projectSchema.table("workflow_run_step_instances", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   taskId: text("task_id").notNull(),
   runId: text("run_id").notNull(),
   foreachNodeId: text("foreach_node_id").notNull(),
@@ -819,8 +819,8 @@ export const workflowRunStepInstances = projectSchema.table("workflow_run_step_i
   integratedAt: text("integrated_at"),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  primaryKey({ columns: [t.taskId, t.runId, t.foreachNodeId, t.stepIndex] }),
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.taskId, t.runId, t.foreachNodeId, t.stepIndex] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
   index("idx_workflow_run_step_instances_task_run").on(t.taskId, t.runId),
 ]);
 
@@ -846,7 +846,8 @@ export const workflowPromptOverrides = projectSchema.table("workflow_prompt_over
 
 // ── Task documents + revisions ───────────────────────────────────────
 export const taskDocuments = projectSchema.table("task_documents", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   taskId: text("task_id").notNull(),
   key: text("key").notNull(),
   content: text("content").notNull().default(""),
@@ -856,8 +857,9 @@ export const taskDocuments = projectSchema.table("task_documents", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("cascade"),
-  unique("task_documents_task_id_key_unique").on(t.taskId, t.key),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("cascade"),
+  unique("task_documents_task_id_key_unique").on(t.projectId, t.taskId, t.key),
   index("idxTaskDocumentsTaskId").on(t.taskId),
 ]);
 
@@ -997,7 +999,7 @@ export const experimentSessionRecords = projectSchema.table("experiment_session_
 
 // ── Eval runs ────────────────────────────────────────────────────────
 export const evalRuns = projectSchema.table("eval_runs", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   projectId: text("project_id").notNull(),
   status: text("status").notNull(),
   trigger: text("trigger").notNull(),
@@ -1017,13 +1019,15 @@ export const evalRuns = projectSchema.table("eval_runs", {
   completedAt: text("completed_at"),
   cancelledAt: text("cancelled_at"),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxEvalRunsProjectIdCreatedAt").on(t.projectId, t.createdAt),
   index("idxEvalRunsProjectTriggerStatus").on(t.projectId, t.trigger, t.status),
   index("idxEvalRunsStatusCreatedAt").on(t.status, t.createdAt),
 ]);
 
 export const evalTaskResults = projectSchema.table("eval_task_results", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   runId: text("run_id").notNull(),
   taskId: text("task_id").notNull(),
   taskSnapshot: jsonb("task_snapshot").notNull(),
@@ -1042,15 +1046,17 @@ export const evalTaskResults = projectSchema.table("eval_task_results", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.runId], foreignColumns: [evalRuns.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.runId], foreignColumns: [evalRuns.projectId, evalRuns.id] }).onDelete("cascade"),
   index("idxEvalTaskResultsRunIdCreatedAt").on(t.runId, t.createdAt),
   index("idxEvalTaskResultsTaskIdCreatedAt").on(t.taskId, t.createdAt),
   index("idxEvalTaskResultsStatusRunId").on(t.status, t.runId),
-  unique("idxEvalTaskResultsRunTaskUnique").on(t.runId, t.taskId),
+  unique("idxEvalTaskResultsRunTaskUnique").on(t.projectId, t.runId, t.taskId),
 ]);
 
 export const evalRunEvents = projectSchema.table("eval_run_events", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   runId: text("run_id").notNull(),
   seq: integer("seq").notNull(),
   type: text("type").notNull(),
@@ -1060,7 +1066,8 @@ export const evalRunEvents = projectSchema.table("eval_run_events", {
   metadata: jsonb("metadata"),
   createdAt: text("created_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.runId], foreignColumns: [evalRuns.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.runId], foreignColumns: [evalRuns.projectId, evalRuns.id] }).onDelete("cascade"),
   index("idxEvalRunEventsRunIdSeq").on(t.runId, t.seq),
 ]);
 
@@ -1097,7 +1104,8 @@ export const projectMeta = projectSchema.table("__meta", {
 
 // ── Missions hierarchy ───────────────────────────────────────────────
 export const missions = projectSchema.table("missions", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   title: text("title").notNull(),
   description: text("description"),
   status: text("status").notNull(),
@@ -1117,7 +1125,7 @@ export const missions = projectSchema.table("missions", {
   lastAutopilotActivityAt: text("last_autopilot_activity_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [primaryKey({ columns: [t.projectId, t.id] })]);
 
 export const branchGroups = projectSchema.table("branch_groups", {
   id: text("id").primaryKey(),
@@ -1147,7 +1155,8 @@ export const branchGroups = projectSchema.table("branch_groups", {
 ]);
 
 export const pullRequests = projectSchema.table("pull_requests", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   sourceType: text("source_type").notNull(),
   sourceId: text("source_id").notNull(),
   repo: text("repo").notNull(),
@@ -1170,17 +1179,19 @@ export const pullRequests = projectSchema.table("pull_requests", {
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
   closedAt: bigint("closed_at", { mode: "number" }),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   check("pull_requests_source_type_check", sql`${t.sourceType} IN ('task','branch-group')`),
   check(
     "pull_requests_state_check",
     sql`${t.state} IN ('creating','open','responding','merged','closed','failed')`,
   ),
-  unique("idxPullRequestsOpenSource").on(t.sourceType, t.sourceId),
-  unique("idxPullRequestsOpenBranch").on(t.repo, t.headBranch),
-  unique("idxPullRequestsNumber").on(t.repo, t.prNumber),
+  unique("idxPullRequestsOpenSource").on(t.projectId, t.sourceType, t.sourceId),
+  unique("idxPullRequestsOpenBranch").on(t.projectId, t.repo, t.headBranch),
+  unique("idxPullRequestsNumber").on(t.projectId, t.repo, t.prNumber),
 ]);
 
 export const pullRequestThreadState = projectSchema.table("pull_request_thread_state", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   prEntityId: text("pr_entity_id").notNull(),
   threadId: text("thread_id").notNull(),
   headOid: text("head_oid").notNull(),
@@ -1189,8 +1200,8 @@ export const pullRequestThreadState = projectSchema.table("pull_request_thread_s
   // FNXC:PostgresSchema 2026-06-24-12:00: Epoch-millis → bigint (see branch_groups note).
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
 }, (t) => [
-  primaryKey({ columns: [t.prEntityId, t.threadId, t.headOid] }),
-  foreignKey({ columns: [t.prEntityId], foreignColumns: [pullRequests.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.prEntityId, t.threadId, t.headOid] }),
+  foreignKey({ columns: [t.projectId, t.prEntityId], foreignColumns: [pullRequests.projectId, pullRequests.id] }).onDelete("cascade"),
   check("pull_request_thread_state_outcome_check", sql`${t.outcome} IN ('fixed','disagreed','pending')`),
 ]);
 
@@ -1215,7 +1226,8 @@ export const missionGoals = projectSchema.table("mission_goals", {
 ]);
 
 export const goalCitations = projectSchema.table("goal_citations", {
-  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: integer("id").generatedAlwaysAsIdentity().notNull(),
   goalId: text("goal_id").notNull(),
   agentId: text("agent_id").notNull(),
   taskId: text("task_id"),
@@ -1224,14 +1236,16 @@ export const goalCitations = projectSchema.table("goal_citations", {
   snippet: text("snippet").notNull(),
   timestamp: text("timestamp").notNull(),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxGoalCitationsGoalId").on(t.goalId),
   index("idxGoalCitationsAgentId").on(t.agentId),
   index("idxGoalCitationsTimestamp").on(t.timestamp),
-  unique("uxGoalCitationsDedup").on(t.goalId, t.surface, t.sourceRef),
+  unique("uxGoalCitationsDedup").on(t.projectId, t.goalId, t.surface, t.sourceRef),
 ]);
 
 export const milestones = projectSchema.table("milestones", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   missionId: text("mission_id").notNull(),
   title: text("title").notNull(),
   description: text("description"),
@@ -1251,10 +1265,14 @@ export const milestones = projectSchema.table("milestones", {
   validationState: text("validation_state").notNull().default("not_started"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-}, (t) => [foreignKey({ columns: [t.missionId], foreignColumns: [missions.id] }).onDelete("cascade")]);
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.missionId], foreignColumns: [missions.projectId, missions.id] }).onDelete("cascade"),
+]);
 
 export const slices = projectSchema.table("slices", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   milestoneId: text("milestone_id").notNull(),
   title: text("title").notNull(),
   description: text("description"),
@@ -1271,10 +1289,14 @@ export const slices = projectSchema.table("slices", {
   verification: text("verification"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-}, (t) => [foreignKey({ columns: [t.milestoneId], foreignColumns: [milestones.id] }).onDelete("cascade")]);
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.milestoneId], foreignColumns: [milestones.projectId, milestones.id] }).onDelete("cascade"),
+]);
 
 export const missionFeatures = projectSchema.table("mission_features", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   sliceId: text("slice_id").notNull(),
   taskId: text("task_id"),
   title: text("title").notNull(),
@@ -1301,8 +1323,9 @@ export const missionFeatures = projectSchema.table("mission_features", {
   generatedFromFeatureId: text("generated_from_feature_id"),
   generatedFromRunId: text("generated_from_run_id"),
 }, (t) => [
-  foreignKey({ columns: [t.sliceId], foreignColumns: [slices.id] }).onDelete("cascade"),
-  foreignKey({ columns: [t.taskId], foreignColumns: [tasks.id] }).onDelete("set null"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.sliceId], foreignColumns: [slices.projectId, slices.id] }).onDelete("cascade"),
+  foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("set null"),
 ]);
 
 export const missionEvents = projectSchema.table("mission_events", {
@@ -1342,7 +1365,8 @@ export const plugins = projectSchema.table("plugins", {
 });
 
 export const routines = projectSchema.table("routines", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   agentId: text("agent_id").notNull().default(""),
   name: text("name").notNull(),
   description: text("description"),
@@ -1364,6 +1388,7 @@ export const routines = projectSchema.table("routines", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxRoutinesNextRunAt").on(t.nextRunAt),
   index("idxRoutinesEnabled").on(t.enabled),
   index("idxRoutinesScope").on(t.scope),
@@ -1388,7 +1413,7 @@ export const projectInsights = projectSchema.table("project_insights", {
 ]);
 
 export const projectInsightRuns = projectSchema.table("project_insight_runs", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   projectId: text("project_id").notNull(),
   trigger: text("trigger").notNull(),
   status: text("status").notNull(),
@@ -1404,12 +1429,14 @@ export const projectInsightRuns = projectSchema.table("project_insight_runs", {
   completedAt: text("completed_at"),
   cancelledAt: text("cancelled_at"),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxInsightRunsProjectId").on(t.projectId),
   index("idxInsightRunsProjectTriggerStatus").on(t.projectId, t.trigger, t.status),
 ]);
 
 export const projectInsightRunEvents = projectSchema.table("project_insight_run_events", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   runId: text("run_id").notNull(),
   seq: integer("seq").notNull(),
   type: text("type").notNull(),
@@ -1419,21 +1446,23 @@ export const projectInsightRunEvents = projectSchema.table("project_insight_run_
   metadata: jsonb("metadata"),
   createdAt: text("created_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.runId], foreignColumns: [projectInsightRuns.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.runId], foreignColumns: [projectInsightRuns.projectId, projectInsightRuns.id] }).onDelete("cascade"),
   index("idxInsightRunEventsRunIdSeq").on(t.runId, t.seq),
 ]);
 
 // ── Todo lists ───────────────────────────────────────────────────────
 export const todoLists = projectSchema.table("todo_lists", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   projectId: text("project_id").notNull(),
   title: text("title").notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (t) => [primaryKey({ columns: [t.projectId, t.id] })]);
 
 export const todoItems = projectSchema.table("todo_items", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   listId: text("list_id").notNull(),
   text: text("text").notNull(),
   completed: integer("completed").notNull().default(0),
@@ -1442,7 +1471,8 @@ export const todoItems = projectSchema.table("todo_items", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
-  foreignKey({ columns: [t.listId], foreignColumns: [todoLists.id] }).onDelete("cascade"),
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.listId], foreignColumns: [todoLists.projectId, todoLists.id] }).onDelete("cascade"),
   index("idxTodoItemsListId").on(t.listId),
   index("idxTodoItemsSortOrder").on(t.listId, t.sortOrder),
 ]);
@@ -1544,7 +1574,7 @@ export const incidents = projectSchema.table("incidents", {
 
 // ── Migration-only tables (from MIGRATION_ONLY_TABLE_SCHEMAS) ────────
 export const aiSessions = projectSchema.table("ai_sessions", {
-  id: text("id").primaryKey(),
+  id: text("id").notNull(),
   type: text("type").notNull(),
   status: text("status").notNull(),
   title: text("title").notNull(),
@@ -1554,13 +1584,14 @@ export const aiSessions = projectSchema.table("ai_sessions", {
   result: jsonb("result"),
   thinkingOutput: text("thinking_output").default(""),
   error: text("error"),
-  projectId: text("project_id"),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   lockedByTab: text("locked_by_tab"),
   lockedAt: text("locked_at"),
   archived: integer("archived").default(0),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxAiSessionsStatus").on(t.status),
   index("idxAiSessionsType").on(t.type),
   index("idxAiSessionsUpdatedAt").on(t.updatedAt),
@@ -1570,7 +1601,8 @@ export const aiSessions = projectSchema.table("ai_sessions", {
 ]);
 
 export const messages = projectSchema.table("messages", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   fromId: text("from_id").notNull(),
   fromType: text("from_type").notNull(),
   toId: text("to_id").notNull(),
@@ -1582,6 +1614,7 @@ export const messages = projectSchema.table("messages", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxMessagesTo").on(t.toId, t.toType, t.read),
   index("idxMessagesFrom").on(t.fromId, t.fromType),
   index("idxMessagesCreatedAt").on(t.createdAt),
@@ -1704,7 +1737,8 @@ export const runAuditEvents = projectSchema.table("run_audit_events", {
 ]);
 
 export const missionContractAssertions = projectSchema.table("mission_contract_assertions", {
-  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
   milestoneId: text("milestone_id").notNull(),
   title: text("title").notNull(),
   assertion: text("assertion").notNull(),
@@ -1715,6 +1749,7 @@ export const missionContractAssertions = projectSchema.table("mission_contract_a
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
   index("idxContractAssertionsMilestoneOrder").on(t.milestoneId, t.orderIndex, t.createdAt, t.id),
 ]);
 

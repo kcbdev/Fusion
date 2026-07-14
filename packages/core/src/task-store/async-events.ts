@@ -110,6 +110,7 @@ export async function recordGoalCitations(
       })
       .onConflictDoNothing({
         target: [
+          schema.project.goalCitations.projectId,
           schema.project.goalCitations.goalId,
           schema.project.goalCitations.surface,
           schema.project.goalCitations.sourceRef,

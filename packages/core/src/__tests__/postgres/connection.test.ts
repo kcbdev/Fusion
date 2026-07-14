@@ -132,6 +132,42 @@ pgDescribe("connection: external PostgreSQL integration (VAL-CONN-002)", () => {
     await connections.close();
     connections = null; // prevent double-close in afterEach
   });
+
+  it("binds runtime sessions to one project while migration sessions retain explicit bypass", async () => {
+    const backend: ResolvedBackend = {
+      mode: "external",
+      runtimeUrl: PG_TEST_URL,
+      migrationUrl: PG_TEST_URL,
+      migrationUrlOverridden: false,
+    };
+    const bootstrap = await createConnectionSetFromUrl(backend, {
+      poolMax: 1,
+      connectTimeoutSeconds: 5,
+    });
+    await bootstrap.migration.execute(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fusion_runtime') THEN
+          CREATE ROLE fusion_runtime NOLOGIN NOSUPERUSER;
+        END IF;
+        EXECUTE format('GRANT fusion_runtime TO %I', current_user);
+      END $$
+    `);
+    await bootstrap.close();
+    connections = await createConnectionSetFromUrl(backend, {
+      poolMax: 1,
+      connectTimeoutSeconds: 5,
+      projectId: "project-a",
+      useRuntimeRole: true,
+    });
+    const runtime = await connections.runtime.execute(
+      "SELECT current_user AS current_user, current_setting('fusion.project_id', true) AS project_id, current_setting('fusion.project_bypass', true) AS bypass",
+    ) as unknown as Array<{ current_user: string; project_id: string; bypass: string | null }>;
+    const migration = await connections.migration.execute(
+      "SELECT current_setting('fusion.project_bypass', true) AS bypass",
+    ) as unknown as Array<{ bypass: string }>;
+    expect(runtime[0]).toEqual({ current_user: "fusion_runtime", project_id: "project-a", bypass: null });
+    expect(migration[0]).toEqual({ bypass: "on" });
+  });
 });
 
 pgDescribe("connection: DATABASE_MIGRATION_URL split integration (VAL-CONN-003)", () => {

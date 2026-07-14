@@ -441,6 +441,173 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
   });
 
   /*
+  FNXC:PostgresLegacyPreservation 2026-07-14-12:10:
+  Unknown historical mission evidence rows are operator data, not disposable schema drift. Preserve every typed SQLite cell under the resolved project partition, including BLOB bytes, and make retries idempotent without allowing identical legacy IDs from separate projects to collide.
+  */
+  it("losslessly preserves opaque mission evidence rows per project and on retry", async () => {
+    const makeLegacyProject = (filename: string): string => {
+      const sqlitePath = join(ctx!.fusionDir, filename);
+      const legacy = new DatabaseSync(sqlitePath);
+      try {
+        legacy.exec(`
+          CREATE TABLE mission_feature_evidence_links (
+            id TEXT NOT NULL,
+            featureId TEXT,
+            confidence REAL,
+            payload BLOB,
+            nullableValue TEXT
+          )
+        `);
+        legacy.prepare(`INSERT INTO mission_feature_evidence_links VALUES (?, ?, ?, ?, ?)`)
+          .run("shared-id", "feature-1", 0.75, Buffer.from([0, 255, 16]), null);
+      } finally {
+        legacy.close();
+      }
+      return sqlitePath;
+    };
+    const projectAPath = makeLegacyProject("mission-project-a.db");
+    const projectBPath = makeLegacyProject("mission-project-b.db");
+
+    const first = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: projectAPath, pgSchema: "project" as const }],
+      { projectId: "project-a" },
+    );
+    const retry = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: projectAPath, pgSchema: "project" as const }],
+      { projectId: "project-a" },
+    );
+    const secondProject = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: projectBPath, pgSchema: "project" as const }],
+      { projectId: "project-b" },
+    );
+
+    for (const report of [first, retry, secondProject]) {
+      expect(report.tables).toContainEqual(expect.objectContaining({
+        table: "mission_feature_evidence_links",
+        sourceRows: 1,
+        verified: true,
+        skipped: false,
+      }));
+    }
+    expect(retry.tables.find((table) => table.table === "mission_feature_evidence_links")?.insertedRows).toBe(0);
+    const rows = await ctx!.db.execute(sql`
+      SELECT project_id, legacy_row_hash, legacy_row, source_schema_sql
+      FROM project.mission_feature_evidence_links
+      ORDER BY project_id
+    `) as unknown as Array<{
+      project_id: string;
+      legacy_row_hash: string;
+      legacy_row: Record<string, unknown>;
+      source_schema_sql: string;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.map(({ project_id }) => project_id)).toEqual(["project-a", "project-b"]);
+    expect(rows[0].legacy_row).toEqual({
+      confidence: { type: "number", value: "0.75" },
+      featureId: { type: "text", value: "feature-1" },
+      id: { type: "text", value: "shared-id" },
+      nullableValue: { type: "null" },
+      payload: { type: "blob", value: "AP8Q" },
+    });
+    expect(rows[0].legacy_row_hash).toBe(rows[1].legacy_row_hash);
+    expect(rows[0].source_schema_sql).toContain("CREATE TABLE mission_feature_evidence_links");
+  });
+
+  it("requires a project identity before preserving opaque project rows", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "mission-unbound.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`CREATE TABLE mission_feature_evidence_links (id TEXT, payload BLOB)`);
+      legacy.prepare(`INSERT INTO mission_feature_evidence_links VALUES (?, ?)`)
+        .run("row-1", Buffer.from([1, 2, 3]));
+    } finally {
+      legacy.close();
+    }
+
+    await expect(migrateSqliteToPostgres(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { migrationKey: "unbound-mission" },
+    )).rejects.toThrow(/projectId.*required/i);
+  });
+
+  it("losslessly preserves historical agentLogEntries rows", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "legacy-agent-log.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`CREATE TABLE agentLogEntries (id INTEGER, taskId TEXT, text TEXT, detail BLOB, agent TEXT)`);
+      legacy.prepare(`INSERT INTO agentLogEntries VALUES (?, ?, ?, ?, ?)`)
+        .run(7, "FN-7", "worked", Buffer.from([4, 5, 6]), "agent-7");
+    } finally {
+      legacy.close();
+    }
+
+    const first = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { projectId: "project-agent-log" },
+    );
+    const retry = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { projectId: "project-agent-log" },
+    );
+
+    expect(first.tables).toContainEqual(expect.objectContaining({
+      table: "agent_log_entries_legacy",
+      sourceRows: 1,
+      targetRows: 1,
+      verified: true,
+    }));
+    expect(retry.tables.find((table) => table.table === "agent_log_entries_legacy")?.insertedRows).toBe(0);
+    const rows = await ctx!.db.execute(sql`
+      SELECT project_id, legacy_row FROM project.agent_log_entries_legacy
+    `) as unknown as Array<{ project_id: string; legacy_row: Record<string, unknown> }>;
+    expect(rows).toEqual([{
+      project_id: "project-agent-log",
+      legacy_row: {
+        agent: { type: "text", value: "agent-7" },
+        detail: { type: "blob", value: "BAUG" },
+        id: { type: "number", value: "7" },
+        taskId: { type: "text", value: "FN-7" },
+        text: { type: "text", value: "worked" },
+      },
+    }]);
+  });
+
+  /*
+  FNXC:PostgresMigrationColumnCoverage 2026-07-14-12:10:
+  A normally mapped table is verified only when every source column has an explicit PostgreSQL destination. Silently dropping a newly discovered legacy column would make matching row counts conceal data loss.
+  */
+  it("fails verification when a mapped table has an unhandled SQLite column", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "fusion.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`ALTER TABLE tasks ADD COLUMN operatorOnlyPayload BLOB`);
+      legacy.prepare(`UPDATE tasks SET operatorOnlyPayload = ? WHERE id = ?`)
+        .run(Buffer.from([9, 9, 9]), "FN-100");
+    } finally {
+      legacy.close();
+    }
+
+    const report = await migrateTest(ctx!.db, [
+      { sqlitePath, pgSchema: "project" as const },
+    ]);
+
+    expect(report.tables).toContainEqual(expect.objectContaining({
+      table: "tasks",
+      sourceRows: 2,
+      insertedRows: 0,
+      verified: false,
+      skipped: false,
+      skipReason: expect.stringContaining("operatorOnlyPayload"),
+    }));
+  });
+
+  /*
   FNXC:PostgresMigration 2026-07-13-23:08:
   FTS5 shadow tables are disposable implementation details, but the virtual table is the user-visible search dataset. Verification must distinguish the two so an unmapped search surface fails cutover while its internal indexes remain intentional skips.
   */
@@ -666,7 +833,7 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
 
   /*
   FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
-  Sequential project cutovers share one PostgreSQL schema. Verification must accept accumulated shared-table rows, keep __meta isolated by project, and generate a new task-revision identity when both SQLite files start their local sequence at 1.
+  Sequential project cutovers share one PostgreSQL schema. Verification must count project-owned rows only, keep agents and __meta isolated by project, and generate a new task-revision identity when both SQLite files start their local sequence at 1.
   */
   it("converges sequential project migrations in one shared PostgreSQL database", async () => {
     const makeProjectDb = (name: string, projectId: string, taskId: string): string => {
@@ -686,7 +853,7 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
           CREATE TABLE __meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         `);
         legacy.prepare("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?)").run(
-          `agent-${projectId}`, `Agent ${projectId}`, "worker", "idle", "2026-07-14", "2026-07-14",
+          "shared-agent", `Agent ${projectId}`, "worker", "idle", "2026-07-14", "2026-07-14",
         );
         legacy.prepare("INSERT INTO task_document_revisions VALUES (1, ?, 'docs', ?, 1, 'agent', '{}', '2026-07-14')").run(
           taskId, `content-${projectId}`,
@@ -698,8 +865,8 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
       return sqlitePath;
     };
 
-    const firstPath = makeProjectDb("project-a.db", "project-a", "A-1");
-    const secondPath = makeProjectDb("project-b.db", "project-b", "B-1");
+    const firstPath = makeProjectDb("project-a.db", "project-a", "FN-1");
+    const secondPath = makeProjectDb("project-b.db", "project-b", "FN-1");
     const first = await migrateTest(
       ctx!.db, [{ sqlitePath: firstPath, pgSchema: "project" as const }], { projectId: "project-a" },
     );
@@ -710,13 +877,20 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
     expect(first.tables.every((table) => table.verified)).toBe(true);
     expect(second.tables.every((table) => table.verified)).toBe(true);
     expect(second.tables.find((table) => table.table === "agents")).toEqual(
-      expect.objectContaining({ sourceRows: 1, targetRows: 2, verified: true }),
+      expect.objectContaining({ sourceRows: 1, targetRows: 1, verified: true }),
     );
+    const agents = await ctx!.db.execute(sql`
+      SELECT project_id, id FROM project.agents ORDER BY project_id
+    `) as unknown as Array<{ project_id: string; id: string }>;
+    expect(agents).toEqual([
+      { project_id: "project-a", id: "shared-agent" },
+      { project_id: "project-b", id: "shared-agent" },
+    ]);
     const revisions = await ctx!.db.execute(sql`
-      SELECT id, task_id FROM project.task_document_revisions ORDER BY task_id
-    `) as unknown as Array<{ id: number; task_id: string }>;
-    expect(revisions.map(({ task_id }) => task_id)).toEqual(["A-1", "B-1"]);
-    expect(new Set(revisions.map(({ id }) => id)).size).toBe(2);
+      SELECT id, legacy_sqlite_id, task_id FROM project.task_document_revisions ORDER BY project_id
+    `) as unknown as Array<{ id: number; legacy_sqlite_id: number; task_id: string }>;
+    expect(revisions.map(({ task_id }) => task_id)).toEqual(["FN-1", "FN-1"]);
+    expect(revisions.map(({ legacy_sqlite_id }) => legacy_sqlite_id)).toEqual([1, 1]);
     const metadata = await ctx!.db.execute(sql`
       SELECT project_id, key, value FROM project.__meta ORDER BY project_id
     `) as unknown as Array<{ project_id: string; key: string; value: string }>;
@@ -728,16 +902,23 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
 
   /*
   FNXC:PostgresMigrationRetry 2026-07-14-09:06:
-  Retrying after the former non-transactional migrator must repair a globally keyed row copied under a NULL project partition. Reconciliation may replace only an exact migrated-content match, so unrelated PostgreSQL state remains untouched.
+  Retrying after the former non-transactional migrator must repair a row copied under a stale project partition. Current ownership constraints reject NULL, so reconciliation proves the exact stale non-NULL owner is replaced without touching unrelated project state.
   */
-  it("re-keys an exact globally keyed row left under a null project partition", async () => {
+  it("re-keys an exact row left under a stale project partition", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "fusion.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.prepare(`UPDATE tasks SET projectId = ? WHERE id = ?`).run("stale-project", "FN-100");
+    } finally {
+      legacy.close();
+    }
     await applySchemaBaseline(ctx!.db);
     await ctx!.db.execute(sql`
       INSERT INTO project.tasks
         (id, project_id, title, description, "column", dependencies, steps, comments,
          custom_fields, deleted_at, created_at, updated_at)
       VALUES
-        ('FN-100', NULL, 'First task', 'desc', 'todo',
+        ('FN-100', 'stale-project', 'First task', 'desc', 'todo',
          '[{"taskId":"FN-99","type":"blocks"}]'::jsonb,
          '[{"id":"s1","name":"step one"}]'::jsonb,
          '[{"author":"agent","body":"hello"}]'::jsonb,
@@ -747,7 +928,7 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
 
     const report = await migrateTest(
       ctx!.db,
-      [{ sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const }],
+      [{ sqlitePath, pgSchema: "project" as const }],
       { projectId: "project-retry" },
     );
 
@@ -761,6 +942,40 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
       { id: "FN-100", project_id: "project-retry" },
       { id: "FN-101", project_id: "project-retry" },
     ]);
+  });
+
+  it("re-keys quarantined retry rows when project_id was injected", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "retry-injected.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`CREATE TABLE agents (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, state TEXT NOT NULL,
+        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+      )`);
+      legacy.prepare("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?)").run(
+        "retry-agent", "Retry Agent", "worker", "idle", "2026-07-14", "2026-07-14",
+      );
+    } finally {
+      legacy.close();
+    }
+    await applySchemaBaseline(ctx!.db);
+    await ctx!.db.execute(sql`
+      INSERT INTO project.agents(project_id, id, name, role, state, created_at, updated_at)
+      VALUES ('__legacy_unscoped__', 'retry-agent', 'Retry Agent', 'worker', 'idle', '2026-07-14', '2026-07-14')
+    `);
+
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { projectId: "project-retry-injected" },
+    );
+
+    expect(report.tables.find((table) => table.table === "agents")).toEqual(
+      expect.objectContaining({ sourceRows: 1, targetRows: 1, verified: true }),
+    );
+    await expect(ctx!.db.execute(sql`
+      SELECT project_id FROM project.agents WHERE id = 'retry-agent'
+    `)).resolves.toEqual([{ project_id: "project-retry-injected" }]);
   });
 
   /*
@@ -975,8 +1190,8 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
 
     // Insert a new row without specifying id — it should get id=4, not collide.
     await ctx!.db.execute(sql`
-      INSERT INTO project.agent_heartbeats (agent_id, timestamp, status, run_id)
-      VALUES ('agent-3', '2026-06-03', 'alive', 'run-3')
+      INSERT INTO project.agent_heartbeats (project_id, agent_id, timestamp, status, run_id)
+      VALUES ('migration-test', 'agent-3', '2026-06-03', 'alive', 'run-3')
     `);
     const rows = (await ctx!.db.execute(sql`
       SELECT id, agent_id FROM project.agent_heartbeats WHERE agent_id = 'agent-3'

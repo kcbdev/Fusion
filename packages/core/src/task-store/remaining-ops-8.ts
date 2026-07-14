@@ -521,7 +521,10 @@ export async function writeTaskWorkflowSelectionImpl(store: TaskStore, taskId: s
         .insert(schema.project.taskWorkflowSelection)
         .values({ taskId, workflowId, stepIds, updatedAt })
         .onConflictDoUpdate({
-          target: schema.project.taskWorkflowSelection.taskId,
+          target: [
+            schema.project.taskWorkflowSelection.projectId,
+            schema.project.taskWorkflowSelection.taskId,
+          ],
           set: { workflowId, stepIds, updatedAt },
         });
       return;

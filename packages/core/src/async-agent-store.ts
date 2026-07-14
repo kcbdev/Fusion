@@ -195,7 +195,7 @@ export async function writeAgent(handle: QueryHandle, agent: Agent): Promise<voi
       data,
     })
     .onConflictDoUpdate({
-      target: schema.project.agents.id,
+      target: [schema.project.agents.projectId, schema.project.agents.id],
       set: {
         name: agent.name,
         role: agent.role,
@@ -363,7 +363,7 @@ export async function saveRun(handle: QueryHandle, projectId: string, run: Agent
       status: run.status,
     })
     .onConflictDoUpdate({
-      target: schema.project.agentRuns.id,
+      target: [schema.project.agentRuns.projectId, schema.project.agentRuns.id],
       set: {
         agentId: run.agentId,
         data: run,
@@ -598,6 +598,7 @@ export async function upsertTaskSession(
     })
     .onConflictDoUpdate({
       target: [
+        schema.project.agentTaskSessions.projectId,
         schema.project.agentTaskSessions.agentId,
         schema.project.agentTaskSessions.taskId,
       ],
@@ -842,7 +843,7 @@ export async function setLastBlockedState(
       updatedAt,
     })
     .onConflictDoUpdate({
-      target: schema.project.agentBlockedStates.agentId,
+      target: [schema.project.agentBlockedStates.projectId, schema.project.agentBlockedStates.agentId],
       set: {
         data: state,
         updatedAt,

@@ -454,7 +454,7 @@ export async function upsertTaskRowInTransaction(
     .insert(schema.project.tasks)
     .values(values as never)
     .onConflictDoUpdate({
-      target: schema.project.tasks.id,
+      target: [schema.project.tasks.projectId, schema.project.tasks.id],
       set: updateValues as never,
     });
 }

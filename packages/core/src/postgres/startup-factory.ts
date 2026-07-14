@@ -45,6 +45,8 @@
 
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { isValidSqliteDatabaseFile } from "../sqlite-validation.js";
 import { createLogger } from "../logger.js";
 import { TaskStore } from "../store.js";
@@ -60,7 +62,11 @@ import {
 } from "./connection.js";
 import { applySchemaBaseline } from "./schema-applier.js";
 import { createAsyncDataLayer, type AsyncDataLayer } from "./data-layer.js";
-import { lookupRegisteredProjectIdByPath, stampMigratedProjectRows } from "./migration-stamping.js";
+import {
+  lookupRegisteredProjectIdByPath,
+  rekeyFallbackProjectPartition,
+  stampMigratedProjectRows,
+} from "./migration-stamping.js";
 
 // FNXC:RuntimeStartupWiring 2026-06-24-10:55:
 // The embedded PostgreSQL lifecycle module imports the `embedded-postgres`
@@ -79,6 +85,14 @@ type EmbeddedLifecycleLike = {
 };
 
 const log = createLogger("startup-factory");
+
+/**
+ * FNXC:ProjectDataIsolation 2026-07-14-12:10:
+ * An unregistered project still needs a stable, non-shared PostgreSQL partition. Derive a deterministic identity from its canonical root path so first-boot migration and every later runtime session select the same isolated rows without inventing cross-project ownership.
+ */
+function fallbackProjectIdForRoot(rootDir: string): string {
+  return `local-${createHash("sha256").update(resolve(rootDir)).digest("hex").slice(0, 24)}`;
+}
 
 /**
  * FNXC:BackendFlip 2026-06-26-14:10:
@@ -414,6 +428,15 @@ export async function createTaskStoreForBackend(
             legacyCentral.close();
           }
         }
+        const fallbackProjectId = fallbackProjectIdForRoot(rootDir);
+        migrationProjectId ??= fallbackProjectId;
+        if (migrationProjectId !== fallbackProjectId) {
+          await rekeyFallbackProjectPartition(
+            connections.migration,
+            fallbackProjectId,
+            migrationProjectId,
+          );
+        }
         /*
         FNXC:MultiProjectIsolation 2026-07-11:
         With per-project task partitioning (project_id on project.tasks), the
@@ -571,7 +594,35 @@ export async function createTaskStoreForBackend(
   single-project behavior.
   */
   const resolvedProjectId = options.projectId
-    ?? (rootDir ? await lookupRegisteredProjectIdByPath(connections.migration, rootDir) : undefined);
+    ?? (rootDir
+      ? (await lookupRegisteredProjectIdByPath(connections.migration, rootDir))
+        ?? fallbackProjectIdForRoot(rootDir)
+      : undefined);
+
+  if (rootDir && resolvedProjectId) {
+    await rekeyFallbackProjectPartition(
+      connections.migration,
+      fallbackProjectIdForRoot(rootDir),
+      resolvedProjectId,
+    );
+  }
+
+  /*
+  FNXC:ProjectDataIsolation 2026-07-14-12:10:
+  Schema application and SQLite copy require an administrative connection, but application stores must never inherit that bypass. Replace the bootstrap pools with project-bound sessions before constructing any store so every agent and satellite query is constrained by forced RLS.
+  */
+  if (resolvedProjectId) {
+    const runtimeRoleRows = (await connections.migration.execute(sql`
+      SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fusion_runtime')
+        AND pg_has_role(current_user, 'fusion_runtime', 'MEMBER') AS usable
+    `)) as unknown as Array<{ usable: boolean }>;
+    await connections.close();
+    connections = await createConnectionSetFromUrl(resolvedBackend, {
+      poolMax: options.poolMax,
+      projectId: resolvedProjectId,
+      useRuntimeRole: runtimeRoleRows[0]?.usable === true,
+    });
+  }
   const asyncLayer = createAsyncDataLayer(connections, { projectId: resolvedProjectId });
 
   // Step 7: construct the TaskStore in backend mode.

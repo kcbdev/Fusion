@@ -753,6 +753,7 @@ export async function upsertTaskCommitAssociationImpl(store: TaskStore, input: O
         })
         .onConflictDoUpdate({
           target: [
+            schema.project.taskCommitAssociations.projectId,
             schema.project.taskCommitAssociations.taskLineageId,
             schema.project.taskCommitAssociations.commitSha,
             schema.project.taskCommitAssociations.matchedBy,

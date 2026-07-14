@@ -27,7 +27,7 @@ import { sql } from "drizzle-orm";
 import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type PluginSchemaInitHook } from "./plugin-schema-hook.js";
 
 /** The latest PostgreSQL schema version known to this applier. */
-export const SCHEMA_BASELINE_VERSION = "0005";
+export const SCHEMA_BASELINE_VERSION = "0006";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -38,6 +38,7 @@ const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
 export const MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION = "0003";
 export const LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION = "0004";
 export const MULTI_PROJECT_CUTOVER_SCHEMA_VERSION = "0005";
+export const PROJECT_OWNERSHIP_SCHEMA_VERSION = "0006";
 
 /** Bookkeeping table for the fresh Drizzle migration history. */
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
@@ -68,6 +69,11 @@ const MULTI_PROJECT_CUTOVER_MIGRATION_PATH = join(
   __dirname,
   "migrations",
   "0005_multi_project_cutover.sql",
+);
+const PROJECT_OWNERSHIP_MIGRATION_PATH = join(
+  __dirname,
+  "migrations",
+  "0006_project_ownership.sql",
 );
 
 /**
@@ -131,6 +137,7 @@ export async function applySchemaBaseline(
     const monitorApprovalIsolationAlreadyApplied = applied.includes(MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION);
     const legacyCutoverPreservationAlreadyApplied = applied.includes(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION);
     const multiProjectCutoverAlreadyApplied = applied.includes(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION);
+    const projectOwnershipAlreadyApplied = applied.includes(PROJECT_OWNERSHIP_SCHEMA_VERSION);
     let schemaChanged = false;
 
     if (!baselineAlreadyApplied) {
@@ -216,6 +223,99 @@ export async function applySchemaBaseline(
   // NOT EXISTS), so re-running is safe.
     const pluginHooks = options.pluginHooks ?? DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS;
     await runPluginSchemaInitHooks(tx, pluginHooks);
+
+    /*
+    FNXC:ProjectDataIsolation 2026-07-14-12:10:
+    Run universal ownership once, after plugin hooks, so first application covers core and plugin tables without duplicate DDL. Later boots validate that every newly introduced plugin table declared the same ownership contract instead of rebuilding primary keys, foreign keys, and policies on every startup.
+
+    FNXC:ProjectArchiveIsolation 2026-07-14-14:31:
+    The steady-state audit includes archive.archived_tasks because archived task IDs are project-local and must retain the same forced-RLS boundary as live task rows.
+    */
+    if (!projectOwnershipAlreadyApplied) {
+      const projectOwnershipSql = await readFile(PROJECT_OWNERSHIP_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(projectOwnershipSql));
+      await tx.execute(
+        sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${PROJECT_OWNERSHIP_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
+      );
+      schemaChanged = true;
+    } else {
+      const ownershipGaps = (await tx.execute(sql`
+        SELECT n.nspname || '.' || c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        LEFT JOIN information_schema.columns col
+          ON col.table_schema = n.nspname
+         AND col.table_name = c.relname
+         AND col.column_name = 'project_id'
+        WHERE (n.nspname = 'project' OR (n.nspname = 'archive' AND c.relname = 'archived_tasks'))
+          AND c.relkind = 'r'
+          AND (
+            col.column_name IS NULL
+            OR NOT c.relrowsecurity
+            OR NOT c.relforcerowsecurity
+            OR NOT EXISTS (
+              SELECT 1 FROM pg_policy p
+              WHERE p.polrelid = c.oid AND p.polname = 'fusion_project_isolation'
+            )
+          )
+        ORDER BY c.relname
+      `)) as unknown as Array<{ table_name: string }>;
+      if (ownershipGaps.length > 0) {
+        throw new Error(
+          `Project-owned tables are missing required isolation: ${ownershipGaps.map(({ table_name }) => table_name).join(", ")}`,
+        );
+      }
+      const relationalGaps = (await tx.execute(sql`
+        SELECT c.conrelid::regclass::text AS object_name, c.conname AS detail
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE (n.nspname = 'project' OR (n.nspname = 'archive' AND t.relname = 'archived_tasks'))
+          AND c.contype IN ('p', 'u')
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest(c.conkey) key_attnum
+            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key_attnum
+            WHERE a.attname = 'project_id'
+          )
+        UNION ALL
+        SELECT t.oid::regclass::text, idx.relname
+        FROM pg_index i
+        JOIN pg_class t ON t.oid = i.indrelid
+        JOIN pg_class idx ON idx.oid = i.indexrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'project' AND i.indisunique
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest(i.indkey::smallint[]) key_attnum
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_attnum
+            WHERE a.attname = 'project_id'
+          )
+        UNION ALL
+        SELECT c.conrelid::regclass::text, c.conname
+        FROM pg_constraint c
+        JOIN pg_class child ON child.oid = c.conrelid
+        JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+        JOIN pg_class parent ON parent.oid = c.confrelid
+        JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+        WHERE c.contype = 'f' AND child_ns.nspname = 'project' AND parent_ns.nspname = 'project'
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM unnest(c.conkey) key_attnum
+              JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key_attnum
+              WHERE a.attname = 'project_id'
+            ) OR NOT EXISTS (
+              SELECT 1 FROM unnest(c.confkey) key_attnum
+              JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = key_attnum
+              WHERE a.attname = 'project_id'
+            )
+          )
+        ORDER BY 1, 2
+      `)) as unknown as Array<{ object_name: string; detail: string }>;
+      if (relationalGaps.length > 0) {
+        throw new Error(
+          `Project-owned keys or relationships are globally scoped: ${relationalGaps.map(({ object_name, detail }) => `${object_name}.${detail}`).join(", ")}`,
+        );
+      }
+    }
 
     return { applied: schemaChanged, pluginHooksRun: pluginHooks.length };
   });

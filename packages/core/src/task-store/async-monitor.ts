@@ -105,6 +105,14 @@ const FIRST_FIRED_META_KEY = "firstFiredAt";
  */
 export const FIX_TASK_CLAIM_SENTINEL_PREFIX = "claiming:";
 
+/**
+ * FNXC:MonitorProjectIsolation 2026-07-14-12:35:
+ * Every monitor read and mutation must use the same explicit project partition. Legacy direct helper callers without a bound AsyncDataLayer are quarantined consistently instead of writing an empty project ID that the database trigger rewrites behind their subsequent reads.
+ */
+function monitorProjectPartition(projectId: string): string {
+  return projectId.trim() || "__legacy_unscoped__";
+}
+
 // ── Row mappers ──────────────────────────────────────────────────────────────
 
 /**
@@ -175,6 +183,7 @@ export async function recordDeploymentAsync(
   input: DeploymentInput,
   projectId = "",
 ): Promise<Deployment> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const deploymentId = input.deploymentId?.trim() || `dep-${randomUUID()}`;
   const now = new Date().toISOString();
   const deployedAt = input.deployedAt ?? now;
@@ -182,7 +191,7 @@ export async function recordDeploymentAsync(
   await db
     .insert(schema.project.deployments)
     .values({
-      projectId,
+      projectId: ownerProjectId,
       deploymentId,
       service: input.service ?? null,
       environment: input.environment ?? null,
@@ -209,7 +218,7 @@ export async function recordDeploymentAsync(
   const rows = await db
     .select()
     .from(schema.project.deployments)
-    .where(and(eq(schema.project.deployments.projectId, projectId), eq(schema.project.deployments.deploymentId, deploymentId)));
+    .where(and(eq(schema.project.deployments.projectId, ownerProjectId), eq(schema.project.deployments.deploymentId, deploymentId)));
   const row = rows[0];
   if (!row) throw new Error(`deployment ${deploymentId} not found after upsert`);
   return deploymentFromRow(row);
@@ -228,10 +237,11 @@ export async function getOpenIncidentByGroupingKeyAsync(
   groupingKey: string,
   projectId = "",
 ): Promise<Incident | null> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const rows = await db
     .select()
     .from(schema.project.incidents)
-    .where(and(eq(schema.project.incidents.projectId, projectId), eq(schema.project.incidents.groupingKey, groupingKey), eq(schema.project.incidents.status, "open")))
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.groupingKey, groupingKey), eq(schema.project.incidents.status, "open")))
     .orderBy(desc(schema.project.incidents.openedAt), desc(schema.project.incidents.id))
     .limit(1);
   return rows[0] ? incidentFromRow(rows[0]) : null;
@@ -248,10 +258,11 @@ export async function getIncidentAsync(
   incidentId: string,
   projectId = "",
 ): Promise<Incident | null> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const rows = await db
     .select()
     .from(schema.project.incidents)
-    .where(and(eq(schema.project.incidents.projectId, projectId), eq(schema.project.incidents.incidentId, incidentId)))
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, incidentId)))
     .limit(1);
   return rows[0] ? incidentFromRow(rows[0]) : null;
 }
@@ -276,8 +287,9 @@ export async function ingestIncidentSignalAsync(
   input: IncidentSignalInput,
   projectId = "",
 ): Promise<{ incident: Incident; created: boolean }> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const now = input.at ?? new Date().toISOString();
-  const existing = await getOpenIncidentByGroupingKeyAsync(db, input.groupingKey, projectId);
+  const existing = await getOpenIncidentByGroupingKeyAsync(db, input.groupingKey, ownerProjectId);
 
   if (existing) {
     // Absorb the re-firing signal into the open incident.
@@ -292,8 +304,8 @@ export async function ingestIncidentSignalAsync(
     await db
       .update(schema.project.incidents)
       .set({ updatedAt: now, meta: nextMeta })
-      .where(eq(schema.project.incidents.incidentId, existing.incidentId));
-    const updated = await getIncidentAsync(db, existing.incidentId, projectId);
+      .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, existing.incidentId)));
+    const updated = await getIncidentAsync(db, existing.incidentId, ownerProjectId);
     return { incident: updated ?? existing, created: false };
   }
 
@@ -304,7 +316,7 @@ export async function ingestIncidentSignalAsync(
     [FIRST_FIRED_META_KEY]: now,
   };
   await db.insert(schema.project.incidents).values({
-    projectId,
+    projectId: ownerProjectId,
     incidentId,
     groupingKey: input.groupingKey,
     title: input.title,
@@ -319,7 +331,7 @@ export async function ingestIncidentSignalAsync(
     createdAt: now,
     updatedAt: now,
   });
-  const incident = await getIncidentAsync(db, incidentId, projectId);
+  const incident = await getIncidentAsync(db, incidentId, ownerProjectId);
   if (!incident) throw new Error(`incident ${incidentId} not found after insert`);
   return { incident, created: true };
 }
@@ -338,14 +350,15 @@ export async function resolveIncidentAsync(
   at?: string,
   projectId = "",
 ): Promise<Incident | null> {
-  const open = await getOpenIncidentByGroupingKeyAsync(db, groupingKey, projectId);
+  const ownerProjectId = monitorProjectPartition(projectId);
+  const open = await getOpenIncidentByGroupingKeyAsync(db, groupingKey, ownerProjectId);
   if (!open) return null;
   const now = at ?? new Date().toISOString();
   await db
     .update(schema.project.incidents)
     .set({ status: "resolved", resolvedAt: now, updatedAt: now })
-    .where(and(eq(schema.project.incidents.projectId, projectId), eq(schema.project.incidents.incidentId, open.incidentId)));
-  return getIncidentAsync(db, open.incidentId, projectId);
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, open.incidentId)));
+  return getIncidentAsync(db, open.incidentId, ownerProjectId);
 }
 
 /**
@@ -370,13 +383,15 @@ export async function resolveIncidentAsync(
 export async function claimIncidentForFixTaskAsync(
   db: AsyncDataLayer["db"] | DbTransaction,
   incidentId: string,
+  projectId = "",
 ): Promise<boolean> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const now = new Date().toISOString();
   const sentinel = `${FIX_TASK_CLAIM_SENTINEL_PREFIX}${incidentId}`;
   const result = await db
     .update(schema.project.incidents)
     .set({ fixTaskId: sentinel, updatedAt: now })
-    .where(and(eq(schema.project.incidents.incidentId, incidentId), isNull(schema.project.incidents.fixTaskId)))
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, incidentId), isNull(schema.project.incidents.fixTaskId)))
     .returning({ id: schema.project.incidents.id });
   return result.length > 0;
 }
@@ -392,12 +407,14 @@ export async function attachFixTaskAsync(
   db: AsyncDataLayer["db"] | DbTransaction,
   incidentId: string,
   fixTaskId: string,
+  projectId = "",
 ): Promise<void> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const now = new Date().toISOString();
   await db
     .update(schema.project.incidents)
     .set({ fixTaskId, updatedAt: now })
-    .where(eq(schema.project.incidents.incidentId, incidentId));
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, incidentId)));
 }
 
 /**
@@ -418,13 +435,15 @@ export async function attachFixTaskAsync(
 export async function releaseIncidentFixTaskClaimAsync(
   db: AsyncDataLayer["db"] | DbTransaction,
   incidentId: string,
+  projectId = "",
 ): Promise<boolean> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const now = new Date().toISOString();
   const sentinel = `${FIX_TASK_CLAIM_SENTINEL_PREFIX}${incidentId}`;
   const result = await db
     .update(schema.project.incidents)
     .set({ fixTaskId: null, updatedAt: now })
-    .where(and(eq(schema.project.incidents.incidentId, incidentId), eq(schema.project.incidents.fixTaskId, sentinel)))
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.incidentId, incidentId), eq(schema.project.incidents.fixTaskId, sentinel)))
     .returning({ id: schema.project.incidents.id });
   return result.length > 0;
 }
@@ -523,13 +542,16 @@ export async function countRecentAutoFixTasksAsync(
   db: AsyncDataLayer["db"] | DbTransaction,
   config: StormGuardConfig = DEFAULT_STORM_GUARD,
   nowMs: number = Date.now(),
+  projectId = "",
 ): Promise<number> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const cutoff = new Date(nowMs - config.windowMs).toISOString();
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(schema.project.incidents)
     .where(
       and(
+        eq(schema.project.incidents.projectId, ownerProjectId),
         sql`${schema.project.incidents.fixTaskId} IS NOT NULL`,
         notLike(schema.project.incidents.fixTaskId, `${FIX_TASK_CLAIM_SENTINEL_PREFIX}%`),
         gte(schema.project.incidents.updatedAt, cutoff),
@@ -549,10 +571,12 @@ export async function countRecentAutoFixTasksAsync(
  */
 export async function countOpenIncidentsAsync(
   db: AsyncDataLayer["db"] | DbTransaction,
+  projectId = "",
 ): Promise<number> {
+  const ownerProjectId = monitorProjectPartition(projectId);
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(schema.project.incidents)
-    .where(eq(schema.project.incidents.status, "open"));
+    .where(and(eq(schema.project.incidents.projectId, ownerProjectId), eq(schema.project.incidents.status, "open")));
   return Number(rows[0]?.count ?? 0);
 }

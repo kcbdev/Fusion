@@ -422,10 +422,11 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       await applySchemaBaseline(connections.migration);
       const db = connections.migration;
 
-      // Seed unstamped rows the migrator would have produced.
+      // Current migrators stamp task ownership during copy; the helper still
+      // re-keys historical config/workflow identities.
       await db.execute(
-        `INSERT INTO project.tasks (id, description, "column", created_at, updated_at)
-         VALUES ('FN-HELP-1', 'd', 'todo', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')`,
+        `INSERT INTO project.tasks (project_id, id, description, "column", created_at, updated_at)
+         VALUES ('proj_help', 'FN-HELP-1', 'd', 'todo', '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')`,
       );
       await db.execute(
         `INSERT INTO project.config (project_id, settings, updated_at)
@@ -551,10 +552,10 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
   });
 
   /*
-  FNXC:MultiProjectMigration 2026-07-13-22:37:
-  Legacy task IDs remain globally unique in the PostgreSQL schema. When two projects contain the same ID, the second migration must diagnose the collision through project-scoped verification and abort before stamping or recording success; it must never silently attribute project A's row to project B.
+  FNXC:ProjectTaskIdentity 2026-07-14-12:32:
+  Legacy task IDs are project-local. Two projects migrating the same task ID must each retain its own row and title without a collision or cross-project attribution.
   */
-  it("fails closed when a second project's legacy task id collides with the first project", async () => {
+  it("migrates the same legacy task id independently for two projects", async () => {
     rootDir = await mkdtemp(join(tmpdir(), "startup-factory-project-collision-"));
     dbName = uniqueDbName();
     adminExec(`CREATE DATABASE "${dbName}"`);
@@ -573,16 +574,19 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     expect(first).not.toBeNull();
     await first!.shutdown();
 
-    await expect(
-      createTaskStoreForBackend({ rootDir: projectB, globalSettingsDir: globalDir, env: { DATABASE_URL: testUrl } }),
-    ).rejects.toThrow(/failed verification.*project\.tasks/i);
+    const second = await createTaskStoreForBackend({ rootDir: projectB, globalSettingsDir: globalDir, env: { DATABASE_URL: testUrl } });
+    expect(second).not.toBeNull();
+    await second!.shutdown();
 
     const client = postgres(testUrl, { max: 1 });
     try {
       const rows = await client<{ title: string; project_id: string | null }[]>`
-        SELECT title, project_id FROM project.tasks WHERE id = 'SHARED-1'
+        SELECT title, project_id FROM project.tasks WHERE id = 'SHARED-1' ORDER BY project_id
       `;
-      expect(rows).toEqual([{ title: "Project A owns this id", project_id: "project-a" }]);
+      expect(rows).toEqual([
+        { title: "Project A owns this id", project_id: "project-a" },
+        { title: "Project B collides", project_id: "project-b" },
+      ]);
     } finally {
       await client.end();
     }
@@ -615,7 +619,7 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       const configs = await client<{ settings: unknown }[]>`SELECT settings FROM project.config`;
       expect(configs.some((row) => JSON.stringify(row.settings).includes("sqliteMigrationNotice"))).toBe(false);
       const tasks = await client<{ project_id: string | null }[]>`SELECT project_id FROM project.tasks WHERE id = 'FAIL-1'`;
-      expect(tasks[0]?.project_id ?? null).toBeNull();
+      expect(tasks[0]?.project_id).toMatch(/^local-[a-f0-9]{24}$/);
     } finally {
       await client.end();
     }
@@ -642,7 +646,8 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     const verifyClient = postgres(testUrl, { max: 1 });
     try {
       const states = await verifyClient<{ status: string }[]>`
-        SELECT status FROM public.fusion_sqlite_migrations WHERE migration_key = ${`project:${rootDir}`}
+        SELECT status FROM public.fusion_sqlite_migrations
+        WHERE migration_key LIKE 'project:local-%'
       `;
       expect(states).toEqual([{ status: "complete" }]);
     } finally {

@@ -4895,8 +4895,9 @@ export interface ProjectSettings {
   auto-migration succeeds, so the dashboard can show a one-time banner telling
   the operator their data was migrated and the original SQLite files were
   kept as backups. Dismissing the banner sets dismissed: true (the notice is
-  retained for support/audit rather than deleted). null/absent = no migration
-  happened on this project.
+  retained for support/audit rather than deleted). Inbox delivery has a
+  separate top-level marker so writing it cannot revert a concurrent banner
+  dismissal. null/absent = no migration happened on this project.
   */
   sqliteMigrationNotice?: {
     /** ISO timestamp of the auto-migration. */
@@ -4910,6 +4911,8 @@ export interface ProjectSettings {
     /** True once the operator dismissed the banner. */
     dismissed?: boolean;
   } | null;
+  /** ISO timestamp after the one-time post-migration system inbox message was durably inserted. */
+  postgresMigrationInboxMessageSentAt?: string;
   /** Number of days to retain per-task agent-log JSONL files for soft-deleted
    *  and archived tasks. Only affects tasks that are no longer active. Entries
    *  older than this window are removed from the JSONL file during periodic

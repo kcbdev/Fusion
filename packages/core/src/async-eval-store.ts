@@ -232,9 +232,17 @@ export async function upsertEvalTaskResult(
   handle: QueryHandle,
   result: EvalTaskResult,
 ): Promise<void> {
+  const runRows = await handle
+    .select({ projectId: schema.project.evalRuns.projectId })
+    .from(schema.project.evalRuns)
+    .where(eq(schema.project.evalRuns.id, result.runId))
+    .limit(1);
+  const projectId = runRows[0]?.projectId;
+  if (!projectId) throw new Error(`Eval run not found: ${result.runId}`);
   await handle
     .insert(schema.project.evalTaskResults)
     .values({
+      projectId,
       id: result.id,
       runId: result.runId,
       taskId: result.taskId,
@@ -255,7 +263,11 @@ export async function upsertEvalTaskResult(
       updatedAt: result.updatedAt,
     })
     .onConflictDoUpdate({
-      target: [schema.project.evalTaskResults.runId, schema.project.evalTaskResults.taskId],
+      target: [
+        schema.project.evalTaskResults.projectId,
+        schema.project.evalTaskResults.runId,
+        schema.project.evalTaskResults.taskId,
+      ],
       set: {
         taskSnapshot: result.taskSnapshot,
         status: result.status,
@@ -334,6 +346,13 @@ export async function appendEvalRunEvent(
   input: { id: string; runId: string; type: string; message: string; status?: EvalRunStatus; taskId?: string; metadata?: Record<string, unknown> },
 ): Promise<EvalRunEvent> {
   return layer.transactionImmediate(async (tx) => {
+    const runRows = await tx
+      .select({ projectId: schema.project.evalRuns.projectId })
+      .from(schema.project.evalRuns)
+      .where(eq(schema.project.evalRuns.id, input.runId))
+      .limit(1);
+    const projectId = runRows[0]?.projectId;
+    if (!projectId) throw new Error(`Eval run not found: ${input.runId}`);
     const seqRows = await tx
       .select({ maxSeq: sql<number | null>`max(${schema.project.evalRunEvents.seq})` })
       .from(schema.project.evalRunEvents)
@@ -341,6 +360,7 @@ export async function appendEvalRunEvent(
     const seq = (seqRows[0]?.maxSeq ?? 0) + 1;
     const createdAt = new Date().toISOString();
     await tx.insert(schema.project.evalRunEvents).values({
+      projectId,
       id: input.id,
       runId: input.runId,
       seq,

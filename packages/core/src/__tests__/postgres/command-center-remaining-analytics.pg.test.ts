@@ -161,8 +161,8 @@ pgTest("Command Center remaining analytics aggregators (PostgreSQL backend mode)
 
     // ── Live snapshot: one active session + one active run ────────────────────
     await adminDb.execute(sql`
-      INSERT INTO project.agents (id, name, role, state, created_at, updated_at)
-      VALUES ('agent-live', 'Live Agent', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE})
+      INSERT INTO project.agents (project_id, id, name, role, state, created_at, updated_at)
+      VALUES ('p1', 'agent-live', 'Live Agent', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE})
     `);
     await adminDb.execute(sql`
       INSERT INTO project.agent_runs (project_id, id, agent_id, data, started_at, status)
@@ -290,10 +290,10 @@ pgTest("Command Center remaining analytics aggregators (PostgreSQL backend mode)
       { taskId: "FN-LIVE-B", createdAt: IN_RANGE, updatedAt: IN_RANGE, applyDefaultWorkflowSteps: false },
     );
     await adminDb.execute(sql`
-      INSERT INTO project.agents (id, name, role, state, created_at, updated_at)
+      INSERT INTO project.agents (project_id, id, name, role, state, created_at, updated_at)
       VALUES
-        ('agent-live-a', 'Live A', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE}),
-        ('agent-live-b', 'Live B', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE})
+        ('live-project-a', 'agent-live-a', 'Live A', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE}),
+        ('live-project-b', 'agent-live-b', 'Live B', 'executor', 'idle', ${IN_RANGE}, ${IN_RANGE})
     `);
     await adminDb.execute(sql`
       INSERT INTO project.agent_runs (project_id, id, agent_id, data, started_at, status)

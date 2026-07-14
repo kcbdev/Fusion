@@ -36,7 +36,9 @@ import {
   LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION,
   MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION,
   MULTI_PROJECT_CUTOVER_SCHEMA_VERSION,
+  PROJECT_OWNERSHIP_SCHEMA_VERSION,
 } from "../../postgres/schema-applier.js";
+import { rekeyFallbackProjectPartition } from "../../postgres/migration-stamping.js";
 
 const PG_ADMIN_URL =
   process.env.FUSION_PG_TEST_ADMIN_URL ?? "postgresql://localhost:5432/postgres";
@@ -62,7 +64,13 @@ describe("schema-applier: immutable migration identities", () => {
 
   it("keeps multi-project cutover assigned to version 0005", () => {
     expect(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION).toBe("0005");
-    expect(SCHEMA_BASELINE_VERSION).toBe(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION);
+    expect(Number(SCHEMA_BASELINE_VERSION))
+      .toBeGreaterThanOrEqual(Number(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION));
+  });
+
+  it("keeps universal project ownership assigned to version 0006", () => {
+    expect(PROJECT_OWNERSHIP_SCHEMA_VERSION).toBe("0006");
+    expect(SCHEMA_BASELINE_VERSION).toBe(PROJECT_OWNERSHIP_SCHEMA_VERSION);
   });
 });
 
@@ -337,7 +345,7 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     ctx = null;
   });
 
-  it("creates all 87 project tables, 17 central tables, 1 archive table", async () => {
+  it("creates all 89 project tables, 17 central tables, 1 archive table", async () => {
     ctx = await setupFreshDb();
     // FNXC:PostgresCutover 2026-07-05-15:55: apply the BASELINE only.
     // applySchemaBaseline now runs the plugin schema-init hooks by default,
@@ -352,8 +360,9 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
       GROUP BY table_schema
     `)) as unknown as Array<{ table_schema: string; n: number }>;
     const bySchema = Object.fromEntries(rows.map((r) => [r.table_schema, r.n]));
-    // Project: 87 core tables. (Plugin tables are added separately by the hook.)
-    expect(bySchema.project).toBe(87);
+    // Project: 87 typed core tables + 2 lossless legacy preservation tables.
+    // Plugin tables are added separately by the hook.
+    expect(bySchema.project).toBe(89);
     expect(bySchema.central).toBe(17);
     expect(bySchema.archive).toBe(1);
   });
@@ -373,6 +382,298 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     await applySchemaBaseline(ctx.db);
     const second = await applySchemaBaseline(ctx.db);
     expect(second.applied).toBe(false);
+  });
+
+  /*
+  FNXC:ProjectDataIsolation 2026-07-14-12:10:
+  Every table in the shared PostgreSQL project schema is project-owned unless it is one of the three explicitly cluster-wide coordination tables. Require a physical project_id plus forced row-level security so a missed application predicate cannot expose agents, secrets, inbox messages, missions, workflows, or plugin data to another project.
+  */
+  it("forces project ownership on every non-global project table", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+
+    const missingOwnership = (await ctx.db.execute(sql`
+      SELECT t.table_name
+      FROM information_schema.tables t
+      LEFT JOIN information_schema.columns c
+        ON c.table_schema = t.table_schema
+       AND c.table_name = t.table_name
+       AND c.column_name = 'project_id'
+      WHERE t.table_schema = 'project'
+        AND t.table_type = 'BASE TABLE'
+        AND c.column_name IS NULL
+      ORDER BY t.table_name
+    `)) as unknown as Array<{ table_name: string }>;
+    expect(missingOwnership).toEqual([]);
+
+    const rlsGaps = (await ctx.db.execute(sql`
+      SELECT n.nspname || '.' || c.relname AS table_name
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE (n.nspname = 'project' OR (n.nspname = 'archive' AND c.relname = 'archived_tasks'))
+        AND c.relkind = 'r'
+        AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
+      ORDER BY c.relname
+    `)) as unknown as Array<{ table_name: string }>;
+    expect(rlsGaps).toEqual([]);
+  });
+
+  /*
+  FNXC:ProjectDataIsolation 2026-07-14-12:10:
+  Exercise the user-visible invariant through a non-superuser role: agents created in one project are invisible and immutable from another project even when application SQL omits project predicates.
+  */
+  it("prevents cross-project agent reads and mutations at the database boundary", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+    const role = `fusion_project_isolation_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+    await ctx.db.execute(sql.raw(`
+      CREATE ROLE ${role} NOLOGIN;
+      GRANT USAGE ON SCHEMA project TO ${role};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA project TO ${role};
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA project TO ${role};
+    `));
+    try {
+      await ctx.db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL ROLE ${role}`));
+        await tx.execute(sql`SELECT set_config('fusion.project_id', 'project-a', true)`);
+        await tx.execute(sql`
+          INSERT INTO project.agents(id, name, role, created_at, updated_at)
+          VALUES ('agent-a', 'Agent A', 'worker', '2026-01-01', '2026-01-01')
+        `);
+        await tx.execute(sql`
+          INSERT INTO project.agents(id, name, role, created_at, updated_at)
+          VALUES ('shared-agent', 'Shared ID in A', 'worker', '2026-01-01', '2026-01-01')
+        `);
+      });
+      await ctx.db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL ROLE ${role}`));
+        await tx.execute(sql`SELECT set_config('fusion.project_id', 'project-b', true)`);
+        await tx.execute(sql`
+          INSERT INTO project.agents(id, name, role, created_at, updated_at)
+          VALUES ('agent-b', 'Agent B', 'worker', '2026-01-01', '2026-01-01')
+        `);
+        await tx.execute(sql`
+          INSERT INTO project.agents(id, name, role, created_at, updated_at)
+          VALUES ('shared-agent', 'Shared ID in B', 'worker', '2026-01-01', '2026-01-01')
+        `);
+        const visible = (await tx.execute(sql`
+          SELECT id, project_id FROM project.agents ORDER BY id
+        `)) as unknown as Array<{ id: string; project_id: string }>;
+        expect(visible).toEqual([
+          { id: "agent-b", project_id: "project-b" },
+          { id: "shared-agent", project_id: "project-b" },
+        ]);
+        const changed = (await tx.execute(sql`
+          UPDATE project.agents SET name = 'stolen' WHERE id = 'agent-a' RETURNING id
+        `)) as unknown as Array<{ id: string }>;
+        expect(changed).toEqual([]);
+        const removed = (await tx.execute(sql`
+          DELETE FROM project.agents WHERE id = 'agent-a' RETURNING id
+        `)) as unknown as Array<{ id: string }>;
+        expect(removed).toEqual([]);
+      });
+      await expect(ctx.db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL ROLE ${role}`));
+        await tx.execute(sql`SELECT set_config('fusion.project_id', 'project-b', true)`);
+        await tx.execute(sql`
+          INSERT INTO project.agent_heartbeats(agent_id, timestamp, status, run_id)
+          VALUES ('agent-a', '2026-01-01', 'alive', 'run-cross-project')
+        `);
+      })).rejects.toThrow();
+      const crossProjectHeartbeats = (await ctx.db.execute(sql`
+        SELECT count(*)::int AS count FROM project.agent_heartbeats
+        WHERE run_id = 'run-cross-project'
+      `)) as unknown as Array<{ count: number }>;
+      expect(crossProjectHeartbeats[0]?.count).toBe(0);
+      const rows = (await ctx.db.execute(sql`
+        SELECT id, name, project_id FROM project.agents ORDER BY id, project_id
+      `)) as unknown as Array<{ id: string; name: string; project_id: string }>;
+      expect(rows).toEqual([
+        { id: "agent-a", name: "Agent A", project_id: "project-a" },
+        { id: "agent-b", name: "Agent B", project_id: "project-b" },
+        { id: "shared-agent", name: "Shared ID in A", project_id: "project-a" },
+        { id: "shared-agent", name: "Shared ID in B", project_id: "project-b" },
+      ]);
+    } finally {
+      await ctx.db.execute(sql.raw(`DROP OWNED BY ${role}; DROP ROLE ${role};`));
+    }
+  });
+
+  it("scopes every project key and relationship to project_id", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+    const unscopedKeys = (await ctx.db.execute(sql`
+      SELECT c.conrelid::regclass::text AS table_name, c.conname
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE (n.nspname = 'project' OR (n.nspname = 'archive' AND t.relname = 'archived_tasks'))
+        AND c.contype IN ('p', 'u')
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest(c.conkey) key_attnum
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key_attnum
+          WHERE a.attname = 'project_id'
+        )
+      ORDER BY 1, 2
+    `)) as unknown as Array<{ table_name: string; conname: string }>;
+    expect(unscopedKeys).toEqual([]);
+
+    const unscopedUniqueIndexes = (await ctx.db.execute(sql`
+      SELECT t.oid::regclass::text AS table_name, idx.relname AS index_name
+      FROM pg_index i
+      JOIN pg_class t ON t.oid = i.indrelid
+      JOIN pg_class idx ON idx.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE n.nspname = 'project'
+        AND i.indisunique
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest(i.indkey::smallint[]) key_attnum
+          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key_attnum
+          WHERE a.attname = 'project_id'
+        )
+      ORDER BY 1, 2
+    `)) as unknown as Array<{ table_name: string; index_name: string }>;
+    expect(unscopedUniqueIndexes).toEqual([]);
+
+    const unscopedRelationships = (await ctx.db.execute(sql`
+      SELECT c.conrelid::regclass::text AS table_name, c.conname
+      FROM pg_constraint c
+      JOIN pg_class child ON child.oid = c.conrelid
+      JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
+      JOIN pg_class parent ON parent.oid = c.confrelid
+      JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+      WHERE c.contype = 'f'
+        AND child_ns.nspname = 'project'
+        AND parent_ns.nspname = 'project'
+        AND (
+          NOT EXISTS (
+            SELECT 1 FROM unnest(c.conkey) key_attnum
+            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key_attnum
+            WHERE a.attname = 'project_id'
+          )
+          OR NOT EXISTS (
+            SELECT 1 FROM unnest(c.confkey) key_attnum
+            JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = key_attnum
+            WHERE a.attname = 'project_id'
+          )
+        )
+      ORDER BY 1, 2
+    `)) as unknown as Array<{ table_name: string; conname: string }>;
+    expect(unscopedRelationships).toEqual([]);
+  });
+
+  it("promotes a fallback project partition without stranding task satellites", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+    await ctx.db.execute(sql`
+      CREATE TABLE public.fusion_sqlite_migrations (
+        migration_key text PRIMARY KEY,
+        project_id text,
+        status text NOT NULL,
+        last_error text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      INSERT INTO project.tasks(project_id, id, description, "column", created_at, updated_at)
+      VALUES ('local-fallback', 'FN-1', 'fallback task', 'todo', '2026-01-01', '2026-01-01');
+      INSERT INTO project.task_documents(project_id, id, task_id, key, created_at, updated_at)
+      VALUES ('local-fallback', 'doc-1', 'FN-1', 'PROMPT.md', '2026-01-01', '2026-01-01');
+      INSERT INTO public.fusion_sqlite_migrations(migration_key, project_id, status, updated_at)
+      VALUES ('project:local-fallback', 'local-fallback', 'complete', now());
+    `);
+
+    await expect(rekeyFallbackProjectPartition(
+      ctx.db,
+      "local-fallback",
+      "registered-project",
+    )).resolves.toBe(true);
+
+    const rows = (await ctx.db.execute(sql`
+      SELECT project_id, id FROM project.tasks
+      UNION ALL
+      SELECT project_id, task_id FROM project.task_documents
+      ORDER BY 1, 2
+    `)) as unknown as Array<{ project_id: string; id: string }>;
+    expect(rows).toEqual([
+      { project_id: "registered-project", id: "FN-1" },
+      { project_id: "registered-project", id: "FN-1" },
+    ]);
+    await expect(ctx.db.execute(sql`
+      SELECT 1 FROM public.fusion_sqlite_migrations
+      WHERE migration_key = 'project:registered-project'
+        AND project_id = 'registered-project'
+        AND status = 'complete'
+    `)).resolves.toHaveLength(1);
+  });
+
+  it("quarantines ownerless rows when complete and failed migrations name different projects", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+    await ctx.db.execute(sql.raw(`
+      DELETE FROM public.fusion_schema_migrations WHERE version = '0006';
+      CREATE TABLE public.fusion_sqlite_migrations (
+        migration_key text PRIMARY KEY,
+        project_id text,
+        status text NOT NULL,
+        last_error text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      INSERT INTO public.fusion_sqlite_migrations(migration_key, project_id, status)
+      VALUES ('project:a', 'project-a', 'complete'), ('project:b', 'project-b', 'failed');
+      ALTER TABLE project.activity_log DROP CONSTRAINT activity_log_pkey;
+      ALTER TABLE project.activity_log ALTER COLUMN project_id DROP NOT NULL;
+      INSERT INTO project.activity_log(project_id, id, timestamp, type, details)
+      VALUES (NULL, 'partial-event', '2026-01-01', 'task:created', 'partial');
+    `));
+
+    await applySchemaBaseline(ctx.db);
+    await expect(ctx.db.execute(sql`
+      SELECT project_id FROM project.activity_log WHERE id = 'partial-event'
+    `)).resolves.toEqual([{ project_id: "__legacy_unscoped__" }]);
+  });
+
+  /*
+  FNXC:ProjectMigrationRetry 2026-07-14-12:43:
+  The ownership migration must repair a stale child partition through the legacy global foreign key before installing composite project-local relationships, so an operator can retry after the former non-transactional cutover failed between parent and child copies.
+  */
+  it("reconciles stale child ownership before rebuilding project-local foreign keys", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db);
+    await ctx.db.execute(sql.raw(`
+      CREATE TABLE public.fusion_sqlite_migrations (
+        migration_key text PRIMARY KEY,
+        project_id text,
+        status text NOT NULL,
+        last_error text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      INSERT INTO public.fusion_sqlite_migrations(migration_key, project_id, status)
+      VALUES ('project:registered-project', 'registered-project', 'failed');
+      INSERT INTO project.agents(project_id, id, name, role, created_at, updated_at)
+      VALUES ('registered-project', 'retry-agent', 'Retry Agent', 'worker', '2026-01-01', '2026-01-01');
+      INSERT INTO project.agent_heartbeats(project_id, agent_id, timestamp, status, run_id)
+      VALUES ('registered-project', 'retry-agent', '2026-01-01', 'alive', 'retry-run');
+      DO $downgrade$
+      DECLARE fk_name text;
+      BEGIN
+        SELECT c.conname INTO fk_name
+        FROM pg_constraint c
+        WHERE c.conrelid = 'project.agent_heartbeats'::regclass
+          AND c.confrelid = 'project.agents'::regclass
+          AND c.contype = 'f';
+        EXECUTE format('ALTER TABLE project.agent_heartbeats DROP CONSTRAINT %I', fk_name);
+      END $downgrade$;
+      UPDATE project.agent_heartbeats SET project_id = '__legacy_unscoped__' WHERE run_id = 'retry-run';
+      ALTER TABLE project.agents ADD CONSTRAINT agents_legacy_global_id_key UNIQUE (id);
+      ALTER TABLE project.agent_heartbeats
+        ADD CONSTRAINT agent_heartbeats_legacy_agent_id_fkey
+        FOREIGN KEY (agent_id) REFERENCES project.agents(id) ON DELETE CASCADE;
+      DELETE FROM public.fusion_schema_migrations WHERE version = '0006';
+    `));
+
+    await expect(applySchemaBaseline(ctx.db)).resolves.toMatchObject({ applied: true });
+    await expect(ctx.db.execute(sql`
+      SELECT project_id FROM project.agent_heartbeats WHERE run_id = 'retry-run'
+    `)).resolves.toEqual([{ project_id: "registered-project" }]);
   });
 });
 
@@ -555,7 +856,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     const versions = (await ctx.db.execute(sql`
       SELECT version FROM public.fusion_schema_migrations ORDER BY version
     `)) as unknown as Array<{ version: string }>;
-    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", "0003", "0004", SCHEMA_BASELINE_VERSION]);
+    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005", SCHEMA_BASELINE_VERSION]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
 
@@ -579,14 +880,20 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       applySchemaBaseline(ctx.db, { pluginHooks: [] }),
     ]);
     expect(results.filter(({ applied }) => applied)).toHaveLength(1);
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", SCHEMA_BASELINE_VERSION]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005", SCHEMA_BASELINE_VERSION]);
   });
 
   it("upgrades a 0001 database by backfilling analytics ownership", async () => {
     ctx = await setupFreshDb();
     await applySchemaBaseline(ctx.db, { pluginHooks: [] });
     await ctx.db.execute(sql.raw(`
-      DELETE FROM public.fusion_schema_migrations WHERE version IN ('0002', '0003');
+      DELETE FROM public.fusion_schema_migrations WHERE version IN ('0002', '0003', '0004', '0005', '0006');
+      DROP POLICY fusion_project_isolation ON project.activity_log;
+      DROP POLICY fusion_project_isolation ON project.agent_runs;
+      DROP POLICY fusion_project_isolation ON project.usage_events;
+      DROP TRIGGER fusion_assign_project_id ON project.activity_log;
+      DROP TRIGGER fusion_assign_project_id ON project.agent_runs;
+      DROP TRIGGER fusion_assign_project_id ON project.usage_events;
       ALTER TABLE project.activity_log DROP COLUMN project_id;
       ALTER TABLE project.agent_runs DROP COLUMN project_id;
       ALTER TABLE project.usage_events DROP COLUMN project_id;
@@ -609,7 +916,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005", "0006"]);
   });
 
   /**
@@ -620,7 +927,13 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     ctx = await setupFreshDb();
     await applySchemaBaseline(ctx.db, { pluginHooks: [] });
     await ctx.db.execute(sql.raw(`
-      DELETE FROM public.fusion_schema_migrations WHERE version = '0003';
+      DELETE FROM public.fusion_schema_migrations WHERE version IN ('0003', '0004', '0005', '0006');
+      DROP POLICY fusion_project_isolation ON project.deployments;
+      DROP POLICY fusion_project_isolation ON project.incidents;
+      DROP POLICY fusion_project_isolation ON project.approval_request_audit_events;
+      DROP TRIGGER fusion_assign_project_id ON project.deployments;
+      DROP TRIGGER fusion_assign_project_id ON project.incidents;
+      DROP TRIGGER fusion_assign_project_id ON project.approval_request_audit_events;
       ALTER TABLE project.deployments DROP COLUMN project_id;
       ALTER TABLE project.incidents DROP COLUMN project_id;
       ALTER TABLE project.approval_request_audit_events DROP COLUMN project_id;
@@ -641,7 +954,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005", "0006"]);
   });
 
   /*
@@ -652,7 +965,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     ctx = await setupFreshDb();
     await applySchemaBaseline(ctx.db, { pluginHooks: [] });
     await ctx.db.execute(sql.raw(`
-      DELETE FROM public.fusion_schema_migrations WHERE version = '0004';
+      DELETE FROM public.fusion_schema_migrations WHERE version IN ('0004', '0005', '0006');
       DROP TABLE project.project_auth_sessions;
       DROP TABLE project.project_auth_providers;
       DROP TABLE project.project_auth_memberships;
@@ -679,7 +992,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       "project_auth_users",
       "task_reviewer_runs",
     ]);
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005", "0006"]);
   });
 });
 

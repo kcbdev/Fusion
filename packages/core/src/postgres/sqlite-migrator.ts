@@ -140,7 +140,18 @@ interface TablePlan {
   readonly partitionProjectId?: string;
   /** Why a source table has no target mapping, when it is intentionally disposable. */
   readonly allowedSkipReason?: string;
+  /** Source columns that would otherwise be silently discarded. */
+  readonly unmappedSourceColumns: readonly string[];
+  /** Opaque legacy rows retained as tagged canonical JSON when typed DDL is unavailable. */
+  readonly legacyPreservation?: {
+    readonly sourceSchemaSql: string;
+  };
 }
+
+const LEGACY_PRESERVATION_TARGETS = new Map<string, string>([
+  ["mission_feature_evidence_links", "mission_feature_evidence_links"],
+  ["agentLogEntries", "agent_log_entries_legacy"],
+]);
 
 /** Per-table migration result. */
 export interface TableMigrationResult {
@@ -464,10 +475,32 @@ async function buildMigrationPlan(
     const targetColumnsByTable = await loadTargetColumnMetadata(db, source.pgSchema);
     const plans: TablePlan[] = [];
     for (const table of tables) {
+      const legacyPreservationTarget = source.pgSchema === PROJECT_SCHEMA
+        ? LEGACY_PRESERVATION_TARGETS.get(table)
+        : undefined;
+      if (legacyPreservationTarget) {
+        /*
+        FNXC:PostgresLegacyPreservation 2026-07-14-12:10:
+        Some historical project tables reached operators without a durable typed PostgreSQL schema. Preserve every complete row as tagged canonical JSON under the registry-resolved project partition; never guess a cross-project identity or discard unknown columns.
+        */
+        if (!projectId) {
+          throw new Error(`projectId is required to preserve legacy SQLite table ${table}`);
+        }
+        plans.push({
+          pgSchema: source.pgSchema,
+          table,
+          pgTable: legacyPreservationTarget,
+          columns: [],
+          partitionProjectId: projectId,
+          unmappedSourceColumns: [],
+          legacyPreservation: { sourceSchemaSql: readSqliteTableSchema(sqlite, table) },
+        });
+        continue;
+      }
       // Legacy SQLite table names are camelCase; PostgreSQL tables are
       // snake_case. toSnakeCase is the identity for already-snake names.
       const pgTable = toSnakeCase(table);
-      const { columns: resolvedColumns, targetColumnNames } = resolveColumnMapping(
+      const { columns: resolvedColumns, targetColumnNames, unmappedSourceColumns } = resolveColumnMapping(
         pgTable,
         table,
         sqlite,
@@ -503,16 +536,34 @@ async function buildMigrationPlan(
           pgTable,
           columns: cols,
           partitionProjectId,
+          unmappedSourceColumns,
           allowedSkipReason: disposableSqliteTableReason(ftsVirtualTables, table),
         });
         continue;
       }
-      plans.push({ pgSchema: source.pgSchema, table, pgTable, columns: cols, partitionProjectId });
+      plans.push({
+        pgSchema: source.pgSchema,
+        table,
+        pgTable,
+        columns: cols,
+        partitionProjectId,
+        unmappedSourceColumns,
+      });
     }
     return plans;
   } finally {
     sqlite.close();
   }
+}
+
+function readSqliteTableSchema(db: DatabaseSync, table: string): string {
+  const row = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+  ).get(table) as { sql?: string | null } | undefined;
+  if (!row?.sql) {
+    throw new Error(`Could not read SQLite schema for legacy table ${table}`);
+  }
+  return row.sql;
 }
 
 /**
@@ -655,7 +706,11 @@ function resolveColumnMapping(
   table: string,
   sqlite: DatabaseSync,
   targetColumnsByTable: ReadonlyMap<string, readonly PostgresColumnMetadata[]>,
-): { columns: readonly ColumnMapping[]; targetColumnNames: ReadonlySet<string> } {
+): {
+  columns: readonly ColumnMapping[];
+  targetColumnNames: ReadonlySet<string>;
+  unmappedSourceColumns: readonly string[];
+} {
   // PostgreSQL columns from information_schema + pg_attribute.
   // FNXC:PostgresMigration 2026-06-26-15:30 (fix migration-review P1 #14):
   // The join between information_schema.columns and pg_attribute MUST be
@@ -675,7 +730,7 @@ function resolveColumnMapping(
 
   if (pgCols.length === 0) {
     // No PostgreSQL table with this name — skip.
-    return { columns: [], targetColumnNames: new Set() };
+    return { columns: [], targetColumnNames: new Set(), unmappedSourceColumns: [] };
   }
 
   const pgByName = new Map(pgCols.map((c) => [c.column_name, c]));
@@ -687,13 +742,16 @@ function resolveColumnMapping(
   }>;
 
   const mapping: ColumnMapping[] = [];
+  const unmappedSourceColumns: string[] = [];
   for (const sc of sqliteCols) {
     const pgName = toSnakeCase(sc.name);
     const pgCol = pgByName.get(pgName);
     if (!pgCol) {
-      // SQLite column with no PostgreSQL counterpart (e.g. a dropped column
-      // in the new schema, or a legacy column). Skip it — the migration only
-      // copies columns that exist in both schemas.
+      /*
+      FNXC:PostgresMigrationColumnCoverage 2026-07-14-12:10:
+      Row-count and mapped-column checksums cannot detect a discarded source column. Record every unmatched source column so the table fails verification unless a future migration gives that column an explicit documented destination.
+      */
+      unmappedSourceColumns.push(sc.name);
       continue;
     }
     const type = classifyColumnType(pgCol);
@@ -717,7 +775,11 @@ function resolveColumnMapping(
     mapping.push({ sqliteName: sc.name, pgName, type, nullJsonbFallback });
   }
 
-  return { columns: mapping, targetColumnNames: new Set(pgByName.keys()) };
+  return {
+    columns: mapping,
+    targetColumnNames: new Set(pgByName.keys()),
+    unmappedSourceColumns,
+  };
 }
 
 /** Classify a PostgreSQL column into a conversion type. */
@@ -809,6 +871,148 @@ function convertValue(value: unknown, type: ColumnType, nullJsonbFallback?: stri
   }
 }
 
+type TaggedLegacyCell =
+  | { readonly type: "null" }
+  | { readonly type: "text"; readonly value: string }
+  | { readonly type: "number"; readonly value: string }
+  | { readonly type: "blob"; readonly value: string };
+
+interface CanonicalLegacyRow {
+  readonly hash: string;
+  readonly json: string;
+}
+
+function tagLegacyCell(value: unknown): TaggedLegacyCell {
+  if (value === null || value === undefined) return { type: "null" };
+  if (Buffer.isBuffer(value)) {
+    return { type: "blob", value: value.toString("base64") };
+  }
+  if (value instanceof Uint8Array) {
+    return { type: "blob", value: Buffer.from(value).toString("base64") };
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return { type: "number", value: Object.is(value, -0) ? "-0" : String(value) };
+  }
+  return { type: "text", value: String(value) };
+}
+
+function canonicalizeLegacyRows(
+  rows: readonly Record<string, unknown>[],
+  occurrences = new Map<string, number>(),
+): CanonicalLegacyRow[] {
+  return rows.map((row) => {
+    const tagged = Object.fromEntries(
+      Object.keys(row).map((column) => [column, tagLegacyCell(row[column])]),
+    );
+    const json = stableJsonStringify(tagged);
+    const occurrence = occurrences.get(json) ?? 0;
+    occurrences.set(json, occurrence + 1);
+    return {
+      hash: createHash("sha256").update(json).update("\u0000").update(String(occurrence)).digest("hex"),
+      json,
+    };
+  });
+}
+
+async function migrateLegacyPreservationTable(
+  db: PostgresJsDatabase<Record<string, never>>,
+  source: SqliteMigrationSource,
+  plan: TablePlan,
+  dryRun: boolean,
+): Promise<TableMigrationResult> {
+  const projectId = plan.partitionProjectId;
+  const legacyPreservation = plan.legacyPreservation;
+  if (!projectId || !legacyPreservation) {
+    throw new Error(`projectId is required to preserve legacy SQLite table ${plan.table}`);
+  }
+  const sqlite = openSqlite(source.sqlitePath);
+  try {
+    const countRow = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(plan.table)}`).get() as { n: number };
+    const sourceRows = Number(countRow.n);
+    if (dryRun) {
+      return {
+        schema: plan.pgSchema,
+        table: plan.pgTable,
+        sourceRows,
+        insertedRows: 0,
+        targetRows: 0,
+        verified: false,
+        skipped: true,
+        skipReason: "dry-run",
+      };
+    }
+
+    let insertedRows = 0;
+    let contentOk = true;
+    const occurrences = new Map<string, number>();
+    const sourceColumnOrder = (sqlite.prepare(
+      `PRAGMA table_info(${quoteIdent(plan.table)})`,
+    ).all() as Array<{ name: string }>).map(({ name }) => quoteIdent(name)).join(", ");
+    for (let offset = 0; offset < sourceRows; offset += INSERT_BATCH_SIZE) {
+      const rawBatch = sqlite.prepare(
+        `SELECT * FROM ${quoteIdent(plan.table)} ORDER BY ${sourceColumnOrder} LIMIT ? OFFSET ?`,
+      ).all(INSERT_BATCH_SIZE, offset) as Array<Record<string, unknown>>;
+      const batch = canonicalizeLegacyRows(rawBatch, occurrences);
+      const values = batch.map((row) => sql`(
+        ${projectId},
+        ${row.hash},
+        ${row.json}::jsonb,
+        ${legacyPreservation.sourceSchemaSql},
+        now()
+      )`);
+      const inserted = await db.execute(sql`
+        INSERT INTO ${sql.raw(quoteIdent(plan.pgSchema))}.${sql.raw(quoteIdent(plan.pgTable))}
+          (project_id, legacy_row_hash, legacy_row, source_schema_sql, migrated_at)
+        VALUES ${sql.join(values, sql`, `)}
+        ON CONFLICT (project_id, legacy_row_hash) DO NOTHING
+        RETURNING 1
+      `) as unknown as { length?: number };
+      insertedRows += Number(inserted.length ?? 0);
+
+      const targetBatch = await db.execute(sql`
+        SELECT legacy_row_hash, legacy_row, source_schema_sql
+        FROM ${sql.raw(quoteIdent(plan.pgSchema))}.${sql.raw(quoteIdent(plan.pgTable))}
+        WHERE project_id = ${projectId}
+          AND legacy_row_hash IN (${sql.join(batch.map((row) => sql`${row.hash}`), sql`, `)})
+      `) as unknown as Array<{
+        legacy_row_hash: string;
+        legacy_row: unknown;
+        source_schema_sql: string;
+      }>;
+      const expectedBatch = new Map(batch.map((row) => [row.hash, row.json]));
+      contentOk = contentOk && targetBatch.length === batch.length && targetBatch.every((row) =>
+        expectedBatch.get(row.legacy_row_hash) === canonicalizeCell(row.legacy_row) &&
+        row.source_schema_sql === legacyPreservation.sourceSchemaSql,
+      );
+    }
+
+    const targetCountRows = await db.execute(sql`
+      SELECT COUNT(*)::int AS n
+      FROM ${sql.raw(quoteIdent(plan.pgSchema))}.${sql.raw(quoteIdent(plan.pgTable))}
+      WHERE project_id = ${projectId}
+    `) as unknown as Array<{ n: number }>;
+    const targetRows = Number(targetCountRows[0]?.n ?? 0);
+    const verified = targetRows === sourceRows && contentOk;
+    if (!verified) {
+      log.warn(
+        `Opaque legacy verification mismatch for ${plan.pgSchema}.${plan.pgTable}: ` +
+          `source=${sourceRows}, target=${targetRows}`,
+      );
+    }
+    return {
+      schema: plan.pgSchema,
+      table: plan.pgTable,
+      sourceRows,
+      insertedRows,
+      targetRows,
+      verified,
+      skipped: false,
+    };
+  } finally {
+    sqlite.close();
+  }
+}
+
 /**
  * FNXC:PostgresMigration 2026-06-24-08:30:
  * Migrate a single table: read all rows from SQLite, batch-insert into
@@ -823,6 +1027,27 @@ async function migrateTable(
   plan: TablePlan,
   dryRun: boolean,
 ): Promise<TableMigrationResult> {
+  if (plan.legacyPreservation) {
+    return migrateLegacyPreservationTable(db, source, plan, dryRun);
+  }
+  if (plan.unmappedSourceColumns.length > 0) {
+    const sqlite = openSqlite(source.sqlitePath);
+    try {
+      const countRow = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(plan.table)}`).get() as { n: number };
+      return {
+        schema: plan.pgSchema,
+        table: plan.pgTable,
+        sourceRows: Number(countRow.n),
+        insertedRows: 0,
+        targetRows: 0,
+        verified: false,
+        skipped: false,
+        skipReason: `SQLite columns have no PostgreSQL counterpart: ${plan.unmappedSourceColumns.join(", ")}`,
+      };
+    } finally {
+      sqlite.close();
+    }
+  }
   if (plan.columns.length === 0) {
     const sqlite = openSqlite(source.sqlitePath);
     try {
@@ -1033,28 +1258,36 @@ async function insertBatch(
   FNXC:PostgresMigrationRetry 2026-07-14-09:06:
   The former non-transactional migrator could commit a source row under its NULL or stale project_id before a later table aborted startup. On retry, re-key only a stale-partition row whose complete migrated column set still matches the SQLite source. If an identical authoritative composite-key row already exists, remove only its stale duplicate; updating globally keyed rows in place preserves dependent rows and avoids foreign-key cascades.
   */
-  if (plan.partitionProjectId && hasMappedProjectId) {
-    const staleRows = rows.filter(
-      (row) => row.project_id !== plan.partitionProjectId,
-    );
-    if (staleRows.length > 0) {
+  if (plan.partitionProjectId) {
+    const repairRows = rows.map((row) => ({
+      row,
+      candidateOwners: Array.from(new Set([
+        "__legacy_unscoped__",
+        ...(hasMappedProjectId && typeof row.project_id === "string" && row.project_id !== plan.partitionProjectId
+          ? [row.project_id]
+          : []),
+      ])),
+    }));
+    if (repairRows.length > 0) {
       const comparisonsFor = (
         alias: string,
         row: Readonly<Record<string, unknown>>,
-        includeProjectId: boolean,
       ) => cols
-        .filter((column) => includeProjectId || column.pgName !== "project_id")
+        .filter((column) => column.pgName !== "project_id")
         .map((column) => {
           const targetColumn = sql.raw(`${alias}.${quoteIdent(column.pgName)}`);
           return sql`${targetColumn} IS NOT DISTINCT FROM ${buildCell(column, row[column.pgName])}`;
         });
-      const exactStalePredicates = staleRows.map((row) =>
-        sql`(${sql.join(comparisonsFor("target", row, true), sql` AND `)})`,
-      );
-      const duplicatePredicates = staleRows.map((row) => {
-        const authoritativeComparisons = comparisonsFor("authoritative", row, false);
+      const ownerSet = (owners: readonly string[]) => sql`(${sql.join(owners.map((owner) => sql`${owner}`), sql`, `)})`;
+      const stalePredicates = repairRows.map(({ row, candidateOwners }) => sql`(
+        target.project_id IN ${ownerSet(candidateOwners)}
+        AND ${sql.join(comparisonsFor("target", row), sql` AND `)}
+      )`);
+      const duplicatePredicates = repairRows.map(({ row, candidateOwners }) => {
+        const authoritativeComparisons = comparisonsFor("authoritative", row);
         return sql`(
-          ${sql.join(comparisonsFor("target", row, true), sql` AND `)}
+          target.project_id IN ${ownerSet(candidateOwners)}
+          AND ${sql.join(comparisonsFor("target", row), sql` AND `)}
           AND EXISTS (
             SELECT 1 FROM ${sql.raw(schemaQualifiedTable)} AS authoritative
             WHERE authoritative.project_id = ${plan.partitionProjectId}
@@ -1070,7 +1303,7 @@ async function insertBatch(
       const rekeyed = (await db.execute(sql`
         UPDATE ${sql.raw(schemaQualifiedTable)} AS target
         SET project_id = ${plan.partitionProjectId}
-        WHERE ${sql.join(exactStalePredicates, sql` OR `)}
+        WHERE ${sql.join(stalePredicates, sql` OR `)}
         RETURNING 1
       `)) as unknown as { length?: number };
       const repairedCount = Number(removedDuplicates?.length ?? 0) + Number(rekeyed?.length ?? 0);

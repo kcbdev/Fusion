@@ -139,7 +139,7 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
       updatedAt: "2026-07-13T10:00:00.000Z",
     });
     await layer.db.insert(schema.project.agentRuns).values({
-      projectId: layer.projectId ?? "",
+      projectId: layer.projectId ?? "__legacy_unscoped__",
       id: "run-analytics",
       agentId: "agent-analytics",
       data: {},
@@ -147,10 +147,11 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
       status: "completed",
     });
     await layer.db.insert(schema.project.usageEvents).values([
-      { projectId: layer.projectId ?? "", ts: "2026-07-13T11:00:00.000Z", kind: "user_message", agentId: "agent-analytics", nodeId: "node-1" },
-      { projectId: layer.projectId ?? "", ts: "2026-07-13T11:05:00.000Z", kind: "tool_call", agentId: "agent-analytics", nodeId: "node-2" },
+      { projectId: layer.projectId ?? "__legacy_unscoped__", ts: "2026-07-13T11:00:00.000Z", kind: "user_message", agentId: "agent-analytics", nodeId: "node-1" },
+      { projectId: layer.projectId ?? "__legacy_unscoped__", ts: "2026-07-13T11:05:00.000Z", kind: "tool_call", agentId: "agent-analytics", nodeId: "node-2" },
     ]);
     await layer.db.insert(schema.project.agents).values({
+      projectId: "other-project",
       id: "agent-other-project",
       name: "Other Project Agent",
       role: "worker",
@@ -175,7 +176,7 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
     await layer.db.insert(schema.project.cliSessions).values({
       id: "cli-analytics",
       purpose: "chat",
-      projectId: layer.projectId ?? "",
+      projectId: layer.projectId ?? "__legacy_unscoped__",
       adapterId: "test",
       createdAt: "2026-07-13T10:30:00.000Z",
       updatedAt: "2026-07-13T10:30:00.000Z",
@@ -190,7 +191,7 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
     });
     await layer.db.insert(schema.project.activityLog).values([
       {
-        projectId: "",
+        projectId: "__legacy_unscoped__",
         id: "activity-analytics-local",
         timestamp: "2026-07-13T13:00:00.000Z",
         type: "task:moved",
@@ -222,7 +223,7 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
     ]);
     expect(result.funnel.stages.find(({ stage }) => stage === "todo")?.entered).toBe(2);
 
-    const boundResult = await aggregateActivityAnalytics({ ...layer, projectId: "" }, range);
+    const boundResult = await aggregateActivityAnalytics({ ...layer, projectId: "__legacy_unscoped__" }, range);
     expect(boundResult).toMatchObject({ sessions: 1, messages: 1, activeNodes: 2, activeAgents: 1 });
     expect(boundResult.agentRuns).toMatchObject({ total: 1, completed: 1, failed: 0 });
     expect(boundResult.daily).toEqual([
@@ -245,7 +246,7 @@ pgTest("agent-log buffer + monitor metrics (PostgreSQL backend mode)", () => {
       updatedAt: "2026-07-13T10:00:00.000Z",
     });
     await layer.db.insert(schema.project.usageEvents).values({
-      projectId: "",
+      projectId: "__legacy_unscoped__",
       ts: "2026-07-13T11:00:00.000Z",
       kind: "user_message",
       agentId: "agent-real",

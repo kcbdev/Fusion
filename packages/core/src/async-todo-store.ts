@@ -181,6 +181,13 @@ export async function createTodoItem(
   handle: QueryHandle,
   item: { id: string; listId: string; text: string; completed: boolean; completedAt: string | null; sortOrder: number | undefined; createdAt: string; updatedAt: string },
 ): Promise<TodoItem> {
+  const listRows = await handle
+    .select({ projectId: schema.project.todoLists.projectId })
+    .from(schema.project.todoLists)
+    .where(eq(schema.project.todoLists.id, item.listId))
+    .limit(1);
+  const projectId = listRows[0]?.projectId;
+  if (!projectId) throw new Error(`Todo list not found: ${item.listId}`);
   let sortOrder = item.sortOrder;
   if (sortOrder === undefined) {
     const maxRows = await handle
@@ -190,6 +197,7 @@ export async function createTodoItem(
     sortOrder = (maxRows[0]?.maxSortOrder ?? -1) + 1;
   }
   await handle.insert(schema.project.todoItems).values({
+    projectId,
     id: item.id,
     listId: item.listId,
     text: item.text,
