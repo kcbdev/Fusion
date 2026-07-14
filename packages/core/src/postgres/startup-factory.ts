@@ -374,7 +374,7 @@ export async function createTaskStoreForBackend(
     try {
       const fusionDir = join(rootDir, ".fusion");
       const legacySqlitePath = join(fusionDir, "fusion.db");
-      if (existsSync(legacySqlitePath) && isValidSqliteDatabaseFile(legacySqlitePath)) {
+      if (existsSync(legacySqlitePath)) {
         /*
         FNXC:MultiProjectIsolation 2026-07-11:
         With per-project task partitioning (project_id on project.tasks), the
@@ -385,6 +385,16 @@ export async function createTaskStoreForBackend(
         project_id rows are counted as blocking: they may be this project's
         pre-isolation data, and migrating on top of them risks id collisions.
         Without a bound projectId the pre-isolation whole-table check applies.
+
+        FNXC:PostgresCutover 2026-07-13-20:50:
+        Order matters: the PostgreSQL emptiness count runs BEFORE the SQLite
+        validity probe. isValidSqliteDatabaseFile opens the file with a
+        read-write DatabaseSync, and that open/close performs WAL recovery and
+        a checkpoint — i.e. it WRITES to the legacy fusion.db on every boot.
+        Post-cutover the legacy files must stay byte-quiet: steady-state boots
+        (PG already populated) must not open SQLite at all. The probe now runs
+        only on the rare empty-PG path where auto-migration is actually being
+        considered.
         */
         const countRows = (await connections.migration.execute(
           options.projectId
@@ -392,7 +402,7 @@ export async function createTaskStoreForBackend(
             : drizzleSql`SELECT count(*)::int AS count FROM project.tasks`,
         )) as Array<{ count: number }>;
         const pgTaskCount = Number(countRows[0]?.count ?? 0);
-        if (pgTaskCount === 0) {
+        if (pgTaskCount === 0 && isValidSqliteDatabaseFile(legacySqlitePath)) {
           const { migrateSqliteToPostgres, defaultMigrationSources } = await import("./sqlite-migrator.js");
           // The central (global-dir) source is optional: when no global dir is
           // resolvable (e.g. tests without an explicit dir), migrate only the

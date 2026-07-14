@@ -108,6 +108,27 @@ CREATE TABLE IF NOT EXISTS config (
 );
 `;
 
+/*
+FNXC:PostgresMigration 2026-07-13-20:30:
+Legacy camelCase-named table. Older SQLite tables are camelCase (activityLog,
+runAuditEvents, mergeQueue, projectNodePathMappings, …) while every PostgreSQL
+table is snake_case. The migrator must snake_case the TABLE name too — a bug
+where only column names were converted silently skipped all 22 such tables
+("no PostgreSQL counterpart") and surfaced post-cutover as
+`Project/node path mapping not found`.
+*/
+const ACTIVITY_LOG_SQLITE_DDL = `
+CREATE TABLE IF NOT EXISTS activityLog (
+  id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  type TEXT NOT NULL,
+  taskId TEXT,
+  taskTitle TEXT,
+  details TEXT NOT NULL,
+  metadata TEXT
+);
+`;
+
 /**
  * A minimal agents table so agent_heartbeats has a parent row to satisfy the
  * FK constraint that is re-enabled after the migration completes. Includes
@@ -140,6 +161,14 @@ function buildPopulatedSqliteProject(fusionDir: string): void {
     db.exec(AGENT_HEARTBEATS_SQLITE_DDL);
     db.exec(CONFIG_SQLITE_DDL);
     db.exec(AGENTS_SQLITE_DDL);
+    db.exec(ACTIVITY_LOG_SQLITE_DDL);
+
+    // Legacy camelCase table rows — must land in project.activity_log.
+    const insertActivity = db.prepare(
+      `INSERT INTO activityLog (id, timestamp, type, taskId, taskTitle, details, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertActivity.run("act-1", "2026-06-01T00:00:00Z", "task:created", "FN-100", "First task", "created", JSON.stringify({ source: "test" }));
+    insertActivity.run("act-2", "2026-06-01T01:00:00Z", "task:moved", "FN-100", "First task", "todo -> in-progress", null);
 
     // Insert agents so agent_heartbeats FK is satisfiable post-migration.
     const insertAgent = db.prepare(`INSERT INTO agents (id, name, role, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`);
@@ -338,6 +367,32 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
     const archived = byTable.get("archive.archived_tasks")!;
     expect(archived.sourceRows).toBe(1);
     expect(archived.targetRows).toBe(1);
+  });
+
+  // FNXC:PostgresMigration 2026-07-13-20:30:
+  // Legacy camelCase TABLE names (activityLog, runAuditEvents, mergeQueue,
+  // projectNodePathMappings, …) must be snake_cased when matched against
+  // PostgreSQL, exactly like column names. A bug that matched table names
+  // verbatim silently skipped all 22 legacy camelCase tables ("no PostgreSQL
+  // counterpart"), surfacing post-cutover as
+  // `Project/node path mapping not found` on engine start.
+  it("migrates legacy camelCase-named tables into their snake_case PostgreSQL counterparts", async () => {
+    const report = await migrateSqliteToPostgres(ctx!.db, [
+      { sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const },
+    ]);
+
+    const activity = report.tables.find((t) => t.table === "activity_log");
+    expect(activity, "activityLog must not be silently skipped").toBeDefined();
+    expect(activity!.sourceRows).toBe(2);
+    expect(activity!.targetRows).toBe(2);
+    expect(activity!.verified).toBe(true);
+
+    const rows = (await ctx!.db.execute(sql`
+      SELECT id, task_id, metadata FROM project.activity_log ORDER BY id
+    `)) as unknown as Array<{ id: string; task_id: string | null; metadata: unknown }>;
+    expect(rows.map((r) => r.id)).toEqual(["act-1", "act-2"]);
+    expect(rows[0].task_id).toBe("FN-100");
+    expect(rows[0].metadata).toEqual({ source: "test" });
   });
 
   // FNXC:PostgresMigration 2026-06-26-16:00 (fix migration-review P1 #14):

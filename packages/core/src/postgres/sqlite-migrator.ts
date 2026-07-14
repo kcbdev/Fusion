@@ -119,8 +119,20 @@ interface ColumnMapping {
 /** A table to migrate. */
 interface TablePlan {
   readonly pgSchema: string;
-  /** The table name (identical in SQLite and PostgreSQL). */
+  /** The SQLite table name (legacy tables are camelCase, e.g. `activityLog`). */
   readonly table: string;
+  /*
+  FNXC:PostgresMigration 2026-07-13-20:30:
+  The PostgreSQL table name (snake_case). Table names were previously assumed
+  identical across both engines, but legacy SQLite tables are camelCase
+  (activityLog, runAuditEvents, mergeQueue, taskClaims, projectNodePathMappings,
+  …) while every PostgreSQL table is snake_case. The old single-name plan made
+  resolveColumnMapping find zero PG columns for all 22 camelCase tables, and the
+  migrator silently skipped them as "no PostgreSQL counterpart" — first
+  observed as `Project/node path mapping not found` because
+  central.project_node_path_mappings was never populated.
+  */
+  readonly pgTable: string;
   readonly columns: readonly ColumnMapping[];
 }
 
@@ -227,7 +239,7 @@ export async function migrateSqliteToPostgres(
         if (!dryRun && !result.skipped && result.sourceRows > 0) {
           const identityCols = tablePlan.columns.filter((c) => c.type === "identity");
           for (const col of identityCols) {
-            const bump = await bumpIdentitySequence(migrationDb, tablePlan.pgSchema, tablePlan.table, col.pgName);
+            const bump = await bumpIdentitySequence(migrationDb, tablePlan.pgSchema, tablePlan.pgTable, col.pgName);
             if (bump) {
               sequenceBumps.push({
                 schema: tablePlan.pgSchema,
@@ -288,14 +300,17 @@ async function buildMigrationPlan(
     const tables = listSqliteTables(sqlite);
     const plans: TablePlan[] = [];
     for (const table of tables) {
-      const cols = await resolveColumnMapping(db, source.pgSchema, table, sqlite);
+      // Legacy SQLite table names are camelCase; PostgreSQL tables are
+      // snake_case. toSnakeCase is the identity for already-snake names.
+      const pgTable = toSnakeCase(table);
+      const cols = await resolveColumnMapping(db, source.pgSchema, pgTable, table, sqlite);
       if (cols.length === 0) {
         // Table exists in SQLite but has no mappable columns in PostgreSQL —
         // skip it (e.g. FTS5 shadow tables). Logged at the table-migration
         // step, not here.
         continue;
       }
-      plans.push({ pgSchema: source.pgSchema, table, columns: cols });
+      plans.push({ pgSchema: source.pgSchema, table, pgTable, columns: cols });
     }
     return plans;
   } finally {
@@ -363,6 +378,7 @@ function listSqliteTables(db: DatabaseSync): string[] {
 async function resolveColumnMapping(
   db: PostgresJsDatabase<Record<string, never>>,
   pgSchema: string,
+  pgTable: string,
   table: string,
   sqlite: DatabaseSync,
 ): Promise<readonly ColumnMapping[]> {
@@ -393,7 +409,7 @@ async function resolveColumnMapping(
     JOIN pg_class cls ON cls.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = cls.relnamespace
     WHERE c.table_schema = ${pgSchema}
-      AND c.table_name = ${table}
+      AND c.table_name = ${pgTable}
       AND n.nspname = c.table_schema
       AND cls.relname = c.table_name
       AND a.attnum > 0
@@ -546,10 +562,10 @@ async function migrateTable(
   if (insertableCols.length === 0) {
     // No insertable columns (e.g. a pure-generated table). Verify the target
     // exists but copy nothing.
-    const targetRows = await countTargetRows(db, plan.pgSchema, plan.table);
+    const targetRows = await countTargetRows(db, plan.pgSchema, plan.pgTable);
     return {
       schema: plan.pgSchema,
-      table: plan.table,
+      table: plan.pgTable,
       sourceRows: 0,
       insertedRows: 0,
       targetRows,
@@ -576,10 +592,10 @@ async function migrateTable(
       // Dry-run: report the plan without writing.
       return {
         schema: plan.pgSchema,
-        table: plan.table,
+        table: plan.pgTable,
         sourceRows,
         insertedRows: 0,
-        targetRows: dryRun ? 0 : await countTargetRows(db, plan.pgSchema, plan.table),
+        targetRows: dryRun ? 0 : await countTargetRows(db, plan.pgSchema, plan.pgTable),
         verified: dryRun ? false : true,
         skipped: dryRun ? true : false,
         skipReason: dryRun ? "dry-run" : "no source rows",
@@ -624,7 +640,7 @@ async function migrateTable(
     // Both layers must pass for `verified: true`. The MD5 is computed in SQL
     // (md5(string_agg(...)) on PostgreSQL, and a Node-side md5 over the SQLite
     // converted stream) so the comparison is a single short string per side.
-    const targetRows = await countTargetRows(db, plan.pgSchema, plan.table);
+    const targetRows = await countTargetRows(db, plan.pgSchema, plan.pgTable);
     const rowCountOk = targetRows === sourceRows;
     let contentOk = true;
     if (rowCountOk && sourceRows > 0) {
@@ -632,26 +648,26 @@ async function migrateTable(
       const targetChecksum = await computeTargetContentChecksum(
         db,
         plan.pgSchema,
-        plan.table,
+        plan.pgTable,
         insertableCols,
       );
       contentOk = sourceChecksum === targetChecksum;
       if (!contentOk) {
         log.warn(
-          `Content checksum mismatch for ${plan.pgSchema}.${plan.table}: ` +
+          `Content checksum mismatch for ${plan.pgSchema}.${plan.pgTable}: ` +
             `source=${sourceChecksum}, target=${targetChecksum}`,
         );
       }
     } else if (!rowCountOk) {
       log.warn(
-        `Row-count mismatch for ${plan.pgSchema}.${plan.table}: source=${sourceRows}, target=${targetRows}`,
+        `Row-count mismatch for ${plan.pgSchema}.${plan.pgTable}: source=${sourceRows}, target=${targetRows}`,
       );
     }
     const verified = rowCountOk && contentOk;
 
     return {
       schema: plan.pgSchema,
-      table: plan.table,
+      table: plan.pgTable,
       sourceRows,
       insertedRows,
       targetRows,
@@ -685,7 +701,7 @@ async function insertBatch(
 ): Promise<number> {
   if (rows.length === 0) return 0;
   const colList = cols.map((c) => quoteIdent(c.pgName)).join(", ");
-  const schemaQualifiedTable = `${quoteIdent(plan.pgSchema)}.${quoteIdent(plan.table)}`;
+  const schemaQualifiedTable = `${quoteIdent(plan.pgSchema)}.${quoteIdent(plan.pgTable)}`;
   // OVERRIDING SYSTEM VALUE lets us write explicit values into GENERATED ALWAYS
   // AS IDENTITY columns so the SQLite id is preserved (VAL-MIGRATE-002/004).
   const overridingClause = hasIdentityCol ? " OVERRIDING SYSTEM VALUE" : "";
