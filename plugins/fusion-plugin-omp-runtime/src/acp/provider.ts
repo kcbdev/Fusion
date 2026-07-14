@@ -418,7 +418,8 @@ export async function authenticateAcpConnection(
 //
 // These helpers wrap the `ClientSideConnection` session methods so the runtime
 // adapter drives one shape (open → prompt → cancel/resume) without touching SDK
-// types directly. v1 always sends an empty `mcpServers` (KTD5).
+// types directly. mcpServers default to [] (no tools); callers may forward a
+// non-empty list for operator/Fusion MCP (U10).
 
 function readsLoadSession(connection: AcpConnection): boolean {
   // `agentCapabilities` is already typed as `AgentCapabilities | undefined`.

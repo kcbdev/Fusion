@@ -22,6 +22,7 @@ export function OmpCliProviderCard({ authenticated, compact = false, onToggled }
   const [busy, setBusy] = useState<"enabling" | "disabling" | "testing" | "saving-path" | null>(null);
   const [binaryPathInput, setBinaryPathInput] = useState("");
   const [pathMessage, setPathMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const pathDirtyRef = useRef(false);
   const mountedRef = useRef(true);
 
@@ -38,12 +39,20 @@ export function OmpCliProviderCard({ authenticated, compact = false, onToggled }
       if (mountedRef.current) {
         setStatus(next);
         setBinaryPathInput((current) => (pathDirtyRef.current ? current : (next.binaryPath ?? "")));
+        setStatusMessage(null);
       }
       return next;
-    } catch {
+    } catch (error) {
+      if (mountedRef.current) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatusMessage({
+          tone: "error",
+          text: message || t("setup.ompCli.probeFailed", "Failed to probe local omp CLI."),
+        });
+      }
       return null;
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -52,15 +61,24 @@ export function OmpCliProviderCard({ authenticated, compact = false, onToggled }
   const handleToggle = useCallback(
     async (next: boolean) => {
       setBusy(next ? "enabling" : "disabling");
+      setStatusMessage(null);
       try {
         const result = await setOmpCliEnabled(next);
         onToggled?.(result.enabled);
         await refresh();
+      } catch (error) {
+        if (mountedRef.current) {
+          const message = error instanceof Error ? error.message : String(error);
+          setStatusMessage({
+            tone: "error",
+            text: message || t("setup.ompCli.toggleFailed", "Failed to update OMP CLI enable state."),
+          });
+        }
       } finally {
         if (mountedRef.current) setBusy(null);
       }
     },
-    [onToggled, refresh],
+    [onToggled, refresh, t],
   );
 
   const currentlyEnabled = status?.enabled ?? authenticated;
@@ -170,6 +188,9 @@ export function OmpCliProviderCard({ authenticated, compact = false, onToggled }
         </div>
         <div className="omp-cli-provider-card__body" data-testid="omp-cli-provider-card-body">
           <small className="settings-muted">{statusText}</small>
+          {statusMessage ? (
+            <small className={statusMessage.tone === "error" ? "form-error" : "text-muted"}>{statusMessage.text}</small>
+          ) : null}
           <small className="settings-muted omp-cli-provider-card__hint">
             {t("setup.ompCli.authHint", "Credentials live under ~/.omp (agent auth). Fusion does not store omp API keys.")}
           </small>

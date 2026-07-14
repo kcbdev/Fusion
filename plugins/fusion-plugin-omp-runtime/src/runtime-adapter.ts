@@ -215,7 +215,12 @@ export class OmpRuntimeAdapter implements AgentRuntime {
 
     try {
       const result = await acp.createSession(sessionOptions);
-      const session = ensureOmpSessionShape(result.session, model, options, turnAccum);
+      /*
+      FNXC:OmpAcp 2026-07-13-23:10:
+      Prefer sessionOptions (turnAccum-wrapped callbacks) over the raw engine options when
+      ACP returns empty callbacks — otherwise assistant text is not accumulated for history.
+      */
+      const session = ensureOmpSessionShape(result.session, model, sessionOptions, turnAccum);
       this.adapters.set(session, acp);
       return { session, sessionFile: result.sessionFile };
     } catch (error) {

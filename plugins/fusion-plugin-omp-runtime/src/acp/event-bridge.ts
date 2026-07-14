@@ -138,9 +138,14 @@ export function createEventBridge(callbacks: AcpCallbacks): EventBridge {
   function setTracked(rawId: string, tracked: TrackedToolCall): string | undefined {
     const id = boundIdentifier(rawId);
     if (id === "") return undefined;
-    // Re-insert moves an existing key to the tail (refresh recency); for a new
-    // key, evict the oldest first so size stays bounded.
-    if (!toolCalls.has(id) && toolCalls.size >= TOOL_CALL_MAP_CAP) {
+    /*
+    FNXC:OmpAcp 2026-07-13-23:10:
+    Map.set on an existing key does not move recency — delete first so re-track is true LRU.
+    For a new key, evict the oldest when at cap so memory stays bounded.
+    */
+    if (toolCalls.has(id)) {
+      toolCalls.delete(id);
+    } else if (toolCalls.size >= TOOL_CALL_MAP_CAP) {
       const oldest = toolCalls.keys().next().value;
       if (oldest !== undefined) toolCalls.delete(oldest);
     }

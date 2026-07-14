@@ -129,6 +129,13 @@ export function resolveCliSettings(settings?: Record<string, unknown>): AcpCliSe
     binaryResolution = resolveBundledClaudeBridgeBinary();
     if (binaryResolution.kind === "resolved" && binaryResolution.path) {
       binaryPath = binaryResolution.path;
+    } else {
+      /*
+      FNXC:OmpAcp 2026-07-13-23:10:
+      Fail closed when the Claude bridge sentinel cannot resolve to the plugin-owned shim —
+      do not spawn a bare PATH name that surfaces as opaque ENOENT.
+      */
+      binaryPath = "";
     }
   }
   const args = asStringArray(settings?.acpArgs) ?? [];
@@ -138,6 +145,14 @@ export function resolveCliSettings(settings?: Record<string, unknown>): AcpCliSe
   const envAllowList = asStringArray(settings?.acpEnvAllowList) ?? [];
   const allowUnrestricted = asBool(settings?.acpAllowUnrestricted);
   const authenticate = asAuthenticateSettings(settings?.acpAuthenticate);
+  if (
+    binaryResolution?.kind === "not_resolved" &&
+    requestedBinaryPath === CLAUDE_CODE_CLI_ACP_BINARY
+  ) {
+    throw new Error(
+      binaryResolution.reason ?? `Bundled ${CLAUDE_CODE_CLI_ACP_BINARY} binary was not resolved`,
+    );
+  }
   return {
     binaryPath,
     args,

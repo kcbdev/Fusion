@@ -145,19 +145,14 @@ export function createFsHandlers(opts: FsHandlerOptions): FsHandlers {
       // Atomic, symlink-safe open (TOCTOU defense), then read.
       const handle = await openWithinCwd(resolved, opts.cwd, fsConstants.O_RDONLY);
       try {
-        const hasLimit =
-          typeof params.limit === "number" &&
-          Number.isFinite(params.limit) &&
-          params.limit > 0;
         // DoS guard (FIX 4): a multi-GB file would OOM if we `readFile` the whole
-        // thing before `applyReadWindow` truncates. When the file exceeds the byte
-        // ceiling AND no bounding `limit` was supplied, read at most ceiling+1
-        // bytes so memory stays bounded; the +1 still lets applyReadWindow apply
-        // its truncation marker logic identically to a full read. A `limit` is
-        // line-bounded and read in full (matches prior behavior).
+        // thing before `applyReadWindow` truncates. Always cap the read when size
+        // exceeds the byte ceiling — even if a line `limit` is supplied — so a
+        // multi-GB file with limit:1 cannot allocate the full file. applyReadWindow
+        // still applies line/limit/byte truncation markers on the capped content.
         const stat = await handle.stat();
         let content: string;
-        if (!hasLimit && stat.size > readMaxBytes) {
+        if (stat.size > readMaxBytes) {
           const buf = Buffer.alloc(readMaxBytes + 1);
           const { bytesRead } = await handle.read(buf, 0, readMaxBytes + 1, 0);
           content = buf.subarray(0, bytesRead).toString("utf8");

@@ -174,10 +174,18 @@ export class AcpRuntimeAdapter implements AgentRuntime {
     // KTD4a teardown: best-effort cancel of any in-flight turn, then force the
     // connection down. The process-registry SIGKILL is the authoritative
     // no-orphan guarantee, not the cancel round-trip. Idempotent.
+    //
+    // FNXC:OmpAcp 2026-07-13-23:10:
+    // Always run session.dispose() even when cancel rejects, so SIGKILL teardown is not skipped.
     const acp = session as AcpSession;
-    if (acp.connection && acp.sessionId) {
-      await cancelAcpSession(acp.connection, acp.sessionId);
+    try {
+      if (acp.connection && acp.sessionId) {
+        await cancelAcpSession(acp.connection, acp.sessionId);
+      }
+    } catch {
+      // best-effort cancel only
+    } finally {
+      session.dispose();
     }
-    session.dispose();
   }
 }
