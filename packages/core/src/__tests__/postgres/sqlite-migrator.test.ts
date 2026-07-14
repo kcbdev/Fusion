@@ -34,8 +34,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "../../sqlite-adapter.js";
 import {
+  formatMigrationProgress,
   migrateSqliteToPostgres,
   toSnakeCase,
+  type MigrationProgressEvent,
 } from "../../postgres/sqlite-migrator.js";
 import { applySchemaBaseline } from "../../postgres/schema-applier.js";
 
@@ -45,6 +47,35 @@ const PG_AVAILABLE =
   process.env.FUSION_PG_TEST_SKIP !== "1" && Boolean(PG_TEST_URL_BASE);
 
 const pgDescribe = PG_AVAILABLE ? describe : describe.skip;
+
+describe("SQLite migration CLI progress", () => {
+  it("formats table copy progress with position, row counts, and percentage", () => {
+    expect(formatMigrationProgress({
+      phase: "table-progress",
+      sourceSchema: "project",
+      table: "run_audit_events",
+      tableIndex: 42,
+      tableCount: 124,
+      processedRows: 63_400,
+      sourceRows: 252_947,
+    })).toBe("[42/124] project.run_audit_events: processed 63,400/252,947 rows (25%)");
+  });
+
+  it("makes transaction rollback explicit on failure", () => {
+    expect(formatMigrationProgress({
+      phase: "failed",
+      error: "project.tasks failed verification",
+    })).toBe("FAILED — migration transaction rolled back: project.tasks failed verification");
+  });
+
+  it("distinguishes committed verification failures from transaction rollbacks", () => {
+    expect(formatMigrationProgress({
+      phase: "failed",
+      tableCount: 124,
+      failedTables: 2,
+    })).toBe("FAILED — 2/124 tables failed verification; migration will not be marked complete.");
+  });
+});
 
 /**
  * FNXC:PostgresMigration 2026-06-24-09:05:
@@ -449,6 +480,90 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
   });
 
   /*
+  FNXC:CliMigrationProgress 2026-07-14-13:47:
+  CLI-triggered first-boot migrations must expose schema preparation, source discovery, per-table copy/verification, and terminal success so operators can distinguish a long-running copy from a stalled or failed startup.
+  */
+  it("reports structured progress through planning, table verification, and completion", async () => {
+    const progress: MigrationProgressEvent[] = [];
+    let rejectFirstCallback = true;
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const }],
+      {
+        onProgress: (event) => {
+          progress.push(event);
+          if (rejectFirstCallback) {
+            rejectFirstCallback = false;
+            return Promise.reject(new Error("test progress sink failure"));
+          }
+        },
+      },
+    );
+
+    expect(progress[0]?.phase).toBe("preparing-schema");
+    expect(progress.some((event) => event.phase === "scanning-source")).toBe(true);
+    expect(progress.some((event) => event.phase === "copy-started" && event.tableCount === report.tables.length)).toBe(true);
+    expect(progress.some((event) => event.phase === "table-started" && event.table === "tasks")).toBe(true);
+    expect(progress.some((event) => event.phase === "table-verifying" && event.table === "tasks")).toBe(true);
+    expect(progress.some((event) => event.phase === "table-complete" && event.table === "tasks")).toBe(true);
+    expect(progress.at(-1)?.phase).toBe("copy-complete");
+    expect(progress.filter((event) => event.phase === "table-complete")).toHaveLength(report.tables.length);
+  });
+
+  it("reports bounded quarter progress for a multi-batch table without a redundant 100% event", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "fusion.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      const insert = legacy.prepare(
+        `INSERT INTO tasks (id, title, description, "column", createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (let index = 0; index < 648; index += 1) {
+        insert.run(
+          `FN-PROGRESS-${index}`,
+          `Progress ${index}`,
+          "progress fixture",
+          "todo",
+          "2026-07-14T00:00:00Z",
+          "2026-07-14T00:00:00Z",
+        );
+      }
+    } finally {
+      legacy.close();
+    }
+
+    const progress: MigrationProgressEvent[] = [];
+    await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { onProgress: (event) => { progress.push(event); } },
+    );
+    const taskProgress = progress.filter(
+      (event): event is Extract<MigrationProgressEvent, { phase: "table-progress" }> =>
+        event.phase === "table-progress" && event.table === "tasks",
+    );
+
+    expect(taskProgress.map((event) => Math.floor((event.processedRows / event.sourceRows) * 4))).toEqual([1, 2, 3]);
+    expect(taskProgress.every((event) => event.processedRows < event.sourceRows)).toBe(true);
+  });
+
+  it("reports a terminal dry-run plan without implying that data was written", async () => {
+    const progress: MigrationProgressEvent[] = [];
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const }],
+      { dryRun: true, onProgress: (event) => { progress.push(event); } },
+    );
+
+    expect(report.dryRun).toBe(true);
+    expect(progress.at(-1)).toMatchObject({
+      phase: "dry-run-complete",
+      tableCount: report.tables.length,
+    });
+    expect(formatMigrationProgress(progress.at(-1)!)).toContain("no data written");
+  });
+
+  /*
   FNXC:PostgresMigration 2026-07-13-22:37:
   Every user table in a legacy SQLite database must be represented in the migration report. An unknown table is retained as an explicit failed verification so startup cannot claim a complete cutover while silently abandoning operator data.
   */
@@ -462,9 +577,12 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
       legacy.close();
     }
 
-    const report = await migrateTest(ctx!.db, [
-      { sqlitePath, pgSchema: "project" as const },
-    ]);
+    const progress: MigrationProgressEvent[] = [];
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { onProgress: (event) => { progress.push(event); } },
+    );
 
     expect(report.tables).toContainEqual(
       expect.objectContaining({
@@ -476,6 +594,10 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
         skipped: false,
       }),
     );
+    expect(progress.at(-1)).toMatchObject({
+      phase: "failed",
+      failedTables: 1,
+    });
   });
 
   /*

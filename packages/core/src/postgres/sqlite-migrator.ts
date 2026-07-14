@@ -56,6 +56,7 @@ import { DatabaseSync } from "../sqlite-adapter.js";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import { applySchemaBaseline } from "./schema-applier.js";
 import {
   PROJECT_SCHEMA,
@@ -63,6 +64,7 @@ import {
   ARCHIVE_SCHEMA,
 } from "./schema/_shared.js";
 import { createLogger } from "../logger.js";
+import { getErrorMessage } from "../error-message.js";
 
 const log = createLogger("sqlite-migrator");
 
@@ -176,6 +178,110 @@ export interface MigrationReport {
   readonly appliedBaseline: boolean;
 }
 
+interface TableProgressCoordinates {
+  readonly sourceSchema: SchemaName;
+  readonly table: string;
+  readonly tableIndex: number;
+  readonly tableCount: number;
+}
+
+/** Structured status emitted to CLI callers during a potentially long migration. */
+export type MigrationProgressEvent =
+  | { readonly phase: "preparing-schema" }
+  | {
+      readonly phase: "scanning-source";
+      readonly sourcePath: string;
+      readonly sourceSchema: SchemaName;
+      readonly sourceIndex: number;
+      readonly sourceCount: number;
+    }
+  | { readonly phase: "copy-started"; readonly tableCount: number }
+  | ({ readonly phase: "table-started" } & TableProgressCoordinates)
+  | ({
+      readonly phase: "table-progress";
+      readonly processedRows: number;
+      readonly sourceRows: number;
+    } & TableProgressCoordinates)
+  | ({
+      readonly phase: "table-verifying";
+      readonly sourceRows: number;
+      readonly verificationStage: "target-count" | "source-content" | "target-content";
+    } & TableProgressCoordinates)
+  | ({
+      readonly phase: "table-complete";
+      readonly sourceRows: number;
+      readonly insertedRows: number;
+      readonly targetRows: number;
+      readonly verified: boolean;
+      readonly skipped: boolean;
+      readonly skipReason?: string;
+    } & TableProgressCoordinates)
+  | {
+      readonly phase: "copy-complete";
+      readonly tableCount: number;
+      readonly verifiedTables: number;
+      readonly failedTables: number;
+      readonly sequenceBumps: number;
+    }
+  | {
+      readonly phase: "dry-run-complete";
+      readonly tableCount: number;
+      readonly sourceRows: number;
+    }
+  | { readonly phase: "failed"; readonly error: string }
+  | {
+      readonly phase: "failed";
+      readonly tableCount: number;
+      readonly verifiedTables: number;
+      readonly failedTables: number;
+    };
+
+export type MigrationProgressPhase = MigrationProgressEvent["phase"];
+
+function formatTableProgressPrefix(event: TableProgressCoordinates): string {
+  return `[${event.tableIndex}/${event.tableCount}] ${event.sourceSchema}.${event.table}`;
+}
+
+/** Format a structured migration event for terminal output. */
+export function formatMigrationProgress(event: MigrationProgressEvent): string {
+  switch (event.phase) {
+    case "preparing-schema":
+      return "Preparing PostgreSQL schema…";
+    case "scanning-source":
+      return `Scanning source ${event.sourceIndex}/${event.sourceCount}: ${basename(event.sourcePath)} → ${event.sourceSchema}…`;
+    case "copy-started":
+      return `Found ${event.tableCount} tables. Copying and verifying data…`;
+    case "table-started":
+      return `${formatTableProgressPrefix(event)}: starting…`;
+    case "table-progress": {
+      const percent = Math.floor((event.processedRows / event.sourceRows) * 100);
+      return `${formatTableProgressPrefix(event)}: processed ${event.processedRows.toLocaleString()}/${event.sourceRows.toLocaleString()} rows (${percent}%)`;
+    }
+    case "table-verifying": {
+      const stage = {
+        "target-count": "counting migrated rows",
+        "source-content": "checksumming SQLite source",
+        "target-content": "checksumming PostgreSQL target",
+      }[event.verificationStage];
+      return `${formatTableProgressPrefix(event)}: processed ${event.sourceRows.toLocaleString()} rows; ${stage}…`;
+    }
+    case "table-complete":
+      if (event.skipped) return `${formatTableProgressPrefix(event)}: skipped — ${event.skipReason ?? "not required"}`;
+      if (!event.verified) {
+        return `${formatTableProgressPrefix(event)}: VERIFICATION FAILED — source=${event.sourceRows}, target=${event.targetRows}${event.skipReason ? ` (${event.skipReason})` : ""}`;
+      }
+      return `${formatTableProgressPrefix(event)}: verified — ${event.sourceRows.toLocaleString()} rows (${event.insertedRows.toLocaleString()} inserted)`;
+    case "copy-complete":
+      return `Copy and verification complete — ${event.verifiedTables}/${event.tableCount} tables verified; ${event.sequenceBumps} sequences updated. Finalizing migration…`;
+    case "dry-run-complete":
+      return `Dry run complete — ${event.tableCount} tables and ${event.sourceRows.toLocaleString()} source rows planned; no data written.`;
+    case "failed":
+      return "error" in event
+        ? `FAILED — migration transaction rolled back: ${event.error}`
+        : `FAILED — ${event.failedTables}/${event.tableCount} tables failed verification; migration will not be marked complete.`;
+  }
+}
+
 /** Options for the migration. */
 export interface MigrationOptions {
   /** If true, report the planned copy without modifying PostgreSQL. */
@@ -192,6 +298,21 @@ export interface MigrationOptions {
   readonly migrationKey?: string;
   /** Leave a verified migration running until caller-side project stamping succeeds. */
   readonly deferCompletion?: boolean;
+  /** Receives CLI-safe progress events; callback failures never abort migration. */
+  readonly onProgress?: (event: MigrationProgressEvent) => void | Promise<void>;
+}
+
+function emitMigrationProgress(options: MigrationOptions, event: MigrationProgressEvent): void {
+  try {
+    const pending = options.onProgress?.(event);
+    if (pending) {
+      void pending.catch((error) => {
+        log.warn(`Migration progress callback failed: ${getErrorMessage(error)}`);
+      });
+    }
+  } catch (error) {
+    log.warn(`Migration progress callback failed: ${getErrorMessage(error)}`);
+  }
 }
 
 const SQLITE_MIGRATION_STATE_TABLE = "fusion_sqlite_migrations";
@@ -281,6 +402,11 @@ export async function migrateSqliteToPostgres(
       ),
     );
   } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    emitMigrationProgress(options, {
+      phase: "failed",
+      error: errorMessage,
+    });
     if (options.dryRun !== true) {
       await migrationDb.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fusion:sqlite-migration-state'))`);
@@ -288,7 +414,7 @@ export async function migrateSqliteToPostgres(
         await tx.execute(sql`
           INSERT INTO public.${sql.identifier(SQLITE_MIGRATION_STATE_TABLE)}
             (migration_key, project_id, status, last_error, updated_at)
-          VALUES (${migrationKey}, ${options.projectId ?? null}, 'failed', ${error instanceof Error ? error.message : String(error)}, now())
+          VALUES (${migrationKey}, ${options.projectId ?? null}, 'failed', ${errorMessage}, now())
           ON CONFLICT (migration_key) DO UPDATE
           SET project_id = EXCLUDED.project_id, status = 'failed', last_error = EXCLUDED.last_error, updated_at = now()
         `);
@@ -305,6 +431,7 @@ async function migrateSqliteToPostgresOnSession(
 ): Promise<MigrationReport> {
   const dryRun = options.dryRun === true;
   const migrationKey = options.migrationKey ?? `project:${options.projectId ?? "unbound"}`;
+  emitMigrationProgress(options, { phase: "preparing-schema" });
 
   /*
    * FNXC:PostgresMigration 2026-07-14-00:05:
@@ -345,7 +472,7 @@ async function migrateSqliteToPostgresOnSession(
     if (!dryRun) {
       await migrationDb.execute(sql`
         UPDATE public.${sql.identifier(SQLITE_MIGRATION_STATE_TABLE)}
-        SET status = 'failed', last_error = ${error instanceof Error ? error.message : String(error)}, updated_at = now()
+        SET status = 'failed', last_error = ${getErrorMessage(error)}, updated_at = now()
         WHERE migration_key = ${migrationKey}
       `);
     }
@@ -375,7 +502,7 @@ async function migrateSqliteToPostgresOnSession(
     } catch (error) {
       log.warn(
         `Could not set session_replication_role = replica (FK deferral requires SUPERUSER/REPLICATION): ` +
-          `${error instanceof Error ? error.message : String(error)}. ` +
+          `${getErrorMessage(error)}. ` +
           `Tables will be copied in name order; FK violations may surface if order is wrong.`,
       );
     }
@@ -383,11 +510,62 @@ async function migrateSqliteToPostgresOnSession(
 
   let copyError: unknown;
   try {
-    for (const source of sources) {
+    const plannedSources: Array<{ source: SqliteMigrationSource; plan: readonly TablePlan[] }> = [];
+    for (const [sourceOffset, source] of sources.entries()) {
+      emitMigrationProgress(options, {
+        phase: "scanning-source",
+        sourcePath: source.sqlitePath,
+        sourceSchema: source.pgSchema,
+        sourceIndex: sourceOffset + 1,
+        sourceCount: sources.length,
+      });
       const plan = await buildMigrationPlan(migrationDb, source, options.projectId);
+      plannedSources.push({ source, plan });
+    }
+    const tableCount = plannedSources.reduce((sum, planned) => sum + planned.plan.length, 0);
+    emitMigrationProgress(options, { phase: "copy-started", tableCount });
+    let tableIndex = 0;
+    for (const { source, plan } of plannedSources) {
       for (const tablePlan of plan) {
-        const result = await migrateTable(migrationDb, source, tablePlan, dryRun);
+        tableIndex += 1;
+        const progressBase = {
+          sourceSchema: source.pgSchema,
+          table: tablePlan.pgTable,
+          tableIndex,
+          tableCount,
+        } as const;
+        emitMigrationProgress(options, { phase: "table-started", ...progressBase });
+        const result = await migrateTable(
+          migrationDb,
+          source,
+          tablePlan,
+          dryRun,
+          {
+            onCopyProgress: (processedRows, sourceRows) => emitMigrationProgress(options, {
+              phase: "table-progress",
+              ...progressBase,
+              processedRows,
+              sourceRows,
+            }),
+            onVerifying: (verificationStage, sourceRows) => emitMigrationProgress(options, {
+              phase: "table-verifying",
+              ...progressBase,
+              sourceRows,
+              verificationStage,
+            }),
+          },
+        );
         tableResults.push(result);
+        emitMigrationProgress(options, {
+          phase: "table-complete",
+          ...progressBase,
+          sourceRows: result.sourceRows,
+          insertedRows: result.insertedRows,
+          targetRows: result.targetRows,
+          verified: result.verified,
+          skipped: result.skipped,
+          skipReason: result.skipReason,
+        });
 
         // Bump identity sequences after a real (non-dry-run) copy.
         if (!dryRun && !result.skipped && result.sourceRows > 0) {
@@ -440,7 +618,13 @@ async function migrateSqliteToPostgresOnSession(
   };
 
   if (dryRun) {
-    log.log(`[dry-run] Migration plan: ${tableResults.length} tables, ${tableResults.reduce((n, t) => n + t.sourceRows, 0)} source rows planned. No writes performed.`);
+    const sourceRows = tableResults.reduce((n, t) => n + t.sourceRows, 0);
+    log.log(`[dry-run] Migration plan: ${tableResults.length} tables, ${sourceRows} source rows planned. No writes performed.`);
+    emitMigrationProgress(options, {
+      phase: "dry-run-complete",
+      tableCount: tableResults.length,
+      sourceRows,
+    });
   } else {
     const ok = tableResults.filter((t) => t.verified).length;
     const bad = tableResults.length - ok;
@@ -452,6 +636,18 @@ async function migrateSqliteToPostgresOnSession(
       WHERE migration_key = ${migrationKey}
     `);
     log.log(`Migration complete: ${ok}/${tableResults.length} tables verified (${bad} failed verification). ${sequenceBumps.length} sequences bumped.`);
+    emitMigrationProgress(options, bad === 0 ? {
+      phase: "copy-complete",
+      tableCount: tableResults.length,
+      verifiedTables: ok,
+      failedTables: bad,
+      sequenceBumps: sequenceBumps.length,
+    } : {
+      phase: "failed",
+      tableCount: tableResults.length,
+      verifiedTables: ok,
+      failedTables: bad,
+    });
   }
 
   return report;
@@ -903,6 +1099,30 @@ interface CanonicalLegacyRow {
   readonly json: string;
 }
 
+interface TableMigrationProgressCallbacks {
+  readonly onCopyProgress?: (processedRows: number, sourceRows: number) => void;
+  readonly onVerifying?: (
+    stage: "target-count" | "source-content" | "target-content",
+    sourceRows: number,
+  ) => void;
+}
+
+function createQuarterProgressReporter(
+  sourceRows: number,
+  onCopyProgress?: (processedRows: number, sourceRows: number) => void,
+): (processedRows: number) => void {
+  let lastProgressQuarter = 0;
+  return (processedRows) => {
+    // The verifying and complete events represent the terminal 100% state.
+    if (processedRows >= sourceRows) return;
+    const progressQuarter = Math.floor((processedRows / sourceRows) * 4);
+    if (progressQuarter > lastProgressQuarter) {
+      lastProgressQuarter = progressQuarter;
+      onCopyProgress?.(processedRows, sourceRows);
+    }
+  };
+}
+
 function tagLegacyCell(value: unknown): TaggedLegacyCell {
   if (value === null || value === undefined) return { type: "null" };
   if (Buffer.isBuffer(value)) {
@@ -940,6 +1160,7 @@ async function migrateLegacyPreservationTable(
   source: SqliteMigrationSource,
   plan: TablePlan,
   dryRun: boolean,
+  progress: TableMigrationProgressCallbacks,
 ): Promise<TableMigrationResult> {
   const projectId = plan.partitionProjectId;
   const legacyPreservation = plan.legacyPreservation;
@@ -969,6 +1190,7 @@ async function migrateLegacyPreservationTable(
     const sourceColumnOrder = (sqlite.prepare(
       `PRAGMA table_info(${quoteIdent(plan.table)})`,
     ).all() as Array<{ name: string }>).map(({ name }) => quoteIdent(name)).join(", ");
+    const reportCopyProgress = createQuarterProgressReporter(sourceRows, progress.onCopyProgress);
     for (let offset = 0; offset < sourceRows; offset += INSERT_BATCH_SIZE) {
       const rawBatch = sqlite.prepare(
         `SELECT * FROM ${quoteIdent(plan.table)} ORDER BY ${sourceColumnOrder} LIMIT ? OFFSET ?`,
@@ -1005,8 +1227,11 @@ async function migrateLegacyPreservationTable(
         expectedBatch.get(row.legacy_row_hash) === canonicalizeCell(row.legacy_row) &&
         row.source_schema_sql === legacyPreservation.sourceSchemaSql,
       );
+      const processedRows = Math.min(offset + rawBatch.length, sourceRows);
+      reportCopyProgress(processedRows);
     }
 
+    progress.onVerifying?.("target-count", sourceRows);
     const targetCountRows = await db.execute(sql`
       SELECT COUNT(*)::int AS n
       FROM ${sql.raw(quoteIdent(plan.pgSchema))}.${sql.raw(quoteIdent(plan.pgTable))}
@@ -1047,9 +1272,10 @@ async function migrateTable(
   source: SqliteMigrationSource,
   plan: TablePlan,
   dryRun: boolean,
+  progress: TableMigrationProgressCallbacks = {},
 ): Promise<TableMigrationResult> {
   if (plan.legacyPreservation) {
-    return migrateLegacyPreservationTable(db, source, plan, dryRun);
+    return migrateLegacyPreservationTable(db, source, plan, dryRun, progress);
   }
   if (plan.unmappedSourceColumns.length > 0) {
     const sqlite = openSqlite(source.sqlitePath);
@@ -1145,11 +1371,16 @@ async function migrateTable(
     // Stream rows in batches.
     const stmt = sqlite.prepare(`SELECT ${selectableCols} FROM ${quoteIdent(plan.table)}`);
     const batch: Record<string, unknown>[] = [];
+    let processedRows = 0;
+    const reportCopyProgress = createQuarterProgressReporter(sourceRows, progress.onCopyProgress);
     const flush = async (): Promise<void> => {
       if (batch.length === 0) return;
+      const batchSize = batch.length;
       const inserted = await insertBatch(db, plan, insertableCols, batch, hasIdentityCol);
       insertedRows += inserted;
+      processedRows += batchSize;
       batch.length = 0;
+      reportCopyProgress(processedRows);
     };
 
     for (const row of stmt.all() as Array<Record<string, unknown>>) {
@@ -1168,6 +1399,7 @@ async function migrateTable(
       }
     }
     await flush();
+    progress.onVerifying?.("target-count", sourceRows);
 
     // Verify the migration.
     // FNXC:PostgresMigration 2026-06-26-15:40 (fix migration-review P1 #15):
@@ -1197,9 +1429,11 @@ async function migrateTable(
       : targetRows === sourceRows;
     let contentOk = true;
     if (rowCountOk && sourceRows > 0) {
+      progress.onVerifying?.("source-content", sourceRows);
       const sourceCanonicalRows = computeSourceCanonicalRows(
         sqlite, plan.table, insertableCols, plan.partitionProjectId,
       );
+      progress.onVerifying?.("target-content", sourceRows);
       const targetCanonicalRows = await computeTargetCanonicalRows(
         db, plan.pgSchema, plan.pgTable, insertableCols, plan.partitionProjectId,
       );

@@ -2239,6 +2239,7 @@ export {
   isSqliteMigrationComplete,
   completeSqliteMigration,
   defaultMigrationSources,
+  formatMigrationProgress,
   // FNXC:CentralProjectIdentity 2026-07-13-23:10:
   // Post-migration project-partition stamping, shared by the startup-factory
   // first-boot auto-migration and `fn db migrate` so migrated rows are re-keyed
@@ -2281,6 +2282,8 @@ export type {
   SqliteMigrationSource,
   SchemaName,
   MigrationReport,
+  MigrationProgressEvent,
+  MigrationProgressPhase,
   TableMigrationResult,
   StampMigratedProjectRowsInput,
   StampMigratedProjectRowsResult,

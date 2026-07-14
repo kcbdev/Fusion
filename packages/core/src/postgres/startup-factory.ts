@@ -463,7 +463,7 @@ export async function createTaskStoreForBackend(
         considered.
         */
         const migrationKey = `project:${migrationProjectId ?? rootDir}`;
-        const { migrateSqliteToPostgres, defaultMigrationSources, isSqliteMigrationComplete, completeSqliteMigration, recordSqliteMigrationComplete, CENTRAL_SQLITE_MIGRATION_KEY } = await import("./sqlite-migrator.js");
+        const { migrateSqliteToPostgres, defaultMigrationSources, formatMigrationProgress, isSqliteMigrationComplete, completeSqliteMigration, recordSqliteMigrationComplete, CENTRAL_SQLITE_MIGRATION_KEY } = await import("./sqlite-migrator.js");
         const migrationComplete = await isSqliteMigrationComplete(connections.migration, migrationKey);
         if (!migrationComplete && isValidSqliteDatabaseFile(legacySqlitePath)) {
           // The central (global-dir) source is optional: when no global dir is
@@ -486,6 +486,13 @@ export async function createTaskStoreForBackend(
               projectId: migrationProjectId,
               migrationKey,
               deferCompletion: true,
+              /*
+              FNXC:CliMigrationProgress 2026-07-14-13:47:
+              First-boot migration can copy hundreds of thousands of rows. Forward structured phase, table, quarter-copy, and terminal events to the CLI logger so an operator sees forward progress and an explicit rollback instead of a silent startup wait.
+              */
+              onProgress: (event) => {
+                log.log(`startup-factory: SQLite migration — ${formatMigrationProgress(event)}`);
+              },
             });
             /*
             FNXC:PostgresMigrationVerification 2026-07-13-22:37:

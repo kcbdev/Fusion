@@ -159,11 +159,14 @@ export {
   isSqliteMigrationComplete,
   completeSqliteMigration,
   defaultMigrationSources,
+  formatMigrationProgress,
   toSnakeCase,
   type SqliteMigrationSource,
   type SchemaName,
   type MigrationOptions,
   type MigrationReport,
+  type MigrationProgressEvent,
+  type MigrationProgressPhase,
   type TableMigrationResult,
 } from "./sqlite-migrator.js";
 

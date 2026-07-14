@@ -4,6 +4,7 @@ import {
   vacuumAnalyze,
   resolveBackend,
   migrateSqliteToPostgres,
+  formatMigrationProgress,
   completeSqliteMigration,
   defaultMigrationSources,
   stampMigratedProjectRows,
@@ -278,6 +279,9 @@ export async function runDbMigrate(
       projectId: registeredProjectId,
       migrationKey: `project:${registeredProjectId}`,
       deferCompletion: true,
+      onProgress: (event) => {
+        console.log(`fn db migrate: ${formatMigrationProgress(event)}`);
+      },
     });
   } catch (error) {
     console.error(`fn db migrate: migration failed: ${(error as Error).message}`);
