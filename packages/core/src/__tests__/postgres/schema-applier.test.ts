@@ -32,7 +32,10 @@ import {
   SCHEMA_BASELINE_VERSION,
   roadmapPluginSchemaInit,
 } from "../../postgres/index.js";
-import { MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION } from "../../postgres/schema-applier.js";
+import {
+  LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION,
+  MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION,
+} from "../../postgres/schema-applier.js";
 
 const PG_ADMIN_URL =
   process.env.FUSION_PG_TEST_ADMIN_URL ?? "postgresql://localhost:5432/postgres";
@@ -48,6 +51,11 @@ describe("schema-applier: immutable migration identities", () => {
     expect(MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION).toBe("0003");
     expect(Number(SCHEMA_BASELINE_VERSION))
       .toBeGreaterThanOrEqual(Number(MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION));
+  });
+
+  it("keeps legacy cutover preservation assigned to version 0004", () => {
+    expect(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION).toBe("0004");
+    expect(SCHEMA_BASELINE_VERSION).toBe(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION);
   });
 });
 
@@ -322,7 +330,7 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     ctx = null;
   });
 
-  it("creates all 81 project tables, 17 central tables, 1 archive table", async () => {
+  it("creates all 87 project tables, 17 central tables, 1 archive table", async () => {
     ctx = await setupFreshDb();
     // FNXC:PostgresCutover 2026-07-05-15:55: apply the BASELINE only.
     // applySchemaBaseline now runs the plugin schema-init hooks by default,
@@ -337,8 +345,8 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
       GROUP BY table_schema
     `)) as unknown as Array<{ table_schema: string; n: number }>;
     const bySchema = Object.fromEntries(rows.map((r) => [r.table_schema, r.n]));
-    // Project: 81 core tables. (Plugin tables are added separately by the hook.)
-    expect(bySchema.project).toBe(81);
+    // Project: 87 core tables. (Plugin tables are added separately by the hook.)
+    expect(bySchema.project).toBe(87);
     expect(bySchema.central).toBe(17);
     expect(bySchema.archive).toBe(1);
   });
@@ -540,7 +548,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     const versions = (await ctx.db.execute(sql`
       SELECT version FROM public.fusion_schema_migrations ORDER BY version
     `)) as unknown as Array<{ version: string }>;
-    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", SCHEMA_BASELINE_VERSION]);
+    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", "0003", SCHEMA_BASELINE_VERSION]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
 
@@ -564,7 +572,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       applySchemaBaseline(ctx.db, { pluginHooks: [] }),
     ]);
     expect(results.filter(({ applied }) => applied)).toHaveLength(1);
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", SCHEMA_BASELINE_VERSION]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", SCHEMA_BASELINE_VERSION]);
   });
 
   it("upgrades a 0001 database by backfilling analytics ownership", async () => {
@@ -594,7 +602,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
   });
 
   /**
@@ -626,7 +634,45 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
+  });
+
+  /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  A target that already recorded 0000-0003 must still receive all retired-table preservation surfaces before a SQLite migration retry.
+  */
+  it("upgrades a 0003 database with legacy cutover preservation tables", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db, { pluginHooks: [] });
+    await ctx.db.execute(sql.raw(`
+      DELETE FROM public.fusion_schema_migrations WHERE version = '0004';
+      DROP TABLE project.project_auth_sessions;
+      DROP TABLE project.project_auth_providers;
+      DROP TABLE project.project_auth_memberships;
+      DROP TABLE project.project_auth_users;
+      DROP TABLE project.task_reviewer_runs;
+      DROP TABLE project.boards;
+    `));
+
+    expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(true);
+    const tables = (await ctx.db.execute(sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'project'
+        AND table_name IN (
+          'boards', 'project_auth_users', 'project_auth_memberships',
+          'project_auth_providers', 'project_auth_sessions', 'task_reviewer_runs'
+        )
+      ORDER BY table_name
+    `)) as unknown as Array<{ table_name: string }>;
+    expect(tables.map(({ table_name }) => table_name)).toEqual([
+      "boards",
+      "project_auth_memberships",
+      "project_auth_providers",
+      "project_auth_sessions",
+      "project_auth_users",
+      "task_reviewer_runs",
+    ]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
   });
 });
 

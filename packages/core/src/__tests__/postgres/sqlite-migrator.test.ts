@@ -472,6 +472,139 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
   });
 
   /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  The built-in task and archive FTS5 tables are derived indexes whose searchable content is regenerated from the migrated task rows by PostgreSQL generated tsvectors. Only these two named virtual tables may be skipped; arbitrary extension-owned FTS data must continue to fail closed.
+  */
+  it("treats the two replaced built-in FTS indexes as verified derived data", async () => {
+    const projectPath = join(ctx!.fusionDir, "fusion.db");
+    const archivePath = join(ctx!.fusionDir, "archive.db");
+    const project = new DatabaseSync(projectPath);
+    const archive = new DatabaseSync(archivePath);
+    try {
+      project.exec(`CREATE VIRTUAL TABLE tasks_fts USING fts5(title, description)`);
+      project.prepare(`INSERT INTO tasks_fts (title, description) VALUES (?, ?)`).run("First task", "desc");
+      archive.exec(`CREATE VIRTUAL TABLE archived_tasks_fts USING fts5(title, description)`);
+      archive.prepare(`INSERT INTO archived_tasks_fts (title, description) VALUES (?, ?)`).run("Archived task", "desc");
+    } finally {
+      project.close();
+      archive.close();
+    }
+
+    const report = await migrateTest(ctx!.db, [
+      { sqlitePath: projectPath, pgSchema: "project" as const },
+      { sqlitePath: archivePath, pgSchema: "archive" as const },
+    ]);
+
+    for (const table of ["tasks_fts", "archived_tasks_fts"]) {
+      expect(report.tables).toContainEqual(expect.objectContaining({
+        table,
+        verified: true,
+        skipped: true,
+      }));
+    }
+  });
+
+  /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  SQLite cutover must preserve retired company-board, project-auth, and task-reviewer datasets even though current runtime code no longer reads them. These tables remain project-partitioned in shared PostgreSQL so later projects cannot collide with legacy IDs.
+  */
+  it("preserves every retired project table under the resolved project partition", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "retired-project-data.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`
+        CREATE TABLE boards (id TEXT PRIMARY KEY, projectId TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', workflowId TEXT NOT NULL, ordering INTEGER NOT NULL DEFAULT 0, requirePlanApproval INTEGER NOT NULL DEFAULT 0, lfgMode INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE project_auth_users (id TEXT PRIMARY KEY, email TEXT NOT NULL, displayName TEXT, active INTEGER NOT NULL DEFAULT 1, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE project_auth_memberships (id TEXT PRIMARY KEY, userId TEXT NOT NULL, role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE project_auth_providers (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT NOT NULL, providerUserId TEXT NOT NULL, metadata TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE project_auth_sessions (id TEXT PRIMARY KEY, userId TEXT NOT NULL, membershipId TEXT NOT NULL, sessionToken TEXT NOT NULL, expiresAt TEXT NOT NULL, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE task_reviewer_runs (id TEXT PRIMARY KEY, taskId TEXT NOT NULL, boardId TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', summary TEXT, failureReasons TEXT, reviewerAgentId TEXT, reworkRound INTEGER NOT NULL DEFAULT 0, startedAt TEXT NOT NULL, completedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, invalidatedAt TEXT);
+      `);
+      legacy.prepare(`INSERT INTO boards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run("board-1", "stale", "Legacy board", "desc", "builtin:coding", 0, 0, 0, "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO project_auth_users VALUES (?, ?, ?, ?, ?, ?)`).run("user-1", "operator@example.com", "Operator", 1, "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO project_auth_memberships VALUES (?, ?, ?, ?, ?, ?)`).run("member-1", "user-1", "owner", 1, "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO project_auth_providers VALUES (?, ?, ?, ?, ?, ?, ?)`).run("provider-1", "user-1", "local", "operator", "{}", "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO project_auth_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run("session-1", "user-1", "member-1", "token", "2026-07-01", null, "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO task_reviewer_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run("review-1", "FN-1", "board-1", "passed", "ok", "[]", "agent-1", 0, "2026-06-01", "2026-06-01", "2026-06-01", "2026-06-01", null);
+    } finally {
+      legacy.close();
+    }
+
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath, pgSchema: "project" as const }],
+      { projectId: "project-retired" },
+    );
+    const retiredTables = [
+      "boards",
+      "project_auth_users",
+      "project_auth_memberships",
+      "project_auth_providers",
+      "project_auth_sessions",
+      "task_reviewer_runs",
+    ];
+    for (const table of retiredTables) {
+      expect(report.tables).toContainEqual(expect.objectContaining({
+        table,
+        sourceRows: 1,
+        targetRows: 1,
+        verified: true,
+      }));
+    }
+    const partitions = await ctx!.db.execute(sql`
+      SELECT project_id FROM project.boards
+      UNION ALL SELECT project_id FROM project.project_auth_users
+      UNION ALL SELECT project_id FROM project.project_auth_memberships
+      UNION ALL SELECT project_id FROM project.project_auth_providers
+      UNION ALL SELECT project_id FROM project.project_auth_sessions
+      UNION ALL SELECT project_id FROM project.task_reviewer_runs
+    `) as unknown as Array<{ project_id: string }>;
+    expect(partitions).toHaveLength(6);
+    expect(partitions.every(({ project_id }) => project_id === "project-retired")).toBe(true);
+  });
+
+  /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  Central singleton values from SQLite must replace baseline seed defaults during first-boot cutover, and content verification must be independent of SQLite versus PostgreSQL text collation so mixed-case filesystem paths verify consistently.
+  */
+  it("migrates seeded central singletons and verifies rows across database collations", async () => {
+    const sqlitePath = join(ctx!.fusionDir, "fusion-central.db");
+    const legacy = new DatabaseSync(sqlitePath);
+    try {
+      legacy.exec(`
+        CREATE TABLE centralSettings (id INTEGER PRIMARY KEY, defaultProjectId TEXT, updatedAt TEXT NOT NULL);
+        CREATE TABLE globalConcurrency (id INTEGER PRIMARY KEY, globalMaxConcurrent INTEGER, currentlyActive INTEGER, queuedCount INTEGER, updatedAt TEXT);
+        CREATE TABLE plugin_installs (id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL, path TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+        CREATE TABLE project_plugin_states (projectPath TEXT NOT NULL, pluginId TEXT NOT NULL, enabled INTEGER NOT NULL, state TEXT NOT NULL, error TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, PRIMARY KEY (projectPath, pluginId));
+      `);
+      legacy.prepare(`INSERT INTO centralSettings VALUES (?, ?, ?)`).run(1, "project-default", "2026-06-01");
+      legacy.prepare(`INSERT INTO globalConcurrency VALUES (?, ?, ?, ?, ?)`).run(1, 10, 0, 0, "2026-06-02");
+      legacy.prepare(`INSERT INTO plugin_installs VALUES (?, ?, ?, ?, ?, ?)`).run("plugin-a", "A", "1.0.0", "/a", "2026-06-01", "2026-06-01");
+      legacy.prepare(`INSERT INTO plugin_installs VALUES (?, ?, ?, ?, ?, ?)`).run("plugin-b", "B", "1.0.0", "/b", "2026-06-01", "2026-06-01");
+      const insertState = legacy.prepare(`INSERT INTO project_plugin_states VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      insertState.run("/Users/operator/project", "plugin-a", 1, "started", null, "2026-06-01", "2026-06-01");
+      insertState.run("/private/tmp/project", "plugin-b", 1, "stopped", null, "2026-06-01", "2026-06-01");
+    } finally {
+      legacy.close();
+    }
+
+    const report = await migrateTest(ctx!.db, [
+      { sqlitePath, pgSchema: "central" as const },
+    ]);
+    for (const table of ["central_settings", "global_concurrency", "project_plugin_states"]) {
+      expect(report.tables).toContainEqual(expect.objectContaining({ table, verified: true }));
+    }
+    const settings = await ctx!.db.execute(sql`
+      SELECT default_project_id, updated_at FROM central.central_settings WHERE id = 1
+    `) as unknown as Array<{ default_project_id: string; updated_at: string }>;
+    expect(settings).toEqual([{ default_project_id: "project-default", updated_at: "2026-06-01" }]);
+    const concurrency = await ctx!.db.execute(sql`
+      SELECT global_max_concurrent, updated_at FROM central.global_concurrency WHERE id = 1
+    `) as unknown as Array<{ global_max_concurrent: number; updated_at: string }>;
+    expect(concurrency).toEqual([{ global_max_concurrent: 10, updated_at: "2026-06-02" }]);
+  });
+
+  /*
   FNXC:AutomationIsolation 2026-07-13-22:37:
   Legacy project databases do not carry project_id on automation rows. Migration must inject the resolved registry identity before verification so bound automation stores and cron runners see only their project's schedules, including when legacy automation IDs overlap.
 

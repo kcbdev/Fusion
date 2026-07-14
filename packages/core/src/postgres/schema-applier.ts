@@ -27,7 +27,7 @@ import { sql } from "drizzle-orm";
 import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type PluginSchemaInitHook } from "./plugin-schema-hook.js";
 
 /** The latest PostgreSQL schema version known to this applier. */
-export const SCHEMA_BASELINE_VERSION = "0003";
+export const SCHEMA_BASELINE_VERSION = "0004";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -36,6 +36,7 @@ const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
  * Each migration keeps an immutable bookkeeping identity even as SCHEMA_BASELINE_VERSION advances to newer migrations. Upgrade checks and inserts must use this dedicated 0003 identifier so a later latest-version marker cannot make an unrecorded monitor/approval migration look applied.
  */
 export const MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION = "0003";
+export const LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION = "0004";
 
 /** Bookkeeping table for the fresh Drizzle migration history. */
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
@@ -56,6 +57,11 @@ const MONITOR_APPROVAL_ISOLATION_MIGRATION_PATH = join(
   __dirname,
   "migrations",
   "0003_monitor_approval_project_isolation.sql",
+);
+const LEGACY_CUTOVER_PRESERVATION_MIGRATION_PATH = join(
+  __dirname,
+  "migrations",
+  "0004_legacy_cutover_preservation.sql",
 );
 
 /**
@@ -117,6 +123,7 @@ export async function applySchemaBaseline(
     const automationIsolationAlreadyApplied = applied.includes(AUTOMATION_ISOLATION_SCHEMA_VERSION);
     const analyticsIsolationAlreadyApplied = applied.includes(ANALYTICS_ISOLATION_SCHEMA_VERSION);
     const monitorApprovalIsolationAlreadyApplied = applied.includes(MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION);
+    const legacyCutoverPreservationAlreadyApplied = applied.includes(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION);
     let schemaChanged = false;
 
     if (!baselineAlreadyApplied) {
@@ -166,6 +173,19 @@ export async function applySchemaBaseline(
       await tx.execute(sql.raw(migrationSql));
       await tx.execute(
         sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
+      );
+      schemaChanged = true;
+    }
+
+    /*
+    FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+    Apply retired-table preservation independently of 0000 so an older partial migration target can retry without losing board, project-auth, or task-reviewer rows. The DDL is additive and idempotent.
+    */
+    if (!legacyCutoverPreservationAlreadyApplied) {
+      const migrationSql = await readFile(LEGACY_CUTOVER_PRESERVATION_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(
+        sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
       );
       schemaChanged = true;
     }

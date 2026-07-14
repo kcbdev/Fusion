@@ -529,6 +529,17 @@ function disposableSqliteTableReason(virtualTables: readonly string[], table: st
     return "SQLite internal bookkeeping table";
   }
 
+  /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  tasks_fts and archived_tasks_fts contain derived search indexes, not the authoritative task records. PostgreSQL regenerates both surfaces from migrated task rows through generated tsvector columns, so the two canonical virtual tables and their shadows are intentional skips; extension-owned FTS tables still fail closed.
+  */
+  if (
+    virtualTables.includes(table) &&
+    (table === "tasks_fts" || table === "archived_tasks_fts")
+  ) {
+    return `FTS5 index replaced by PostgreSQL tsvector for ${table}`;
+  }
+
   for (const name of virtualTables) {
     /*
     FNXC:PostgresMigration 2026-07-13-23:02:
@@ -1055,6 +1066,20 @@ async function insertBatch(
   });
 
   /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  The fresh PostgreSQL baseline seeds the two central singleton rows so a database without SQLite can boot. During SQLite cutover those defaults are placeholders: the legacy singleton is authoritative and must replace them instead of being discarded by ON CONFLICT DO NOTHING. No other table receives overwrite semantics.
+  */
+  const replacesCentralSeed =
+    plan.pgSchema === CENTRAL_SCHEMA &&
+    (plan.pgTable === "central_settings" || plan.pgTable === "global_concurrency");
+  const conflictClause = replacesCentralSeed
+    ? sql.raw(`ON CONFLICT (${quoteIdent("id")}) DO UPDATE SET ${cols
+        .filter((column) => column.pgName !== "id")
+        .map((column) => `${quoteIdent(column.pgName)} = EXCLUDED.${quoteIdent(column.pgName)}`)
+        .join(", ")}`)
+    : sql`ON CONFLICT DO NOTHING`;
+
+  /*
   FNXC:PostgresMigration 2026-07-13-21:05:
   RETURNING 1 makes the inserted-row count driver-agnostic: the result carries
   exactly one row per row actually inserted (conflicts return nothing). The
@@ -1065,7 +1090,7 @@ async function insertBatch(
   */
   const query = sql`INSERT INTO ${sql.raw(schemaQualifiedTable)} (${sql.raw(colList)})${sql.raw(overridingClause)}
     VALUES ${sql.join(valueRowsBuilt, sql`, `)}
-    ON CONFLICT DO NOTHING
+    ${conflictClause}
     RETURNING 1`;
 
   const result = (await db.execute(query)) as unknown as { length?: number };
@@ -1243,21 +1268,24 @@ function computeSourceContentChecksum(
 ): string {
   if (cols.length === 0) return "";
   const selectCols = cols.map((c) => quoteIdent(c.sqliteName)).join(", ");
-  const orderCols = cols.map((c) => quoteIdent(c.sqliteName)).join(", ");
   const rows = sqlite
-    .prepare(`SELECT ${selectCols} FROM ${quoteIdent(table)} ORDER BY ${orderCols}`)
+    .prepare(`SELECT ${selectCols} FROM ${quoteIdent(table)}`)
     .all() as Array<Record<string, unknown>>;
 
-  const hash = createHash("md5");
-  for (const row of rows) {
+  const canonicalRows = rows.map((row) => {
+    let canonical = "";
     for (const col of cols) {
       const converted = col.pgName === "project_id" && partitionProjectId
         ? partitionProjectId
         : convertValue(row[col.sqliteName], col.type, col.nullJsonbFallback);
-      hash.update(canonicalizeCell(converted));
-      hash.update("\u0001"); // cell separator
+      canonical += `${canonicalizeCell(converted)}\u0001`;
     }
-    hash.update("\u0002"); // row separator
+    return canonical;
+  }).sort();
+  const hash = createHash("md5");
+  for (const row of canonicalRows) {
+    hash.update(row);
+    hash.update("\u0002");
   }
   return hash.digest("hex");
 }
@@ -1283,19 +1311,26 @@ async function computeTargetContentChecksum(
 ): Promise<string> {
   if (cols.length === 0) return "";
   const selectCols = cols.map((c) => quoteIdent(c.pgName)).join(", ");
-  const orderCols = cols.map((c) => `${quoteIdent(c.pgName)} NULLS FIRST`).join(", ");
   const rows = (await db.execute(
     sql`SELECT ${sql.raw(selectCols)} FROM ${sql.raw(quoteIdent(pgSchema))}.${sql.raw(
       quoteIdent(table),
-    )}${projectId ? sql` WHERE project_id = ${projectId}` : sql``} ORDER BY ${sql.raw(orderCols)}`,
+    )}${projectId ? sql` WHERE project_id = ${projectId}` : sql``}`,
   )) as unknown as Array<Record<string, unknown>>;
 
-  const hash = createHash("md5");
-  for (const row of rows) {
+  /*
+  FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+  Content verification must not depend on database collation. SQLite BINARY and PostgreSQL locale collation can order identical mixed-case paths differently, so both sides canonicalize complete rows and sort those strings in Node before hashing.
+  */
+  const canonicalRows = rows.map((row) => {
+    let canonical = "";
     for (const col of cols) {
-      hash.update(canonicalizeCell(row[col.pgName]));
-      hash.update("\u0001");
+      canonical += `${canonicalizeCell(row[col.pgName])}\u0001`;
     }
+    return canonical;
+  }).sort();
+  const hash = createHash("md5");
+  for (const row of canonicalRows) {
+    hash.update(row);
     hash.update("\u0002");
   }
   return hash.digest("hex");

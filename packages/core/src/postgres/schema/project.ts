@@ -324,6 +324,123 @@ export const config = projectSchema.table("config", {
   updatedAt: text("updated_at"),
 });
 
+/*
+FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
+Retired company-board, project-auth, and task-reviewer tables remain part of the cutover preservation contract even though current runtime code no longer reads them. Keep their legacy columns queryable and add project_id to every key and relationship so multiple SQLite project databases can migrate into one shared PostgreSQL schema without collisions.
+*/
+export const legacyBoards = projectSchema.table("boards", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  workflowId: text("workflow_id").notNull(),
+  ordering: integer("ordering").notNull().default(0),
+  requirePlanApproval: integer("require_plan_approval").notNull().default(0),
+  lfgMode: integer("lfg_mode").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  index("idxLegacyBoardsProjectOrdering").on(t.projectId, t.ordering),
+]);
+
+export const legacyProjectAuthUsers = projectSchema.table("project_auth_users", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  email: text("email").notNull(),
+  displayName: text("display_name"),
+  active: integer("active").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  index("idxLegacyProjectAuthUsersEmail").on(t.projectId, t.email),
+]);
+
+export const legacyProjectAuthMemberships = projectSchema.table("project_auth_memberships", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  userId: text("user_id").notNull(),
+  role: text("role").notNull(),
+  active: integer("active").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({
+    columns: [t.projectId, t.userId],
+    foreignColumns: [legacyProjectAuthUsers.projectId, legacyProjectAuthUsers.id],
+  }).onDelete("cascade"),
+  index("idxLegacyProjectAuthMembershipsUser").on(t.projectId, t.userId),
+  index("idxLegacyProjectAuthMembershipsRole").on(t.projectId, t.role),
+]);
+
+export const legacyProjectAuthProviders = projectSchema.table("project_auth_providers", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  providerUserId: text("provider_user_id").notNull(),
+  metadata: text("metadata"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({
+    columns: [t.projectId, t.userId],
+    foreignColumns: [legacyProjectAuthUsers.projectId, legacyProjectAuthUsers.id],
+  }).onDelete("cascade"),
+  uniqueIndex("idxLegacyProjectAuthProvidersIdentity").on(t.projectId, t.provider, t.providerUserId),
+  index("idxLegacyProjectAuthProvidersUser").on(t.projectId, t.userId),
+]);
+
+export const legacyProjectAuthSessions = projectSchema.table("project_auth_sessions", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  userId: text("user_id").notNull(),
+  membershipId: text("membership_id").notNull(),
+  sessionToken: text("session_token").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({
+    columns: [t.projectId, t.userId],
+    foreignColumns: [legacyProjectAuthUsers.projectId, legacyProjectAuthUsers.id],
+  }).onDelete("cascade"),
+  foreignKey({
+    columns: [t.projectId, t.membershipId],
+    foreignColumns: [legacyProjectAuthMemberships.projectId, legacyProjectAuthMemberships.id],
+  }).onDelete("cascade"),
+  uniqueIndex("idxLegacyProjectAuthSessionsToken").on(t.projectId, t.sessionToken),
+  index("idxLegacyProjectAuthSessionsUser").on(t.projectId, t.userId),
+  index("idxLegacyProjectAuthSessionsMembership").on(t.projectId, t.membershipId),
+  index("idxLegacyProjectAuthSessionsExpiry").on(t.projectId, t.expiresAt),
+]);
+
+export const legacyTaskReviewerRuns = projectSchema.table("task_reviewer_runs", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  taskId: text("task_id").notNull(),
+  boardId: text("board_id").notNull().default(""),
+  status: text("status").notNull().default("pending"),
+  summary: text("summary"),
+  failureReasons: text("failure_reasons"),
+  reviewerAgentId: text("reviewer_agent_id"),
+  reworkRound: integer("rework_round").notNull().default(0),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  invalidatedAt: text("invalidated_at"),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  index("idxLegacyTaskReviewerRunsTask").on(t.projectId, t.taskId),
+  index("idxLegacyTaskReviewerRunsStatus").on(t.projectId, t.status),
+]);
+
 // ── Distributed task ID allocator ────────────────────────────────────
 /*
 FNXC:CentralProjectIdentity 2026-07-13-22:40:
@@ -1755,7 +1872,9 @@ export const chatRoomMessages = projectSchema.table("chat_room_messages", {
  * entry (drift signal).
  */
 export const projectTableNames = [
-  "tasks", "config", "distributed_task_id_state", "distributed_task_id_reservations",
+  "tasks", "config", "boards", "project_auth_users", "project_auth_memberships",
+  "project_auth_providers", "project_auth_sessions", "task_reviewer_runs",
+  "distributed_task_id_state", "distributed_task_id_reservations",
   "workflow_steps", "workflows", "task_workflow_selection", "activity_log",
   "archived_tasks", "task_commit_associations", "automations", "agents",
   "agent_heartbeats", "agent_runs", "agent_task_sessions", "agent_api_keys",

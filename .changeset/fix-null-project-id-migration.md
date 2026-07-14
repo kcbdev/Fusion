@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-summary: Fix startup migration for legacy project rows whose project ID is null.
+summary: Fix first-boot SQLite migration failures while preserving all legacy project data.
 category: fix
-dev: Bound SQLite cutovers now override nullable or stale source project IDs with the resolved registry identity.
+dev: Handles stale partitions, retired tables, derived FTS indexes, seeded singletons, and cross-database checksum collation.
