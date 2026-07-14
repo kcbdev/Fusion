@@ -1641,6 +1641,22 @@ describe("GET /auth/status", () => {
       expect(providerIds).not.toContain("anthropic");
       expect(providerIds.filter((id: string) => id === "anthropic-subscription")).toHaveLength(1);
     });
+
+    it("does not duplicate CLI-backed providers as unauthenticated API-key rows", async () => {
+      (authStorage.getApiKeyProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+        { id: "grok-cli", name: "Grok Cli" },
+        { id: "omp-cli", name: "OMP Cli" },
+        { id: "a-brand-new-api-provider", name: "Brand New API Provider" },
+      ]);
+
+      const res = await GET(app, "/api/auth/status");
+
+      expect(res.status).toBe(200);
+      expect(res.body.providers.filter((provider: any) => provider.id === "grok-cli")).toHaveLength(1);
+      expect(res.body.providers.find((provider: any) => provider.id === "grok-cli")).toMatchObject({ type: "cli" });
+      expect(res.body.providers.filter((provider: any) => provider.id === "omp-cli")).toHaveLength(1);
+      expect(res.body.providers.find((provider: any) => provider.id === "a-brand-new-api-provider")).toMatchObject({ type: "api_key" });
+    });
   });
 });
 

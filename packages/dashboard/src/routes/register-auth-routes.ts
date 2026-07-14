@@ -32,6 +32,20 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, options, store, getScopedStore, rethrowAsApiError } = ctx;
   const authStorage = options?.authStorage;
 
+  /*
+  FNXC:ProviderAuth 2026-07-14-14:22:
+  CLI-backed providers own their credentials and have dedicated status rows below. Runtime model registration can also expose those ids through getApiKeyProviders(); exclude them from the generic API-key union so Grok cannot render twice as both "missing API key" and ready via its authenticated CLI.
+  */
+  const syntheticCliProviderIds = new Set([
+    "claude-cli",
+    "pi-claude-cli",
+    "droid-cli",
+    "cursor-cli",
+    "grok-cli",
+    "omp-cli",
+    "llama-cpp",
+  ]);
+
   // Use injected AuthStorage or fail gracefully if not provided.
   // When running via the CLI/engine, AuthStorage is passed in via ServerOptions.
   function getAuthStorage(): AuthStorageLike {
@@ -618,7 +632,9 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       // storage.getApiKeyProviders may be absent/narrowed, but the catalog
       // entries must still surface as present-but-unauthenticated.
       {
-        const runtimeApiKeyProviders = storage.getApiKeyProviders ? storage.getApiKeyProviders() : [];
+        const runtimeApiKeyProviders = storage.getApiKeyProviders
+          ? storage.getApiKeyProviders().filter((provider) => !syntheticCliProviderIds.has(provider.id))
+          : [];
         const apiKeyProviders = unionProviderCatalog(STATIC_API_KEY_PROVIDER_CATALOG, runtimeApiKeyProviders);
         for (const p of apiKeyProviders) {
           let keyHint: string | undefined;
