@@ -2,12 +2,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import { mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { TaskStore } from "@fusion/core";
 import type { BranchGroup, Task } from "@fusion/core";
+import {
+  createTaskStoreForTest,
+  PG_AVAILABLE,
+} from "../../../core/src/__test-utils__/pg-test-harness.js";
+import { createConnectionSetFromUrl } from "../../../core/src/postgres/connection.js";
+import { createAsyncDataLayer } from "../../../core/src/postgres/data-layer.js";
 import { evaluateBranchGroupCompletion, ProjectEngine } from "@fusion/engine";
 import { createApiRoutes } from "../routes.js";
 import { createBranchGroupsRouter } from "../routes/register-branch-groups-routes.js";
@@ -499,39 +501,61 @@ describe("branch group routes project-store scoping", () => {
   });
 });
 
-describe("branch group routes with durable TaskStore", () => {
+/*
+FNXC:BranchGroupProjectScoping 2026-07-13-12:05:
+FN-7438 durable-route coverage used bare `new TaskStore` (SQLite). Main removed that path for Postgres backend mode.
+Rebind the restart fixture to createTaskStoreForTest, reopening a second TaskStore on the same AsyncDataLayer so group/member rows still prove request routing against durable storage.
+*/
+const durableDescribe = PG_AVAILABLE ? describe : describe.skip;
+
+durableDescribe("branch group routes with durable TaskStore", () => {
   async function withRestartedStore<T>(callback: (store: TaskStore, app: express.Express) => Promise<T>): Promise<T> {
-    const rootDir = mkdtempSync(join(tmpdir(), "fusion-branch-group-route-"));
-    const globalDir = join(rootDir, ".fusion-global");
-    let store = new TaskStore(rootDir, globalDir);
-    await store.init();
+    const harness = await createTaskStoreForTest({ prefix: "fusion_bg_route" });
+    let restartedStore: TaskStore | null = null;
     try {
-      const group = store.ensureBranchGroupForSource("planning", "PS-route-restart", {
+      const group = await harness.store.ensureBranchGroupForSource("planning", "PS-route-restart", {
         branchName: "feature/route-restart",
         autoMerge: true,
       });
-      await store.createTask({
+      await harness.store.createTask({
         description: "route member after restart",
         branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
       });
-      store.close();
-      store = new TaskStore(rootDir, globalDir);
-      await store.init();
+      // TaskStore.close() also closes the AsyncDataLayer pool. Rebuild a fresh
+      // connection set to the same database URL so we prove durability across a
+      // real store/process restart rather than reusing a closed pool.
+      await harness.store.close();
+      const connections = await createConnectionSetFromUrl(
+        {
+          mode: "external",
+          runtimeUrl: harness.testUrl,
+          migrationUrl: harness.testUrl,
+          migrationUrlOverridden: false,
+        },
+        { poolMax: 5, connectTimeoutSeconds: 5 },
+      );
+      const layer = createAsyncDataLayer(connections);
+      restartedStore = new TaskStore(harness.rootDir, undefined, { asyncLayer: layer });
+      await restartedStore.init();
 
       const app = express();
       app.use(express.json());
-      app.use("/api/branch-groups", createBranchGroupsRouter(store));
+      app.use("/api/branch-groups", createBranchGroupsRouter(restartedStore));
       attachErrorHandler(app);
-      return await callback(store, app);
+      return await callback(restartedStore, app);
     } finally {
-      store.close();
-      await rm(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      try {
+        await restartedStore?.close();
+      } catch {
+        // best-effort; harness.teardown drops the database either way
+      }
+      await harness.teardown();
     }
   }
 
   it("FN-7438: lists and shows persisted branch groups after a server/store restart", async () => {
     await withRestartedStore(async (store, app) => {
-      const group = store.getBranchGroupBySource("planning", "PS-route-restart");
+      const group = await store.getBranchGroupBySource("planning", "PS-route-restart");
       expect(group?.id).toMatch(/^BG-/);
 
       const listRes = await REQUEST(app, "GET", "/api/branch-groups");
