@@ -729,12 +729,22 @@ async function insertBatch(
     )})`,
   );
 
+  /*
+  FNXC:PostgresMigration 2026-07-13-21:05:
+  RETURNING 1 makes the inserted-row count driver-agnostic: the result carries
+  exactly one row per row actually inserted (conflicts return nothing). The
+  previous `result.count ?? result.rowCount ?? rows.length` read whatever the
+  driver wrapper exposed and reported 0 even when every row landed, so
+  migration reports showed "inserted 0" for fully-migrated tables and the
+  startup banner's migratedRows total was wrong.
+  */
   const query = sql`INSERT INTO ${sql.raw(schemaQualifiedTable)} (${sql.raw(colList)})${sql.raw(overridingClause)}
     VALUES ${sql.join(valueRowsBuilt, sql`, `)}
-    ON CONFLICT DO NOTHING`;
+    ON CONFLICT DO NOTHING
+    RETURNING 1`;
 
-  const result = (await db.execute(query)) as unknown as { count?: number; rowCount?: number };
-  return Number(result?.count ?? result?.rowCount ?? rows.length);
+  const result = (await db.execute(query)) as unknown as { length?: number };
+  return Number(result?.length ?? 0);
 }
 
 /** Count rows in a PostgreSQL table. */

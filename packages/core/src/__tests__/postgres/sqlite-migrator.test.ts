@@ -546,12 +546,23 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
     const first = await migrateSqliteToPostgres(ctx!.db, sources);
     const firstCounts = new Map(first.tables.map((t) => [`${t.schema}.${t.table}`, t.targetRows]));
 
+    // FNXC:PostgresMigration 2026-07-13-21:05:
+    // insertedRows must report rows ACTUALLY inserted (RETURNING-based count):
+    // every copied row on the first run, zero on the idempotent re-run. The
+    // old driver-wrapper count read 0 even when every row landed.
+    for (const t of first.tables) {
+      if (!t.skipped) {
+        expect(t.insertedRows, `${t.schema}.${t.table} first-run insertedRows`).toBe(t.sourceRows);
+      }
+    }
+
     // Second run — should be a clean re-sync (ON CONFLICT DO NOTHING).
     const second = await migrateSqliteToPostgres(ctx!.db, sources);
     for (const t of second.tables) {
       const key = `${t.schema}.${t.table}`;
       expect(t.targetRows, `${key} row count should be unchanged on re-run`).toBe(firstCounts.get(key));
       expect(t.verified, `${key} should still verify`).toBe(true);
+      expect(t.insertedRows, `${key} re-run should insert nothing`).toBe(0);
     }
   });
 
