@@ -11,7 +11,11 @@ function rethrowAsApiError(error: unknown, fallbackMessage = "Internal server er
 }
 
 function getProjectId(req: Request): string | undefined {
-  if (typeof req.query.projectId === "string" && req.query.projectId.trim()) return req.query.projectId;
+  // FNXC:BranchGroupProjectScoping 2026-07-14-06:15: return the trimmed id, not the raw padded string.
+  if (typeof req.query.projectId === "string") {
+    const projectId = req.query.projectId.trim();
+    if (projectId) return projectId;
+  }
   return undefined;
 }
 

@@ -56,12 +56,18 @@ export function classifyRemoteRouteError(error: unknown): RemoteRouteErrorClassi
   };
 }
 
+/*
+FNXC:BranchGroupProjectScoping 2026-07-14-06:15:
+projectId from query/body must be trimmed before store/engine lookup. A padded value like `secondary ` is a different key than `secondary` and can select the wrong project store or miss the engine manager entry. Whitespace-only values are treated as absent so routes fall back to the mounted default store.
+*/
 export function getProjectIdFromRequest(req: Request): string | undefined {
-  if (req.query && typeof req.query.projectId === "string" && req.query.projectId.length > 0) {
-    return req.query.projectId;
+  if (req.query && typeof req.query.projectId === "string") {
+    const projectId = req.query.projectId.trim();
+    if (projectId.length > 0) return projectId;
   }
-  if (req.body && typeof req.body.projectId === "string" && req.body.projectId.length > 0) {
-    return req.body.projectId;
+  if (req.body && typeof req.body.projectId === "string") {
+    const projectId = req.body.projectId.trim();
+    if (projectId.length > 0) return projectId;
   }
   return undefined;
 }

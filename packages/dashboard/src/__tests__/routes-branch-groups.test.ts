@@ -321,6 +321,38 @@ describe("branch group routes project-store scoping", () => {
     projectStoreResolverMocks.getOrCreateProjectStore.mockReset();
   });
 
+  it("canonicalizes padded projectId so store and callback keys match the bare id", async () => {
+    // FNXC:BranchGroupProjectScoping 2026-07-14-06:15:
+    // `?projectId=secondary%20` must resolve the same store key as `secondary`, not a distinct padded key.
+    const secondaryGroup = scopedGroup("BG-PAD", "secondary");
+    const defaultStore = scopedStore("/projects/default", [], []);
+    const secondaryStore = scopedStore("/projects/secondary", [secondaryGroup], [
+      scopedTask("FN-PAD", secondaryGroup.id, "secondary"),
+    ]);
+    projectStoreResolverMocks.getOrCreateProjectStore.mockResolvedValue(secondaryStore);
+    const promoteBranchGroup = vi.fn(async () => ({ promoted: true }));
+    const app = mountScopedRouter(defaultStore, { promoteBranchGroup });
+
+    const read = await REQUEST(app, "GET", "/branch-groups/BG-PAD?projectId=secondary%20");
+    expect(read.status).toBe(200);
+    expect(read.body.group.branchName).toBe("feature/secondary");
+    expect(projectStoreResolverMocks.getOrCreateProjectStore).toHaveBeenCalledWith("secondary");
+
+    const promote = await REQUEST(
+      app,
+      "POST",
+      "/branch-groups/BG-PAD/promote?projectId=%20secondary%20",
+      JSON.stringify({}),
+      { "content-type": "application/json" },
+    );
+    expect(promote.status).toBe(200);
+    expect(promoteBranchGroup).toHaveBeenCalledWith({
+      groupId: "BG-PAD",
+      projectId: "secondary",
+      store: secondaryStore,
+    });
+  });
+
   it("replays non-default GET and reset requests without consulting the mounted default store", async () => {
     const duplicateDefault = scopedGroup("BG-DUPLICATE", "default");
     const duplicateSecondary = scopedGroup("BG-DUPLICATE", "secondary");
