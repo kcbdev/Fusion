@@ -37,6 +37,7 @@ import {
   migrateSqliteToPostgres,
   toSnakeCase,
 } from "../../postgres/sqlite-migrator.js";
+import { applySchemaBaseline } from "../../postgres/schema-applier.js";
 
 const PG_TEST_URL_BASE =
   process.env.FUSION_PG_TEST_URL_BASE ?? "postgresql://localhost:5432";
@@ -78,7 +79,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   customFields TEXT DEFAULT '{}',
   deletedAt TEXT,
   createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
+  updatedAt TEXT NOT NULL,
+  projectId TEXT
 );
 `;
 
@@ -472,6 +474,9 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
   /*
   FNXC:AutomationIsolation 2026-07-13-22:37:
   Legacy project databases do not carry project_id on automation rows. Migration must inject the resolved registry identity before verification so bound automation stores and cron runners see only their project's schedules, including when legacy automation IDs overlap.
+
+  FNXC:AutomationIsolation 2026-07-14-08:52:
+  Real upgraded SQLite databases already have a nullable projectId column whose legacy rows can still be NULL. The resolved registry identity remains authoritative during the one-project-file cutover; migration must override that nullable source column instead of copying NULL into PostgreSQL's required project_id partition.
   */
   it("injects and verifies the project partition for migrated automations", async () => {
     const sqlitePath = join(ctx!.fusionDir, "fusion.db");
@@ -480,14 +485,27 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
       legacy.exec(`CREATE TABLE automations (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, scheduleType TEXT NOT NULL,
         cronExpression TEXT NOT NULL, command TEXT NOT NULL,
-        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+        createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL,
+        projectId TEXT
       )`);
-      legacy.prepare(`INSERT INTO automations VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
-        "auto-shared", "Nightly", "cron", "0 0 * * *", "pnpm check", "2026-06-01", "2026-06-01",
+      legacy.prepare(`INSERT INTO automations VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        "auto-shared", "Nightly", "cron", "0 0 * * *", "pnpm check", "2026-06-01", "2026-06-01", null,
+      );
+      legacy.prepare(`INSERT INTO automations VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        "auto-stale", "Weekly", "cron", "0 0 * * 0", "pnpm audit", "2026-06-01", "2026-06-01", "stale-project",
       );
     } finally {
       legacy.close();
     }
+
+    await applySchemaBaseline(ctx!.db);
+    await ctx!.db.execute(sql`
+      INSERT INTO project.automations
+        (project_id, id, name, schedule_type, cron_expression, command, created_at, updated_at)
+      VALUES
+        ('stale-project', 'auto-stale', 'Weekly', 'cron', '0 0 * * 0', 'pnpm audit', '2026-06-01', '2026-06-01'),
+        ('project-a', 'auto-stale', 'Weekly', 'cron', '0 0 * * 0', 'pnpm audit', '2026-06-01', '2026-06-01')
+    `);
 
     for (const projectId of ["project-a", "project-b"]) {
       const report = await migrateTest(
@@ -496,16 +514,57 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
         { projectId },
       );
       expect(report.tables.find((table) => table.table === "automations")).toEqual(
-        expect.objectContaining({ sourceRows: 1, targetRows: 1, verified: true }),
+        expect.objectContaining({ sourceRows: 2, targetRows: 2, verified: true }),
       );
     }
 
     const rows = (await ctx!.db.execute(sql`
-      SELECT project_id, id FROM project.automations WHERE id = 'auto-shared' ORDER BY project_id
+      SELECT project_id, id FROM project.automations
+      WHERE id IN ('auto-shared', 'auto-stale')
+      ORDER BY project_id, id
     `)) as unknown as Array<{ project_id: string; id: string }>;
     expect(rows).toEqual([
       { project_id: "project-a", id: "auto-shared" },
+      { project_id: "project-a", id: "auto-stale" },
       { project_id: "project-b", id: "auto-shared" },
+      { project_id: "project-b", id: "auto-stale" },
+    ]);
+  });
+
+  /*
+  FNXC:PostgresMigrationRetry 2026-07-14-09:06:
+  Retrying after the former non-transactional migrator must repair a globally keyed row copied under a NULL project partition. Reconciliation may replace only an exact migrated-content match, so unrelated PostgreSQL state remains untouched.
+  */
+  it("re-keys an exact globally keyed row left under a null project partition", async () => {
+    await applySchemaBaseline(ctx!.db);
+    await ctx!.db.execute(sql`
+      INSERT INTO project.tasks
+        (id, project_id, title, description, "column", dependencies, steps, comments,
+         custom_fields, deleted_at, created_at, updated_at)
+      VALUES
+        ('FN-100', NULL, 'First task', 'desc', 'todo',
+         '[{"taskId":"FN-99","type":"blocks"}]'::jsonb,
+         '[{"id":"s1","name":"step one"}]'::jsonb,
+         '[{"author":"agent","body":"hello"}]'::jsonb,
+         '{"priority":"high","labels":["a","b"]}'::jsonb,
+         NULL, '2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z')
+    `);
+
+    const report = await migrateTest(
+      ctx!.db,
+      [{ sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const }],
+      { projectId: "project-retry" },
+    );
+
+    expect(report.tables.find((table) => table.table === "tasks")).toEqual(
+      expect.objectContaining({ sourceRows: 2, targetRows: 2, verified: true }),
+    );
+    const rows = await ctx!.db.execute(sql`
+      SELECT id, project_id FROM project.tasks ORDER BY id
+    `) as unknown as Array<{ id: string; project_id: string }>;
+    expect(rows).toEqual([
+      { id: "FN-100", project_id: "project-retry" },
+      { id: "FN-101", project_id: "project-retry" },
     ]);
   });
 

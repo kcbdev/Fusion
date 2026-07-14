@@ -456,10 +456,13 @@ async function buildMigrationPlan(
         sqlite,
         targetColumnsByTable,
       );
+      /*
+      FNXC:PostgresMigration 2026-07-14-08:52:
+      A legacy per-project SQLite table can already contain a nullable projectId column while its existing rows still hold NULL. The registry identity resolved for this one-project-file cutover is authoritative whenever the PostgreSQL target is partitioned, so insertion and verification must override absent, NULL, or stale source project IDs instead of copying them into the required project_id partition.
+      */
       const partitionProjectId =
         projectId &&
         source.pgSchema !== CENTRAL_SCHEMA &&
-        !cols.some((column) => column.pgName === "project_id") &&
         targetColumnNames.has("project_id")
           ? projectId
           : undefined;
@@ -898,7 +901,12 @@ async function migrateTable(
     const rowCountOk = targetRows === sourceRows;
     let contentOk = true;
     if (rowCountOk && sourceRows > 0) {
-      const sourceChecksum = computeSourceContentChecksum(sqlite, plan.table, insertableCols);
+      const sourceChecksum = computeSourceContentChecksum(
+        sqlite,
+        plan.table,
+        insertableCols,
+        plan.partitionProjectId,
+      );
       const targetChecksum = await computeTargetContentChecksum(
         db,
         plan.pgSchema,
@@ -955,9 +963,10 @@ async function insertBatch(
   hasIdentityCol: boolean,
 ): Promise<number> {
   if (rows.length === 0) return 0;
+  const hasMappedProjectId = cols.some((column) => column.pgName === "project_id");
   const colList = [
     ...cols.map((c) => quoteIdent(c.pgName)),
-    ...(plan.partitionProjectId ? [quoteIdent("project_id")] : []),
+    ...(plan.partitionProjectId && !hasMappedProjectId ? [quoteIdent("project_id")] : []),
   ].join(", ");
   const schemaQualifiedTable = `${quoteIdent(plan.pgSchema)}.${quoteIdent(plan.pgTable)}`;
   // OVERRIDING SYSTEM VALUE lets us write explicit values into GENERATED ALWAYS
@@ -980,9 +989,68 @@ async function insertBatch(
     return sql`${value}`;
   };
 
+  /*
+  FNXC:PostgresMigrationRetry 2026-07-14-09:06:
+  The former non-transactional migrator could commit a source row under its NULL or stale project_id before a later table aborted startup. On retry, re-key only a stale-partition row whose complete migrated column set still matches the SQLite source. If an identical authoritative composite-key row already exists, remove only its stale duplicate; updating globally keyed rows in place preserves dependent rows and avoids foreign-key cascades.
+  */
+  if (plan.partitionProjectId && hasMappedProjectId) {
+    const staleRows = rows.filter(
+      (row) => row.project_id !== plan.partitionProjectId,
+    );
+    if (staleRows.length > 0) {
+      const comparisonsFor = (
+        alias: string,
+        row: Readonly<Record<string, unknown>>,
+        includeProjectId: boolean,
+      ) => cols
+        .filter((column) => includeProjectId || column.pgName !== "project_id")
+        .map((column) => {
+          const targetColumn = sql.raw(`${alias}.${quoteIdent(column.pgName)}`);
+          return sql`${targetColumn} IS NOT DISTINCT FROM ${buildCell(column, row[column.pgName])}`;
+        });
+      const exactStalePredicates = staleRows.map((row) =>
+        sql`(${sql.join(comparisonsFor("target", row, true), sql` AND `)})`,
+      );
+      const duplicatePredicates = staleRows.map((row) => {
+        const authoritativeComparisons = comparisonsFor("authoritative", row, false);
+        return sql`(
+          ${sql.join(comparisonsFor("target", row, true), sql` AND `)}
+          AND EXISTS (
+            SELECT 1 FROM ${sql.raw(schemaQualifiedTable)} AS authoritative
+            WHERE authoritative.project_id = ${plan.partitionProjectId}
+              AND ${sql.join(authoritativeComparisons, sql` AND `)}
+          )
+        )`;
+      });
+      const removedDuplicates = (await db.execute(sql`
+        DELETE FROM ${sql.raw(schemaQualifiedTable)} AS target
+        WHERE ${sql.join(duplicatePredicates, sql` OR `)}
+        RETURNING 1
+      `)) as unknown as { length?: number };
+      const rekeyed = (await db.execute(sql`
+        UPDATE ${sql.raw(schemaQualifiedTable)} AS target
+        SET project_id = ${plan.partitionProjectId}
+        WHERE ${sql.join(exactStalePredicates, sql` OR `)}
+        RETURNING 1
+      `)) as unknown as { length?: number };
+      const repairedCount = Number(removedDuplicates?.length ?? 0) + Number(rekeyed?.length ?? 0);
+      if (repairedCount > 0) {
+        log.log(
+          `Reconciled ${repairedCount} stale partition row(s) in ${plan.pgSchema}.${plan.pgTable}`,
+        );
+      }
+    }
+  }
+
   const valueRowsBuilt = rows.map((row) => {
-    const cells = cols.map((c) => buildCell(c, row[c.pgName]));
-    if (plan.partitionProjectId) cells.push(sql`${plan.partitionProjectId}`);
+    const cells = cols.map((c) =>
+      c.pgName === "project_id" && plan.partitionProjectId
+        ? sql`${plan.partitionProjectId}`
+        : buildCell(c, row[c.pgName]),
+    );
+    if (plan.partitionProjectId && !hasMappedProjectId) {
+      cells.push(sql`${plan.partitionProjectId}`);
+    }
     return sql`(${sql.join(cells, sql`, `)})`;
   });
 
@@ -1171,6 +1239,7 @@ function computeSourceContentChecksum(
   sqlite: DatabaseSync,
   table: string,
   cols: readonly ColumnMapping[],
+  partitionProjectId?: string,
 ): string {
   if (cols.length === 0) return "";
   const selectCols = cols.map((c) => quoteIdent(c.sqliteName)).join(", ");
@@ -1182,7 +1251,9 @@ function computeSourceContentChecksum(
   const hash = createHash("md5");
   for (const row of rows) {
     for (const col of cols) {
-      const converted = convertValue(row[col.sqliteName], col.type, col.nullJsonbFallback);
+      const converted = col.pgName === "project_id" && partitionProjectId
+        ? partitionProjectId
+        : convertValue(row[col.sqliteName], col.type, col.nullJsonbFallback);
       hash.update(canonicalizeCell(converted));
       hash.update("\u0001"); // cell separator
     }

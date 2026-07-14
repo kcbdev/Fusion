@@ -21,6 +21,7 @@ import { createTaskStoreForBackend } from "../../postgres/startup-factory.js";
 import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "../../sqlite-adapter.js";
 import postgres from "postgres";
+import { sql } from "drizzle-orm";
 
 const PG_TEST_URL_BASE =
   process.env.FUSION_PG_TEST_URL_BASE ?? "postgresql://localhost:5432";
@@ -152,9 +153,16 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
    */
   it("auto-migrates legacy SQLite data into an empty PostgreSQL database on first boot", async () => {
     rootDir = await mkdtemp(join(tmpdir(), "startup-factory-automig-"));
+    const globalDir = join(rootDir, "global");
     dbName = uniqueDbName();
     adminExec(`CREATE DATABASE "${dbName}"`);
     const testUrl = `${PG_TEST_URL_BASE}/${dbName}`;
+
+    /*
+    FNXC:PostgresMigration 2026-07-14-08:52:
+    Startup migration must bind real upgraded SQLite automation rows whose nullable projectId is still NULL to the registry project before PostgreSQL enforces its required partition. This fixture reproduces the pnpm dev startup crash, not only the simpler legacy shape where the source column is absent.
+    */
+    seedLegacyRegistry(globalDir, [{ id: "project-migrated", path: rootDir }]);
 
     // Seed a minimal legacy fusion.db with one live task.
     const fusionDir = join(rootDir, ".fusion");
@@ -168,16 +176,37 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
         "column" TEXT NOT NULL,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL
+      );
+      CREATE TABLE automations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        scheduleType TEXT NOT NULL,
+        cronExpression TEXT NOT NULL,
+        command TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        projectId TEXT
       );`);
       legacy.prepare(
         `INSERT INTO tasks (id, title, description, "column", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("FN-MIG-1", "Legacy task", "migrated from sqlite", "todo", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+      legacy.prepare(`INSERT INTO automations VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        "automation-migrated",
+        "Nightly",
+        "cron",
+        "0 0 * * *",
+        "pnpm check",
+        "2026-06-01T00:00:00Z",
+        "2026-06-01T00:00:00Z",
+        null,
+      );
     } finally {
       legacy.close();
     }
 
     const first = await createTaskStoreForBackend({
       rootDir,
+      globalSettingsDir: globalDir,
       env: { DATABASE_URL: testUrl },
     });
     expect(first).not.toBeNull();
@@ -199,6 +228,13 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       expect(notice!.tables).toBeGreaterThanOrEqual(1);
       expect(notice!.sqliteBackups).toContain(join(fusionDir, "fusion.db"));
       expect(notice!.dismissed).toBe(false);
+
+      const migratedAutomations = (await first!.asyncLayer.db.execute(sql`
+        SELECT project_id, id FROM project.automations WHERE id = 'automation-migrated'
+      `)) as unknown as Array<{ project_id: string; id: string }>;
+      expect(migratedAutomations).toEqual([
+        { project_id: "project-migrated", id: "automation-migrated" },
+      ]);
     } finally {
       await first!.shutdown();
     }
@@ -206,6 +242,7 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     // Second boot: PG is no longer empty — must NOT attempt to re-migrate.
     const second = await createTaskStoreForBackend({
       rootDir,
+      globalSettingsDir: globalDir,
       env: { DATABASE_URL: testUrl },
     });
     expect(second).not.toBeNull();
