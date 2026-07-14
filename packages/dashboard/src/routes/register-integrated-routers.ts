@@ -114,7 +114,9 @@ export function registerIntegratedRouters({
         fetchMembers: false,
         syncGroupPr: async ({ cwd: projectCwd, group: g }) => reconcileGroupPullRequest(client, g, projectCwd || undefined),
       });
-      return requestStore.getBranchGroup(group.id) ?? group;
+      // FNXC:BranchGroupProjectScoping 2026-07-13-12:00:
+      // Re-read from the request-scoped store after reconcile, and await the async Postgres-era TaskStore API from main.
+      return (await requestStore.getBranchGroup(group.id)) ?? group;
     },
   }));
 

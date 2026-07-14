@@ -442,8 +442,9 @@ describe("branch group routes project-store scoping", () => {
     const secondaryStore = scopedStore("/projects/secondary", [duplicateSecondary], []);
     projectStoreResolverMocks.getOrCreateProjectStore.mockResolvedValue(secondaryStore);
     const reconcileGroupPr = vi.fn(async ({ group, store: requestStore }: { group: BranchGroup; store: TaskStore }) => {
-      requestStore.updateBranchGroup(group.id, { prState: "merged" });
-      return requestStore.getBranchGroup(group.id) ?? group;
+      // FNXC:BranchGroupProjectScoping 2026-07-13-12:00: await async TaskStore branch-group methods after Postgres cutover on main.
+      await requestStore.updateBranchGroup(group.id, { prState: "merged" });
+      return (await requestStore.getBranchGroup(group.id)) ?? group;
     });
     const app = mountScopedRouter(defaultStore, { reconcileGroupPr });
 

@@ -45,6 +45,9 @@ interface BranchGroupRequestContext {
 /*
 FNXC:BranchGroupProjectScoping 2026-07-13-00:00:
 Every branch-group request must resolve one TaskStore from its query/body projectId and carry that store through reads, writes, serialization, and injected callbacks. Only requests without projectId may fall back to the store mounted with the router.
+
+FNXC:BranchGroupProjectScoping 2026-07-13-12:00:
+Main made branch-group TaskStore methods async for the Postgres cutover. Keep request-scoped store selection from FN-001 and await those methods so multi-project routes stay correct after merge with main.
 */
 async function resolveRequestContext(req: Request, mountedStore: TaskStore): Promise<BranchGroupRequestContext> {
   const projectId = getProjectIdFromRequest(req);
@@ -93,7 +96,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
       throw badRequest("status must be one of: open, finalized, abandoned");
     }
 
-    const groups = requestStore.listBranchGroups(status ? { status: status as BranchGroup["status"] } : undefined);
+    const groups = await requestStore.listBranchGroups(status ? { status: status as BranchGroup["status"] } : undefined);
     // Fix #8/#9: fetch tasks ONCE and filter per group in memory rather than one
     // full scan per group (the old N+1). Membership semantics (incl. legacy
     // synthetic-groupId fallback) come from the shared `filterTasksByBranchGroup`.
@@ -106,7 +109,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
     const { projectId, store: requestStore } = await resolveRequestContext(req, store);
     const id = String(req.params.id ?? "").trim();
     if (!id) throw badRequest("id is required");
-    let group = requestStore.getBranchGroup(id);
+    let group = await requestStore.getBranchGroup(id);
     if (!group) throw notFound("Branch group not found");
 
     // Fix #3: reconcile an out-of-band merged/closed PR before serializing so the
@@ -116,7 +119,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
       try {
         group = await options.reconcileGroupPr({ group, projectId, store: requestStore });
       } catch {
-        group = requestStore.getBranchGroup(id) ?? group;
+        group = (await requestStore.getBranchGroup(id)) ?? group;
       }
     }
 
@@ -144,12 +147,12 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
       if (!branchName) throw badRequest("branchName is required when groupId is not provided");
       const sourceType = task.branchContext?.source ?? "planning";
       const sourceId = `task:${task.id}`;
-      const created = requestStore.ensureBranchGroupForSource(sourceType, sourceId, {
+      const created = await requestStore.ensureBranchGroupForSource(sourceType, sourceId, {
         branchName,
         autoMerge: task.autoMerge ?? false,
       });
       groupId = created.id;
-    } else if (!requestStore.getBranchGroup(groupId)) {
+    } else if (!(await requestStore.getBranchGroup(groupId))) {
       throw notFound("Branch group not found");
     }
 
@@ -161,7 +164,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
     const { projectId, store: requestStore } = await resolveRequestContext(req, store);
     const id = String(req.params.id ?? "").trim();
     if (!id) throw badRequest("id is required");
-    const group = requestStore.getBranchGroup(id);
+    const group = await requestStore.getBranchGroup(id);
     if (!group) throw notFound("Branch group not found");
 
     const members = await requestStore.listTasksByBranchGroup(group.id);
@@ -187,7 +190,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
     const { projectId, store: requestStore } = await resolveRequestContext(req, store);
     const id = String(req.params.id ?? "").trim();
     if (!id) throw badRequest("id is required");
-    const group = requestStore.getBranchGroup(id);
+    const group = await requestStore.getBranchGroup(id);
     if (!group) throw notFound("Branch group not found");
 
     // Fix #2: a finalized, already-abandoned, or already-merged group is terminal
@@ -219,7 +222,7 @@ export function createBranchGroupsRouter(store: TaskStore, options?: BranchGroup
       }
     }
 
-    const updated = requestStore.updateBranchGroup(id, {
+    const updated = await requestStore.updateBranchGroup(id, {
       status: "abandoned",
       prState,
       prNumber: prNumber ?? null,

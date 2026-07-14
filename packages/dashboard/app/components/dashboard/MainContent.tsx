@@ -74,6 +74,7 @@ export function MainContent({
   mergeStrategy,
   planAutoApproveEnabled,
   settingsLoaded,
+  openMobileTasksInPopup,
   taskDetailChatFirst,
   skillsEnabled,
   experimentalFeatures,
@@ -917,6 +918,7 @@ export function MainContent({
         lastFetchTimeMs={lastFetchTimeMs}
         prAuthAvailable={prAuthAvailable}
         autoMerge={autoMerge}
+        openMobileTasksInPopup={openMobileTasksInPopup}
         taskDetailChatFirst={taskDetailChatFirst}
         mergeStrategy={mergeStrategy}
         onOpenWorkflowEditor={openWorkflowEditorWithNav}

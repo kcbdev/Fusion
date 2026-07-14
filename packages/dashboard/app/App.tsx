@@ -1369,6 +1369,7 @@ function AppInner() {
     mergeStrategy,
     planAutoApproveEnabled,
     settingsLoaded,
+    openMobileTasksInPopup,
     taskDetailChatFirst,
     skillsEnabled,
     experimentalFeatures,

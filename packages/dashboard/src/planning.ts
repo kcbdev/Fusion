@@ -433,6 +433,8 @@ interface ActivePlanningGeneration {
   abortController: AbortController;
   timer: NodeJS.Timeout;
   abortReason?: PlanningGenerationAbortReason;
+  abortTeardownFired: boolean;
+  abortTeardown: () => void;
   markProgress: (output: string) => void;
 }
 
@@ -736,6 +738,9 @@ function cleanupInMemorySession(sessionId: string): boolean {
   const activeGeneration = activeGenerations.get(sessionId);
   if (activeGeneration) {
     clearTimeout(activeGeneration.timer);
+    activeGeneration.abortReason = "user-stop";
+    activeGeneration.abortTeardown();
+    activeGeneration.abortController.abort();
     activeGenerations.delete(sessionId);
   }
 
@@ -786,7 +791,7 @@ function persistSession(session: Session, status: "generating" | "awaiting_input
     lockedByTab: null,
     lockedAt: null,
   };
-  _aiSessionStore.upsert(row);
+  _aiSessionStore.upsert(row).catch(() => { /* best-effort persistence */ });
 }
 
 /** Persist only thinking output (debounced). */
@@ -798,7 +803,7 @@ function persistThinking(sessionId: string, thinkingOutput: string): void {
 /** Remove session from persistence. */
 function unpersistSession(sessionId: string): void {
   if (!_aiSessionStore) return;
-  _aiSessionStore.delete(sessionId);
+  void _aiSessionStore.delete(sessionId);
 }
 
 /** Release in-memory planning runtime state while keeping persisted history. */
@@ -867,11 +872,11 @@ function buildSessionFromRow(row: AiSessionRow): Session {
   };
 }
 
-export function rehydrateFromStore(store: AiSessionStore): number {
+export async function rehydrateFromStore(store: AiSessionStore): Promise<number> {
   let rows: AiSessionRow[] = [];
 
   try {
-    rows = store.listRecoverable().filter((row) => row.type === "planning");
+    rows = (await store.listRecoverable()).filter((row) => row.type === "planning");
   } catch (error) {
     diagnostics.errorFromException("Failed to list recoverable sessions", error, { operation: "list-recoverable" });
     return 0;
@@ -1449,7 +1454,7 @@ export async function summarizeDraftTitle(
 ): Promise<string | null> {
   if (!_aiSessionStore) return null;
 
-  const row = _aiSessionStore.get(sessionId);
+  const row = await _aiSessionStore.get(sessionId);
   if (!row || row.type !== "planning" || row.status !== "draft") {
     return null;
   }
@@ -1479,12 +1484,12 @@ export async function summarizeDraftTitle(
 
   // Re-check status (not title) so a concurrent Start Planning or a later
   // edit-then-blur cycle doesn't overwrite a real generating/complete title.
-  const latest = _aiSessionStore.get(sessionId);
+  const latest = await _aiSessionStore.get(sessionId);
   if (!latest || latest.status !== "draft") {
     return latest?.title ?? null;
   }
 
-  _aiSessionStore.markDraftSummarized(sessionId, finalTitle, trimmed);
+  _aiSessionStore.markDraftSummarized(sessionId, finalTitle, trimmed).catch(() => { /* best-effort */ });
   const session = sessions.get(sessionId);
   if (session) {
     session.title = finalTitle;
@@ -1515,7 +1520,7 @@ export async function startExistingSession(
   // map entirely. Rebuild lazily from SQLite so persisted drafts can still be
   // started after a restart, and so updateDraft-only state survives.
   if (!session && _aiSessionStore) {
-    const row = _aiSessionStore.get(sessionId);
+    const row = await _aiSessionStore.get(sessionId);
     if (row && row.type === "planning") {
       try {
         session = buildSessionFromRow(row);
@@ -1546,7 +1551,7 @@ export async function startExistingSession(
   let persistedSummarizedFor: string | undefined;
   let cameFromDraft = false;
   if (_aiSessionStore) {
-    const row = _aiSessionStore.get(sessionId);
+    const row = await _aiSessionStore.get(sessionId);
     if (row) {
       cameFromDraft = row.status === "draft";
       const payload = safeParseJson<DraftInputPayload>(row.inputPayload, {});
@@ -1896,7 +1901,21 @@ async function ensureSessionAgent(
   }
 
   const contextMessage = buildHistoryReplayPrompt(historyForReplay);
-  await session.agent.session.prompt(contextMessage);
+  await runGenerationWithTimeout(session, async (abortSignal) => {
+    /*
+    FNXC:AiSessionCancellation 2026-07-13-00:00:
+    Planning history replay is an agent prompt surface too. Forward the generation AbortSignal and rely on runGenerationWithTimeout to tear down the in-flight session because Promise.race alone cannot cancel prompt() work.
+    */
+    if (abortSignal.aborted) {
+      throw createAbortError();
+    }
+    await (session.agent!.session.prompt as (input: string, options?: { signal?: AbortSignal }) => Promise<void>)(contextMessage, {
+      signal: abortSignal,
+    });
+    if (abortSignal.aborted) {
+      throw createAbortError();
+    }
+  });
 }
 
 async function maybeNotifyPlanningAwaitingInput(session: Session, question: PlanningQuestion): Promise<void> {
@@ -1997,6 +2016,7 @@ async function runGenerationWithTimeout<T>(session: Session, operation: (abortSi
   if (existing) {
     clearTimeout(existing.timer);
     existing.abortReason = "displaced";
+    existing.abortTeardown();
     existing.abortController.abort();
   }
 
@@ -2017,8 +2037,8 @@ async function runGenerationWithTimeout<T>(session: Session, operation: (abortSi
         operation: "planning-generation-watchdog",
       });
       setSessionError(session, message);
-      disposeSessionAgentForRetry(session);
     }
+    generationRecord.abortTeardown();
     abortController.abort();
   };
 
@@ -2029,6 +2049,18 @@ async function runGenerationWithTimeout<T>(session: Session, operation: (abortSi
   const generationRecord: ActivePlanningGeneration = {
     abortController,
     timer: scheduleInactivityTimer(),
+    abortTeardownFired: false,
+    abortTeardown: () => {
+      if (generationRecord.abortTeardownFired) {
+        return;
+      }
+      generationRecord.abortTeardownFired = true;
+      /*
+      FNXC:AiSessionCancellation 2026-07-13-00:00:
+      Planning has a local generation runner instead of GenerationGuard. Abort teardown must run once for timeout, user-stop, displacement, stuck, and loop aborts so an abandoned prompt cannot continue after the Promise.race waiter rejects.
+      */
+      disposeSessionAgentForRetry(session);
+    },
     markProgress: (output: string) => {
       const signature = normalizeGenerationProgress(output);
       if (!signature) {
@@ -2139,11 +2171,19 @@ async function continueAgentConversation(session: Session, message: string): Pro
       // Clear thinking output for this turn
       session.thinkingOutput = "";
 
-      // Send message to agent using .prompt() - it will stream thinking via onThinking callback.
-      // Pass abort signal so timeout/user-stop can cancel the underlying prompt when supported.
+      /*
+      FNXC:AiSessionCancellation 2026-07-13-00:00:
+      Planning turns and parse-retry prompts must pass the active AbortSignal to prompt() and short-circuit after abort. The local generation runner also tears down the agent session because provider SDKs may ignore the signal.
+      */
+      if (abortSignal.aborted) {
+        throw createAbortError();
+      }
       await (session.agent.session.prompt as (input: string, options?: { signal?: AbortSignal }) => Promise<void>)(message, {
         signal: abortSignal,
       });
+      if (abortSignal.aborted) {
+        throw createAbortError();
+      }
 
     // Get the response text from the agent's state
     interface AgentMessage {
@@ -2209,12 +2249,18 @@ async function continueAgentConversation(session: Session, message: string): Pro
           );
           try {
             session.thinkingOutput = "";
+            if (abortSignal.aborted) {
+              throw createAbortError();
+            }
             await (session.agent.session.prompt as (input: string, options?: { signal?: AbortSignal }) => Promise<void>)(
               "Your previous response could not be parsed as JSON. " +
                 'Please respond with ONLY a valid JSON object: either {"type":"question","data":{...}} ' +
                 'or {"type":"complete","data":{...}}. No markdown, no explanation, just the JSON.',
               { signal: abortSignal },
             );
+            if (abortSignal.aborted) {
+              throw createAbortError();
+            }
             
             // Get the new response text
             const retryMessage = (session.agent.session.state.messages as AgentMessage[])
@@ -2238,6 +2284,9 @@ async function continueAgentConversation(session: Session, message: string): Pro
             responseText = retryText;
             markPlanningGenerationProgress(session.id, responseText);
           } catch (retryErr) {
+            if (retryErr instanceof Error && retryErr.name === "AbortError") {
+              throw retryErr;
+            }
             // Retry prompt itself failed — give up
             diagnostics.errorFromException(
               "Retry prompt failed for session",
@@ -2539,7 +2588,7 @@ export async function submitResponse(
   promptOverrides?: PromptOverrideMap,
   store?: TaskStore,
 ): Promise<PlanningResponse> {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
@@ -2635,7 +2684,7 @@ export async function retrySession(
   promptOverrides?: PromptOverrideMap,
   store?: TaskStore,
 ): Promise<void> {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
@@ -2643,7 +2692,7 @@ export async function retrySession(
   if (store && !session.store) session.store = store;
   if (rootDir && !session.rootDir) session.rootDir = rootDir;
 
-  const persisted = _aiSessionStore?.get(sessionId);
+  const persisted = _aiSessionStore ? await _aiSessionStore.get(sessionId) : null;
   if (persisted && persisted.type !== "planning") {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
@@ -2689,7 +2738,7 @@ export async function rewindSession(
   promptOverrides?: PromptOverrideMap,
   store?: TaskStore,
 ): Promise<PlanningRewindResult> {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
@@ -2738,19 +2787,10 @@ export function stopGeneration(sessionId: string): boolean {
   }
 
   activeGeneration.abortReason = "user-stop";
-  activeGeneration.abortController.abort();
   clearTimeout(activeGeneration.timer);
+  activeGeneration.abortTeardown();
+  activeGeneration.abortController.abort();
   activeGenerations.delete(sessionId);
-
-  if (session.agent) {
-    nonfatal(
-      () => session.agent?.session.dispose?.(),
-      diagnostics,
-      "Error disposing agent for stop-generation",
-      { sessionId, operation: "stop-generation-dispose" },
-    );
-    session.agent = undefined;
-  }
 
   setSessionError(session, PLANNING_USER_STOP_ERROR_MESSAGE);
   return true;
@@ -2931,7 +2971,7 @@ export async function cancelSession(sessionId: string): Promise<void> {
 /**
  * Get session details.
  */
-export function getSession(sessionId: string): Session | undefined {
+export async function getSession(sessionId: string): Promise<Session | undefined> {
   const inMemory = sessions.get(sessionId);
   if (inMemory) {
     return inMemory;
@@ -2941,7 +2981,7 @@ export function getSession(sessionId: string): Session | undefined {
     return undefined;
   }
 
-  const row = _aiSessionStore.get(sessionId);
+  const row = await _aiSessionStore.get(sessionId);
   if (!row || row.type !== "planning") {
     return undefined;
   }
@@ -3198,7 +3238,7 @@ export async function __runGenerationWithTimeoutForTests<T>(
   sessionId: string,
   operation: (abortSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
