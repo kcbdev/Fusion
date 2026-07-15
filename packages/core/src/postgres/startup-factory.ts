@@ -527,7 +527,7 @@ export async function createTaskStoreForBackend(
         on the empty-PG path where one-time auto-migration is considered.
         */
         const migrationKey = `project:${migrationProjectId ?? rootDir}`;
-        const { migrateSqliteToPostgres, defaultMigrationSources, formatMigrationProgress, isSqliteMigrationComplete, completeSqliteMigration, recordSqliteMigrationComplete, CENTRAL_SQLITE_MIGRATION_KEY } = await import("./sqlite-migrator.js");
+        const { migrateSqliteToPostgres, migrateLegacyProjectPluginRows, defaultMigrationSources, formatMigrationProgress, isSqliteMigrationComplete, completeSqliteMigration, recordSqliteMigrationComplete, CENTRAL_SQLITE_MIGRATION_KEY } = await import("./sqlite-migrator.js");
         const migrationComplete = await isSqliteMigrationComplete(connections.migration, migrationKey);
         if (!migrationComplete && isValidSqliteDatabaseFile(legacySqlitePath)) {
           // The central (global-dir) source is optional: when no global dir is
@@ -633,6 +633,17 @@ export async function createTaskStoreForBackend(
             };
             log.log(`startup-factory: SQLite → PostgreSQL auto-migration complete (${migratedRows} row(s) across ${report.tables.length} table(s))`);
           }
+        }
+        /*
+        FNXC:PluginLegacyMigration 2026-07-15-02:09:
+        The retained-SQLite plugin bridge requires schema-marker and central plugin writes, so steady-state startup must run it through the privileged migration connection before that connection is replaced by the project-scoped fusion_runtime role. This bridge remains independently marker-gated because projects that completed the core cutover before plugin migration existed still need their plugin state recovered; every runtime surface receives the already-migrated store and PluginStore.init stays DDL-free.
+        */
+        if (isValidSqliteDatabaseFile(legacySqlitePath)) {
+          await migrateLegacyProjectPluginRows(
+            connections.migration,
+            legacySqlitePath,
+            rootDir,
+          );
         }
       }
     } catch (err) {

@@ -81,6 +81,41 @@ function seedLegacyRegistry(globalDir: string, projects: Array<{ id: string; pat
   }
 }
 
+function seedLegacyPlugin(root: string): void {
+  const fusionDir = join(root, ".fusion");
+  mkdirSync(fusionDir, { recursive: true });
+  const legacy = new DatabaseSync(join(fusionDir, "fusion.db"));
+  try {
+    legacy.exec(`CREATE TABLE plugins (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+      description TEXT, author TEXT, homepage TEXT, path TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1, state TEXT NOT NULL DEFAULT 'installed',
+      settings TEXT DEFAULT '{}', settingsSchema TEXT, error TEXT,
+      dependencies TEXT DEFAULT '[]', aiScanOnLoad INTEGER NOT NULL DEFAULT 0,
+      lastSecurityScan TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+    )`);
+    legacy.prepare(`INSERT INTO plugins (
+      id, name, version, path, enabled, state, settings, dependencies,
+      aiScanOnLoad, createdAt, updatedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(
+        "legacy-startup-plugin",
+        "Legacy startup plugin",
+        "1.0.0",
+        "/plugins/legacy-startup-plugin",
+        1,
+        "installed",
+        "{}",
+        "[]",
+        0,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+      );
+  } finally {
+    legacy.close();
+  }
+}
+
 pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
   let rootDir: string;
   let dbName: string;
@@ -141,6 +176,69 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     });
     expect(second).not.toBeNull();
     await second!.shutdown();
+  });
+
+  /*
+  FNXC:PluginLegacyMigration 2026-07-15-02:09:
+  Steady-state startup must finish the retained-SQLite plugin bridge through the privileged migration connection before returning a project-scoped runtime store. Dashboard, serve, desktop, and engine startup all initialize PluginStore after the runtime role is active, so PluginStore.init must remain DDL-free and must not crash with "permission denied for schema public".
+  */
+  it("migrates retained plugin rows before returning the restricted runtime store", async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "startup-factory-plugin-bridge-"));
+    dbName = uniqueDbName();
+    adminExec(`CREATE DATABASE "${dbName}"`);
+    const testUrl = `${PG_TEST_URL_BASE}/${dbName}`;
+
+    const first = await createTaskStoreForBackend({
+      rootDir,
+      env: { DATABASE_URL: testUrl },
+      poolMax: 1,
+    });
+    const projectId = first.taskStore.getAsyncLayer()!.projectId!;
+    await first.shutdown();
+
+    const admin = postgres(testUrl, { max: 1 });
+    try {
+      await admin`CREATE TABLE public.fusion_sqlite_migrations (
+        migration_key text PRIMARY KEY,
+        project_id text,
+        status text NOT NULL CHECK (status IN ('running', 'complete', 'failed')),
+        last_error text,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )`;
+      await admin`
+        INSERT INTO public.fusion_sqlite_migrations
+          (migration_key, project_id, status, last_error, updated_at)
+        VALUES (${`project:${projectId}`}, ${projectId}, 'complete', NULL, now())
+      `;
+    } finally {
+      await admin.end();
+    }
+    seedLegacyPlugin(rootDir);
+
+    const second = await createTaskStoreForBackend({
+      rootDir,
+      env: { DATABASE_URL: testUrl },
+      poolMax: 1,
+    });
+    try {
+      await expect(second.taskStore.getPluginStore().init()).resolves.toBeUndefined();
+      const client = postgres(testUrl, { max: 1 });
+      try {
+        const installs = await client<{ id: string }[]>`
+          SELECT id FROM central.plugin_installs WHERE id = 'legacy-startup-plugin'
+        `;
+        const states = await client<{ plugin_id: string }[]>`
+          SELECT plugin_id FROM central.project_plugin_states
+          WHERE project_path = ${rootDir} AND plugin_id = 'legacy-startup-plugin'
+        `;
+        expect(installs).toEqual([{ id: "legacy-startup-plugin" }]);
+        expect(states).toEqual([{ plugin_id: "legacy-startup-plugin" }]);
+      } finally {
+        await client.end();
+      }
+    } finally {
+      await second.shutdown();
+    }
   });
 
   /*
