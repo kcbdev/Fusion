@@ -905,7 +905,13 @@ export class EmbeddedPostgresLifecycle {
   }
 
   private buildUrl(port: number, database: string): string {
-    return `postgresql://${encodeURIComponent(this.options.user)}:${encodeURIComponent(this.options.password)}@localhost:${port}/${encodeURIComponent(database)}`;
+    // FNXC:WindowsDesktopPackaging 2026-07-15-05:00:
+    // Prefer 127.0.0.1 on Windows. `localhost` can resolve to ::1 first; the
+    // non-admin postmaster path and some Windows loopback policies made IPv6
+    // connects hang while IPv4 was fine, which blocked ensureDatabase after the
+    // cluster was already ready.
+    const host = process.platform === "win32" ? "127.0.0.1" : "localhost";
+    return `postgresql://${encodeURIComponent(this.options.user)}:${encodeURIComponent(this.options.password)}@${host}:${port}/${encodeURIComponent(database)}`;
   }
 
   /**
@@ -1100,33 +1106,73 @@ export class EmbeddedPostgresLifecycle {
    * Idempotent: queries `pg_database` first and only issues `CREATE DATABASE`
    * when the database is missing. `embedded-postgres.createDatabase()` throws on
    * an existing database, so this guard is required for safe re-starts.
+   *
+   * FNXC:WindowsDesktopPackaging 2026-07-15-05:00:
+   * Do not call embedded-postgres.createDatabase() when the server was started
+   * under the elevated-Windows non-admin path: that library requires
+   * `this.process` (set only by its own .start()), so createDatabase throws
+   * "cluster must be running" even though postgres is healthy. Use a direct
+   * SQL connection with a bounded connect timeout instead.
    */
   async ensureDatabase(): Promise<void> {
-    if (!this.pg || !this.running) {
+    if (!this.running || this.getPort() === undefined) {
       throw new Error(
         "Cannot ensure database: the embedded cluster is not running. Call start() first.",
       );
     }
     const exists = await this.databaseExists(this.options.database);
     if (exists) return;
-    await this.pg.createDatabase(this.options.database);
+    const sql = await this.openMaintenanceSql();
+    try {
+      const safeName = this.options.database.replace(/"/g, '""');
+      await sql.unsafe(`CREATE DATABASE "${safeName}"`);
+    } finally {
+      await sql.end({ timeout: 5 }).catch(() => {});
+    }
   }
 
   /** Check whether a database with the given name exists on the cluster. */
   private async databaseExists(name: string): Promise<boolean> {
-    if (!this.pg) return false;
-    // Use the maintenance client (connects to the default "postgres" db).
-    const client = this.pg.getPgClient("postgres", "localhost");
+    if (!this.running || this.getPort() === undefined) return false;
+    const sql = await this.openMaintenanceSql();
     try {
-      await client.connect();
-      const result = await client.query(
-        "SELECT 1 FROM pg_database WHERE datname = $1",
-        [name],
-      );
-      return (result.rowCount ?? 0) > 0;
+      const rows = await sql`SELECT 1 AS one FROM pg_database WHERE datname = ${name}`;
+      return rows.length > 0;
+    } catch {
+      return false;
     } finally {
-      await client.end().catch(() => {});
+      await sql.end({ timeout: 5 }).catch(() => {});
     }
+  }
+
+  /**
+   * Open a short-lived maintenance connection to the embedded cluster's
+   * built-in `postgres` database (for CREATE DATABASE / existence checks).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private openMaintenanceSql(): any {
+    const port = this.getPort();
+    if (port === undefined) {
+      throw new Error("openMaintenanceSql: no port assigned");
+    }
+    // Lazy require so CLI bundles that never touch embedded PG do not need
+    // the postgres.js runtime in their static graph for this path alone.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const postgres = require("postgres") as (opts: Record<string, unknown>) => {
+      (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]>;
+      unsafe(query: string): Promise<unknown>;
+      end(opts?: { timeout?: number }): Promise<void>;
+    };
+    const host = process.platform === "win32" ? "127.0.0.1" : "localhost";
+    return postgres({
+      host,
+      port,
+      user: this.options.user,
+      password: this.options.password,
+      database: "postgres",
+      max: 1,
+      connect_timeout: 10,
+    });
   }
 
   /**

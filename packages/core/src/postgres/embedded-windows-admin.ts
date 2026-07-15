@@ -27,6 +27,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { join, dirname } from "node:path";
 
 /** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
@@ -373,8 +374,14 @@ export async function startServerAsNonAdminUser(
       opts.onLog(`non-admin poll wrapper={${wrapperTail}} pg={${tail.slice(-400)}}`);
     }
     if (/database system is ready to accept connections/.test(tail)) {
-      ready = true;
-      break;
+      // FNXC:WindowsDesktopPackaging 2026-07-15-05:00:
+      // Log readiness alone is not enough: confirm TCP accept on 127.0.0.1 so
+      // ensureDatabase cannot hang on a connect that never completes (IPv6 /
+      // cross-session loopback quirks). Probe is async and cheap.
+      if (await probeTcpPort(opts.port, 500)) {
+        ready = true;
+        break;
+      }
     }
     if (/\bFATAL\b|\bPANIC\b|could not (bind|start|create|access|connect|load)|not permitted|Permission denied|is not the owner/i.test(tail)) {
       throw new Error(
@@ -409,6 +416,9 @@ export async function startServerAsNonAdminUser(
 
   let stopped = false;
   const resolvedPid = postgresPid ?? wrapperPid;
+  opts.onLog(
+    `embedded postgres: non-admin server ready on 127.0.0.1:${opts.port} (pid ${resolvedPid})`,
+  );
   return {
     postgresPid: resolvedPid,
     async stop() {
@@ -419,4 +429,23 @@ export async function startServerAsNonAdminUser(
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
     },
   };
+}
+
+/** True when a TCP accept is available on 127.0.0.1:port within timeoutMs. */
+function probeTcpPort(port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
+  });
 }
