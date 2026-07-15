@@ -30,6 +30,7 @@ See the [2026-07-14 PostgreSQL runtime cutover review](./postgres-migration-revi
 ### Agent log storage + soft-delete visibility (FN-5143 / FN-5911)
 
 - Agent logs are stored outside PostgreSQL. Each task appends newline-delimited JSON records to `<rootDir>/.fusion/tasks/{ID}/agent-log.jsonl`.
+- Tool arguments and successful `tool_result` detail remain opt-in through `persistAgentToolOutput`; failed `tool_error` detail always persists as bounded diagnostic signal so task Activity transcripts can reveal the underlying failure.
 - Agent-log JSONL rows may include optional numeric timing metadata: `timeToFirstTokenMs` on the first visible model-output row for a request, and `durationMs` on tool/request completion rows such as `tool_result` or `tool_error`. These fields are additive, non-sensitive millisecond values; legacy rows may omit them and readers must continue to treat omission as normal.
 - `TaskStore.deleteTask` keeps that JSONL file on disk for forensics, but all live read APIs (`getAgentLogs*`, `getAgentLogCount`) gate on task liveness and return zero entries once `deletedAt` is set.
 - Archived-task snapshot behavior (`taskToArchiveEntry` / `archiveTask`) embeds a capped agent-log snapshot sourced from JSONL.

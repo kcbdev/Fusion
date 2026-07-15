@@ -145,7 +145,7 @@ export function summarizeToolArgs(name: string, args?: Record<string, unknown>):
  *    When both are provided, both sinks receive every entry.
  */
 export interface AgentLoggerOptions {
-  /** When true, persist `detail` payloads for tool entries; default false preserves rows without verbose payloads. */
+  /** When true, persist `detail` payloads for `tool` and successful `tool_result` entries; failed `tool_error` details always persist. */
   persistAgentToolOutput?: boolean;
   /** When true, persist `thinking` rows. Default: false (skip thinking persistence). */
   persistAgentThinkingLog?: boolean;
@@ -253,8 +253,8 @@ export class AgentLogger {
     this.flushSizeBytes = options.flushSizeBytes ?? FLUSH_SIZE_BYTES;
     this.flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
     /*
-    FNXC:AgentLogs 2026-06-23-00:00:
-    Direct logger construction must match global settings: verbose tool payload persistence is default-off and only explicit persistAgentToolOutput: true saves tool entry detail. Tool/tool_result/tool_error rows still persist so timelines and usage telemetry remain intact.
+    FNXC:AgentLogging 2026-07-15-16:00:
+    Verbose tool arguments and successful result payloads remain default-off unless persistAgentToolOutput is enabled. Failed tool_error detail is bounded diagnostic signal, so it must persist regardless of that setting for Activity-feed diagnosis (FN-7995).
     */
     this.persistAgentToolOutput = options.persistAgentToolOutput === true;
     this.persistAgentThinkingLog = options.persistAgentThinkingLog === true;
@@ -444,7 +444,8 @@ export class AgentLogger {
     timing?: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">,
   ): void {
     const isToolEntry = type === "tool" || type === "tool_result" || type === "tool_error";
-    const includeDetail = !isToolEntry || this.persistAgentToolOutput;
+    // FNXC:AgentLogging 2026-07-15-16:00: Failed tool detail is diagnostic signal, unlike verbose arguments/success output, and must survive default-off tool-output persistence for FN-7995 Activity diagnosis.
+    const includeDetail = !isToolEntry || type === "tool_error" || this.persistAgentToolOutput;
     const entry: AgentLogEntry = {
       timestamp: new Date().toISOString(),
       taskId: this.taskId,

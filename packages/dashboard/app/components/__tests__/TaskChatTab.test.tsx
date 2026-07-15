@@ -951,6 +951,48 @@ describe("TaskChatTab", () => {
     expect(screen.getByLabelText("Tool invocation timestamp")).toBeVisible();
   });
 
+  it.each([
+    ["desktop", false],
+    ["mobile", true],
+  ])("keeps an error detail revealable in the collapsed tool group on %s", async (_viewport, matchesMobile) => {
+    const user = userEvent.setup();
+    mockMatchMedia(matchesMobile);
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "edit" }),
+      makeEntry({ agent: "executor", type: "tool_error", text: "edit", detail: "replacement text did not match" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(within(toolGroup).getByText("1 error")).toBeVisible();
+    expect(screen.getByText("replacement text did not match")).not.toBeVisible();
+
+    await user.click(within(toolGroup).getByText("1 tool call"));
+
+    const detailBlock = document.querySelector(".task-chat-tool-detail-block");
+    expect(detailBlock).toBeTruthy();
+    expect(within(detailBlock as HTMLElement).getByText("Error")).toBeVisible();
+    expect(within(detailBlock as HTMLElement).getByText("replacement text did not match")).toBeVisible();
+  });
+
+  it("does not render an empty Error detail block when a tool_error has no detail", async () => {
+    const user = userEvent.setup();
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "Write" }),
+      makeEntry({ agent: "executor", type: "tool_error", text: "Write", detail: undefined }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    await user.click(screen.getByText("1 tool call"));
+
+    expect(screen.getByText("Tool call → error")).toBeVisible();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    expect(document.querySelector(".task-chat-tool-detail-block")).toBeNull();
+  });
+
   it("renders a single tool entry as one collapsed group and tolerates missing detail", () => {
     mockLogs([
       makeEntry({ agent: "executor", type: "tool", text: "bash", detail: undefined }),

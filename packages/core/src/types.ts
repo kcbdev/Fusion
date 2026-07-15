@@ -527,8 +527,14 @@ export interface AgentLogEntry {
   text: string;
   /** The kind of entry — streamed text delta, standalone engine status message, tool invocation marker, thinking block, tool result, or tool error. */
   type: AgentLogType;
-  /** For tool entries: human-readable summary of tool args (e.g. file path, command).
-   *  For tool_result/tool_error: summary of the result or error message. */
+  /**
+   * For `tool`: human-readable argument summary (for example a file path or command).
+   * `tool` and successful `tool_result` detail are persisted only when `persistAgentToolOutput` is enabled;
+   * failed `tool_error` detail is always persisted as bounded diagnostic signal.
+   *
+   * FNXC:AgentLogging 2026-07-15-16:05: FN-7995 requires failed tool-call errors to remain available
+   * to task transcript renderers even when verbose successful tool output is disabled.
+   */
   detail?: string;
   /** Which agent produced this entry. Absent in logs written before this field was added. */
   agent?: AgentRole;
