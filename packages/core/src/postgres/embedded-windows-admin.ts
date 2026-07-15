@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 /** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
 export interface NonAdminServerHandle {
@@ -128,15 +128,38 @@ function ensureNonAdminUser(): { user: string; password: string } {
 }
 
 /**
- * Grant the non-admin user RX on the postgres binary root and full control on
- * the data dir. Relies on the default "Bypass traverse checking" right so no
- * parent-dir grants are required. /T applies recursively; /C keeps going on
- * non-fatal errors (e.g. unreadable sibling files).
+ * FNXC:WindowsDesktopPackaging 2026-07-14-22:30:
+ * Grant traverse (RX) on each ancestor dir of `leaf` up to the drive root, so
+ * the non-admin user can reach `leaf` even when "Bypass traverse checking" is
+ * restricted (the windows-2025 runner) or a profile ACL would deny traversal.
+ * RX is applied folder-by-folder as a non-inheriting ACE so sibling contents
+ * are not over-granted. Best-effort: ancestors that already allow traverse
+ * (e.g. C:\) reject harmlessly, and a blocked path surfaces later via the
+ * Start-Process error (which carries the full stderr).
+ */
+function grantTraverseChain(user: string, leaf: string): void {
+  let dir = dirname(leaf);
+  for (let depth = 0; depth < 16; depth += 1) {
+    const parent = dirname(dir);
+    if (parent === dir) break; // drive root reached
+    if (existsSync(dir)) {
+      spawnSync("icacls", [dir, "/grant", `${user}:(RX)`, "/C"], { encoding: "utf8" });
+    }
+    dir = parent;
+  }
+}
+
+/**
+ * Grant the non-admin user full control on the data dir (postgres writes
+ * there), read+execute on the native binary root, and traverse on each parent
+ * ancestor of both so the user can reach them. F/RX grants fail fast; the
+ * traverse walk is best-effort. /T applies the F/RX grants recursively; /C
+ * keeps going on non-fatal errors (e.g. unreadable sibling files).
  */
 function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
   for (const [target, perm] of [
-    [nativeRoot, "(OI)(CI)RX"],
     [dataDir, "(OI)(CI)F"],
+    [nativeRoot, "(OI)(CI)RX"],
   ] as const) {
     if (!existsSync(target)) {
       throw new Error(`embedded postgres: non-admin grant target does not exist: ${target}`);
@@ -151,6 +174,8 @@ function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string):
       );
     }
   }
+  grantTraverseChain(user, dataDir);
+  grantTraverseChain(user, nativeRoot);
 }
 
 function readPostgresPid(dataDir: string): number | null {
@@ -312,7 +337,9 @@ export async function startServerAsNonAdminUser(
   if (!Number.isFinite(wrapperPid)) {
     throw new Error(
       `embedded postgres: failed to launch non-admin postgres ` +
-        `(${powerShell} status=${launch.status}: ${(launch.stderr || "").trim().slice(0, 400)}).`,
+        `(${powerShell} status=${launch.status} ` +
+        `stdout=${(launch.stdout || "").trim().slice(0, 500)} ` +
+        `stderr=${(launch.stderr || "").trim().slice(0, 2000)}).`,
     );
   }
   opts.onLog(
