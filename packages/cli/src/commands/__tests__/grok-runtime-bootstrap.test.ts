@@ -29,3 +29,35 @@ describe("Grok CLI runtime packaged bootstrap", () => {
     });
   }
 });
+
+/*
+FNXC:GrokCliRouting 2026-07-15-09:58:
+CLI/UI-only merge doors must thread pluginRunner into runAiMerge/landWorkspaceTask when a real PluginRunner is obtainable (engine warm). Bare `fn task merge` has no ProjectEngine — explicitly passes undefined rather than inventing a bootstrap.
+*/
+describe("Grok CLI PluginRunner wiring for CLI/UI-only merge doors", () => {
+  it("dashboard onMergeImpl passes mergePluginRunner into runAiMerge and landWorkspaceTask", () => {
+    const source = readCommand("dashboard");
+    expect(source).toContain("let mergePluginRunner: PluginRunner | undefined");
+    expect(source).toContain("mergePluginRunner =");
+    expect(source).toContain("cwdEngine?.getPluginRunner?.()");
+
+    const onMergeImplIndex = source.indexOf("const onMergeImpl = async (taskId: string)");
+    expect(onMergeImplIndex).toBeGreaterThanOrEqual(0);
+    const landCall = source.indexOf("landWorkspaceTask(store, mergeTask!, cwd, {", onMergeImplIndex);
+    const runAiMergeCall = source.indexOf("runAiMerge(store, cwd, taskId, {", onMergeImplIndex);
+    expect(landCall).toBeGreaterThan(onMergeImplIndex);
+    expect(runAiMergeCall).toBeGreaterThan(onMergeImplIndex);
+    expect(source.slice(landCall, landCall + 200)).toContain("pluginRunner");
+    expect(source.slice(runAiMergeCall, runAiMergeCall + 250)).toContain("pluginRunner");
+  });
+
+  it("fn task merge threads pluginRunner option (undefined without a live ProjectEngine)", () => {
+    const source = readFileSync(resolve(commandsDir, "task.ts"), "utf8");
+    const mergeFnIndex = source.indexOf("export async function runTaskMerge");
+    expect(mergeFnIndex).toBeGreaterThanOrEqual(0);
+    const mergeFnBody = source.slice(mergeFnIndex, source.indexOf("export async function runTaskAttach", mergeFnIndex));
+    expect(mergeFnBody).toContain("pluginRunner: mergePluginRunner");
+    expect(mergeFnBody).toContain("FNXC:GrokCliRouting 2026-07-15-09:58");
+    expect(mergeFnBody).toContain("const mergePluginRunner = undefined");
+  });
+});

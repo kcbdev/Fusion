@@ -64,6 +64,7 @@ import {
   shouldUseHybridExecutor,
   setHostExtensionPaths,
   createFusionAuthStorage,
+  type PluginRunner,
 } from "@fusion/engine";
 import { DefaultPackageManager, ModelRegistry, SettingsManager, discoverAndLoadExtensions, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import {
@@ -1480,7 +1481,16 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // entry points onto runAiMerge (the FN-5633 clean-room AI merge path);
   // aiMergeTask is soft-deprecated.
   //
+  /*
+  FNXC:GrokCliRouting 2026-07-15-09:58:
+  UI-only onMergeImpl calls runAiMerge/landWorkspaceTask without ProjectEngine's onMerge door, so it must obtain a PluginRunner that exposes getRuntimeById for grok-cli/no-key merge sessions. Prefer the live cwd engine runner (set when engines warm); do not pass the bare PluginLoader (lacks getRuntimeById). When no engine exists (--no-engine), leave undefined so dual-remediation surfaces — do not invent a PluginRunner bootstrap here.
+  */
+  let mergePluginRunner: PluginRunner | undefined;
+
   const onMergeImpl = async (taskId: string) => {
+    // Prefer the live engine PluginRunner at call time (may be set after engine warm).
+    const pluginRunner = mergePluginRunner;
+
     // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
     // Dashboard merge button (UI-only mode). A workspace-mode task routes through
     // the ENGINE per-repo merge loop `landWorkspaceTask` (each sub-repo lands on its
@@ -1494,6 +1504,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     if (isWorkspaceMerge) {
       const workspaceResult = await landWorkspaceTask(store, mergeTask!, cwd, {
         agentStore,
+        pluginRunner,
       });
       const latest = await store.getTask(taskId).catch(() => mergeTask!);
       // FNXC:Workspace 2026-06-22-05:10 (Phase C review B3):
@@ -1545,6 +1556,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       return await runAiMerge(store, cwd, taskId, {
         agentStore,
         onAgentText: (delta) => streamedMergeLog.push(delta),
+        pluginRunner,
       });
     } finally {
       streamedMergeLog.flush();
@@ -2110,6 +2122,22 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           }),
         )
       : undefined;
+
+    /*
+    FNXC:GrokCliRouting 2026-07-15-09:58:
+    Capture the live engine PluginRunner for any residual UI-only merge door usage. Engine mode replaces onMerge with engine.onMerge (already forwards getPluginRunner); this ref covers onMergeImpl if it is still reached after engines warm. Prefer cwd engine, then any warm engine that exposes getRuntimeById — never the bare PluginLoader.
+    */
+    mergePluginRunner =
+      cwdEngine?.getPluginRunner?.()
+      ?? (() => {
+        for (const engine of engineManager.getAllEngines().values()) {
+          const runner = engine.getPluginRunner?.();
+          if (runner && typeof runner.getRuntimeById === "function") {
+            return runner;
+          }
+        }
+        return undefined;
+      })();
 
     // Get the trigger scheduler from any running engine
     for (const engine of engineManager.getAllEngines().values()) {

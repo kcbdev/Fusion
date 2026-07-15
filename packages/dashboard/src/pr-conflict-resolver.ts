@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Settings, TaskStore } from "@fusion/core";
-import { createResolvedAgentSession, resolveMcpServersForStore } from "@fusion/engine";
+import { createResolvedAgentSession, resolveMcpServersForStore, type PluginRunner } from "@fusion/engine";
 import { runGitCommand } from "./routes/resolve-diff-base.js";
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -20,6 +20,11 @@ export interface ResolvePrConflictsInput {
   rootDir: string;
   store: TaskStore;
   settings: Settings;
+  /*
+  FNXC:GrokCliRouting 2026-07-15-09:58:
+  Create-PR conflict resolution builds merger-purpose sessions via createResolvedAgentSession. Without a PluginRunner that exposes getRuntimeById, grok-cli/no-key selections cannot resolve the bundled Grok CLI runtime and throw the dual-remediation error even when chat/engine merge work. Optional runner only — callers that lack an engine PluginRunner may omit it. Structural getRuntimeById is the minimum capability; prefer the real engine PluginRunner.
+  */
+  pluginRunner?: PluginRunner | { getRuntimeById?(id: string): unknown };
 }
 
 export interface ResolvePrConflictsResult {
@@ -144,14 +149,19 @@ async function runResolutionAgent(params: {
   conflictedFiles: string[];
   settings: Settings;
   store: TaskStore;
+  pluginRunner?: PluginRunner | { getRuntimeById?(id: string): unknown };
 }): Promise<void> {
-  const { cwd, taskId, conflictedFiles, settings, store } = params;
+  const { cwd, taskId, conflictedFiles, settings, store, pluginRunner } = params;
   const sessionModel = getDefaultSessionModel(settings);
   /*
    * FNXC:McpConfig 2026-06-26-00:00:
    * Create-PR conflict resolution is a merger-purpose coding-agent lane; forward configured MCP servers from the scoped task store so PR conflict work sees the same operator-approved tools as other merger surfaces.
    */
   const mcpServers = (await resolveMcpServersForStore(store)).servers;
+  /*
+  FNXC:GrokCliRouting 2026-07-15-09:58:
+  Forward pluginRunner into createResolvedAgentSession so grok-cli/no-key default models resolve via getRuntimeById("grok") the same way engine merge and chat do. Bare PluginLoader lacks getRuntimeById — callers must pass the engine PluginRunner (or another runner with that method).
+  */
   const { session } = await createResolvedAgentSession({
     cwd,
     systemPrompt: SESSION_PROMPT,
@@ -163,6 +173,7 @@ async function runResolutionAgent(params: {
     fallbackModelId: settings.fallbackModelId,
     settings,
     mcpServers,
+    pluginRunner: pluginRunner as PluginRunner | undefined,
   });
 
   try {
@@ -221,6 +232,7 @@ export async function resolvePrConflicts(input: ResolvePrConflictsInput): Promis
           conflictedFiles,
           settings: input.settings,
           store,
+          pluginRunner: input.pluginRunner,
         });
 
         const unresolvedFiles = await findFilesWithConflictMarkers(cwd, conflictedFiles);

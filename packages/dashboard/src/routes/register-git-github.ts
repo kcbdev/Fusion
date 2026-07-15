@@ -2475,7 +2475,7 @@ export async function refreshIssueInBackground(
 }
 
 export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
-  const { router, getProjectContext, rethrowAsApiError, store } = ctx;
+  const { router, getProjectContext, rethrowAsApiError, store, options } = ctx;
 
   /*
   FNXC:Workspace 2026-06-24-21:00:
@@ -5136,7 +5136,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
    */
   router.post("/tasks/:id/pr/resolve-conflicts", async (req, res) => {
     try {
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, engine } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       if (task.column !== "in-review") {
         throw badRequest("Task must be in 'in-review' column to resolve PR conflicts");
@@ -5164,12 +5164,23 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const head = ensureSafeGitRef(`fusion/${task.id.toLowerCase()}`, "head branch");
       const baseRef = await resolvePrBaseRef(repoRoot, baseBranch).catch(() => baseBranch);
 
+      /*
+      FNXC:GrokCliRouting 2026-07-15-09:58:
+      Create-PR conflict resolution must forward a real PluginRunner (getRuntimeById) so grok-cli/no-key sessions resolve the Grok CLI runtime. Prefer the project engine runner (same pattern as resolveChatManagerPluginRunner); never pass a bare PluginLoader which lacks getRuntimeById. Fall back to options.pluginRunner only when it actually exposes getRuntimeById (UI-only may only have the loader — omit in that case so dual-remediation surfaces cleanly).
+      */
+      const engineRunner = engine?.getPluginRunner?.();
+      const optionsRunner = options?.pluginRunner;
+      const pluginRunner =
+        engineRunner
+        ?? (typeof optionsRunner?.getRuntimeById === "function" ? optionsRunner : undefined);
+
       const result = await resolvePrConflicts({
         taskId: task.id,
         baseRef,
         rootDir: repoRoot,
         store: scopedStore,
         settings: await scopedStore.getSettings(),
+        pluginRunner,
       });
 
       if (!result.resolved) {
