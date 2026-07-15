@@ -8434,7 +8434,10 @@ export class TaskExecutor {
     if (abortProvenance === "completion-finalize") return false;
     if (live.column !== "in-review" || !this.isRetryableMergePauseAbortStatus(live.status) || live.error != null) return false;
     if (live.mergeDetails?.mergeConfirmed === true) return false;
-    if (this.isTerminalMergeGraphFailureValue(this.graphFailureValue(result))) return false;
+    const failureValue = this.graphFailureValue(result);
+    if (this.isTerminalMergeGraphFailureValue(failureValue)) return false;
+    /* FNXC:WorkflowMerge 2026-07-12-17:38: FN-1165 / Runfusion#1991 — missing implementation proof is not a transient merge pause. Let the implementation-incomplete classifier fail closed or requeue resumable parsed steps before any requester can mint a no-branch no-op merge proof. */
+    if (failureValue === "implementation-incomplete") return false;
     const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
     if (!this.isMergeGraphFailure(failedNode)) return false;
     let settings: Settings | undefined;
@@ -8826,6 +8829,8 @@ export class TaskExecutor {
     abortProvenance: "global-pause" | "merge-seam" | "hard-cancel" | "completion-finalize" | undefined,
   ): Promise<boolean> {
     if (!this.mergeRequester) return false;
+    /* FNXC:WorkflowMerge 2026-07-12-17:38: FN-1165 defense in depth — implementation-incomplete merge graph failures must never reach the merge requester, because a no-branch task can otherwise be finalized as an intentional no-op. */
+    if (this.graphFailureValue(result) === "implementation-incomplete") return false;
     const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
     const message = `Workflow graph merge failure at node '${failedNode}' routed to bounded auto-merge retry${abortProvenance === "merge-seam" ? " after merge-seam abort" : abortProvenance === "hard-cancel" || abortProvenance === undefined ? " after benign pause/resume abort" : ""}`;
     executorLog.warn(`${live.id}: ${message}`);
@@ -8840,6 +8845,40 @@ export class TaskExecutor {
       await this.mergeRequester(mergeTask.id);
     } catch (error) {
       executorLog.warn(`${live.id}: bounded auto-merge retry request failed after graph merge failure: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.persistTokenUsage(live.id);
+    return true;
+  }
+
+  private async routeImplementationIncompleteMergeGraphFailure(live: TaskDetail, failedNode: string): Promise<boolean> {
+    /*
+    FNXC:WorkflowMerge 2026-07-14-18:20:
+    FN-1165 greptile P1s: (1) system-paused implementation-incomplete merge failures must still classify —
+    clear only non-user pause parks so incomplete steps can requeue; real global/user pauses never enter this method.
+    (2) Do not drop activeWorktrees until we know the outcome is terminal fail-closed. Resumable requeue preserves
+    progress (and often the persisted worktree); releasing tracking early leaves that worktree uncounted while a later
+    dispatch can allocate a second one. Keep the active registration on the resumable path; release only on fail-closed.
+    */
+    this.clearPausedAborted(live.id);
+    let resumeLive = live;
+    if (live.paused === true && live.userPaused !== true) {
+      // FNXC:WorkflowMerge 2026-07-14-18:35: TaskDetail.pausedReason is string|undefined (not null). Persist clear via updateTask (store accepts null); in-memory resume snapshot uses undefined to satisfy the type.
+      await this.store.updateTask(live.id, {
+        paused: false,
+        pausedReason: null,
+      }, this.getRunContextFor(live.id));
+      resumeLive = { ...live, paused: false, pausedReason: undefined };
+    }
+    if (hasNonTerminalWorkflowSteps(resumeLive) && await this.routeGraphFailureToExecutionResume(resumeLive, failedNode, "implementation-incomplete")) {
+      return true;
+    }
+    // Fail-closed terminal path — release active worktree tracking now that no resume will reuse it.
+    this.activeWorktrees.delete(live.id);
+    const message = `Workflow graph merge blocked at node '${failedNode}': implementation incomplete with no executable proof to resume — failing instead of retrying merge`;
+    executorLog.warn(`${live.id}: ${message}`);
+    await this.store.logEntry(live.id, message, undefined, this.getRunContextFor(live.id));
+    if (live.column !== "done" && live.column !== "archived" && live.error == null) {
+      await this.store.updateTask(live.id, { error: message, status: "failed" }, this.getRunContextFor(live.id));
     }
     await this.persistTokenUsage(live.id);
     return true;
@@ -8930,9 +8969,9 @@ export class TaskExecutor {
           || (live.paused && !mergeSeamAborted && !suppressFinalizedCompletionAbort)
           || (pausedAborted && !mergeSeamAborted && !completionFinalizeAborted && !suppressFinalizedCompletionAbort),
       );
+      const failedNodeForLog = result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
+      const failureValueForLog = this.graphFailureValue(result) ?? "none";
       if (pausedAborted || live.paused || live.userPaused || abortProvenance) {
-        const failedNodeForLog = result.visitedNodeIds[result.visitedNodeIds.length - 1] ?? "unknown";
-        const failureValueForLog = this.graphFailureValue(result) ?? "none";
         this.safeLogEntry(
           task.id,
           `Pause abort classified: provenance=${abortProvenance ?? "unknown"}; node=${failedNodeForLog}; interrupted=${result.interruptedNodeId ?? "none"}; abortKind=${result.interruptedAbortKind ?? "none"}; column=${live.column}; status=${live.status ?? "none"}; paused=${live.paused === true}; userPaused=${live.userPaused === true}; value=${failureValueForLog}; genuine=${genuinePauseAbort}; mergeSeam=${mergeSeamAborted}; completionSuppressed=${suppressFinalizedCompletionAbort}`,
@@ -8940,6 +8979,24 @@ export class TaskExecutor {
       }
       if (genuinePauseAbort && await this.isReentrantPausedAbortedInFlightNode(live, result, abortProvenance, pausedAborted, this.userCanceledTaskIds.has(task.id))) {
         if (await this.reenterPausedAbortedWorkflowNode(live, result, abortProvenance)) {
+          return;
+        }
+      }
+      /*
+      FNXC:WorkflowMerge 2026-07-14-18:20:
+      FN-1165 greptile P1: system pause (`live.paused` without userPaused/global-pause) must still enter the
+      implementation-incomplete merge classifier. Requiring `live.paused !== true` let pause-abort parking win and
+      skipped fail-closed/resumable routing for missing implementation proof. User pause and global-pause stay excluded.
+      */
+      if (
+        genuinePauseAbort
+        && abortProvenance !== "global-pause"
+        && abortProvenance !== "completion-finalize"
+        && live.userPaused !== true
+        && this.isMergeGraphFailure(failedNodeForLog)
+        && failureValueForLog === "implementation-incomplete"
+      ) {
+        if (await this.routeImplementationIncompleteMergeGraphFailure(live, failedNodeForLog)) {
           return;
         }
       }
@@ -9279,8 +9336,10 @@ export class TaskExecutor {
         await this.persistTokenUsage(task.id);
         return;
       }
-      if (mergeGraphFailure && failureValue === "implementation-incomplete" && await this.routeGraphFailureToExecutionResume(live, failedNode ?? "unknown", failureValue)) {
-        return;
+      if (mergeGraphFailure && failureValue === "implementation-incomplete") {
+        if (await this.routeImplementationIncompleteMergeGraphFailure(live, failedNode ?? "unknown")) {
+          return;
+        }
       }
       if (mergeGraphFailure && !this.isTerminalMergeGraphFailureValue(failureValue) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
         return;
@@ -9405,7 +9464,9 @@ export class TaskExecutor {
      */
     if (failedNode === COMPLETION_SUMMARY_NODE_ID) return false;
     const incompleteSteps = hasNonTerminalWorkflowSteps(live);
-    const prematureMergeWithIncompleteSteps = failedNode === "merge" && failureValue === "implementation-incomplete" && incompleteSteps;
+    const implementationIncompleteMergeFailure = this.isMergeGraphFailure(failedNode) && failureValue === "implementation-incomplete";
+    if (implementationIncompleteMergeFailure && !incompleteSteps) return false;
+    const prematureMergeWithIncompleteSteps = implementationIncompleteMergeFailure && incompleteSteps;
     if (live.column !== "in-review" && !(incompleteSteps && live.column === "todo") && !(prematureMergeWithIncompleteSteps && live.column === "in-progress")) return false;
 
     const message = incompleteSteps
