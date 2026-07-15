@@ -203,9 +203,17 @@ options.taskPrefix is a fallback when taskId is not a well-formed "<PREFIX>-<n>"
 
 FNXC:WorktreeHooks 2026-07-14-19:40:
 Also escape `/` so a fallback prefix like `TEAM/API` cannot break the `/`-delimited sed substitution (`s/^TEAM/API-//i` is invalid; greptile P1 databaseId 3583850800 on PR #1930).
+
+FNXC:WorktreeHooks 2026-07-14-20:05:
+PREFIX= must use a POSIX single-quoted shell literal, not JSON double quotes. Double-quoted `PREFIX="$(id)"` expands command substitution when the commit-msg hook runs under /bin/sh (greptile P1 security threads 3583890011 / 3583943640 on PR #1930). Single quotes prevent `$()`, backticks, and `$VAR` expansion; embedded `'` becomes `'\''`.
 */
 function escapeSedEre(value: string): string {
   return value.replace(/[\\/.^$*+?()[\]{}|]/g, "\\$&");
+}
+
+/** POSIX single-quoted shell string literal (no expansion of $, `, \\, etc.). */
+function shellSingleQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
 export function buildCommitMsgTrailerHook(
@@ -238,7 +246,7 @@ export function buildCommitMsgTrailerHook(
 
 # FNXC:CommitAttribution 2026-06-26-12:40:
 # Co-author attribution must be deterministic in the worktree hook, not dependent on an AI agent remembering a prompt-supplied git commit -m flag. addIfDifferent keeps an identical agent-added trailer from duplicating while preserving distinct human-provided co-authors.
-CO_AUTHOR_TRAILER=${JSON.stringify(`Co-authored-by: ${commitAuthorName} <${commitAuthorEmail}>`)}
+CO_AUTHOR_TRAILER=${shellSingleQuote(`Co-authored-by: ${commitAuthorName} <${commitAuthorEmail}>`)}
 git interpret-trailers \\
   --in-place \\
   --if-exists addIfDifferent \\
@@ -255,13 +263,13 @@ TASK_FILE=$(git rev-parse --git-path fusion-task-id)
 TASK_ID=$(cat "$TASK_FILE")
 [ -n "$TASK_ID" ] || exit 0
 
-PREFIX=${JSON.stringify(taskPrefix)}
+PREFIX=${shellSingleQuote(taskPrefix)}
 case "$TASK_ID" in
   "$PREFIX"-*) ;;
   *) TASK_ID="$PREFIX-$(printf '%s' "$TASK_ID" | sed -E "s/^${taskPrefixSedEre}-//i")" ;;
 esac
 
-TRAILER_NAME=${JSON.stringify(trailerName)}
+TRAILER_NAME=${shellSingleQuote(trailerName)}
 
 git interpret-trailers \
   --in-place \
