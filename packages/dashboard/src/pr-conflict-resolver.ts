@@ -14,6 +14,24 @@ const SESSION_PROMPT = [
   "When you finish, every conflicted file must be saved without conflict markers.",
 ].join("\n");
 
+/*
+FNXC:GrokCliRouting 2026-07-15-10:17:
+Minimum capability for Grok CLI no-key routing is getRuntimeById. Prefer a real engine PluginRunner; structural form is for tests and hosts that only expose that method.
+*/
+type ConflictResolutionPluginRunner = PluginRunner | {
+  getRuntimeById?(id: string): unknown;
+};
+
+function asSessionPluginRunner(
+  runner: ConflictResolutionPluginRunner | undefined,
+): PluginRunner | undefined {
+  if (!runner) return undefined;
+  if (typeof runner.getRuntimeById === "function") {
+    return runner as PluginRunner;
+  }
+  return undefined;
+}
+
 export interface ResolvePrConflictsInput {
   taskId: string;
   baseRef: string;
@@ -21,10 +39,10 @@ export interface ResolvePrConflictsInput {
   store: TaskStore;
   settings: Settings;
   /*
-  FNXC:GrokCliRouting 2026-07-15-09:58:
-  Create-PR conflict resolution builds merger-purpose sessions via createResolvedAgentSession. Without a PluginRunner that exposes getRuntimeById, grok-cli/no-key selections cannot resolve the bundled Grok CLI runtime and throw the dual-remediation error even when chat/engine merge work. Optional runner only — callers that lack an engine PluginRunner may omit it. Structural getRuntimeById is the minimum capability; prefer the real engine PluginRunner.
+  FNXC:GrokCliRouting 2026-07-15-10:17:
+  Create-PR conflict resolution builds merger-purpose sessions via createResolvedAgentSession. Without a runner that exposes getRuntimeById, grok-cli/no-key selections cannot resolve the bundled Grok CLI runtime. Optional — callers without an engine PluginRunner may omit it.
   */
-  pluginRunner?: PluginRunner | { getRuntimeById?(id: string): unknown };
+  pluginRunner?: ConflictResolutionPluginRunner;
 }
 
 export interface ResolvePrConflictsResult {
@@ -149,7 +167,7 @@ async function runResolutionAgent(params: {
   conflictedFiles: string[];
   settings: Settings;
   store: TaskStore;
-  pluginRunner?: PluginRunner | { getRuntimeById?(id: string): unknown };
+  pluginRunner?: ConflictResolutionPluginRunner;
 }): Promise<void> {
   const { cwd, taskId, conflictedFiles, settings, store, pluginRunner } = params;
   const sessionModel = getDefaultSessionModel(settings);
@@ -159,8 +177,8 @@ async function runResolutionAgent(params: {
    */
   const mcpServers = (await resolveMcpServersForStore(store)).servers;
   /*
-  FNXC:GrokCliRouting 2026-07-15-09:58:
-  Forward pluginRunner into createResolvedAgentSession so grok-cli/no-key default models resolve via getRuntimeById("grok") the same way engine merge and chat do. Bare PluginLoader lacks getRuntimeById — callers must pass the engine PluginRunner (or another runner with that method).
+  FNXC:GrokCliRouting 2026-07-15-10:17:
+  Forward a getRuntimeById-capable pluginRunner into createResolvedAgentSession so grok-cli/no-key defaults resolve via the Grok CLI runtime. Drop non-capable runners (e.g. bare PluginLoader) rather than casting them.
   */
   const { session } = await createResolvedAgentSession({
     cwd,
@@ -173,7 +191,7 @@ async function runResolutionAgent(params: {
     fallbackModelId: settings.fallbackModelId,
     settings,
     mcpServers,
-    pluginRunner: pluginRunner as PluginRunner | undefined,
+    pluginRunner: asSessionPluginRunner(pluginRunner),
   });
 
   try {

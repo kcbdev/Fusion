@@ -64,7 +64,6 @@ import {
   shouldUseHybridExecutor,
   setHostExtensionPaths,
   createFusionAuthStorage,
-  type PluginRunner,
 } from "@fusion/engine";
 import { DefaultPackageManager, ModelRegistry, SettingsManager, discoverAndLoadExtensions, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import {
@@ -1469,28 +1468,17 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
   // ── onMerge: AI-powered merge ─────────────────────────────────────
   //
-  // onMergeImpl is a mutable reference so createServer always gets a stable
-  // wrapper function while the underlying implementation is swapped when the
-  // engine starts in engine mode.
-  //
-  // In UI-only mode: calls runAiMerge directly (no engine, no semaphore).
-  // In engine mode: replaced by engine.onMerge() after ProjectEngine starts
-  // (semaphore-gated via the engine's InProcessRuntime).
-  //
   // FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified all merge
   // entry points onto runAiMerge (the FN-5633 clean-room AI merge path);
   // aiMergeTask is soft-deprecated.
   //
   /*
-  FNXC:GrokCliRouting 2026-07-15-09:58:
-  UI-only onMergeImpl calls runAiMerge/landWorkspaceTask without ProjectEngine's onMerge door, so it must obtain a PluginRunner that exposes getRuntimeById for grok-cli/no-key merge sessions. Prefer the live cwd engine runner (set when engines warm); do not pass the bare PluginLoader (lacks getRuntimeById). When no engine exists (--no-engine), leave undefined so dual-remediation surfaces — do not invent a PluginRunner bootstrap here.
+  FNXC:GrokCliRouting 2026-07-15-10:17:
+  Two doors, not a swap-at-runtime:
+  - Engine mode: createServer is called WITHOUT onMerge so server.ts derives onMerge from engine.onMerge (semaphore + pluginRunner: this.getPluginRunner()).
+  - UI-only (--no-engine): createServer receives uiOnlyOnMerge which calls runAiMerge/landWorkspaceTask with pluginRunner undefined — dual-remediation for grok-cli/no-key is correct because there is no ProjectEngine PluginRunner. Do not invent a bootstrap here and do not pass the bare PluginLoader (lacks getRuntimeById).
   */
-  let mergePluginRunner: PluginRunner | undefined;
-
-  const onMergeImpl = async (taskId: string) => {
-    // Prefer the live engine PluginRunner at call time (may be set after engine warm).
-    const pluginRunner = mergePluginRunner;
-
+  const uiOnlyOnMerge = async (taskId: string) => {
     // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
     // Dashboard merge button (UI-only mode). A workspace-mode task routes through
     // the ENGINE per-repo merge loop `landWorkspaceTask` (each sub-repo lands on its
@@ -1504,7 +1492,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     if (isWorkspaceMerge) {
       const workspaceResult = await landWorkspaceTask(store, mergeTask!, cwd, {
         agentStore,
-        pluginRunner,
+        // FNXC:GrokCliRouting 2026-07-15-10:17: UI-only has no engine PluginRunner.
+        pluginRunner: undefined,
       });
       const latest = await store.getTask(taskId).catch(() => mergeTask!);
       // FNXC:Workspace 2026-06-22-05:10 (Phase C review B3):
@@ -1556,15 +1545,14 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       return await runAiMerge(store, cwd, taskId, {
         agentStore,
         onAgentText: (delta) => streamedMergeLog.push(delta),
-        pluginRunner,
+        // FNXC:GrokCliRouting 2026-07-15-10:17: UI-only has no engine PluginRunner.
+        pluginRunner: undefined,
       });
     } finally {
       streamedMergeLog.flush();
       streamedMergeLog.dispose();
     }
   };
-
-  const onMerge = (taskId: string) => onMergeImpl(taskId);
 
   // ── MissionAutopilot + MissionExecutionLoop: mission lifecycle ────
   //
@@ -2123,22 +2111,6 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         )
       : undefined;
 
-    /*
-    FNXC:GrokCliRouting 2026-07-15-09:58:
-    Capture the live engine PluginRunner for any residual UI-only merge door usage. Engine mode replaces onMerge with engine.onMerge (already forwards getPluginRunner); this ref covers onMergeImpl if it is still reached after engines warm. Prefer cwd engine, then any warm engine that exposes getRuntimeById — never the bare PluginLoader.
-    */
-    mergePluginRunner =
-      cwdEngine?.getPluginRunner?.()
-      ?? (() => {
-        for (const engine of engineManager.getAllEngines().values()) {
-          const runner = engine.getPluginRunner?.();
-          if (runner && typeof runner.getRuntimeById === "function") {
-            return runner;
-          }
-        }
-        return undefined;
-      })();
-
     // Get the trigger scheduler from any running engine
     for (const engine of engineManager.getAllEngines().values()) {
       const ts = engine.getHeartbeatTriggerScheduler();
@@ -2183,6 +2155,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         }
       : undefined;
 
+    /*
+    FNXC:GrokCliRouting 2026-07-15-10:17:
+    Pass the real engine PluginRunner (getRuntimeById) into createServer — never the bare PluginLoader. Chat, plugin setup/reload, workflow templates, and PR conflict resolution all read options.pluginRunner; the loader lacks getRuntimeById and historically produced the misleading "bundled Grok CLI runtime" error. Omit onMerge so server.ts derives engine.onMerge (semaphore + this.getPluginRunner()).
+    */
     app = createServer(store, {
       engine: cwdEngine,
       engineManager,
@@ -2195,7 +2171,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       automationStore,
       pluginStore,
       pluginLoader,
-      pluginRunner: pluginLoader,
+      pluginRunner: cwdEngine?.getPluginRunner?.(),
       ensureBundledPluginInstalled: ensureBundledPluginInstalledCallback,
       onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       onProjectRegistered: ({ path }) => {
@@ -2501,8 +2477,12 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     //
     // FNXC:DashboardStartup 2026-06-20-23:39:
     // Dashboard development mode still needs a running engine by default; only the explicit `--no-engine` flag should produce a UI-only process so local and dev startup paths match user expectations.
+    /*
+    FNXC:GrokCliRouting 2026-07-15-10:17:
+    UI-only mode has no ProjectEngine PluginRunner. Pass pluginRunner undefined (not pluginLoader) so Grok auto-derive surfaces dual-remediation instead of getRuntimeById TypeError. Plugin management routes that need reloadPlugin degrade via optional chaining on options.pluginRunner.
+    */
     app = createServer(store, {
-      onMerge,
+      onMerge: uiOnlyOnMerge,
       centralCore: centralCoreForMesh ?? undefined,
       authStorage: dashboardAuthStorage,
       modelRegistry,
@@ -2529,7 +2509,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       },
       pluginStore,
       pluginLoader,
-      pluginRunner: pluginLoader,
+      pluginRunner: undefined,
       ensureBundledPluginInstalled: ensureBundledPluginInstalledCallback,
       onProjectRegistered: ({ path }) => {
         maybeInstallClaudeSkillForNewProject(path);

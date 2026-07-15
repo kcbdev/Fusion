@@ -1023,10 +1023,9 @@ export async function runTaskMerge(id: string, projectName?: string) {
 
   try {
     /*
-    FNXC:GrokCliRouting 2026-07-15-09:58:
-    `fn task merge` is a bare CLI door: ProjectContext only has store/path, not a live ProjectEngine, so no engine.getPluginRunner() is available. Do not invent a full PluginRunner bootstrap here (that belongs to InProcessRuntime / ProjectEngineManager). Leaving pluginRunner undefined is intentional — grok-cli/no-key merge selections surface the dual-remediation error ("Install and enable the Grok CLI runtime plugin, or set GROK_API_KEY"). Engine-backed merge (dashboard with engine, auto-merge) already forwards this.getPluginRunner().
+    FNXC:GrokCliRouting 2026-07-15-10:17:
+    `fn task merge` is a bare CLI door: ProjectContext only has store/path, not a live ProjectEngine, so no engine.getPluginRunner() is available. Do not invent a full PluginRunner bootstrap here (that belongs to InProcessRuntime / ProjectEngineManager). Omitting pluginRunner is intentional — grok-cli/no-key merge selections surface the dual-remediation error. Engine-backed merge already forwards this.getPluginRunner().
     */
-    const mergePluginRunner = undefined;
 
     // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
     // User-triggered `fn task merge`. A workspace-mode task routes through the
@@ -1041,7 +1040,6 @@ export async function runTaskMerge(id: string, projectName?: string) {
     if (isWorkspaceMerge) {
       const workspaceResult = await landWorkspaceTask(store, mergeTaskRecord!, projectPath, {
         onAgentText: (delta) => process.stdout.write(delta),
-        pluginRunner: mergePluginRunner,
       });
       console.log();
       for (const repo of workspaceResult.repos) {
@@ -1064,7 +1062,6 @@ export async function runTaskMerge(id: string, projectName?: string) {
 
     const result = await runAiMerge(store, projectPath, id, {
       onAgentText: (delta) => process.stdout.write(delta),
-      pluginRunner: mergePluginRunner,
     });
 
     console.log();

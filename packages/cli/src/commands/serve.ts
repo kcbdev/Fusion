@@ -920,7 +920,11 @@ export async function runServe(
       : undefined,
     pluginStore,
     pluginLoader,
-    pluginRunner: pluginLoader,
+    /*
+    FNXC:GrokCliRouting 2026-07-15-10:17:
+    Pass the engine PluginRunner (getRuntimeById), not the bare PluginLoader, so chat/merge/PR routes can resolve grok-cli/no-key via the Grok runtime. PluginLoader stays on pluginLoader for install/load APIs.
+    */
+    pluginRunner: primaryEngine.getPluginRunner?.(),
     ensureBundledPluginInstalled: ensureBundledPluginInstalledCallback,
     onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
     onProjectRegistered: ({ path }) => {

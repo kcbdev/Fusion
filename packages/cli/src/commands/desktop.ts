@@ -90,7 +90,11 @@ async function startDashboardRuntime(rootDir: string, paused: boolean, noAuth: b
       centralCore,
       pluginStore,
       pluginLoader,
-      pluginRunner: pluginLoader,
+      /*
+      FNXC:GrokCliRouting 2026-07-15-10:17:
+      Pass the warm engine PluginRunner when available — never the bare PluginLoader (lacks getRuntimeById).
+      */
+      pluginRunner: cwdEngine?.getPluginRunner?.(),
       /*
        * FNXC:DesktopLauncher 2026-07-01-20:19:
        * `fusion desktop --no-auth` is a compatibility flag for users who learned the dashboard launcher semantics. Propagate it to the embedded dashboard server explicitly so desktop routing never treats it as an unknown flag or falls back to source-workspace discovery.

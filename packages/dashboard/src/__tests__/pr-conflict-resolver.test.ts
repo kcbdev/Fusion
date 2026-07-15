@@ -201,17 +201,18 @@ describe("resolvePrConflicts", () => {
 });
 
 /*
-FNXC:GrokCliRouting 2026-07-15-09:58:
-Source-level guard: PR conflict route and resolver must thread pluginRunner; bare CLI/UI-only merge doors document the runner handoff.
+FNXC:GrokCliRouting 2026-07-15-10:17:
+Source-level guard: PR conflict route and resolver must thread a getRuntimeById-capable pluginRunner; non-capable runners are dropped before createResolvedAgentSession.
 */
 describe("Grok CLI PluginRunner wiring for PR conflict + merge doors", () => {
   const here = dirname(fileURLToPath(import.meta.url));
 
-  it("pr-conflict-resolver forwards input.pluginRunner into runResolutionAgent and createResolvedAgentSession", () => {
+  it("pr-conflict-resolver forwards input.pluginRunner via asSessionPluginRunner into createResolvedAgentSession", () => {
     const source = readFileSync(resolve(here, "../pr-conflict-resolver.ts"), "utf8");
-    expect(source).toContain("pluginRunner?: PluginRunner | { getRuntimeById?(id: string): unknown }");
+    expect(source).toContain("pluginRunner?: ConflictResolutionPluginRunner");
     expect(source).toContain("pluginRunner: input.pluginRunner");
-    expect(source).toContain("pluginRunner: pluginRunner as PluginRunner | undefined");
+    expect(source).toContain("pluginRunner: asSessionPluginRunner(pluginRunner)");
+    expect(source).toContain("function asSessionPluginRunner");
   });
 
   it("register-git-github resolve-conflicts prefers engine.getPluginRunner over bare loader", () => {

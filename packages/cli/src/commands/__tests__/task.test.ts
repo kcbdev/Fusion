@@ -1310,10 +1310,17 @@ describe("project-aware task command behavior", () => {
 
     expect(updateStep).toHaveBeenCalled();
     expect(logEntry).toHaveBeenCalled();
-    // FNXC:GrokCliRouting 2026-07-15-09:58: bare `fn task merge` has no ProjectEngine, so pluginRunner is explicitly undefined (dual-remediation for grok-cli/no-key).
-    expect(runAiMerge).toHaveBeenCalledWith(resolvedStore, "/test", "FN-123", expect.objectContaining({
-      pluginRunner: undefined,
-    }));
+    // FNXC:GrokCliRouting 2026-07-15-10:17: bare `fn task merge` has no ProjectEngine and does not invent a PluginRunner.
+    expect(runAiMerge).toHaveBeenCalledWith(
+      resolvedStore,
+      "/test",
+      "FN-123",
+      expect.objectContaining({
+        onAgentText: expect.any(Function),
+      }),
+    );
+    const mergeOpts = vi.mocked(runAiMerge).mock.calls.at(-1)?.[3] as { pluginRunner?: unknown } | undefined;
+    expect(mergeOpts?.pluginRunner).toBeUndefined();
     expect(landWorkspaceTask).not.toHaveBeenCalled();
     expect(aiMergeTask).not.toHaveBeenCalled();
     expect(exitSpy).not.toHaveBeenCalled();
