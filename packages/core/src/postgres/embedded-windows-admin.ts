@@ -1,0 +1,326 @@
+// FNXC:WindowsDesktopPackaging 2026-07-14-21:30:
+// Embedded PostgreSQL refuses to start under a Windows process token whose
+// Administrators group is ENABLED (a high-integrity / elevated token). It exits
+// immediately with "Execution of PostgreSQL by a user with administrative
+// permissions is not permitted." The bundled embedded-postgres server is
+// spawned as a DIRECT child of the Node process (see embedded-postgres
+// dist/index.js start()), so it inherits that elevated token and cannot boot.
+// This only affects ELEVATED launches: GitHub windows-latest runners execute
+// jobs as `runneradmin` with a fully elevated token (the smoke build fails
+// here), and an end user who explicitly "Run as administrator" hits the same
+// refusal. A normal Electron asInvoker launch uses a filtered/medium token
+// which Postgres accepts.
+//
+// Fix: when the current process is elevated, boot the postgres SERVER process
+// (only) under a freshly-created NON-ADMIN local user via Start-Process
+// -Credential (CreateProcessWithLogonW). That user's token has no enabled
+// Administrators group, so Postgres accepts it. initdb / the pg client /
+// createDatabase still run as the (admin) launching process and work unchanged;
+// only the server start is re-homed. Proven on the windows-2025-vs2026 runner:
+// postgres reached "database system is ready to accept connections" under the
+// dedicated non-admin user (broker diagnostic run 29382479266, job 87248898326).
+//
+// Access model: Windows grants "Bypass traverse checking" to Everyone by
+// default, so the non-admin user does NOT need permission on parent dirs — only
+// on the target dirs themselves. We grant the user RX on the native binary root
+// and full control on the data dir.
+
+import { spawnSync } from "node:child_process";
+import { createConnection } from "node:net";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
+export interface NonAdminServerHandle {
+  /** OS pid of the running postgres server process (from postmaster.pid). */
+  readonly postgresPid: number;
+  /** Stop the non-admin postgres process (taskkill). Safe to call once. */
+  stop(): Promise<void>;
+}
+
+export interface NonAdminStartOptions {
+  /** .../native dir containing bin/postgres.exe + lib + share. */
+  readonly nativeRoot: string;
+  /** The initialized PG data directory. */
+  readonly dataDir: string;
+  /** TCP port postgres should listen on. */
+  readonly port: number;
+  /** Extra flags forwarded to postgres.exe (same semantics as embedded-postgres). */
+  readonly postgresFlags: readonly string[];
+  readonly onLog: (message: string) => void;
+  readonly onError: (messageOrError: string | Error | unknown) => void;
+  /** Hard timeout (ms) on reaching "ready to accept connections". */
+  readonly startTimeoutMs: number;
+}
+
+let elevatedCache: boolean | null = null;
+
+/**
+ * True only on Windows when the current process holds an elevated admin token.
+ * `net session` succeeds (exit 0) exclusively under an elevated admin token, so
+ * it is a reliable elevation probe that does not depend on UAC EnableLUA.
+ */
+export function isWindowsElevatedAdmin(): boolean {
+  if (process.platform !== "win32") return false;
+  if (elevatedCache !== null) return elevatedCache;
+  const r = spawnSync("net", ["session"], { encoding: "utf8", shell: true });
+  elevatedCache = r.status === 0;
+  return elevatedCache;
+}
+
+const DEDICATED_USER = "fusion-pg";
+let dedicatedPassword: string | null = null;
+
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-21:35:
+ * Generate a strong password that does NOT contain the account name token.
+ * Windows complexity policy rejects a password containing the user's account
+ * name; `net user` then re-prompts non-interactively ("No valid response was
+ * provided") and creates NOTHING, which cascades into a misleading
+ * "user name or password is incorrect" downstream.
+ */
+function generatePassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const seed =
+    spawnSync("powershell", ["-NoProfile", "-Command", "[BitConverter]::ToString([guid]::NewGuid().ToByteArray())"], {
+      encoding: "utf8",
+    }).stdout ?? Math.random().toString(36);
+  let s = "";
+  for (const ch of seed) {
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      const idx = parseInt(ch.toLowerCase(), 16);
+      if (Number.isFinite(idx)) s += chars[idx % chars.length];
+    }
+    if (s.length >= 22) break;
+  }
+  while (s.length < 22) s += chars[Math.floor(Math.random() * chars.length)];
+  // Guarantee the 4 complexity categories (upper, lower, digit, symbol).
+  return `Fx9!${s}#kP`;
+}
+
+/**
+ * Ensure the dedicated non-admin local user exists and we know its password.
+ * Idempotent: creates the user if absent, or resets its password if present
+ * (so a leftover account from a prior run still works). Created users default
+ * to the standard Users group — never Administrators.
+ */
+function ensureNonAdminUser(): { user: string; password: string } {
+  if (dedicatedPassword) return { user: DEDICATED_USER, password: dedicatedPassword };
+  const password = generatePassword();
+  const add = spawnSync("net", ["user", DEDICATED_USER, password, "/add", "/y"], {
+    encoding: "utf8",
+  });
+  if (add.status !== 0) {
+    // Likely already exists from a prior run: reset its password so we can log on.
+    const reset = spawnSync("net", ["user", DEDICATED_USER, password, "/y"], {
+      encoding: "utf8",
+    });
+    if (reset.status !== 0) {
+      throw new Error(
+        `embedded postgres: could not create/reset non-admin user '${DEDICATED_USER}' ` +
+          `(net user add status=${add.status}: ${(add.stderr || "").trim()}; ` +
+          `reset status=${reset.status}: ${(reset.stderr || "").trim()}).`,
+      );
+    }
+  }
+  dedicatedPassword = password;
+  return { user: DEDICATED_USER, password };
+}
+
+/**
+ * Grant the non-admin user RX on the postgres binary root and full control on
+ * the data dir. Relies on the default "Bypass traverse checking" right so no
+ * parent-dir grants are required. /T applies recursively; /C keeps going on
+ * non-fatal errors (e.g. unreadable sibling files).
+ */
+function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
+  for (const [target, perm] of [
+    [nativeRoot, "(OI)(CI)RX"],
+    [dataDir, "(OI)(CI)F"],
+  ] as const) {
+    if (!existsSync(target)) {
+      throw new Error(`embedded postgres: non-admin grant target does not exist: ${target}`);
+    }
+    const r = spawnSync("icacls", [target, "/grant", `${user}:${perm}`, "/T", "/C"], {
+      encoding: "utf8",
+    });
+    if (r.status !== 0) {
+      throw new Error(
+        `embedded postgres: failed to grant '${user}' ${perm} on ${target} ` +
+          `(icacls status=${r.status}): ${(r.stderr || "").trim().slice(0, 400)}`,
+      );
+    }
+  }
+}
+
+function readPostgresPid(dataDir: string): number | null {
+  try {
+    const lines = readFileSync(join(dataDir, "postmaster.pid"), "utf-8").split("\n");
+    const pid = parseInt((lines[0] ?? "").trim(), 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTail(file: string, max: number): string {
+  try {
+    const content = readFileSync(file, "utf-8");
+    return content.length > max ? "…" + content.slice(-max) : content;
+  } catch {
+    return "(no log file)";
+  }
+}
+
+/** Resolve true once a TCP connection to port succeeds, false on error/timeout. */
+function probePort(port: number, host: string, timeoutMs: number): Promise<boolean> {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const sock = createConnection(port, host);
+  sock.setTimeout(timeoutMs);
+  sock.on("connect", () => {
+    sock.destroy();
+    resolve(true);
+  });
+  sock.on("error", () => resolve(false));
+  sock.on("timeout", () => {
+    sock.destroy();
+    resolve(false);
+  });
+  return promise;
+}
+
+/**
+ * Start postgres.exe under the dedicated non-admin user and resolve once it is
+ * accepting connections. Rejects with a clear error (including the postgres log
+ * tail) on timeout or early exit. The returned handle's stop() kills the server.
+ */
+export async function startServerAsNonAdminUser(
+  opts: NonAdminStartOptions,
+): Promise<NonAdminServerHandle> {
+  const { user, password } = ensureNonAdminUser();
+  grantNonAdminAccess(user, opts.nativeRoot, opts.dataDir);
+
+  const pgExe = join(opts.nativeRoot, "bin", "postgres.exe");
+  const runDir = join(opts.dataDir, ".pgrunner");
+  mkdirSync(runDir, { recursive: true });
+  const logFile = join(runDir, "postgres.log");
+  const bat = join(runDir, "launch.bat");
+  const args = ["-D", opts.dataDir, "-p", String(opts.port), ...opts.postgresFlags];
+  // Set TMP/TEMP inside the granted data dir so the non-admin postgres process
+  // never writes outside an accessible location; capture all output to the log.
+  const argStr = args.map((a) => `"${a}"`).join(" ");
+  writeFileSync(
+    bat,
+    `@echo off\r\nset "TMP=${runDir}"\r\nset "TEMP=${runDir}"\r\n"${pgExe}" ${argStr} > "${logFile}" 2>&1\r\n`,
+    "ascii",
+  );
+
+  const computerName = process.env.COMPUTERNAME ?? "";
+  const domainUser = computerName ? `${computerName}\\${user}` : user;
+  // Launch detached under the non-admin credential. Start-Process returns at
+  // once with a process object (postgres keeps running in the background).
+  //
+  // FNXC:WindowsDesktopPackaging 2026-07-14-21:50:
+  // Use a parametrized launcher .ps1 invoked with -File + params, NOT an inline
+  // -Command string. The bat path contains backslashes (literal in a PS
+  // single-quoted string — doubling them would corrupt it to C:\\...) and the
+  // password contains ! and #; passing each as a discrete argv token via -File
+  // params is robust across Node's Windows arg escaping and PowerShell parsing.
+  const launcherPs1 = join(runDir, "launch.ps1");
+  writeFileSync(
+    launcherPs1,
+    [
+      "param([string]$User,[string]$Password,[string]$DomainUser,[string]$Bat)",
+      "$ErrorActionPreference='Stop'",
+      "$s = ConvertTo-SecureString $Password -AsPlainText -Force",
+      "$c = New-Object System.Management.Automation.PSCredential($DomainUser,$s)",
+      "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',$Bat -Credential $c -WindowStyle Hidden -PassThru",
+      "Write-Output $p.Id",
+      "",
+    ].join("\r\n"),
+    "ascii",
+  );
+  const launch = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      launcherPs1,
+      "-User",
+      user,
+      "-Password",
+      password,
+      "-DomainUser",
+      domainUser,
+      "-Bat",
+      bat,
+    ],
+    { encoding: "utf8" },
+  );
+  const wrapperPid = parseInt((launch.stdout || "").trim(), 10);
+  if (!Number.isFinite(wrapperPid)) {
+    throw new Error(
+      `embedded postgres: failed to launch non-admin postgres ` +
+        `(powershell status=${launch.status}: ${(launch.stderr || "").trim().slice(0, 400)}).`,
+    );
+  }
+  opts.onLog(
+    `embedded postgres: launched postgres as non-admin user '${user}' (wrapper pid ${wrapperPid}); ` +
+      `waiting for port ${opts.port}`,
+  );
+
+  // Poll for readiness until the server accepts connections or the timeout hits.
+  const deadline = Date.now() + Math.max(opts.startTimeoutMs, 1000);
+  let ready = false;
+  while (Date.now() < deadline) {
+    if (await probePort(opts.port, "127.0.0.1", 600)) {
+      ready = true;
+      break;
+    }
+    // If the wrapper already exited and the port still is not up, postgres died
+    // — surface the captured log instead of waiting out the full timeout.
+    const tasklist = spawnSync("tasklist", ["/FI", `PID eq ${wrapperPid}`], {
+      encoding: "utf8",
+    });
+    const wrapperAlive = (tasklist.stdout || "").includes(String(wrapperPid));
+    if (!wrapperAlive && !(await probePort(opts.port, "127.0.0.1", 600))) {
+      throw new Error(
+        `embedded postgres: non-admin postgres exited before becoming ready.\n${readTail(logFile, 1200)}`,
+      );
+    }
+    const { promise: sleep, resolve: wake } = Promise.withResolvers<void>();
+    setTimeout(wake, 400);
+    await sleep;
+  }
+
+  if (!ready) {
+    const tail = readTail(logFile, 1500);
+    // Best-effort cleanup of the dead/hung process.
+    spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
+    const pgPid = readPostgresPid(opts.dataDir);
+    if (pgPid) spawnSync("taskkill", ["/pid", String(pgPid), "/f", "/t"], { encoding: "utf8" });
+    throw new Error(
+      `embedded postgres: non-admin postgres did not become ready within ${opts.startTimeoutMs}ms.\n${tail}`,
+    );
+  }
+
+  const postgresPid = readPostgresPid(opts.dataDir);
+  if (!postgresPid) {
+    opts.onError("embedded postgres: started but could not read postmaster.pid");
+  }
+
+  let stopped = false;
+  const resolvedPid = postgresPid ?? wrapperPid;
+  return {
+    postgresPid: resolvedPid,
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      const pid = readPostgresPid(opts.dataDir) ?? resolvedPid;
+      spawnSync("taskkill", ["/pid", String(pid), "/f", "/t"], { encoding: "utf8" });
+      spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
+    },
+  };
+}

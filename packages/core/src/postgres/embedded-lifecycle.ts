@@ -58,6 +58,11 @@ import { createRequire } from "node:module";
 import { createLogger } from "../logger.js";
 import { redactConnectionString } from "./credential-redact.js";
 import type { ResolvedBackend } from "./backend-resolver.js";
+import {
+  isWindowsElevatedAdmin,
+  startServerAsNonAdminUser,
+  type NonAdminServerHandle,
+} from "./embedded-windows-admin.js";
 
 const require = createRequire(import.meta.url);
 
@@ -282,6 +287,25 @@ function resolveMacosEmbeddedPostgresNativeRoot(): string | null {
   }
 }
 
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+ * Resolve the bundled @embedded-postgres/windows-x64 native root (.../native,
+ * containing bin/postgres.exe + lib + share). Used to launch the server under a
+ * dedicated non-admin user when the process is elevated; see
+ * embedded-windows-admin.ts.
+ */
+function resolveWindowsEmbeddedPostgresNativeRoot(): string | null {
+  if (process.platform !== "win32") return null;
+  const packageName = process.arch === "x64" ? "@embedded-postgres/windows-x64" : null;
+  if (!packageName) return null;
+  try {
+    const entrypoint = require.resolve(packageName);
+    return join(dirname(entrypoint), "..", "native");
+  } catch {
+    return resolvePnpmPlatformPackageNativeRoot(packageName);
+  }
+}
+
 function normalizeBundledMacosDylibs(onLog: (message: string) => void): void {
   const nativeRoot = resolveMacosEmbeddedPostgresNativeRoot();
   if (!nativeRoot) return;
@@ -425,6 +449,14 @@ export class EmbeddedPostgresLifecycle {
    * on a failure that is handled before the timeout fires.
    */
   private startTimer: NodeJS.Timeout | null = null;
+  /**
+   * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+   * When the process is an elevated Windows admin, the server is booted under a
+   * dedicated non-admin user (see embedded-windows-admin.ts) and this holds the
+   * handle used to stop it. Null in the normal (non-elevated / non-Windows)
+   * path, where stop() delegates to the embedded-postgres instance.
+   */
+  private nonAdminHandle: NonAdminServerHandle | null = null;
 
   constructor(opts: EmbeddedLifecycleOptions) {
     this.options = {
@@ -613,7 +645,36 @@ export class EmbeddedPostgresLifecycle {
       await this.pg.initialise();
     }
 
-    await this.pg.start();
+    // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+    // Under an elevated Windows admin token, postgres refuses to inherit the
+    // process token ("Execution of PostgreSQL by a user with administrative
+    // permissions is not permitted"). initdb + the pg client above ran as the
+    // launching (admin) process and work unchanged; only the SERVER start is
+    // re-homed under a dedicated non-admin local user. Normal (non-elevated /
+    // non-Windows) launches use the inherited-token path as before.
+    if (isWindowsElevatedAdmin()) {
+      const nativeRoot = resolveWindowsEmbeddedPostgresNativeRoot();
+      if (!nativeRoot) {
+        throw new Error(
+          "embedded postgres: the process is running elevated on Windows, where " +
+            "PostgreSQL refuses to start under an administrative token, and the " +
+            "non-admin boot path could not locate the bundled " +
+            "@embedded-postgres/windows-x64 native binaries to stage. Run Fusion " +
+            "non-elevated, or ensure the embedded-postgres platform package is installed.",
+        );
+      }
+      this.nonAdminHandle = await startServerAsNonAdminUser({
+        nativeRoot,
+        dataDir: this.options.dataDir,
+        port,
+        postgresFlags: this.options.postgresFlags,
+        onLog: this.options.onLog,
+        onError: this.options.onError,
+        startTimeoutMs: this.options.startTimeoutMs,
+      });
+    } else {
+      await this.pg.start();
+    }
     this.running = true;
     this.ownsProcess = true;
 
@@ -698,7 +759,16 @@ export class EmbeddedPostgresLifecycle {
       return;
     }
     try {
-      await this.pg.stop();
+      // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+      // Elevated-Windows path: the server was booted under a dedicated
+      // non-admin user; stop it via the handle instead of the embedded-postgres
+      // instance (which never owned a process in this path).
+      if (this.nonAdminHandle) {
+        await this.nonAdminHandle.stop();
+        this.nonAdminHandle = null;
+      } else {
+        await this.pg.stop();
+      }
     } catch (err) {
       this.options.onError(`embedded postgres: error during stop: ${String(err)}`);
     } finally {
