@@ -156,4 +156,5 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Diagnose embedded postgres admin-token failure
-        run: node scripts/diagnose-win-pg-broker.mjs
+        shell: pwsh
+        run: ./scripts/diagnose-win-pg-broker.ps1
