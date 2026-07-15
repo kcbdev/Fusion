@@ -399,9 +399,10 @@ export async function startServerAsNonAdminUser(
         `embedded postgres: non-admin postgres exited before becoming ready.\nwrapper={${wrapperTail}}\npg={${tail}}`,
       );
     }
-    const { promise: sleep, resolve: wake } = Promise.withResolvers<void>();
-    setTimeout(wake, 200);
-    await sleep;
+    // Avoid Promise.withResolvers (needs lib es2024); package tsconfig stays on es2022.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 200);
+    });
   }
 
   if (!ready) {
