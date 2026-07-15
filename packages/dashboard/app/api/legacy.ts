@@ -1738,7 +1738,11 @@ export async function fetchArtifacts(
 }
 
 export function artifactMediaUrl(id: string, projectId?: string): string {
-  return buildApiUrl(withProjectId(`/artifacts/${encodeURIComponent(id)}/media`, projectId));
+  /*
+   * FNXC:ArtifactMediaAuth 2026-07-15-14:24:
+   * Artifact previews and links use browser-native navigation, which cannot send the bearer header used by fetch. Reuse appendTokenQuery so authenticated media loads while its dashboard-owned URL guard prevents leaking the daemon token cross-origin.
+   */
+  return appendTokenQuery(buildApiUrl(withProjectId(`/artifacts/${encodeURIComponent(id)}/media`, projectId)));
 }
 
 /*
