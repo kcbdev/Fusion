@@ -173,6 +173,17 @@ function readTail(file: string, max: number): string {
   }
 }
 
+/** Read the postmaster PID (line 1 of <dataDir>/postmaster.pid) for direct kill. */
+function readPostgresPid(dataDir: string): number | null {
+  try {
+    const lines = readFileSync(join(dataDir, "postmaster.pid"), "utf-8").split("\n");
+    const pid = parseInt((lines[0] ?? "").trim(), 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
 
 let pwshCache: string | null | undefined;
 /**
@@ -376,8 +387,21 @@ export async function startServerAsNonAdminUser(
     async stop() {
       if (stopped) return;
       stopped = true;
-      // /t kills the whole tree: the cmd.exe wrapper + its postgres child.
+      // FNXC:WindowsDesktopPackaging 2026-07-15-01:10:
+      // Kill postgres directly by its pid (read from postmaster.pid). taskkill
+      // /t on the cmd.exe wrapper does not reliably reach a process launched
+      // via Start-Process -Credential in a separate logon session; a surviving
+      // postgres keeps its log locked and the test's rmSync cleanup hits EBUSY.
+      const pgPid = readPostgresPid(opts.dataDir);
+      if (pgPid) {
+        spawnSync("taskkill", ["/pid", String(pgPid), "/f"], { encoding: "utf8" });
+      }
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
+      // Give the OS a moment to release the postgres file locks before the
+      // caller's cleanup rmSync races in.
+      const { promise: sleep, resolve: wake } = Promise.withResolvers<void>();
+      setTimeout(wake, 300);
+      await sleep;
     },
   };
 }
