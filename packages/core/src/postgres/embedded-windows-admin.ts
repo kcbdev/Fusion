@@ -26,7 +26,6 @@
 // and full control on the data dir.
 
 import { spawnSync } from "node:child_process";
-import { createConnection } from "node:net";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 
@@ -197,22 +196,6 @@ function readTail(file: string, max: number): string {
   }
 }
 
-/** Resolve true once a TCP connection to port succeeds, false on error/timeout. */
-function probePort(port: number, host: string, timeoutMs: number): Promise<boolean> {
-  const { promise, resolve } = Promise.withResolvers<boolean>();
-  const sock = createConnection(port, host);
-  sock.setTimeout(timeoutMs);
-  sock.on("connect", () => {
-    sock.destroy();
-    resolve(true);
-  });
-  sock.on("error", () => resolve(false));
-  sock.on("timeout", () => {
-    sock.destroy();
-    resolve(false);
-  });
-  return promise;
-}
 
 let pwshCache: string | null | undefined;
 /**
@@ -371,20 +354,24 @@ export async function startServerAsNonAdminUser(
   // Poll for readiness until the server accepts connections or the timeout hits.
   const deadline = Date.now() + Math.max(opts.startTimeoutMs, 1000);
   let ready = false;
+  let lastSnapshot = "";
   while (Date.now() < deadline) {
-    // FNXC:WindowsDesktopPackaging 2026-07-14-22:40:
-    // Tail the redirected postgres log each poll. This surfaces a startup FATAL
-    // within ~1s (well inside Vitest's 15s test timeout) instead of hanging on
-    // a TCP probe that never connects, so the real reason postgres did not open
-    // the port is visible. "ready to accept connections" is the same marker
-    // embedded-postgres watches stderr for.
+    // FNXC:WindowsDesktopPackaging 2026-07-14-23:05:
+    // Lightweight poll: readFileSync only. Do NOT spawn tasklist/probePort in
+    // the hot loop — a synchronous tasklist per iteration blocked ~16s between
+    // polls on windows-2025, blowing the test's 15s budget before postgres's
+    // "ready" marker was observed (and orphaning servers when start() never
+    // returned). Readiness = the postgres log "ready to accept connections"
+    // marker (the same one embedded-postgres watches). Exit = the wrapper bat's
+    // "exit=" line (written only once postgres returns). Errors = a FATAL in
+    // the postgres log. Logs are emitted only on change to avoid per-poll spam.
     const tail = readTail(logFile, 3000);
     const wrapperTail = readTail(wrapperLog, 1500);
-    // Emit both logs each poll so they are captured even when Vitest's test
-    // timeout preempts the launcher's own error — otherwise the postgres
-    // output hides behind "Test timed out in 15000ms" and we cannot tell
-    // whether the bat ran, postgres exited, or postgres is hung.
-    opts.onLog(`non-admin poll wrapper={${wrapperTail}} pg={${tail.slice(-400)}}`);
+    const snapshot = `${wrapperTail}\u0000${tail.slice(-400)}`;
+    if (snapshot !== lastSnapshot) {
+      lastSnapshot = snapshot;
+      opts.onLog(`non-admin poll wrapper={${wrapperTail}} pg={${tail.slice(-400)}}`);
+    }
     if (/database system is ready to accept connections/.test(tail)) {
       ready = true;
       break;
@@ -394,18 +381,13 @@ export async function startServerAsNonAdminUser(
         `embedded postgres: non-admin postgres reported a startup error before opening the port.\n${tail}`,
       );
     }
-    // If the wrapper already exited and nothing is listening, postgres died.
-    const tasklist = spawnSync("tasklist", ["/FI", `PID eq ${wrapperPid}`], {
-      encoding: "utf8",
-    });
-    const wrapperAlive = (tasklist.stdout || "").includes(String(wrapperPid));
-    if (!wrapperAlive && !(await probePort(opts.port, "127.0.0.1", 400))) {
+    if (/^exit=/m.test(wrapperTail)) {
       throw new Error(
-        `embedded postgres: non-admin postgres exited before becoming ready.\n${readTail(logFile, 3000)}`,
+        `embedded postgres: non-admin postgres exited before becoming ready.\nwrapper={${wrapperTail}}\npg={${tail}}`,
       );
     }
     const { promise: sleep, resolve: wake } = Promise.withResolvers<void>();
-    setTimeout(wake, 300);
+    setTimeout(wake, 200);
     await sleep;
   }
 
