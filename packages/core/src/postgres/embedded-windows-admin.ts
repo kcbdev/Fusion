@@ -189,6 +189,46 @@ function probePort(port: number, host: string, timeoutMs: number): Promise<boole
   return promise;
 }
 
+let pwshCache: string | null | undefined;
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-22:10:
+ * Resolve the PowerShell binary used to launch the non-admin server. Prefer
+ * PowerShell 7 (`pwsh`): the windows-2025 runner runs Windows PowerShell 5.1
+ * (`powershell.exe`) in Constrained Language Mode, where the
+ * Microsoft.PowerShell.Security module cannot load (ConvertTo-SecureString
+ * fails). pwsh runs unconstrained and is what the proven broker diagnostic
+ * used. Fall back to powershell.exe for end-user boxes that only have 5.1 in
+ * Full Language Mode.
+ */
+function resolvePowerShell(): string {
+  if (pwshCache !== undefined) return pwshCache as string;
+  const pf = process.env.PROGRAMFILES;
+  const pf86 = process.env["ProgramFiles(x86)"];
+  const candidates = [
+    pf ? join(pf, "PowerShell", "7", "pwsh.exe") : null,
+    pf86 ? join(pf86, "PowerShell", "7", "pwsh.exe") : null,
+  ].filter((v): v is string => v !== null);
+  for (const c of candidates) {
+    if (existsSync(c)) {
+      pwshCache = c;
+      return c;
+    }
+  }
+  const where = spawnSync("where", ["pwsh"], { encoding: "utf8", shell: true });
+  if (where.status === 0) {
+    const found = (where.stdout || "")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .find(Boolean);
+    if (found) {
+      pwshCache = found;
+      return found;
+    }
+  }
+  pwshCache = "powershell.exe";
+  return pwshCache;
+}
+
 /**
  * Start postgres.exe under the dedicated non-admin user and resolve once it is
  * accepting connections. Rejects with a clear error (including the postgres log
@@ -232,7 +272,15 @@ export async function startServerAsNonAdminUser(
     [
       "param([string]$User,[string]$Password,[string]$DomainUser,[string]$Bat)",
       "$ErrorActionPreference='Stop'",
-      "$s = ConvertTo-SecureString $Password -AsPlainText -Force",
+      // FNXC:WindowsDesktopPackaging 2026-07-14-22:15:
+      // Build the SecureString char-by-char instead of ConvertTo-SecureString,
+      // which lives in Microsoft.PowerShell.Security — a module that fails to
+      // load under Windows PowerShell 5.1 Constrained Language Mode. System.
+      // Security.SecureString + PSCredential are core SMA/.NET types available
+      // without that module.
+      "$s = New-Object System.Security.SecureString",
+      "foreach ($ch in $Password.ToCharArray()) { [void]$s.AppendChar($ch) }",
+      "$s.MakeReadOnly()",
       "$c = New-Object System.Management.Automation.PSCredential($DomainUser,$s)",
       "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',$Bat -Credential $c -WindowStyle Hidden -PassThru",
       "Write-Output $p.Id",
@@ -241,7 +289,7 @@ export async function startServerAsNonAdminUser(
     "ascii",
   );
   const launch = spawnSync(
-    "powershell",
+    resolvePowerShell(),
     [
       "-NoProfile",
       "-ExecutionPolicy",
