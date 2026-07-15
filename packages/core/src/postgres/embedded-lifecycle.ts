@@ -77,6 +77,8 @@ type EmbeddedPostgresCtor = new (opts: Record<string, unknown>) => {
   stop(): Promise<void>;
   createDatabase(name: string): Promise<void>;
   getPgClient(db: string, host: string): {
+    /** pg.Client option; bound here so callers (e.g. the readiness probe) can cap connect time without a cast. */
+    connectionTimeoutMillis?: number;
     connect(): Promise<void>;
     query(text: string, params?: unknown[]): { rowCount: number | null };
     end(): Promise<void>;
@@ -681,6 +683,7 @@ export class EmbeddedPostgresLifecycle {
           const pg = this.pg;
           if (!pg) return false;
           const client = pg.getPgClient("postgres", "localhost");
+          client.connectionTimeoutMillis = 1000;
           try {
             await client.connect();
             await client.query("SELECT 1");
