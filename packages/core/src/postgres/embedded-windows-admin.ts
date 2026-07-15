@@ -27,8 +27,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 
 /** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
 export interface NonAdminServerHandle {
@@ -125,78 +124,52 @@ function ensureNonAdminUser(): { user: string; password: string } {
   dedicatedPassword = password;
   return { user: DEDICATED_USER, password };
 }
-
-let grantScriptPath: string | null = null;
 /**
- * FNXC:WindowsDesktopPackaging 2026-07-14-23:55:
- * Lazily write the ACL grant script once. It performs ALL grants — dataDir
- * FullControl, nativeRoot ReadAndExecute, and ReadAndExecute (traverse) on each
- * ancestor of both — in a single PowerShell process via .NET Get-Acl/Set-Acl.
- * This matters: icacls has ~1.85s fixed spawn overhead per invocation, and the
- * per-ancestor traverse walk (~18 dirs) took ~37s on windows-2025; one
- * PowerShell process does the same work in ~2-3s. Traverse ancestors ARE
- * required: "Bypass traverse checking" does not let the non-admin user reach a
- * data dir under the launching user's profile (confirmed — removing the walk
- * broke the Start-Process launch with access errors).
- */
-function ensureGrantScript(): string {
-  if (grantScriptPath) return grantScriptPath;
-  const dir = join(tmpdir(), "fusion-pg-grant");
-  mkdirSync(dir, { recursive: true });
-  const script = join(dir, "grant.ps1");
-  writeFileSync(
-    script,
-    [
-      "param([string]$User,[string]$DataDir,[string]$NativeRoot)",
-      "$ErrorActionPreference='Stop'",
-      "function Add-Rule([string]$Path,[string]$Rights,[string]$Inheritance,[switch]$Mandatory){",
-      "  if(-not(Test-Path -LiteralPath $Path)){ if($Mandatory){throw \"missing: $Path\"}; return }",
-      "  try{",
-      "    $acl=Get-Acl -LiteralPath $Path",
-      "    $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($User,$Rights,$Inheritance,'None','Allow')",
-      "    $acl.AddAccessRule($rule)",
-      "    Set-Acl -LiteralPath $Path -AclObject $acl",
-      "  }catch{ if($Mandatory){throw} else { Write-Warning \"grant failed: $Path\" } }",
-      "}",
-      "# Required: postgres must write the data dir and read the native binaries.",
-      "Add-Rule $DataDir 'FullControl' 'ContainerInherit,ObjectInherit' -Mandatory",
-      "Add-Rule $NativeRoot 'ReadAndExecute' 'ContainerInherit,ObjectInherit' -Mandatory",
-      "# Best-effort: traverse ancestors (a blocked ancestor surfaces later via Start-Process).",
-      "foreach($leaf in @($DataDir,$NativeRoot)){",
-      "  $d=Split-Path $leaf -Parent",
-      "  for($i=0;$i -lt 16;$i++){",
-      "    $p=Split-Path $d -Parent",
-      "    if($p -eq $d){break}",
-      "    Add-Rule $d 'ReadAndExecute' 'None'",
-      "    $d=$p",
-      "  }",
-      "}",
-      "",
-    ].join("\r\n"),
-    "ascii",
-  );
-  grantScriptPath = script;
-  return script;
-}
-
-/**
+ * FNXC:WindowsDesktopPackaging 2026-07-15-00:10:
  * Grant the non-admin user FullControl on the data dir, ReadAndExecute on the
- * native binary root, and ReadAndExecute (traverse) on each ancestor of both,
- * via a single PowerShell process (see ensureGrantScript). Throws on failure.
+ * native binary root, and ReadAndExecute (traverse) on each ancestor of both.
+ * Traverse ancestors ARE required — "Bypass traverse checking" does not let the
+ * non-admin user reach a data dir under the launching user's profile.
+ *
+ * Profiling: icacls has ~1.85s fixed spawn overhead per invocation, so a
+ * per-ancestor walk (~18 dirs) took ~37s, and a PowerShell Get-Acl/Set-Acl
+ * script hung on pnpm junctions. Batch ALL traverse ancestors into a SINGLE
+ * icacls invocation (icacls accepts multiple name args), so the whole grant is
+ * ~3 icacls calls (~7s). The F/RX grants are required (throw); traverse is
+ * best-effort (icacls /C continues past per-dir errors).
  */
 function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
-  const script = ensureGrantScript();
-  const powerShell = resolvePowerShell();
-  const r = spawnSync(powerShell, [
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
-    "-User", user, "-DataDir", dataDir, "-NativeRoot", nativeRoot,
-  ], { encoding: "utf8" });
-  if (r.status !== 0) {
-    throw new Error(
-      `embedded postgres: non-admin ACL grant failed (${powerShell} status=${r.status} ` +
-        `signal=${r.signal} error=${r.error ? String(r.error) : "none"} ` +
-        `stdout=${(r.stdout || "").trim().slice(0, 300)} stderr=${(r.stderr || "").trim().slice(0, 500)}).`,
-    );
+  // Collect every ancestor dir of dataDir + nativeRoot up to the drive root.
+  const ancestors = new Set<string>();
+  for (const leaf of [dataDir, nativeRoot]) {
+    let dir = dirname(leaf);
+    for (let depth = 0; depth < 16; depth += 1) {
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      ancestors.add(dir);
+      dir = parent;
+    }
+  }
+  const targets = [...ancestors].filter((d) => existsSync(d));
+  // Required: postgres must write the data dir and read the native binaries.
+  const required: ReadonlyArray<readonly string[]> = [
+    ["icacls", dataDir, "/grant", `${user}:(OI)(CI)F`, "/T", "/C"],
+    ["icacls", nativeRoot, "/grant", `${user}:(OI)(CI)RX`, "/T", "/C"],
+  ];
+  for (const [bin, ...args] of required) {
+    const r = spawnSync(bin, args, { encoding: "utf8" });
+    if (r.status !== 0) {
+      throw new Error(
+        `embedded postgres: non-admin ACL grant failed (icacls status=${r.status} args=${args.join(" ").slice(0, 200)}): ${(r.stderr || "").trim().slice(0, 400)}`,
+      );
+    }
+  }
+  // Best-effort traverse: one icacls call over ALL ancestors (ReadAndExecute,
+  // this-dir only). /C continues past per-dir errors so a blocked ancestor
+  // does not abort the rest; any genuinely blocked path surfaces later via the
+  // Start-Process launch error.
+  if (targets.length > 0) {
+    spawnSync("icacls", [...targets, "/grant", `${user}:RX`, "/C"], { encoding: "utf8" });
   }
 }
 
