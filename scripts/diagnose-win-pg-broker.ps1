@@ -32,10 +32,16 @@ Log "initdb ok; data=$data"
 
 # create a NON-admin local user
 $user = "pgu$(Get-Random)"
-$pass = "P@ss$(Get-Random)w0rd!"
-net user $user $pass /add | Out-Null
-$adminsHas = (net localgroup Administrators) -match $user
-Log "user=$user  Administrators-contains-user=$adminsHas"
+# FNXC:WindowsDesktopPackaging 2026-07-14-21:05:
+# The password must NOT contain any token of the username (e.g. the random
+# number). Windows password complexity rejects a password that contains the
+# account name; net user then re-prompts non-interactively ("No valid response
+# was provided") and creates NOTHING, which made Start-Process -Credential
+# fail downstream with "user name or password is incorrect" — a false negative
+# unrelated to whether the dedicated-user mechanism actually boots postgres.
+$pass = "Fx9!qW2v#kP7mZ4"
+$createOut = net user $user $pass /add /y 2>&1
+Log "net user /add exit=$LASTEXITCODE out=$($createOut -join ' | ')"
 icacls $root /grant "${user}:(OI)(CI)F" | Out-Null
 Log "granted $user (OI)(CI)F on $root"
 
