@@ -379,7 +379,7 @@ Self-healing intentionally refuses to auto-restart agents when blockers are oper
 - **Timer trigger:** run completes and the durable agent returns to `state="active"` (recoverable soft-fail).
 - **Assignment / on-demand trigger:** run completes with `resultJson.actionRequired = true`, then the durable agent is paused with `pauseReason="heartbeat-model-unavailable"` and `lastError` set to actionable credential guidance (including the missing provider name when detectable).
 
-After credentials are fixed, operators should resume the paused durable agent; subsequent heartbeats proceed normally.
+False-positive `heartbeat-model-unavailable` parks (session/registry/credential-probe blips that a manual Retry would clear without config changes) are admitted to the same bounded `heartbeatErrorRecovery` budget as error-state recovery. The heartbeat timer re-arms while budget remains, the run-entry path clears the park and retries, and the self-healing sweep plus engine-startup reset are backstops. Genuine missing credentials re-park after each failed attempt and stay parked once the budget is exhausted (keeping `pauseReason="heartbeat-model-unavailable"` for operator guidance). Manual resume still works at any time.
 
 ### Assigned-agent identity + planning model precedence for task triage
 

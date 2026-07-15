@@ -39,11 +39,13 @@ import {
   HEARTBEAT_ERROR_RECOVERY_METADATA_KEY,
   HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
   HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+  HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
   HeartbeatMonitor,
   HeartbeatTriggerScheduler,
   incrementHeartbeatErrorRecoveryMetadata,
   isErrorRecoveryEligible,
   isHeartbeatErrorRecoverable,
+  isModelUnavailableParkRecoveryEligible,
   readHeartbeatErrorRetryCount,
   resetHeartbeatErrorRecoveryMetadata,
   resolveErrorRecoveryLimit,
@@ -186,6 +188,25 @@ describe("heartbeat error-recovery primitives", () => {
     expect(isErrorRecoveryEligible(baseAgent({ lastError: '401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token does not meet scope requirements"}}' }), 5)).toBe(false);
     expect(isHeartbeatErrorRecoverable({ lastError: "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/deleted/node_modules/@runfusion/fusion/dist/bin.js' imported from /tmp/deleted/packages/engine/src/pi.ts" })).toBe(false);
   });
+
+  it("admits under-budget heartbeat-model-unavailable parks for auto-recovery even when lastError is operator-actionable", () => {
+    const parked = baseAgent({
+      state: "paused",
+      pauseReason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
+      lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+    });
+    expect(isModelUnavailableParkRecoveryEligible(parked, 5)).toBe(true);
+    expect(isErrorRecoveryEligible(parked, 5)).toBe(true);
+    expect(isHeartbeatErrorRecoverable(parked)).toBe(false);
+    expect(isErrorRecoveryEligible({
+      ...parked,
+      metadata: buildHeartbeatErrorRecoveryMetadata(parked, 5),
+    }, 5)).toBe(false);
+    expect(isErrorRecoveryEligible({
+      ...parked,
+      pauseReason: "manual",
+    }, 5)).toBe(false);
+  });
 });
 
 describe("HeartbeatMonitor error-state recovery", () => {
@@ -216,6 +237,58 @@ describe("HeartbeatMonitor error-state recovery", () => {
       mutationType: "agent:auto-recover-error-state",
       target: store.agent.id,
       metadata: expect.objectContaining({ attempt: 1, limit: 5 }),
+    }));
+  });
+
+  it("auto-retries a false heartbeat-model-unavailable park on the next heartbeat without operator Retry", async () => {
+    const session = createSession(async () => undefined);
+    mockedCreateFnAgent.mockResolvedValueOnce(session as never);
+    const store = createAgentStore(baseAgent({
+      state: "paused",
+      pauseReason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
+      lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+    }));
+    const taskStore = createNoTaskStore();
+    const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: process.cwd() });
+
+    await monitor.executeHeartbeat({ agentId: store.agent.id, source: "timer" });
+
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    expect(store.agent.state).toBe("active");
+    expect(store.agent.lastError).toBeUndefined();
+    expect(store.agent.pauseReason).toBeUndefined();
+    expect(readHeartbeatErrorRetryCount(store.agent)).toBe(0);
+    expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "agent:auto-recover-error-state",
+      target: store.agent.id,
+      metadata: expect.objectContaining({ attempt: 1, limit: 5, source: "timer" }),
+    }));
+  });
+
+  it("keeps an exhausted heartbeat-model-unavailable park parked with the same pause reason", async () => {
+    const store = createAgentStore(baseAgent({
+      state: "paused",
+      pauseReason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
+      lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+      metadata: buildHeartbeatErrorRecoveryMetadata(baseAgent(), 5),
+    }));
+    const taskStore = createNoTaskStore();
+    const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: process.cwd() });
+
+    const result = await monitor.executeHeartbeat({ agentId: store.agent.id, source: "timer" });
+
+    expect(result.status).toBe("completed");
+    expect(result.resultJson).toMatchObject({
+      reason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
+      attempts: 5,
+      limit: 5,
+    });
+    expect(store.agent.state).toBe("paused");
+    expect(store.agent.pauseReason).toBe(HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON);
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
+    expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "agent:error-retry-exhausted",
+      target: store.agent.id,
     }));
   });
 

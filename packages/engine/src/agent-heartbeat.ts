@@ -73,11 +73,15 @@ FN-7835 requires durable heartbeat-managed agents in error state to retry on the
 
 FNXC:HeartbeatRecovery 2026-07-11-00:00:
 FN-7672 requires durable agent error recovery to stay classification-gated: only transient, non-operator-actionable lastError values may be retried automatically. Credential, quota, model-access, and permanent configuration failures must remain parked for operator action instead of burning heartbeat retries.
+
+FNXC:HeartbeatRecovery 2026-07-15-08:50:
+heartbeat-model-unavailable parks from assignment/on-demand runs were terminal until a human Retry, even when the next attempt succeeds with unchanged credentials (false "model unavailable" / registry / credential-probe blips). Admit those parks to the same bounded heartbeatErrorRecovery budget as error-state recovery so the engine auto-retries like operator Retry, while genuine missing credentials re-park after the budget exhausts.
 */
 export const MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS = 5;
 export const HEARTBEAT_ERROR_RECOVERY_METADATA_KEY = "heartbeatErrorRecovery";
 export const HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON = "error-retry-exhausted";
 export const HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON = "error-unrecoverable";
+export const HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON = "heartbeat-model-unavailable";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
@@ -2382,35 +2386,56 @@ export class HeartbeatMonitor {
           return (await this.store.getRunDetail(agentId, run.id))!;
         }
 
-        if (agent.state === "error") {
+        /*
+        FNXC:HeartbeatRecovery 2026-07-15-08:50:
+        Include paused/heartbeat-model-unavailable in the same run-entry recovery gate as bare error. Assignment/on-demand model-unavailable parks previously never re-entered the timer path, so false positives stayed parked until a human Retry even though the next session start would succeed.
+        */
+        if (agent.state === "error" || isModelUnavailablePark(agent)) {
           const errorRecoveryLimit = resolveErrorRecoveryLimit(heartbeatModelSettings);
           const currentRetryCount = readHeartbeatErrorRetryCount(agent);
           const canAttemptErrorRecovery = isErrorRecoveryEligible(agent, errorRecoveryLimit);
           const recoveryBudgetExhausted = isHeartbeatManaged(agent)
             && agent.runtimeConfig?.enabled !== false
-            && isHeartbeatErrorRecoverable(agent)
-            && currentRetryCount >= errorRecoveryLimit;
+            && currentRetryCount >= errorRecoveryLimit
+            && (isHeartbeatErrorRecoverable(agent) || isModelUnavailablePark(agent));
 
           if (canAttemptErrorRecovery) {
             const attempt = currentRetryCount + 1;
             const metadata = incrementHeartbeatErrorRecoveryMetadata(agent);
             try {
               await this.store.updateAgentState(agentId, "active");
-              await this.store.updateAgent(agentId, { lastError: undefined, metadata });
-              heartbeatLog.log(`Agent ${agentId} auto-recovered from error state for heartbeat retry attempt ${attempt}/${errorRecoveryLimit}`);
+              await this.store.updateAgent(agentId, {
+                lastError: undefined,
+                pauseReason: undefined,
+                metadata,
+              });
+              heartbeatLog.log(`Agent ${agentId} auto-recovered from ${agent.state === "error" ? "error state" : "heartbeat-model-unavailable park"} for heartbeat retry attempt ${attempt}/${errorRecoveryLimit}`);
               await audit.database({
                 type: "agent:auto-recover-error-state",
                 target: agentId,
                 metadata: { agentId, attempt, limit: errorRecoveryLimit, source },
               });
-              agent = (await this.store.getAgent(agentId)) ?? { ...agent, state: "active", lastError: undefined, metadata };
+              agent = (await this.store.getAgent(agentId)) ?? {
+                ...agent,
+                state: "active",
+                lastError: undefined,
+                pauseReason: undefined,
+                metadata,
+              };
             } catch (recoveryErr) {
               heartbeatLog.warn(`Agent ${agentId} error-state recovery bookkeeping failed: ${recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)} — continuing with existing state`);
             }
           } else if (recoveryBudgetExhausted) {
             try {
+              // startRun may have flipped the agent to "running"; restore a parked terminal state.
+              // Exhausted model-unavailable parks keep their pause reason so the UI still
+              // points at credentials/model config rather than a generic retry-exhausted label.
               await this.store.updateAgentState(agentId, "paused");
-              await this.store.updateAgent(agentId, { pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON });
+              await this.store.updateAgent(agentId, {
+                pauseReason: isModelUnavailablePark(agent)
+                  ? HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON
+                  : HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+              });
               heartbeatLog.warn(`Agent ${agentId} error recovery exhausted after ${currentRetryCount}/${errorRecoveryLimit} attempts — pausing`);
               await audit.database({
                 type: "agent:error-retry-exhausted",
@@ -2422,12 +2447,19 @@ export class HeartbeatMonitor {
             }
             await this.completeRun(agentId, run.id, {
               status: "completed",
-              resultJson: { reason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, attempts: currentRetryCount, limit: errorRecoveryLimit },
+              resultJson: {
+                reason: isModelUnavailablePark(agent)
+                  ? HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON
+                  : HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+                attempts: currentRetryCount,
+                limit: errorRecoveryLimit,
+              },
               skipStateTransition: true,
             });
             return (await this.store.getRunDetail(agentId, run.id))!;
           } else if (
-            isHeartbeatManaged(agent)
+            agent.state === "error"
+            && isHeartbeatManaged(agent)
             && agent.runtimeConfig?.enabled !== false
             && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")
           ) {
@@ -2454,9 +2486,11 @@ export class HeartbeatMonitor {
             });
             return (await this.store.getRunDetail(agentId, run.id))!;
           } else {
-            heartbeatLog.log(`Agent ${agentId} state is "error" but lastError is not eligible for heartbeat recovery — graceful exit`);
+            heartbeatLog.log(`Agent ${agentId} state is "${agent.state}" but is not eligible for heartbeat recovery — graceful exit`);
             try {
-              await this.store.updateAgentState(agentId, "error");
+              if (agent.state === "error") {
+                await this.store.updateAgentState(agentId, "error");
+              }
             } catch (restoreErr) {
               heartbeatLog.warn(`Agent ${agentId} non-recoverable error-state restore failed: ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)} — preserving run completion`);
             }
@@ -2999,7 +3033,7 @@ export class HeartbeatMonitor {
 
           await this.store.updateAgentState(agentId, "paused");
           await this.store.updateAgent(agentId, {
-            pauseReason: "heartbeat-model-unavailable",
+            pauseReason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
             lastError: detail,
           });
         };
@@ -3708,7 +3742,7 @@ export class HeartbeatMonitor {
               });
               await this.store.updateAgentState(agentId, "paused");
               await this.store.updateAgent(agentId, {
-                pauseReason: "heartbeat-model-unavailable",
+                pauseReason: HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON,
                 lastError: detail,
               });
             }
@@ -4387,7 +4421,31 @@ export function isHeartbeatErrorRecoverable(agent: Pick<Agent, "lastError">): bo
   return !isStaleWorktreeModuleResolutionError(lastError) && !isOperatorActionableAgentError(lastError);
 }
 
+export function isModelUnavailablePark(agent: Pick<Agent, "state" | "pauseReason">): boolean {
+  // Key on pauseReason, not only state=paused: startRun flips the agent to
+  // "running" before the run-entry recovery gate reads it, and a failed preload
+  // can load the post-startRun store row. Matching only state=paused would miss
+  // budgeted auto-retry for those paths.
+  return agent.pauseReason === HEARTBEAT_MODEL_UNAVAILABLE_PAUSE_REASON
+    && agent.state !== "active"
+    && agent.state !== "idle";
+}
+
+/*
+FNXC:HeartbeatRecovery 2026-07-15-08:50:
+False-positive heartbeat-model-unavailable parks must stay on the timer path with a bounded budget. Operator-actionable lastError text (no API key / registry miss) would otherwise exclude them from isHeartbeatErrorRecoverable forever, so this park reason is an explicit second recovery admission path independent of lastError classification.
+*/
+export function isModelUnavailableParkRecoveryEligible(agent: Agent, limit: number): boolean {
+  return isModelUnavailablePark(agent)
+    && isHeartbeatManaged(agent)
+    && agent.runtimeConfig?.enabled !== false
+    && readHeartbeatErrorRetryCount(agent) < Math.max(1, Math.floor(limit));
+}
+
 export function isErrorRecoveryEligible(agent: Agent, limit: number): boolean {
+  if (isModelUnavailableParkRecoveryEligible(agent, limit)) {
+    return true;
+  }
   return agent.state === "error"
     && isHeartbeatManaged(agent)
     && agent.runtimeConfig?.enabled !== false
@@ -4400,7 +4458,7 @@ export function isErrorRecoveryEligible(agent: Agent, limit: number): boolean {
  *
  * Timers are armed only for durable agents where all of the following hold:
  * - `runtimeConfig.enabled !== false`
- * - `state ∈ {active, running, idle}` or `state === "error"` with retry budget remaining
+ * - `state ∈ {active, running, idle}`, or `state === "error"` / `paused`+`heartbeat-model-unavailable` with retry budget remaining
  *
  * Any other state, or any ephemeral/task-worker agent, clears the timer.
  * State changes and heartbeat config updates are observed via AgentStore

@@ -1018,7 +1018,7 @@ describe("SelfHealingManager", () => {
 
       await managerWithAgents.runStartupRecovery();
 
-      for (const agentId of ["fresh-error", "exhausted-parked", "misattributed-heartbeat-model"]) {
+      for (const agentId of ["fresh-error", "exhausted-parked", "misattributed-heartbeat-model", "genuine-heartbeat-model"]) {
         const agent = agentStore.getAgent(agentId)!;
         expect(agent.state).toBe("active");
         expect(agent.lastError).toBeUndefined();
@@ -1031,24 +1031,26 @@ describe("SelfHealingManager", () => {
       }
       expect(agentStore.getAgent("fresh-error")?.metadata?.unrelated).toBe("keep");
       expect(agentStore.getAgent("exhausted-parked")?.metadata?.unrelated).toBe("keep-too");
-      expect(restartDurableAgentHeartbeat).toHaveBeenCalledTimes(3);
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledTimes(4);
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("fresh-error", { reason: "startup-error-reset", attempt: 1 });
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("exhausted-parked", { reason: "startup-error-reset", attempt: 1 });
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("misattributed-heartbeat-model", { reason: "startup-error-reset", attempt: 1 });
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("genuine-heartbeat-model", { reason: "startup-error-reset", attempt: 1 });
 
       const resetAudits = recordRunAuditEvent.mock.calls
         .map(([event]) => event)
         .filter((event) => event.mutationType === "agent:reset-error-state-on-startup");
-      expect(resetAudits).toHaveLength(3);
+      expect(resetAudits).toHaveLength(4);
       expect(resetAudits).toEqual(expect.arrayContaining([
         expect.objectContaining({ target: "fresh-error", metadata: expect.objectContaining({ agentId: "fresh-error", priorState: "error", source: "self-healing" }) }),
         expect.objectContaining({ target: "exhausted-parked", metadata: expect.objectContaining({ agentId: "exhausted-parked", priorState: "paused", priorPauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, source: "self-healing" }) }),
         expect.objectContaining({ target: "misattributed-heartbeat-model", metadata: expect.objectContaining({ agentId: "misattributed-heartbeat-model", priorState: "paused", priorPauseReason: "heartbeat-model-unavailable", source: "self-healing" }) }),
+        expect.objectContaining({ target: "genuine-heartbeat-model", metadata: expect.objectContaining({ agentId: "genuine-heartbeat-model", priorState: "paused", priorPauseReason: "heartbeat-model-unavailable", source: "self-healing" }) }),
       ]));
       expect(recordRunAuditEvent.mock.calls.map(([event]) => event.mutationType).filter((type) => type === "agent:auto-recover-error-state")).toHaveLength(0);
-      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(3);
+      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(4);
 
-      for (const untouchedId of ["operator-actionable", "stale-module", "error-unrecoverable", "genuine-heartbeat-model", "user-paused", "ephemeral", "disabled", "live-agent", "healthy-active", "healthy-idle"]) {
+      for (const untouchedId of ["operator-actionable", "stale-module", "error-unrecoverable", "user-paused", "ephemeral", "disabled", "live-agent", "healthy-active", "healthy-idle"]) {
         expect(agentStore.updateAgentState).not.toHaveBeenCalledWith(untouchedId, expect.anything());
         expect(agentStore.updateAgent).not.toHaveBeenCalledWith(untouchedId, expect.anything());
       }
@@ -1277,6 +1279,60 @@ describe("SelfHealingManager", () => {
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("parked-generic", { reason: "transient-error", attempt: 1 });
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("parked-scope", expect.anything());
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("parked-budget", expect.anything());
+      managerWithAgents.stop();
+    });
+
+    it("auto-recovers a stale heartbeat-model-unavailable park even when lastError looks operator-actionable", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "false-model-park",
+          state: "paused",
+          pauseReason: "heartbeat-model-unavailable",
+          lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+          runtimeConfig: { enabled: true },
+          metadata: {},
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+        {
+          id: "fresh-model-park",
+          state: "paused",
+          pauseReason: "heartbeat-model-unavailable",
+          lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+          runtimeConfig: { enabled: true },
+          updatedAt: new Date(now).toISOString(),
+        } as Agent,
+        {
+          id: "exhausted-model-park",
+          state: "paused",
+          pauseReason: "heartbeat-model-unavailable",
+          lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+          runtimeConfig: { enabled: true },
+          metadata: { [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: { consecutiveAttempts: 5 } },
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("false-model-park", "active");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("false-model-park", { lastError: undefined, pauseReason: undefined });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "false-model-park",
+        metadata: expect.objectContaining({ agentId: "false-model-park", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("false-model-park", { reason: "transient-error", attempt: 1 });
+      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("fresh-model-park", expect.anything());
+      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("exhausted-model-park", expect.anything());
       managerWithAgents.stop();
     });
 
