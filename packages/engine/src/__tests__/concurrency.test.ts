@@ -6,8 +6,14 @@ import {
   PRIORITY_MERGE,
   PRIORITY_EXECUTE,
   PRIORITY_SPECIFY,
+  clearPreHeldExecutorSlotsForTests,
+  computeTopLevelConcurrencyClaimed,
+  dropPreHeldExecutorSlot,
+  hasPreHeldExecutorSlot,
   persistedTopLevelAgentSlots,
   recoverIdleSemaphoreLeakCandidate,
+  registerPreHeldExecutorSlot,
+  takePreHeldExecutorSlot,
 } from "../concurrency.js";
 
 describe("ScopedAgentSemaphore", () => {
@@ -403,6 +409,109 @@ describe("AgentSemaphore", () => {
     ] as Task[];
 
     expect(persistedTopLevelAgentSlots(tasks)).toBe(7);
+  });
+
+  it("claims top-level concurrency as max(live running agents, semaphore active, pending specify)", () => {
+    const tasks = [
+      { column: "in-progress" },
+      { column: "triage", status: "planning", paused: false },
+      { column: "triage", status: "planning", paused: false },
+      { column: "triage", status: "planning", paused: false },
+      { column: "triage", status: "planning", paused: false },
+      { column: "todo" },
+    ] as Task[];
+
+    // 4 planning + 1 in-progress = 5 live holders (the reported over-cap symptom).
+    expect(computeTopLevelConcurrencyClaimed({ tasks })).toBe(5);
+    // Prefer the larger of live holders and in-memory activeCount.
+    expect(computeTopLevelConcurrencyClaimed({ tasks, semaphoreActiveCount: 2 })).toBe(5);
+    expect(computeTopLevelConcurrencyClaimed({ tasks: [], semaphoreActiveCount: 3, pendingSpecifyCount: 2 })).toBe(3);
+    expect(computeTopLevelConcurrencyClaimed({ tasks: [], semaphoreActiveCount: 1, pendingSpecifyCount: 2 })).toBe(2);
+  });
+
+  it("hands off pre-held executor slots without double-registering", () => {
+    clearPreHeldExecutorSlotsForTests();
+    const sem = new AgentSemaphore(2);
+    expect(sem.tryAcquire()).toBe(true);
+    registerPreHeldExecutorSlot("FN-1");
+    expect(hasPreHeldExecutorSlot("FN-1")).toBe(true);
+
+    expect(takePreHeldExecutorSlot("FN-1")).toBe(true);
+    expect(hasPreHeldExecutorSlot("FN-1")).toBe(false);
+    expect(takePreHeldExecutorSlot("FN-1")).toBe(false);
+
+    // Failed dispatch path releases both the registry entry and the semaphore slot.
+    expect(sem.tryAcquire()).toBe(true);
+    registerPreHeldExecutorSlot("FN-2");
+    dropPreHeldExecutorSlot("FN-2", sem);
+    expect(hasPreHeldExecutorSlot("FN-2")).toBe(false);
+    expect(sem.activeCount).toBe(1);
+    sem.release();
+    clearPreHeldExecutorSlotsForTests();
+  });
+
+  /*
+  FNXC:GlobalConcurrencyControls 2026-07-15-02:55:
+  Graph fallback re-registers a scheduler pre-held slot for the legacy execute path. That registration must always be either take()n (legacy agent work under runWithExecutorSemaphore) or drop()ped on early exits. A re-register without a subsequent take/drop is the permanent global-capacity leak Greptile P1 (PR #2107) caught: activeCount stays inflated while the task is no longer holding work.
+  */
+  it("treats graph→legacy re-register as a leak unless take or drop follows", () => {
+    clearPreHeldExecutorSlotsForTests();
+    const sem = new AgentSemaphore(1);
+    expect(sem.tryAcquire()).toBe(true);
+    // Scheduler reserved the slot before todo→in-progress.
+    registerPreHeldExecutorSlot("FN-LEGACY-HANDOFF");
+
+    // Graph claims then re-registers for legacy (transferPreHeldToLegacy).
+    expect(takePreHeldExecutorSlot("FN-LEGACY-HANDOFF")).toBe(true);
+    registerPreHeldExecutorSlot("FN-LEGACY-HANDOFF");
+    expect(hasPreHeldExecutorSlot("FN-LEGACY-HANDOFF")).toBe(true);
+    expect(sem.activeCount).toBe(1);
+
+    // Authoritative / work-engine / heartbeat-defer early returns must drop, not leave the registration.
+    dropPreHeldExecutorSlot("FN-LEGACY-HANDOFF", sem);
+    expect(hasPreHeldExecutorSlot("FN-LEGACY-HANDOFF")).toBe(false);
+    expect(sem.activeCount).toBe(0);
+
+    // Happy path: re-register then take + release (runWithExecutorSemaphore contract).
+    expect(sem.tryAcquire()).toBe(true);
+    registerPreHeldExecutorSlot("FN-LEGACY-TAKE");
+    expect(takePreHeldExecutorSlot("FN-LEGACY-TAKE")).toBe(true);
+    expect(hasPreHeldExecutorSlot("FN-LEGACY-TAKE")).toBe(false);
+    sem.release();
+    expect(sem.activeCount).toBe(0);
+    // Second drop after take is a no-op — safe for execute()'s outer finally belt-and-suspenders.
+    dropPreHeldExecutorSlot("FN-LEGACY-TAKE", sem);
+    expect(sem.activeCount).toBe(0);
+    clearPreHeldExecutorSlotsForTests();
+  });
+
+  /*
+  FNXC:GlobalConcurrencyControls 2026-07-15-03:50:
+  Scheduler hold/release: tryAcquire + register before the column move; if the move fails the
+  prep release() lambda must dropPreHeldExecutorSlot so activeCount returns to zero. Without
+  that cleanup a failed dispatch permanently shrinks global capacity.
+  */
+  it("releases pre-held semaphore when scheduler dispatch prep release() runs (move failure)", () => {
+    clearPreHeldExecutorSlotsForTests();
+    const sem = new AgentSemaphore(2);
+    expect(sem.tryAcquire()).toBe(true);
+    registerPreHeldExecutorSlot("FN-MOVE-FAIL");
+    expect(hasPreHeldExecutorSlot("FN-MOVE-FAIL")).toBe(true);
+    expect(sem.activeCount).toBe(1);
+
+    // Mirrors scheduler.ts prep.release() after a failed/aborted hold release.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      dropPreHeldExecutorSlot("FN-MOVE-FAIL", sem);
+    };
+    release();
+    release(); // idempotent
+
+    expect(hasPreHeldExecutorSlot("FN-MOVE-FAIL")).toBe(false);
+    expect(sem.activeCount).toBe(0);
+    clearPreHeldExecutorSlotsForTests();
   });
 
   it("recovers idle semaphore leaks only after a stable persisted-idle window", async () => {
