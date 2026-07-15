@@ -399,6 +399,12 @@ export async function startServerAsNonAdminUser(
         // those orphans holding the data-dir files locked (EBUSY cleanup).
         spawnSync("taskkill", ["/pid", String(pgPid), "/f", "/t"], { encoding: "utf8" });
       }
+      // FNXC:WindowsDesktopPackaging 2026-07-15-01:30:
+      // The staged postgres.exe is the only one on the machine (embedded mode);
+      // kill by image name to catch auxiliary processes (bgwriter, checkpoint,
+      // walwriter, ...) that survive a postmaster tree-kill across the separate
+      // logon session. Best-effort (nonzero if none running) — status ignored.
+      spawnSync("taskkill", ["/im", "postgres.exe", "/f", "/t"], { encoding: "utf8" });
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
       // Give the OS a moment to release the postgres file locks before the
       // caller's cleanup rmSync races in.
