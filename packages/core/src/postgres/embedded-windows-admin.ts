@@ -394,7 +394,10 @@ export async function startServerAsNonAdminUser(
       // postgres keeps its log locked and the test's rmSync cleanup hits EBUSY.
       const pgPid = readPostgresPid(opts.dataDir);
       if (pgPid) {
-        spawnSync("taskkill", ["/pid", String(pgPid), "/f"], { encoding: "utf8" });
+        // /t kills the postmaster AND its auxiliary children (bgwriter,
+        // checkpointer, walwriter, ...) — killing only the postmaster leaves
+        // those orphans holding the data-dir files locked (EBUSY cleanup).
+        spawnSync("taskkill", ["/pid", String(pgPid), "/f", "/t"], { encoding: "utf8" });
       }
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
       // Give the OS a moment to release the postgres file locks before the
