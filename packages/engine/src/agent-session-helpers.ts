@@ -10,12 +10,13 @@
 import type { AgentRuntimeOptions } from "./agent-runtime.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { PluginRunner } from "./plugin-runner.js";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   GROK_CLI_PROVIDER_ID,
   isGrokApiKeyFusionVisible,
   isTestModeActive,
   resolveExecutionSettingsModel,
+  resolveMergerSettingsModel,
   resolvePhaseThinkingLevel,
   resolveProjectDefaultModel,
   resolveTaskExecutionModel,
@@ -28,13 +29,74 @@ import {
 } from "@fusion/core";
 import { resolveRuntime, buildRuntimeResolutionContext, isMockProviderId, type SessionPurpose } from "./runtime-resolution.js";
 import { createLogger } from "./logger.js";
-import { promptWithFallback, describeModel } from "./pi.js";
+import {
+  promptWithFallback,
+  describeModel,
+  wrapToolsWithActionGate,
+  wrapToolsWithPermanentAgentGating,
+  wrapToolsWithRtkRewrite,
+} from "./pi.js";
 import type { RunAuditor } from "./run-audit.js";
 import { MockAgentRuntime } from "./providers/mock-provider.js";
 
 /** Logger for agent session helpers */
 const sessionLog = createLogger("agent-session");
 const mockRuntimeSingleton = new MockAgentRuntime();
+
+/*
+FNXC:GrokAcp 2026-07-12-06:30:
+Non-pi plugin runtimes (Grok ACP, Hermes, OpenClaw, …) receive `customTools` as
+engine-injected `fn_*` ToolDefinitions and dispatch them via in-process execute
+(or a loopback MCP bridge). Pi applies RTK rewrite → permanent-agent gating →
+action gate inside `createFnAgent` before tools reach a session; plugin runtimes
+previously skipped that chain and executed raw `execute` closures (Greptile P1
+on PR #2011). Apply the same policy wrappers once here for every non-pi runtime
+before `runtime.createSession`, so Grok/other CLI bridges cannot bypass gate
+policy. Do not wrap for `pi` — `createFnAgent` still owns that chain and must
+not double-wrap. Boundary jailing stays pi-local (needs worktree paths derived
+inside createFnAgent).
+*/
+
+/** Runtime ids that already wrap customTools inside their own createSession path. */
+const RUNTIMES_WITH_INTERNAL_TOOL_GATING = new Set(["pi"]);
+
+/**
+ * Apply Fusion tool policy wrappers for plugin runtimes that do not wrap tools
+ * themselves. Mirrors the customTools portion of the pi createFnAgent chain.
+ *
+ * FNXC:GrokAcp 2026-07-12-06:35:
+ * Missing `actionGateContext` / `permanentAgentGating` is intentionally fail-open
+ * and matches `wrapToolsWithActionGate` / pi `createFnAgent`: when the caller
+ * omits gate context (dashboard chat, room responders, triage), tools stay
+ * ungated coordination primitives. Executor/heartbeat permanent-agent lanes
+ * pass gate context and get full policy. Do not invent a deny-all default here —
+ * that would break chat workflow tools on Grok while pi still allows them.
+ * Emit a content-free warn (tool count + which layers were applied) so missing
+ * context on a non-pi path is visible without logging tool names/args.
+ */
+export function wrapCustomToolsForPluginRuntime(
+  tools: ToolDefinition[] | undefined,
+  options: Pick<AgentRuntimeOptions, "actionGateContext" | "permanentAgentGating">,
+  logContext?: { runtimeId: string; sessionPurpose: string },
+): ToolDefinition[] | undefined {
+  if (!tools || tools.length === 0) {
+    return tools;
+  }
+  const hasActionGate = Boolean(options.actionGateContext) && options.actionGateContext?.isEphemeral !== true;
+  const hasPermanentGate = Boolean(options.permanentAgentGating);
+  if (!hasActionGate && !hasPermanentGate && logContext) {
+    sessionLog.warn(
+      `[${logContext.sessionPurpose}] non-pi runtime "${logContext.runtimeId}" received ${tools.length} customTool(s) without actionGateContext/permanentAgentGating; wrappers apply RTK rewrite only (matches pi fail-open when gate context is omitted)`,
+    );
+  }
+  const withRtk = wrapToolsWithRtkRewrite(tools);
+  const withPermanent = wrapToolsWithPermanentAgentGating(withRtk, options.permanentAgentGating);
+  return wrapToolsWithActionGate(withPermanent, options.actionGateContext);
+}
+
+function shouldWrapCustomToolsForRuntime(runtimeId: string): boolean {
+  return !RUNTIMES_WITH_INTERNAL_TOOL_GATING.has(runtimeId);
+}
 
 function extractSkillNamesFromSelection(skillSelection: SkillSelectionContext | undefined): string[] {
   if (!skillSelection || !Array.isArray(skillSelection.requestedSkillNames)) {
@@ -196,15 +258,22 @@ export function resolveTitleSummarizerThinkingLevel(settings: Partial<Settings> 
 
 /**
  * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
- * `resolveMergerSessionModel` intentionally resolves the merger's model from the
- * project/global DEFAULT lane, not the title-summarizer lane. The thinking level
- * threaded into merger sessions (mutating merge agent, stash-conflict resolver,
- * commit agent, PR-response agent) must follow that same default-lane precedence
- * so a `titleSummarizerThinkingLevel` override (meant only for title/commit-message
- * summarization sessions) does not leak into full merge-agent runs.
+ * Merger thinking must not inherit title-summarizer thinking (commit-message
+ * summarization is a different session purpose).
+ *
+ * FNXC:Settings-MergerModel 2026-07-13-07:52:
+ * After the merger model lane became configurable under Global/Project Models,
+ * thinking follows the same precedence as other dedicated lanes: project merger
+ * thinking → global merger thinking → project default thinking override → global
+ * default thinking. Unset at every level preserves prior default-only behavior.
  */
 export function resolveMergerThinkingLevel(settings: Partial<Settings> | undefined): string | undefined {
-  return firstThinkingLevel(settings?.defaultThinkingLevelOverride, settings?.defaultThinkingLevel);
+  return firstThinkingLevel(
+    settings?.mergerThinkingLevel,
+    settings?.mergerGlobalThinkingLevel,
+    settings?.defaultThinkingLevelOverride,
+    settings?.defaultThinkingLevel,
+  );
 }
 
 /**
@@ -428,6 +497,19 @@ export function resolveImplicitPlanningFallbackModel(
   // (hasDistinctFallback requires the models to differ). Leave both fields
   // undefined so the existing terminal behavior is preserved cleanly.
   if (resolvedModel.provider === primaryProvider && resolvedModel.modelId === primaryModelId) {
+    /*
+    FNXC:TriageModelFallback 2026-07-14-15:54:
+    A project default override can also become the resolved planning primary. When that makes the first implicit fallback a self-swap, try the distinct inherited global default pair before declaring that no fallback exists. This preserves the one-swap ceiling while allowing an authenticated global provider to recover a project-override auth failure.
+    */
+    const inheritedGlobalProvider = settings?.defaultProvider;
+    const inheritedGlobalModelId = settings?.defaultModelId;
+    if (
+      inheritedGlobalProvider
+      && inheritedGlobalModelId
+      && (inheritedGlobalProvider !== primaryProvider || inheritedGlobalModelId !== primaryModelId)
+    ) {
+      return { provider: inheritedGlobalProvider, modelId: inheritedGlobalModelId };
+    }
     return { provider: undefined, modelId: undefined };
   }
 
@@ -477,7 +559,14 @@ export function resolveHeartbeatSessionModels(
   }
 
   const executionSettingsModel = resolveExecutionSettingsModel(settings);
-  const resolvedModel = pickSettingsThenRuntimeModel(executionSettingsModel, assignedAgentRuntimeConfig);
+  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+  /*
+  FNXC:AgentHeartbeat 2026-07-14-16:13:
+  Durable-agent heartbeats must use the complete model assigned to that agent. Shared project execution defaults are only a fallback for an absent or incomplete assignment; otherwise one broken project override can park every heterogeneous agent under the same unrelated provider.
+  */
+  const resolvedModel = hasCompleteRuntimeModel(assignedRuntimeModel)
+    ? assignedRuntimeModel
+    : pickSettingsThenRuntimeModel(executionSettingsModel, assignedAgentRuntimeConfig);
 
   return {
     defaultProvider: resolvedModel.provider,
@@ -498,11 +587,14 @@ export function resolveMergerSessionModel(
     };
   }
 
-  // Merger intentionally uses the default lane rather than execution/validator
-  // lanes. Validator-specific callers resolve `resolveValidatorSettingsModel`
-  // before falling back here; generic merger work uses project/global defaults.
-  const defaultModel = resolveProjectDefaultModel(settings);
-  return pickSettingsThenRuntimeModel(defaultModel, assignedAgentRuntimeConfig);
+  /*
+  FNXC:Settings-MergerModel 2026-07-13-07:52:
+  Merger sessions use the dedicated merger settings lane (project → global → default),
+  not execution/planning/validator. Session fallback still uses the shared global
+  fallbackProvider/fallbackModelId pair at createResolvedAgentSession call sites.
+  */
+  const mergerModel = resolveMergerSettingsModel(settings);
+  return pickSettingsThenRuntimeModel(mergerModel, assignedAgentRuntimeConfig);
 }
 
 /**
@@ -584,7 +676,22 @@ export async function createResolvedAgentSession(
   // latest sync point (just before LLM session instantiation) rather than
   // here, before the runtime's own awaited setup work runs. See
   // AgentRuntimeOptions.beforeSpawnSession for the contract.
-  const result = await resolved.runtime.createSession(effectiveRuntimeOptionsWithModel);
+  //
+  // FNXC:GrokAcp 2026-07-12-06:30:
+  // Gate customTools for non-pi runtimes before createSession so ACP/CLI
+  // bridges (e.g. Grok loopback MCP) execute already-gated closures.
+  const sessionCreateOptions: AgentRuntimeOptions =
+    shouldWrapCustomToolsForRuntime(resolved.runtimeId)
+      ? {
+          ...effectiveRuntimeOptionsWithModel,
+          customTools: wrapCustomToolsForPluginRuntime(
+            effectiveRuntimeOptionsWithModel.customTools,
+            effectiveRuntimeOptionsWithModel,
+            { runtimeId: resolved.runtimeId, sessionPurpose },
+          ),
+        }
+      : effectiveRuntimeOptionsWithModel;
+  const result = await resolved.runtime.createSession(sessionCreateOptions);
 
   const testModeActive = settings ? isTestModeActive(settings) : false;
   const mockProviderActive = isMockProviderId(runtimeOptions.defaultProvider);

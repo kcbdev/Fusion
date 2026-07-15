@@ -434,6 +434,10 @@ export type DatabaseMutationType =
   | "task:steering-comment:add"
   | "task:assign"
   | "task:checkout"
+  | "agent:auto-recover-error-state"
+  | "agent:reset-error-state-on-startup"
+  | "agent:error-retry-exhausted"
+  | "agent:error-parked-unrecoverable"
   | "task:release"
   | "task:pause"
   | "task:unpause"
@@ -548,6 +552,12 @@ export type DatabaseMutationType =
   | "task:stuck-no-progress-churn-terminalized"
   /** Metadata: { taskId, cycleCount, windowMs, lastMoveSource } */
   | "task:dispatch-oscillation-terminalized"
+  /** Metadata: { taskId, cycleCount, maxCycles, progressSignature, failureValue } */
+  | "task:execution-dispatch-loop-terminalized"
+  /** Metadata: { taskId, blocker, source, priorColumn, priorStatus } */
+  | "task:completed-blocked-parked"
+  /** Metadata: { taskId, priorColumn, priorStatus, source } */
+  | "task:completed-blocked-advanced"
   | "task:auto-recover-starved-refinement"
   /** Metadata: { rawDiffFileCount: number; attributedFileCount: number; foreignCommitCount: number; foreignCommitShas: string[]; source: string } */
   | "task:worktree-contamination-detected"

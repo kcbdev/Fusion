@@ -8,6 +8,7 @@ import {
   resolveHeartbeatSessionModels,
   resolveImplicitPlanningFallbackModel,
   resolveMergerSessionModel,
+  resolveMergerThinkingLevel,
   resolveMergerFallbackThinkingLevel,
   resolvePlanningSessionModel,
   resolvePlanningThinkingLevel,
@@ -65,6 +66,21 @@ describe("resolve model-lane thinking levels", () => {
     })).toBe("medium");
   });
 
+  it("documents caller precedence for per-task planning and validator thinking overrides", () => {
+    const settings = { planningThinkingLevel: "minimal", validatorThinkingLevel: "low", defaultThinkingLevel: "off" } as const;
+    const task = { thinkingLevel: "medium", planningThinkingLevel: "high", validatorThinkingLevel: "xhigh" } as const;
+
+    expect(resolvePlanningThinkingLevel(settings, task.planningThinkingLevel ?? task.thinkingLevel)).toBe("high");
+    expect(resolveValidatorThinkingLevel(task.validatorThinkingLevel ?? task.thinkingLevel, settings)).toBe("xhigh");
+
+    const legacyTask = { thinkingLevel: "medium", planningThinkingLevel: undefined, validatorThinkingLevel: undefined } as const;
+    expect(resolvePlanningThinkingLevel(settings, legacyTask.planningThinkingLevel ?? legacyTask.thinkingLevel)).toBe("medium");
+    expect(resolveValidatorThinkingLevel(legacyTask.validatorThinkingLevel ?? legacyTask.thinkingLevel, settings)).toBe("medium");
+
+    const nodeThinkingLevel = "minimal" as const;
+    expect(resolveValidatorThinkingLevel(nodeThinkingLevel ?? task.validatorThinkingLevel ?? task.thinkingLevel, settings)).toBe("minimal");
+  });
+
   it("resolves fallback thinking through fallback key then executor lane then defaults", () => {
     expect(resolveExecutorFallbackThinkingLevel("task", { fallbackThinkingLevel: "high", executionThinkingLevel: "low" })).toBe("high");
     expect(resolveExecutorFallbackThinkingLevel(undefined, { executionThinkingLevel: "minimal", defaultThinkingLevel: "low" })).toBe("minimal");
@@ -96,6 +112,25 @@ describe("resolve model-lane thinking levels", () => {
     expect(resolveMergerFallbackThinkingLevel({ fallbackThinkingLevel: "high", defaultThinkingLevel: "low" })).toBe("high");
     expect(resolveMergerFallbackThinkingLevel({ defaultThinkingLevelOverride: "medium", defaultThinkingLevel: "low" })).toBe("medium");
     expect(resolveMergerFallbackThinkingLevel({ defaultThinkingLevel: "low" })).toBe("low");
+  });
+
+  it("applies project merger thinking > global merger thinking > default thinking for merger sessions", () => {
+    expect(resolveMergerThinkingLevel({
+      mergerThinkingLevel: "xhigh",
+      mergerGlobalThinkingLevel: "high",
+      defaultThinkingLevelOverride: "medium",
+      defaultThinkingLevel: "low",
+    })).toBe("xhigh");
+    expect(resolveMergerThinkingLevel({
+      mergerGlobalThinkingLevel: "high",
+      defaultThinkingLevelOverride: "medium",
+      defaultThinkingLevel: "low",
+    })).toBe("high");
+    expect(resolveMergerThinkingLevel({
+      defaultThinkingLevelOverride: "medium",
+      defaultThinkingLevel: "low",
+    })).toBe("medium");
+    expect(resolveMergerThinkingLevel({ defaultThinkingLevel: "low" })).toBe("low");
   });
 });
 
@@ -194,7 +229,7 @@ describe("resolve session model parity", () => {
     });
   });
 
-  it("does not let a stale complete runtime model mask newer task or settings models", () => {
+  it("does not let a stale complete runtime model mask newer task or settings models outside heartbeat", () => {
     const staleRuntimeConfig = { model: "openai-codex/gpt-5.3-codex" };
 
     expect(resolveExecutorSessionModel("task-provider", "task-model", settings, staleRuntimeConfig)).toEqual({
@@ -213,12 +248,6 @@ describe("resolve session model parity", () => {
       provider: "anthropic",
       modelId: "claude-sonnet-4-5",
     });
-    expect(resolveHeartbeatSessionModels(settings, staleRuntimeConfig)).toEqual({
-      defaultProvider: "openai",
-      defaultModelId: "gpt-4.1",
-      fallbackProvider: undefined,
-      fallbackModelId: undefined,
-    });
     expect(resolveValidatorSessionModel("validator-task-provider", "validator-task-model", settings, staleRuntimeConfig)).toEqual({
       provider: "validator-task-provider",
       modelId: "validator-task-model",
@@ -234,6 +263,23 @@ describe("resolve session model parity", () => {
     expect(resolveMergerSessionModel(settings, staleRuntimeConfig)).toEqual({
       provider: "google",
       modelId: "gemini-2.5-pro",
+    });
+  });
+
+  it("uses the durable agent's complete assigned model for heartbeat instead of shared execution settings", () => {
+    expect(resolveHeartbeatSessionModels(
+      {
+        defaultProviderOverride: "anthropic",
+        defaultModelIdOverride: "claude-sonnet-5",
+        defaultProvider: "openai-codex",
+        defaultModelId: "gpt-5.5",
+      },
+      { modelProvider: "grok-cli", modelId: "grok-4.5", model: "grok-cli/grok-4.5" },
+    )).toEqual({
+      defaultProvider: "grok-cli",
+      defaultModelId: "grok-4.5",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
     });
   });
 
@@ -277,6 +323,36 @@ describe("resolve session model parity", () => {
       defaultProvider: "anthropic",
       defaultModelId: "claude-sonnet-4-5",
     }, staleRuntimeConfig)).toEqual({ provider: "anthropic", modelId: "claude-sonnet-4-5" });
+  });
+
+  it("prefers the dedicated merger lane over default and other AI role lanes", () => {
+    const staleRuntimeConfig = { model: "stale-provider/stale-model" };
+
+    expect(resolveMergerSessionModel({
+      mergerProvider: "merger-project-provider",
+      mergerModelId: "merger-project-model",
+      mergerGlobalProvider: "merger-global-provider",
+      mergerGlobalModelId: "merger-global-model",
+      executionProvider: "openai",
+      executionModelId: "gpt-4.1",
+      defaultProviderOverride: "google",
+      defaultModelIdOverride: "gemini-2.5-pro",
+    }, staleRuntimeConfig)).toEqual({
+      provider: "merger-project-provider",
+      modelId: "merger-project-model",
+    });
+
+    expect(resolveMergerSessionModel({
+      mergerGlobalProvider: "merger-global-provider",
+      mergerGlobalModelId: "merger-global-model",
+      planningProvider: "anthropic",
+      planningModelId: "claude-sonnet-4-5",
+      defaultProviderOverride: "google",
+      defaultModelIdOverride: "gemini-2.5-pro",
+    }, staleRuntimeConfig)).toEqual({
+      provider: "merger-global-provider",
+      modelId: "merger-global-model",
+    });
   });
 
   it("uses a complete runtime model only when no lane/task/default model is configured", () => {
@@ -326,7 +402,7 @@ describe("resolve session model parity", () => {
   });
 });
 
-describe("project model override precedence invariant", () => {
+describe("non-heartbeat project model override precedence invariant", () => {
   const staleRuntimeConfig = { model: "stale-provider/stale-model" };
   const partialRuntimeConfigs: Array<Record<string, unknown>> = [
     { modelProvider: "stale-provider" },
@@ -364,18 +440,6 @@ describe("project model override precedence invariant", () => {
           validatorModelId: "project-validator-model",
         }, runtimeConfig),
       expected: { provider: "project-validator-provider", modelId: "project-validator-model" },
-    },
-    {
-      label: "heartbeat execution lane",
-      settings: { executionProvider: "project-heartbeat-provider", executionModelId: "project-heartbeat-model" },
-      resolve: (runtimeConfig?: Record<string, unknown>) => {
-        const resolved = resolveHeartbeatSessionModels({
-          executionProvider: "project-heartbeat-provider",
-          executionModelId: "project-heartbeat-model",
-        }, runtimeConfig);
-        return { provider: resolved.defaultProvider, modelId: resolved.defaultModelId };
-      },
-      expected: { provider: "project-heartbeat-provider", modelId: "project-heartbeat-model" },
     },
     {
       label: "merger default lane",
@@ -622,6 +686,127 @@ describe("createResolvedAgentSession", () => {
 
     warnSpy.mockRestore();
   });
+
+  /*
+  FNXC:GrokAcp 2026-07-12-06:30:
+  PR #2011 Greptile P1: non-pi runtimes must receive action-gated customTools so
+  Grok ACP loopback execute cannot bypass AgentPermissionPolicy.
+  */
+  it("wraps customTools with action gate for non-pi runtimes before createSession", async () => {
+    const mockSession = { prompt: vi.fn() } as any;
+    const createSessionMock = vi.fn().mockResolvedValue({ session: mockSession });
+    resolveRuntimeMock.mockResolvedValue({
+      runtime: {
+        id: "grok",
+        name: "Grok Runtime",
+        createSession: createSessionMock,
+        promptWithFallback: vi.fn(),
+        describeModel: vi.fn(() => "grok/default"),
+      },
+      runtimeId: "grok",
+      wasConfigured: true,
+    });
+
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const rawTool = {
+      name: "fn_workflow_delete",
+      label: "Delete Workflow",
+      description: "",
+      parameters: {},
+      execute,
+    };
+    const lockedDownPolicy = {
+      presetId: "locked-down",
+      rules: {
+        git_write: "block",
+        file_write_delete: "block",
+        command_execution: "block",
+        network_api: "block",
+        task_agent_mutation: "block",
+        review_gate_bypass: "block",
+        file_scope: "block",
+      },
+    };
+
+    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
+    await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      cwd: "/tmp/project",
+      systemPrompt: "system",
+      customTools: [rawTool as any],
+      actionGateContext: {
+        agentId: "agent-1",
+        agentName: "Agent",
+        isEphemeral: false,
+        taskId: "FN-1",
+        permissionPolicy: lockedDownPolicy as any,
+        createApprovalRequest: vi.fn(),
+        findApprovalByDedupeKey: vi.fn().mockResolvedValue(null),
+      } as any,
+    });
+
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+    const passedTools = createSessionMock.mock.calls[0][0].customTools as Array<{
+      name: string;
+      execute: (...args: unknown[]) => Promise<unknown>;
+    }>;
+    expect(passedTools).toHaveLength(1);
+    expect(passedTools[0].name).toBe("fn_workflow_delete");
+    expect(passedTools[0].execute).not.toBe(execute);
+    // Gated execute must not call the raw tool when policy blocks.
+    const blocked = await passedTools[0].execute("call-1", { workflow_id: "WF-1" });
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        isError: true,
+      }),
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("does not pre-wrap customTools for the pi runtime (createFnAgent owns the chain)", async () => {
+    const mockSession = { prompt: vi.fn() } as any;
+    const createSessionMock = vi.fn().mockResolvedValue({ session: mockSession });
+    resolveRuntimeMock.mockResolvedValue({
+      runtime: {
+        id: "pi",
+        name: "Default PI Runtime",
+        createSession: createSessionMock,
+        promptWithFallback: vi.fn(),
+        describeModel: vi.fn(() => "mock/model"),
+      },
+      runtimeId: "pi",
+      wasConfigured: false,
+    });
+
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const rawTool = {
+      name: "fn_workflow_delete",
+      label: "Delete",
+      description: "",
+      parameters: {},
+      execute,
+    };
+
+    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
+    await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      cwd: "/tmp/project",
+      systemPrompt: "system",
+      customTools: [rawTool as any],
+      actionGateContext: {
+        agentId: "agent-1",
+        agentName: "Agent",
+        isEphemeral: false,
+        taskId: "FN-1",
+        permissionPolicy: { defaultDisposition: "block", rules: {} } as any,
+        createApprovalRequest: vi.fn(),
+        findApprovalByDedupeKey: vi.fn(),
+      } as any,
+    });
+
+    const passedTools = createSessionMock.mock.calls[0][0].customTools;
+    expect(passedTools[0]).toBe(rawTool);
+  });
 });
 
 describe("resolveMergerSessionModel", () => {
@@ -738,6 +923,24 @@ describe("resolveImplicitPlanningFallbackModel (FN-7719)", () => {
     ).toEqual({
       provider: undefined,
       modelId: undefined,
+    });
+  });
+
+  it("uses the inherited global default when a project override equals the planning primary", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel(
+        {
+          defaultProviderOverride: "anthropic",
+          defaultModelIdOverride: "claude-sonnet-5",
+          defaultProvider: "openai-codex",
+          defaultModelId: "gpt-5.5",
+        },
+        "anthropic",
+        "claude-sonnet-5",
+      ),
+    ).toEqual({
+      provider: "openai-codex",
+      modelId: "gpt-5.5",
     });
   });
 

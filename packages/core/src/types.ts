@@ -2452,6 +2452,14 @@ export interface Task {
    *  Incremented by self-healing for resume-limbo detection and reset when
    *  progress is observed or recovery escalates to a fresh todo dispatch. */
   resumeLimboCount?: number;
+  /**
+   * FNXC:WorkflowLifecycle 2026-07-12-00:00:
+   * FN-7863 bounds execute-node self-requeue loops by counting consecutive requeues
+   * that preserve the same execution-progress signature. Reset this counter on real
+   * progress, forward moves, and manual retry; the executor caps it before writing
+   * terminal status:"failed" so committed work and step progress remain visible.
+   */
+  executeRequeueLoopCount?: number;
   /** Bounded auto-retry attempts for transient workflow-graph failures observed
    *  immediately after engine-restart or unpause resume. Reset by manual retry
    *  and by successful forward progress; capped by the executor before terminal
@@ -2463,6 +2471,9 @@ export interface Task {
   /** Compact execution-progress snapshot captured at the last reclaim/unpause
    *  attempt (current step + step statuses) for resume-limbo detection. */
   resumeLimboStepSignature?: string;
+  /** Compact execution-progress snapshot captured at the last execute-node
+   *  self-requeue (current step + step statuses) for FN-7863 loop detection. */
+  executeRequeueLoopSignature?: string;
   /** Number of times workflow remediation has auto-revived this task after
    *  failed pre-merge review feedback. Incremented each time the engine sends the
    *  task back with failure feedback injected. Capped only when the workflow step
@@ -2470,6 +2481,16 @@ export interface Task {
    *  Review defaults to unbounded recovery so ordinary REVISE feedback does not
    *  terminal-fail the task. */
   postReviewFixCount?: number;
+  /** Number of consecutive triage pre-execution Plan Review REVISE replans this task
+   *  has consumed. Incremented by the triage Plan Review gate
+   *  (packages/engine/src/triage.ts runPlanReviewBeforeExecution) each time it blocks
+   *  execution with a REVISE verdict and routes the task back to `needs-replan`. When it
+   *  reaches `PLAN_REVIEW_GATE_REPLAN_CAP` the task is escalated to `awaiting-approval`
+   *  (awaitingApprovalReason `plan-review-replan-cap`) instead of replanning again, so a
+   *  planner/reviewer disagreement can never loop forever. Reset when the gate passes
+   *  (APPROVE) or on a manual retry. Distinct from `postReviewFixCount`, which bounds the
+   *  executor graph's post-merge/advisory optional-step REVISE budget. */
+  planReviewReplanCount?: number;
   /** Number of bounded recovery retry attempts for transient executor/triage failures.
    *  Distinct from `mergeRetries` (merge-conflict-specific). Incremented by the
    *  recovery-policy module on each recoverable failure; cleared when work restarts
@@ -2549,7 +2570,7 @@ export interface Task {
    * any such hold as an ordinary manual plan-approval hold (Approve/Reject Plan render
    * normally). Undefined means either no hold or a manual-approval hold.
    */
-  awaitingApprovalReason?: "release-authorization";
+  awaitingApprovalReason?: "release-authorization" | "plan-review-replan-cap";
   /*
    * FNXC:PlanApproval 2026-07-04-22:41:
    * FN-7569 — records the computePlanApprovalFingerprint (packages/core/src/plan-approval.ts)
@@ -2565,6 +2586,12 @@ export interface Task {
   approvedPlanFingerprint?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-13-00:27:
+   * Validator and planning task fields are optional per-lane reasoning-effort overrides. When unset, those lanes inherit the shared task `thinkingLevel`, then existing settings and lane fallbacks.
+   */
+  validatorThinkingLevel?: ThinkingLevel;
+  planningThinkingLevel?: ThinkingLevel;
   /** Execution mode for task implementation.
    *  - "standard": Full execution with complete review workflow (default)
    *  - "fast": Expedited execution with minimal overhead for simple tasks
@@ -2839,6 +2866,12 @@ export interface TaskCreateInput {
   planningModelId?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-13-00:27:
+   * Validator and planning task fields are optional per-lane reasoning-effort overrides. When unset, those lanes inherit the shared task `thinkingLevel`, then existing settings and lane fallbacks.
+   */
+  validatorThinkingLevel?: ThinkingLevel;
+  planningThinkingLevel?: ThinkingLevel;
   /** When true, trigger AI title summarization if description is long and no title provided */
   summarize?: boolean;
   /** Mission ID to link this task to (for mission hierarchy) */
@@ -2874,21 +2907,7 @@ export interface TaskCreateInput {
 
 // ── Todo List Types ──────────────────────────────────────────────────────
 
-export interface MeshReplicatedTaskCreatePayload {
-  replicationVersion: 1;
-  reservationId: string;
-  taskId: string;
-  sourceNodeId: string;
-  createdAt: string;
-  updatedAt: string;
-  prompt: string;
-  input: TaskCreateInput;
-}
 
-export interface MeshReplicatedTaskApplyResult {
-  task: Task;
-  applied: boolean;
-}
 
 /** Canonical version for shared-state snapshots exchanged across mesh nodes. */
 export const SHARED_STATE_SNAPSHOT_VERSION = 1 as const;
@@ -3456,6 +3475,18 @@ export interface GlobalSettings {
    * Operators need a global machine-local Grok CLI executable override when PATH discovery resolves the wrong `grok`/`.cmd`/`.bat` shim. Blank/undefined means Fusion must keep auto-detecting through PATH candidates.
    */
   grokCliBinaryPath?: string;
+  /**
+   * FNXC:OmpAcp 2026-07-13-22:50:
+   * When true, enable Oh My Pi (omp) CLI model-provider support (provider ID: `omp-cli`)
+   * through an operator-local `omp` install driven over ACP (`omp acp`).
+   */
+  useOmpCli?: boolean;
+  /**
+   * FNXC:OmpAcp 2026-07-13-22:50:
+   * Global machine-local OMP CLI executable override when PATH discovery resolves the wrong
+   * `omp`/`.cmd`/`.bat` shim. Blank/undefined means PATH auto-detection.
+   */
+  ompCliBinaryPath?: string;
   /** Global baseline AI model provider for task execution (executor agent).
    *  This is the global lane that project-level `executionProvider` can override.
    *  Must be set together with `executionGlobalModelId`. Falls back to
@@ -3488,6 +3519,17 @@ export interface GlobalSettings {
   /** Global baseline AI model ID for title summarization.
    *  Must be set together with `titleSummarizerGlobalProvider`. */
   titleSummarizerGlobalModelId?: string;
+  /*
+  FNXC:Settings-MergerModel 2026-07-13-07:52:
+  Merger AI sessions (conflict resolution, clean-room merge, stash-conflict, PR-response helpers, merge commit agent) need a dedicated global baseline lane so operators can pin a merge-capable model without forcing the same choice onto executor/planner/reviewer. Project `mergerProvider`/`mergerModelId` override this pair; unset falls through to project/global default.
+  */
+  /** Global baseline AI model provider for merger agent sessions.
+   *  Must be set together with `mergerGlobalModelId`. Falls back to
+   *  `defaultProvider`/`defaultModelId` when undefined. */
+  mergerGlobalProvider?: string;
+  /** Global baseline AI model ID for merger agent sessions.
+   *  Must be set together with `mergerGlobalProvider`. */
+  mergerGlobalModelId?: string;
   /** Optional global execution-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
   executionGlobalThinkingLevel?: ThinkingLevel;
   /** Optional global planning-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
@@ -3496,6 +3538,8 @@ export interface GlobalSettings {
   validatorGlobalThinkingLevel?: ThinkingLevel;
   /** Optional global summarization-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
   titleSummarizerGlobalThinkingLevel?: ThinkingLevel;
+  /** Optional global merger-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  mergerGlobalThinkingLevel?: ThinkingLevel;
   /** The daemon authentication token (format: fn_<32 hex chars>).
    *  Used for authenticating CLI clients to the daemon server. */
   daemonToken?: string;
@@ -4023,6 +4067,18 @@ export interface ProjectSettings {
    */
   openMobileTasksInPopup?: boolean;
   /**
+   * When true, open task-detail popups render only on the Board/List view where they were opened. Default: false.
+   *
+   * FNXC:TaskPopupViewGating 2026-07-13-00:00:
+   * This project-scoped setting is default-off so currently opened task-detail FloatingWindows remain visible across all main-content views unless operators opt in. When true, open task-detail popups attach to the Board/List view where they were opened; popup state is preserved across view switches and never cleared, so returning to that view restores the same popups and persisted position.
+   */
+  taskPopupsBoardListOnly?: boolean;
+  /**
+   * FNXC:TaskCardCostBadge 2026-07-11-12:15:
+   * Default-off project setting that lets operators opt board cards into showing derived read-time task cost next to the execution-time badge. Missing/false preserves existing card density and no badge shell renders unless a task has positive token usage.
+   */
+  showCostBadgeOnCards?: boolean;
+  /**
    * FNXC:TaskDetailActivityFirst 2026-06-30-23:59:
    * Default-off keeps task details Activity-first so omitted non-done opens land on the legacy `chat` Activity → Live surface. Operators can set true to restore Chat-first ordering/default while explicit Activity/Chat/Logs deep links remain stable.
    */
@@ -4106,6 +4162,21 @@ export interface ProjectSettings {
    * Optional project default-lane thinking override used when a task does not set its own thinking level.
    */
   defaultThinkingLevelOverride?: ThinkingLevel;
+  /**
+   * FNXC:ChatModels 2026-07-12-20:45:
+   * Projects can pin a default Direct-chat target as either a model pair with optional thinking level or a durable agent, then choose whether New Chat prompts with that default preselected or creates the session immediately.
+   */
+  chatNewSessionMode?: "prompt" | "always-default";
+  /** Which configured default target kind New Chat should use or preselect. */
+  chatDefaultKind?: "model" | "agent";
+  /** Durable agent id used when `chatDefaultKind === "agent"`. */
+  chatDefaultAgentId?: string;
+  /** Model provider used when `chatDefaultKind === "model"`; must be paired with `chatDefaultModelId`. */
+  chatDefaultModelProvider?: string;
+  /** Model id used when `chatDefaultKind === "model"`; must be paired with `chatDefaultModelProvider`. */
+  chatDefaultModelId?: string;
+  /** Optional thinking-level override for the model chat default; undefined inherits the resolved project/global default. */
+  chatDefaultThinkingLevel?: ThinkingLevel;
   /** Project-level AI model provider for task execution (executor agent).
    *  This is the execution lane that overrides the global `executionGlobalProvider`.
    *  Must be set together with `executionModelId`. Falls back to
@@ -4645,6 +4716,19 @@ export interface ProjectSettings {
   titleSummarizerModelId?: string;
   /** Optional project summarization-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
   titleSummarizerThinkingLevel?: ThinkingLevel;
+  /*
+  FNXC:Settings-MergerModel 2026-07-13-07:52:
+  Project-scoped merger lane overrides the global merger baseline for conflict resolution and related merge-agent sessions. Both provider and model id must be set together; partial pairs are ignored and fall through. Unset inherits global merger lane then project/global default.
+  */
+  /** Project AI model provider for merger agent sessions.
+   *  Must be set together with `mergerModelId`. Falls back to
+   *  `mergerGlobalProvider`/`mergerGlobalModelId`, then project/global default. */
+  mergerProvider?: string;
+  /** Project AI model ID for merger agent sessions.
+   *  Must be set together with `mergerProvider`. */
+  mergerModelId?: string;
+  /** Optional project merger-lane thinking override. Inherits through global merger thinking then default thinking when unset. */
+  mergerThinkingLevel?: ThinkingLevel;
   /** Fallback model provider for title summarization. When unset, falls back to
    *  planning fallback, then global fallback. Must be set together with
    *  `titleSummarizerFallbackModelId`. */
@@ -4808,6 +4892,30 @@ export interface ProjectSettings {
    *  per-task JSONL files — see agentLogFileRetentionDays. Default: 30. Set 0
    *  to disable pruning. */
   operationalLogRetentionDays?: number;
+  /*
+  FNXC:PostgresMigrationBanner 2026-07-12:
+  Written by the startup factory after the first-boot SQLite → PostgreSQL
+  auto-migration succeeds, so the dashboard can show a one-time banner telling
+  the operator their data was migrated and the original SQLite files were
+  kept as backups. Dismissing the banner sets dismissed: true (the notice is
+  retained for support/audit rather than deleted). Inbox delivery has a
+  separate top-level marker so writing it cannot revert a concurrent banner
+  dismissal. null/absent = no migration happened on this project.
+  */
+  sqliteMigrationNotice?: {
+    /** ISO timestamp of the auto-migration. */
+    migratedAt: string;
+    /** Total rows imported across all tables. */
+    migratedRows: number;
+    /** Number of tables imported. */
+    tables: number;
+    /** Absolute paths of the original SQLite files kept as backups. */
+    sqliteBackups: string[];
+    /** True once the operator dismissed the banner. */
+    dismissed?: boolean;
+  } | null;
+  /** ISO timestamp after the one-time post-migration system inbox message was durably inserted. */
+  postgresMigrationInboxMessageSentAt?: string;
   /** Number of days to retain per-task agent-log JSONL files for soft-deleted
    *  and archived tasks. Only affects tasks that are no longer active. Entries
    *  older than this window are removed from the JSONL file during periodic
@@ -5449,22 +5557,14 @@ export interface MeshDegradedReadState {
 }
 
 export interface SharedMeshStatePayload {
-  taskMetadata?: SnapshotBase & { payload: { tasks: Task[] } };
-  missionHierarchy?: SnapshotBase & {
-    payload: {
-      missions: import("./mission-types.js").Mission[];
-      milestones: import("./mission-types.js").Milestone[];
-      slices: import("./mission-types.js").Slice[];
-      features: import("./mission-types.js").MissionFeature[];
-      missionEvents: import("./mission-types.js").MissionEvent[];
-      assertions: import("./mission-types.js").MissionContractAssertion[];
-      featureAssertionLinks: import("./mission-types.js").FeatureAssertionLink[];
-    };
-  };
-  agents?: SnapshotBase & { payload: { agents: Agent[]; blockedStates: { agentId: string; state: BlockedStateSnapshot }[] } };
-  agentRuns?: SnapshotBase & { payload: { runs: AgentHeartbeatRun[] } };
-  activityLog?: SnapshotBase & { payload: { entries: ActivityLogEntry[] } };
-  runAudit?: SnapshotBase & { payload: { entries: RunAuditEvent[] } };
+  /*
+  FNXC:PostgresCutover 2026-07-12:
+  Task/state mesh replication is REMOVED — replication is handled at the
+  PostgreSQL level (nodes share the database). Only the settings-adjacent
+  domains remain on the wire: projectSettings (legacy sqlite settings sync)
+  and authMaterial (per-machine auth.json). Receivers ignore any other
+  domain a legacy peer may still send.
+  */
   projectSettings?: SnapshotBase & { payload: { global: GlobalSettings; projects?: Record<string, ProjectSettings> } };
   authMaterial?: SnapshotBase & { payload: { providerAuth?: Record<string, ProviderAuthEntry> } };
 }
@@ -7175,6 +7275,13 @@ export interface AgentHeartbeatConfig {
   enabled?: boolean;
   /** Whether this agent should auto-claim relevant unowned tasks during no-task heartbeats (default: true when unset). */
   autoClaimRelevantTasks?: boolean;
+  /**
+   * FNXC:AgentRouting 2026-07-12-11:20:
+   * Per-agent task-routing eligibility (GitHub issue Runfusion/Fusion#2015). "auto" (default) = current behavior;
+   * "explicit-only" = never auto-assigned/auto-claimed but accepts explicit delegation; "none" = never bound to
+   * implementation tasks by ANY path, including delegation with override=true. Set "none" on liaison/observer agents.
+   */
+  assignmentPolicy?: "auto" | "explicit-only" | "none";
   /** Number of auto-claim candidates to inject into no-task heartbeat prompts. Default: 5, range: 0-10. */
   autoClaimCandidatesInPrompt?: number;
   /** Per-agent override for opting engineer-role agents into no-task backlog auto-claim. Default: project setting or false. */
@@ -7949,3 +8056,19 @@ export {
 export type { ResolvedModelSelection } from "./model-resolution.js";
 export { resolveResearchSettings } from "./research-settings.js";
 export type { ResolvedResearchSettings } from "./research-settings.js";
+
+/*
+FNXC:WorkflowLifecycleAutofix 2026-07-12-13:00:
+The workflow editor recomputes lifecycle warnings client-side as the graph is
+edited (so the banner clears without a save round-trip) and offers one-click
+fixes that insert the canonical completion-summary node. Both helpers are
+pure (types + string constants only), so they are safe to re-export through
+this browser-safe alias entry.
+*/
+export { analyzeWorkflowLifecycle } from "./workflow-lifecycle-validation.js";
+export type { WorkflowLifecycleWarning, WorkflowLifecycleWarningCode } from "./workflow-lifecycle-validation.js";
+export {
+  completionSummaryNode,
+  isCompletionSummaryNode,
+  COMPLETION_SUMMARY_NODE_ID,
+} from "./builtin-completion-summary-node.js";

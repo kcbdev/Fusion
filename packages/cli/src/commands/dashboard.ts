@@ -1,15 +1,16 @@
 import type { AddressInfo } from "node:net";
 import { join, resolve as pathResolve } from "node:path";
-import { execFile as execFileCb } from "node:child_process";
+import { execFile as execFileCb, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { stat, readdir, readFile as fsReadFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   TaskStore,
   AutomationStore,
   CentralCore,
   AgentStore,
   PluginLoader,
-  PluginStore,
   getTaskMergeBlocker,
   getEnabledPiExtensionPaths,
   isEphemeralAgent,
@@ -26,10 +27,11 @@ import {
   parseWorkflowIr,
   registerBuiltInGrokProvider,
   registerBuiltInZaiProvider,
+  MissionStore,
   type WorkflowIrColumn,
   type TraitFlags,
-  superviseSpawn,
-  type SupervisedChild,
+  createTaskStoreForBackend,
+  FUSION_RESTART_EXIT_CODE,
 } from "@fusion/core";
 import {
   createServer,
@@ -41,6 +43,7 @@ import {
   GitHubClient,
   createSkillsAdapter,
   getCliPackageVersion,
+  isUnresolvedCliPackageVersion,
   getProjectSettingsPath,
   loadTlsCredentialsFromEnv,
   registerGithubTrackingHook,
@@ -770,7 +773,6 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // (they're assigned after initialization, but the variables exist from the start).
   // prefer-const disabled: callbacks close over these identifiers before the
   // single assignment below, which requires `let` even though no reassignment occurs.
-  // eslint-disable-next-line prefer-const
   let store: TaskStore | undefined;
   // eslint-disable-next-line prefer-const
   let agentStore: AgentStore | undefined;
@@ -872,17 +874,49 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // startup/runtime lines flow into the TUI log buffer when interactive.
   ensureProcessDiagnostics(runtimeLogger);
 
-  store = new TaskStore(cwd);
-  const automationStore = new AutomationStore(cwd);
+  // FNXC:BackendFlip 2026-06-26-14:40:
+  // Consult the startup factory to boot a PostgreSQL-backed TaskStore. Post
+  // default-flip: the factory boots embedded PG by default when DATABASE_URL
+  // is unset, external PG when DATABASE_URL is set, and returns null only
+  // when the operator opted out via FUSION_NO_EMBEDDED_PG=1 (legacy SQLite
+  // path). When it returns null, the legacy SQLite path runs unchanged. The
+  // backend shutdown handle is captured so the dashboard teardown path can
+  // release the pool / stop an embedded cluster; it is invoked via the
+  // existing store.close() (which closes the AsyncDataLayer) plus the
+  // dashboardBackendShutdown
+  // registered below for embedded-cluster teardown.
+  let dashboardBackendShutdown: (() => Promise<void>) | undefined;
+  const dashboardBackendBoot = await createTaskStoreForBackend({ rootDir: cwd });
+  if (dashboardBackendBoot) {
+    store = dashboardBackendBoot.taskStore;
+    dashboardBackendShutdown = dashboardBackendBoot.shutdown;
+  } else {
+    store = new TaskStore(cwd);
+  }
+  // FNXC:PhysicalDeleteSqliteClass 2026-06-26-14:05:
+  // Propagate the backend mode (asyncLayer) from the resolved TaskStore so
+  // AutomationStore does not construct a SQLite file under PostgreSQL. The
+  // `?? undefined` coerces `AsyncDataLayer | null` to the optional option
+  // shape used by the other satellite stores.
+  const automationStore = new AutomationStore(cwd, { asyncLayer: store.getAsyncLayer() ?? undefined });
 
   // CentralCore.init() is independent of store inits — start it early so it
   // overlaps with plugin loading and extension resolution instead of running
   // after them.
   const noEngine = opts.noEngine === true;
 
+  // FNXC:CentralCoreBackendMode 2026-06-26-13:20:
+  // CentralCore must receive the same AsyncDataLayer the resolved TaskStore
+  // uses, otherwise registerProject/listProjects fall back to the deleted
+  // SQLite CentralDatabase path and throw "Cannot read properties of null
+  // (reading 'transaction')" in backend mode. This mirrors serve.ts:292 which
+  // passes { asyncLayer: centralBootResult.asyncLayer } to the CentralCore
+  // constructor. Without this, the dashboard boots but project registration
+  // is completely broken (POST /api/projects returns 500), blocking the
+  // kanban board and all dashboard UI flows.
   const centralCoreInitPromise = !noEngine
     ? (async () => {
-        const core = new CentralCore();
+        const core = new CentralCore(undefined, { asyncLayer: store.getAsyncLayer() ?? undefined });
         try { await core.init(); } catch { /* non-fatal — fallback defaults */ }
         return core;
       })()
@@ -914,7 +948,15 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   const pluginStore = store.getPluginStore();
   await phaseTime("pluginStore.init", () => pluginStore.init());
 
-  agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+  // FNXC:PhysicalDeleteSqliteClass 2026-06-26-15:10:
+  // Propagate the backend mode (asyncLayer) from the resolved TaskStore so
+  // AgentStore does not construct a SQLite file under PostgreSQL. Without
+  // this, AgentStore falls into the legacy SQLite path in backend mode and
+  // throws "SQLite Database is not available in backend mode" the first time
+  // any getter touches `this.db`. Mirrors the AutomationStore fix on line ~893
+  // (VAL-CROSS-008 dashboard boot on embedded PostgreSQL). The `?? undefined`
+  // coerces `AsyncDataLayer | null` to the optional option shape.
+  agentStore = new AgentStore({ rootDir: store.getFusionDir(), asyncLayer: store.getAsyncLayer() ?? undefined });
   if (tui) tui.setLoadingStatus(DASHBOARD_STARTUP_STATUS.initializingAgentStore);
   await phaseTime("agentStore.init", () => agentStore!.init());
   // store.watch() is filesystem-watcher setup — no DB schema work, safe to
@@ -944,8 +986,15 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   let tuiRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Per-project task stores for the BoardView's scoped stats. Shared with the
-  // interactiveData wiring below so we don't re-init SQLite on each refresh.
+  // interactiveData wiring below so we don't re-boot a backend on each refresh.
+  // FNXC:PostgresCutover 2026-07-05-12:00: non-cwd project stores must boot
+  // through the PostgreSQL startup factory; bare `new TaskStore` throws in
+  // backend mode (SQLite runtime removed under VAL-REMOVAL-005). Stores are
+  // cached for the dashboard process lifetime and explicitly closed during
+  // dashboard disposal/shutdown.
   const projectStores = new Map<string, TaskStore>();
+  const projectStoreShutdowns = new Map<string, () => Promise<void>>();
+  let projectStoresClosePromise: Promise<void> | undefined;
   async function getProjectStore(projectPath: string): Promise<TaskStore> {
     const cached = projectStores.get(projectPath);
     if (cached) return cached;
@@ -954,11 +1003,34 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       if (!store) throw new Error("cwd TaskStore not yet initialized");
       projectStore = store;
     } else {
-      projectStore = new TaskStore(projectPath);
-      await projectStore.init();
+      const boot = await createTaskStoreForBackend({ rootDir: projectPath });
+      if (boot) {
+        projectStore = boot.taskStore;
+        projectStoreShutdowns.set(projectPath, boot.shutdown);
+      } else {
+        projectStore = new TaskStore(projectPath);
+        await projectStore.init();
+      }
     }
     projectStores.set(projectPath, projectStore);
     return projectStore;
+  }
+  async function closeProjectStores(): Promise<void> {
+    projectStoresClosePromise ??= (async () => {
+      const stores = Array.from(projectStores.entries()).filter(([, projectStore]) => projectStore !== store);
+      projectStores.clear();
+      const shutdowns = new Map(projectStoreShutdowns);
+      projectStoreShutdowns.clear();
+      await Promise.allSettled(stores.map(async ([projectPath, projectStore]) => {
+        const shutdown = shutdowns.get(projectPath);
+        if (shutdown) {
+          await shutdown();
+        } else {
+          await projectStore.close();
+        }
+      }));
+    })();
+    await projectStoresClosePromise;
   }
 
   // ── U11: resolve per-task workflow column flags for the TUI (flag-ON only) ──
@@ -980,7 +1052,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   ): Promise<ResolvedColumnInfo> {
     if (!flagOn) return {};
     try {
-      const selection = projectStore.getTaskWorkflowSelection(task.id);
+      /*
+      FNXC:WorkflowSelection 2026-07-14-17:06:
+      The dashboard TUI must resolve task workflow selections through the asynchronous store API so PostgreSQL-backed projects retain custom workflow column names and trait flags. The synchronous compatibility method has no backend result and is reserved for legacy test doubles.
+      */
+      const selection = await projectStore.getTaskWorkflowSelectionAsync(task.id);
       const workflowId = selection?.workflowId;
       let columns = workflowIrCache.get(workflowId);
       if (columns === undefined) {
@@ -1104,6 +1180,35 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   let shutdownInProgress = false;
 
   /*
+  FNXC:SystemPanel 2026-07-12-11:00:
+  In-place restart support for the dashboard System panel. A restart request
+  flips the shutdown exit code from 0 to FUSION_RESTART_EXIT_CODE so the
+  graceful-shutdown path (including the hard-exit watchdog and second-signal
+  escape hatch) exits with the restart code and a supervising parent
+  (`--supervise` loop or scripts/dev-with-memory.mjs) respawns the process.
+  `requestSelfRestart` is late-bound because createServer options are built
+  before the shutdown closure exists.
+  */
+  let shutdownExitCode = 0;
+  // Coalesce concurrent restart requests: without this, a second /system/restart
+  // arriving inside the 300ms flush delay would return success and schedule a
+  // second shutdown() whose timer hits the shutdownInProgress fast-path and
+  // process.exit(86)s before the first (graceful) teardown finishes.
+  let restartScheduled = false;
+  let requestSelfRestart: ((reason: string) => boolean) | null = null;
+  const systemControlForServer = {
+    supervised: process.env.FUSION_RESTART_SUPERVISED === "1",
+    requestRestart: (reason: string) => (requestSelfRestart ? requestSelfRestart(reason) : false),
+    sourceWorkspaceRoot: resolveFusionSourceWorkspaceRoot(),
+  };
+  // Built once and spread into both createServer() call sites (engine-mode and
+  // UI-only) so the System panel log surface stays a single definition.
+  const systemLogsForServer = {
+    getRecent: (limit?: number) => logSink.getRecentEntries(limit),
+    subscribe: (listener: (entry: import("./dashboard-tui/log-ring-buffer.js").LogEntry) => void) => logSink.subscribeEntries(listener),
+  };
+
+  /*
    * FNXC:DashboardShutdown 2026-06-27-10:32:
    * Pressing `q`/Ctrl+C in the TUI routes through SIGINT so the graceful shutdown
    * runs (kills dev-server process groups, engines, mesh, central-core). That
@@ -1143,7 +1248,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           `fusion: graceful shutdown stalled on "${currentShutdownStep}" after ${SHUTDOWN_HARD_EXIT_GRACE_MS}ms — forcing exit\n`,
         );
       }
-      process.exit(0);
+      process.exit(shutdownExitCode);
     }, SHUTDOWN_HARD_EXIT_GRACE_MS).unref();
   }
   async function timeShutdownStep(label: string, fn: () => Promise<void> | void): Promise<void> {
@@ -1346,7 +1451,16 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       const schemaHooks = pluginLoader.getPluginSchemaInitHooks();
       if (schemaHooks.length > 0) {
         try {
-          await store.getDatabase().runPluginSchemaInits(schemaHooks);
+          /*
+           * FNXC:SqliteFinalRemoval 2026-06-25-16:25:
+           * Skip SQLite-specific plugin schema init in backend mode (PostgreSQL
+           * uses Drizzle migrations for schema management).
+           */
+          if (store.isBackendMode()) {
+            logSink.log("[plugins] Schema initialization skipped — backend mode (PostgreSQL Drizzle migrations)");
+          } else {
+            await store.getDatabase().runPluginSchemaInits(schemaHooks);
+          }
         } catch (err) {
           logSink.log(
             `Schema initialization failed: ${err instanceof Error ? err.message : err}`,
@@ -1476,23 +1590,75 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // Created inline for UI-only mode (engine doesn't start with --no-engine).
   // In engine mode, the engine is passed to createServer which derives these.
   //
-  const missionAutopilotImpl: MissionAutopilot | undefined = new MissionAutopilot(store, store.getMissionStore());
-  const missionExecutionLoopImpl: MissionExecutionLoop | undefined = new MissionExecutionLoop({
-    taskStore: store,
-    missionStore: store.getMissionStore(),
-    missionAutopilot: {
-      notifyValidationComplete: async (featureId: string, _status: "passed" | "failed" | "blocked" | "error") => {
-        if (missionAutopilotImpl) {
-          const missionStore = store.getMissionStore();
-          const feature = missionStore?.getFeature(featureId);
-          if (feature?.taskId) {
-            await missionAutopilotImpl.handleTaskCompletion(feature.taskId);
-          }
-        }
-      },
-    },
-    rootDir: cwd,
-  });
+  /*
+   * FNXC:SqliteFinalRemoval 2026-06-26-13:05:
+   * In backend mode (PostgreSQL), store.getMissionStore() throws because
+   * MissionStore has not been converted to the async path yet — it requires a
+   * synchronous SQLite Database handle (store.db), which throws
+   * "SQLite Database is not available in backend mode". This used to crash the
+   * entire `fn dashboard` boot, blocking the UI entirely.
+   *
+   * Catch the error and degrade to undefined, mirroring InProcessRuntime's
+   * graceful-degrade pattern (engine/src/runtimes/in-process-runtime.ts:401-413).
+   * The proxy objects handed to createServer (below, around the UI-only-mode
+   * createServer call) already route through `missionAutopilotImpl?` /
+   * `missionExecutionLoopImpl?` optional chaining, so undefined disables
+   * mission lifecycle features without breaking dashboard boot. Mission
+   * autopilot / execution loop will re-enable once MissionStore is fully
+   * converted to the async Drizzle path.
+   */
+  let missionStore: import("@fusion/core").MissionStore | undefined;
+  try {
+    // FNXC:MissionStore 2026-06-27-16:15:
+    // MissionAutopilot + MissionExecutionLoop are coupled to the sync EventEmitter
+    // MissionStore. In PG backend mode getMissionStore() returns the AsyncMissionStore
+    // (CRUD-only); guard with instanceof and skip autopilot/loop init — mission
+    // lifecycle stays degraded in PG (mirrors InProcessRuntime).
+    const resolvedMissionStore = store.getMissionStore();
+    missionStore = resolvedMissionStore instanceof MissionStore ? resolvedMissionStore : undefined;
+  } catch (msErr) {
+    if (store.isBackendMode()) {
+      logSink.log(
+        `MissionStore unavailable (backend mode); mission autopilot disabled: ${
+          msErr instanceof Error ? msErr.message : msErr
+        }`,
+        "engine",
+      );
+    } else {
+      // In SQLite mode, an unexpected failure here is a real bug — surface it
+      // via the log sink but still degrade rather than crashing dashboard boot.
+      logSink.log(
+        `MissionStore init failed; mission autopilot disabled: ${
+          msErr instanceof Error ? msErr.message : msErr
+        }`,
+        "engine",
+      );
+    }
+    missionStore = undefined;
+  }
+  const missionAutopilotImpl: MissionAutopilot | undefined = missionStore
+    ? new MissionAutopilot(store, missionStore)
+    : undefined;
+  const missionExecutionLoopImpl: MissionExecutionLoop | undefined = missionStore
+    ? new MissionExecutionLoop({
+        taskStore: store,
+        missionStore,
+        missionAutopilot: {
+          notifyValidationComplete: async (
+            featureId: string,
+            _status: "passed" | "failed" | "blocked" | "error",
+          ) => {
+            if (missionAutopilotImpl) {
+              const feature = missionStore?.getFeature(featureId);
+              if (feature?.taskId) {
+                await missionAutopilotImpl.handleTaskCompletion(feature.taskId);
+              }
+            }
+          },
+        },
+        rootDir: cwd,
+      })
+    : undefined;
 
   // ── Auth & model wiring ────────────────────────────────────────────
   // AuthStorage manages OAuth/API-key credentials (stored in ~/.fusion/agent/auth.json).
@@ -1684,11 +1850,18 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     string,
     { enabledKey: string; skills: ReturnType<PluginLoader["getPluginSkills"]> }
   >();
-  const getProjectScopedPluginSkills = async (rootDir: string): Promise<ReturnType<PluginLoader["getPluginSkills"]>> => {
+  const getProjectScopedPluginSkills = async (rootDir: string, resolvedProjectStore?: TaskStore): Promise<ReturnType<PluginLoader["getPluginSkills"]>> => {
     const normalizedRootDir = pathResolve(rootDir);
-    const stateStore = new PluginStore(normalizedRootDir, { centralGlobalDir: resolveGlobalDir() });
+    /*
+     * FNXC:PluginSkillsPostgres 2026-07-14-23:45:
+     * Skill discovery must use the backend-aware project store resolved by the
+     * dashboard route. Direct PluginStore/TaskStore construction enters the
+     * removed SQLite runtime under PostgreSQL (VAL-REMOVAL-005).
+     */
+    const targetStore = resolvedProjectStore ?? (normalizedRootDir === pathResolve(store.getRootDir()) ? store : undefined);
+    if (!targetStore) return [];
+    const stateStore = targetStore.getPluginStore();
     await stateStore.init();
-    try {
       const enabledPlugins = await stateStore.listPlugins({ enabled: true });
       const enabledKey = enabledPlugins
         .map((plugin) => `${plugin.id}:${plugin.updatedAt}`)
@@ -1718,12 +1891,14 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         return skills;
       }
 
-      const scopedPluginStore = new PluginStore(normalizedRootDir, { centralGlobalDir: resolveGlobalDir() });
-      const scopedTaskStore = new TaskStore(normalizedRootDir);
-      const scopedPluginLoader = new PluginLoader({ pluginStore: scopedPluginStore, taskStore: scopedTaskStore });
+      const scopedPluginStore = targetStore.getPluginStore();
+      const scopedPluginLoader = new PluginLoader({
+        pluginStore: scopedPluginStore,
+        taskStore: targetStore,
+        persistRuntimeState: false,
+      });
       try {
         await scopedPluginStore.init();
-        await scopedTaskStore.init();
         const { errors } = await scopedPluginLoader.loadAllPlugins();
         if (errors > 0) {
           logSink.warn(`Project-scoped plugin skill loading for ${normalizedRootDir} had ${errors} error(s)`, "plugins");
@@ -1733,12 +1908,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         return skills;
       } finally {
         await scopedPluginLoader.stopAllPlugins();
-        scopedPluginStore.close();
-        scopedTaskStore.close();
       }
-    } finally {
-      stateStore.close();
-    }
   };
 
   const skillsAdapter = packageManager
@@ -1787,6 +1957,19 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     }
   }
 
+  // FNXC:RuntimeStartupWiring 2026-06-24-10:20:
+  // Register the backend shutdown (release PG pool / stop embedded cluster)
+  // so it runs during dispose(). store.close() already closes the
+  // AsyncDataLayer pool; this adds embedded-cluster teardown.
+  if (dashboardBackendShutdown) {
+    disposeCallbacks.push(() => {
+      void dashboardBackendShutdown!().catch(() => undefined);
+    });
+  }
+  disposeCallbacks.push(() => {
+    void closeProjectStores();
+  });
+
   // ── createServer: deferred until engine is conditionally started ────
   //
   // In engine mode, pass the engine so createServer derives subsystem
@@ -1824,7 +2007,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       // Some tests partially mock @fusion/dashboard and omit this export.
     }
 
+    const resolvedCliPackageVersion = getCliPackageVersion(import.meta.url);
+    const cliPackageVersion = isUnresolvedCliPackageVersion(resolvedCliPackageVersion) ? undefined : resolvedCliPackageVersion;
+
     const engineManager = new ProjectEngineManager(centralCoreForEngine, {
+      cliPackageVersion,
       getMergeStrategy,
       processPullRequestMerge: (s, wd, taskId, pool) =>
         processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker, pool),
@@ -2080,12 +2267,14 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       daemon: dashboardAuthToken ? { token: dashboardAuthToken } : undefined,
       noAuth: opts.noAuth,
       runtimeLogger,
+      systemControl: systemControlForServer,
+      systemLogs: systemLogsForServer,
     });
 
     const shutdown = async (signal: NodeJS.Signals) => {
       // Second signal (user mashing q/Ctrl+C because the first didn't exit) —
       // force an immediate exit rather than being swallowed by the guard.
-      if (shutdownInProgress) process.exit(0);
+      if (shutdownInProgress) process.exit(shutdownExitCode);
       shutdownInProgress = true;
       armHardExitWatchdog();
 
@@ -2142,8 +2331,25 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         closeCentralCoreBestEffort(centralCoreForEngine, `shutdown (${signal})`),
       );
 
+      await timeShutdownStep("closeProjectStores", () => closeProjectStores());
       store.close();
-      process.exit(0);
+      process.exit(shutdownExitCode);
+    };
+    /*
+    FNXC:SystemPanel 2026-07-12-11:00:
+    Bind the System panel restart request to the real graceful-shutdown path.
+    The short delay lets the HTTP 202 response flush before teardown starts.
+    Restart is only honored when a supervising parent will respawn us.
+    */
+    requestSelfRestart = (reason: string) => {
+      if (!systemControlForServer.supervised || shutdownInProgress || restartScheduled) return false;
+      restartScheduled = true;
+      logSink.log(`restart requested (${reason}) — shutting down for supervised respawn`, "dashboard");
+      shutdownExitCode = FUSION_RESTART_EXIT_CODE;
+      setTimeout(() => {
+        void shutdown("SIGTERM");
+      }, 300);
+      return true;
     };
     registerHandler(process, "SIGINT", () => void shutdown("SIGINT"));
     registerHandler(process, "SIGTERM", () => void shutdown("SIGTERM"));
@@ -2164,7 +2370,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     // instance for peer exchange and mDNS discovery.
     //
     try {
-      centralCoreForMesh = new CentralCore();
+      centralCoreForMesh = new CentralCore(undefined, { asyncLayer: store.getAsyncLayer() ?? undefined });
       await centralCoreForMesh.init();
 
       peerExchangeService = new PeerExchangeService(centralCoreForMesh);
@@ -2396,6 +2602,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       daemon: dashboardAuthToken ? { token: dashboardAuthToken } : undefined,
       noAuth: opts.noAuth,
       runtimeLogger,
+      systemControl: systemControlForServer,
+      systemLogs: systemLogsForServer,
     });
   }
 
@@ -2404,7 +2612,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     const devShutdown = async (signal: NodeJS.Signals) => {
       // Second signal (user mashing q/Ctrl+C because the first didn't exit) —
       // force an immediate exit rather than being swallowed by the guard.
-      if (shutdownInProgress) process.exit(0);
+      if (shutdownInProgress) process.exit(shutdownExitCode);
       shutdownInProgress = true;
       armHardExitWatchdog();
 
@@ -2457,8 +2665,21 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         );
       }
 
+      await timeShutdownStep("closeProjectStores", () => closeProjectStores());
       store.close();
-      process.exit(0);
+      process.exit(shutdownExitCode);
+    };
+    // FNXC:SystemPanel 2026-07-12-11:00: System panel restart binding for
+    // UI-only mode — same contract as the engine-mode shutdown above.
+    requestSelfRestart = (reason: string) => {
+      if (!systemControlForServer.supervised || shutdownInProgress || restartScheduled) return false;
+      restartScheduled = true;
+      logSink.log(`restart requested (${reason}) — shutting down for supervised respawn`, "dashboard");
+      shutdownExitCode = FUSION_RESTART_EXIT_CODE;
+      setTimeout(() => {
+        void devShutdown("SIGTERM");
+      }, 300);
+      return true;
     };
     registerHandler(process, "SIGINT", () => void devShutdown("SIGINT"));
     registerHandler(process, "SIGTERM", () => void devShutdown("SIGTERM"));
@@ -2994,7 +3215,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
                 try {
                   const values = (t as { customFields?: Record<string, unknown> }).customFields;
                   if (values && Object.keys(values).length > 0) {
-                    const selection = projectStore.getTaskWorkflowSelection(t.id);
+                    /*
+                    FNXC:WorkflowSelection 2026-07-14-17:06:
+                    Task-detail custom-field chips must use the asynchronous workflow-selection read so PostgreSQL tasks render fields declared by their selected workflow.
+                    */
+                    const selection = await projectStore.getTaskWorkflowSelectionAsync(t.id);
                     const def = selection?.workflowId
                       ? await projectStore.getWorkflowDefinition(selection.workflowId)
                       : undefined;
@@ -3156,12 +3381,100 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   return { dispose };
 }
 
+// ── System Panel Support ─────────────────────────────────────────────────────
+
+/*
+FNXC:SystemPanel 2026-07-12-11:05:
+"Rebuild & restart" in the dashboard System panel only makes sense when the
+running CLI comes from a Fusion source checkout (where `pnpm build` /
+scripts/*.mjs exist). Resolve the workspace root by walking up from this
+module and requiring BOTH pnpm-workspace.yaml AND package.json name
+"fusion-workspace" — the name guard prevents a globally-installed
+@runfusion/fusion nested under some unrelated pnpm workspace from being
+misdetected as a rebuildable checkout. Returns undefined for packaged
+installs, which disables rebuild controls in the UI.
+*/
+export function resolveFusionSourceWorkspaceRoot(): string | undefined {
+  try {
+    let dir = pathResolve(fileURLToPath(import.meta.url), "..");
+    for (let i = 0; i < 10; i++) {
+      if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
+        try {
+          const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name?: string };
+          return pkg?.name === "fusion-workspace" ? dir : undefined;
+        } catch {
+          return undefined;
+        }
+      }
+      const parent = pathResolve(dir, "..");
+      if (parent === dir) return undefined;
+      dir = parent;
+    }
+  } catch {
+    // Best-effort detection only — never let it break startup.
+  }
+  return undefined;
+}
+
 // ── Supervised Dashboard Mode ────────────────────────────────────────────────
 
 const SUPERVISE_MAX_RESTARTS = 3;
 const SUPERVISE_BASE_DELAY_MS = 2_000;
 const SUPERVISE_MAX_DELAY_MS = 16_000;
 const SUPERVISE_STALE_RESET_MS = 60_000;
+
+/** True when running inside a bun-compiled single-file `fn` binary. */
+function isCompiledBinary(): boolean {
+  const bun = (globalThis as { Bun?: { embeddedFiles?: unknown } }).Bun;
+  return typeof bun !== "undefined" && Boolean(bun.embeddedFiles);
+}
+
+/*
+FNXC:SystemPanel 2026-07-12-14:05:
+How the supervisor respawns "itself", per install shape:
+  - node script (npx / global npm install / `pnpm dev` source run): re-exec
+    process.execPath with execArgv preserved (tsx loader flags under source
+    runs) plus the argv[1] entry script.
+  - bun-compiled packaged binary (`fn`/`fn.exe` from build:exe): the binary IS
+    the program; argv[1] is Bun's virtual embedded path, so re-exec
+    process.execPath alone.
+Returns null when no respawn command can be determined (then supervision is
+skipped and the dashboard runs unsupervised).
+*/
+export function resolveSupervisorRespawnCommand(): { command: string; args: string[] } | null {
+  if (isCompiledBinary()) {
+    return { command: process.execPath, args: [] };
+  }
+  const entryPoint = process.argv[1];
+  if (!entryPoint) return null;
+  return { command: process.execPath, args: [...process.execArgv, entryPoint] };
+}
+
+/*
+FNXC:SystemPanel 2026-07-12-14:05:
+Supervision decision for `fn dashboard` (and bare `fn`, which defaults to the
+dashboard). Supervision is now the DEFAULT so every install shape — bare `fn`,
+`fusion`, npx, packaged binary — supports the System panel's in-place restart
+and gets crash recovery. Skipped when:
+  - --no-supervise is passed (explicit opt-out; also the escape hatch for
+    debugging the child directly),
+  - FUSION_RESTART_SUPERVISED=1 (a supervising parent already exists — the
+    supervisor's own child, or scripts/dev-with-memory.mjs under `pnpm dev` —
+    so never nest supervisors),
+  - an inspector flag is active (the debugger must attach to the real app
+    process, and a respawned child would fight over the inspector port),
+  - no respawn command can be resolved.
+*/
+export function shouldSuperviseDashboard(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  execArgv: readonly string[] = process.execArgv,
+): boolean {
+  if (args.includes("--no-supervise")) return false;
+  if (env.FUSION_RESTART_SUPERVISED === "1") return false;
+  if (execArgv.some((arg) => arg.startsWith("--inspect"))) return false;
+  return resolveSupervisorRespawnCommand() !== null;
+}
 
 /**
  * Run the dashboard under foreground process supervision with bounded restart
@@ -3176,6 +3489,19 @@ const SUPERVISE_STALE_RESET_MS = 60_000;
  * supervisor restarts up to SUPERVISE_MAX_RESTARTS times with exponential
  * backoff. Clean exits (SIGINT/SIGTERM/exit 0) propagate without restart.
  *
+ * FNXC:SystemPanel 2026-07-12-14:05:
+ * The child is spawned ATTACHED (same foreground process group, stdio
+ * inherited) — NOT via superviseSpawn's detached process group — because the
+ * interactive TUI must own the terminal: a background-process-group child
+ * reading a TTY gets SIGTTIN/SIGTTOU-stopped, which is why detached
+ * supervision was headless-only. Attached means terminal Ctrl+C reaches the
+ * child directly; when a child is alive the parent waits for its graceful exit
+ * (and exits immediately on SIGINT during crash-backoff, when no child is alive
+ * to receive Ctrl+C), and forwards direct SIGTERM kills to the child. A parent
+ * signal latches `stopping` so an intentional shutdown never respawns. Exit code
+ * FUSION_RESTART_EXIT_CODE is an operator-requested restart (System panel):
+ * immediate respawn, no crash budget consumed.
+ *
  * This does NOT use shell detachment wrappers, shell kill loops, or unbounded retries.
  * Port 4040 processes are never killed — the child binds its own port.
  */
@@ -3183,47 +3509,99 @@ export async function runDashboardSupervised(
   port: number,
   _opts: Parameters<typeof runDashboard>[1] = {},
 ): Promise<void> {
-  // Reconstruct child args: same entry point, same flags, minus --supervise
-  const childArgs = process.argv.slice(2).filter((a) => a !== "--supervise");
+  // Reconstruct child args: same flags, minus the supervision flags.
+  const childArgs = process.argv.slice(2).filter((a) => a !== "--supervise" && a !== "--no-supervise");
   // Ensure "dashboard" is present without duplicating it after global flags.
   if (!childArgs.includes("dashboard")) {
     const firstOptionIndex = childArgs.findIndex((arg) => arg.startsWith("-"));
     childArgs.splice(firstOptionIndex === -1 ? 0 : firstOptionIndex, 0, "dashboard");
   }
 
-  const entryPoint = process.argv[1];
-  if (!entryPoint) {
+  const respawn = resolveSupervisorRespawnCommand();
+  if (!respawn) {
     console.error("[dashboard:supervisor] cannot determine entry point for child process");
     process.exit(1);
   }
 
   let restartCount = 0;
   let lastExitTime = 0;
-  const restartCommand = formatSupervisorRestartCommand(process.execPath, entryPoint, childArgs);
+  const restartCommand = formatSupervisorRestartCommand(respawn.command, respawn.args, childArgs);
+
+  let activeChild: ReturnType<typeof spawnAttached> | null = null;
+  // `stopping` latches once the operator asks to quit so the restart loop never
+  // respawns after an intentional shutdown, even if the child's post-signal
+  // exit code is non-zero.
+  let stopping = false;
+  // Parent lifecycle: terminal Ctrl+C (SIGINT) already reaches the attached
+  // child via the shared foreground process group, so when a child is alive the
+  // parent just waits for its graceful exit. But during crash-backoff (or
+  // between spawns) there is NO child to receive the terminal SIGINT, so Ctrl+C
+  // would hang for up to the backoff window — exit immediately in that case.
+  process.on("SIGINT", () => {
+    stopping = true;
+    if (!activeChild) process.exit(130);
+  });
+  // A direct SIGTERM to the parent (process managers, `kill`) is forwarded so
+  // the child shuts down too, then the loop stops. During crash-backoff there
+  // is no child to forward to and the loop is parked in a sleep, so exit
+  // immediately rather than waiting out the backoff. If the parent dies
+  // unexpectedly, best-effort kill the child on exit.
+  process.on("SIGTERM", () => {
+    stopping = true;
+    if (!activeChild) process.exit(143);
+    try {
+      activeChild.child.kill("SIGTERM");
+    } catch {
+      // Child may already be gone.
+    }
+  });
+  process.on("exit", () => {
+    try {
+      activeChild?.child.kill("SIGTERM");
+    } catch {
+      // Child may already be gone.
+    }
+  });
 
   while (true) {
     const attemptLabel = `${restartCount + 1}/${SUPERVISE_MAX_RESTARTS + 1}`;
     console.log(`[dashboard:supervisor] starting dashboard (attempt ${attemptLabel})`);
 
-    let child: SupervisedChild;
     try {
-      child = superviseSpawn(process.execPath, [entryPoint, ...childArgs], {
-        stdio: "inherit",
-        maxLifetimeMs: Number.POSITIVE_INFINITY,
-      });
+      activeChild = spawnAttached(respawn.command, [...respawn.args, ...childArgs]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[dashboard:supervisor] failed to spawn child: ${message}`);
       process.exit(1);
     }
 
-    const exitResult = await child.waitExit();
+    const exitResult = await activeChild.waitExit;
+    activeChild = null;
     const exitCode = exitResult.code ?? 1;
     const exitSignal = exitResult.signal;
+
+    // Operator asked to stop (SIGINT/SIGTERM to the parent) — never respawn,
+    // regardless of the child's post-signal exit code.
+    if (stopping) {
+      return;
+    }
 
     // Clean exit — propagate without restart
     if (exitSignal === "SIGINT" || exitSignal === "SIGTERM" || exitCode === 0) {
       return;
+    }
+
+    /*
+    FNXC:SystemPanel 2026-07-12-10:50:
+    Operator-requested restart (dashboard System panel). Respawn immediately
+    and reset the crash budget — an intentional restart must never consume
+    SUPERVISE_MAX_RESTARTS or incur crash backoff.
+    */
+    if (exitCode === FUSION_RESTART_EXIT_CODE) {
+      console.log("[dashboard:supervisor] restart requested — restarting now");
+      restartCount = 0;
+      lastExitTime = 0;
+      continue;
     }
 
     // Reset restart counter if the child ran for a long time
@@ -3257,8 +3635,33 @@ export async function runDashboardSupervised(
   }
 }
 
-function formatSupervisorRestartCommand(nodePath: string, entryPoint: string, childArgs: readonly string[]): string {
-  return [nodePath, entryPoint, ...childArgs].map(quoteShellArg).join(" ");
+interface AttachedChildExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+/*
+FNXC:SystemPanel 2026-07-12-14:05:
+Attached (non-detached) supervised spawn: the child shares the parent's
+foreground process group so the interactive TUI keeps terminal ownership.
+Deliberately NOT superviseSpawn (its detached process group is what made the
+supervised TUI unusable on a TTY); parent-death cleanup is handled by the
+supervisor's own exit/SIGTERM handlers.
+*/
+function spawnAttached(command: string, args: string[]): { child: ChildProcess; waitExit: Promise<AttachedChildExit> } {
+  const child = spawn(command, args, {
+    stdio: "inherit",
+    env: { ...process.env, FUSION_RESTART_SUPERVISED: "1" },
+  });
+  const waitExit = new Promise<AttachedChildExit>((resolve) => {
+    child.on("close", (code, signal) => resolve({ code, signal }));
+    child.on("error", () => resolve({ code: 1, signal: null }));
+  });
+  return { child, waitExit };
+}
+
+function formatSupervisorRestartCommand(command: string, respawnArgs: readonly string[], childArgs: readonly string[]): string {
+  return [command, ...respawnArgs, ...childArgs].map(quoteShellArg).join(" ");
 }
 
 function quoteShellArg(value: string): string {

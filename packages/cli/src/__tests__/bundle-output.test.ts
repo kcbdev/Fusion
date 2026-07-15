@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolvePluginSkillBodyPath } from "@fusion/core";
 import {
   buildCliWithRealDashboardAssets,
   bundlePath,
@@ -9,11 +10,34 @@ import {
   clientIndexPath,
   dashboardClientStubMarker,
   readClientIndexHtml,
+  workspaceRoot,
 } from "./bundle-output-helpers";
 import { resolveClaudeCliExtensionFromModuleUrl } from "../commands/claude-cli-extension";
 import { resolveDroidCliExtensionFromModuleUrl } from "../commands/droid-cli-extension";
+import { RUNTIME_PLUGIN_IDS } from "../plugins/staged-bundled-plugin-ids";
 
 const tsupConfigPath = join(cliRoot, "tsup.config.ts");
+const bundlePluginEntryPluginIds = [
+  ...RUNTIME_PLUGIN_IDS,
+  "fusion-plugin-dependency-graph",
+  "fusion-plugin-roadmap",
+  "fusion-plugin-compound-engineering",
+  "fusion-plugin-linear-import",
+] as const;
+const knownCompoundEngineeringSkillIds = [
+  "ce-brainstorm",
+  "ce-code-review",
+  "ce-commit",
+  "ce-commit-push-pr",
+  "ce-compound",
+  "ce-debug",
+  "ce-doc-review",
+  "ce-ideate",
+  "ce-plan",
+  "ce-resolve-pr-feedback",
+  "ce-strategy",
+  "ce-work",
+] as const;
 
 describe("CLI bundle output", () => {
   beforeAll(() => {
@@ -220,6 +244,63 @@ describe("CLI bundle output", () => {
     };
     expect(stagedPkg.exports?.["."]?.import).toBe("./bundled.js");
     expect(stagedPkg.dependencies?.["@fusion/core"]).toBeUndefined();
+  });
+
+  it("dist/plugins/fusion-plugin-compound-engineering/ ships skill bodies that resolve from plugin root", () => {
+    const sourceSkillsRoot = join(workspaceRoot, "plugins", "fusion-plugin-compound-engineering", "src", "skills");
+    const stagedPluginRoot = join(cliRoot, "dist", "plugins", "fusion-plugin-compound-engineering");
+    const skillIds = readdirSync(sourceSkillsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    for (const knownSkillId of knownCompoundEngineeringSkillIds) {
+      expect(skillIds).toContain(knownSkillId);
+    }
+
+    for (const skillId of skillIds) {
+      const stagedSkillPath = join(stagedPluginRoot, "skills", skillId, "SKILL.md");
+      expect(existsSync(stagedSkillPath), `${skillId} SKILL.md should be staged`).toBe(true);
+      expect(
+        readFileSync(stagedSkillPath, "utf-8").trim().length,
+        `${skillId} SKILL.md should be non-empty`,
+      ).toBeGreaterThan(0);
+
+      const resolvedSkillBody = resolvePluginSkillBodyPath(
+        { name: skillId, skillFiles: [`skills/${skillId}/SKILL.md`] },
+        stagedPluginRoot,
+      );
+      expect(existsSync(resolvedSkillBody.absolutePath), `${skillId} should resolve via plugin skillFiles`).toBe(true);
+    }
+  });
+
+  it("does not create skills directories for bundled plugins without skill sources", () => {
+    const pluginId = "fusion-plugin-roadmap";
+
+    expect(existsSync(join(workspaceRoot, "plugins", pluginId, "src", "skills"))).toBe(false);
+    expect(existsSync(join(cliRoot, "dist", "plugins", pluginId, "skills"))).toBe(false);
+  });
+
+  it("bundled plugin outputs do not import private @fusion/core at runtime", () => {
+    const inspectedPluginIds: string[] = [];
+
+    for (const pluginId of bundlePluginEntryPluginIds) {
+      const bundledPath = join(cliRoot, "dist", "plugins", pluginId, "bundled.js");
+      if (!existsSync(bundledPath)) {
+        continue;
+      }
+
+      inspectedPluginIds.push(pluginId);
+      const bundled = readFileSync(bundledPath, "utf-8");
+      expect(bundled, `${pluginId} should not keep a bare @fusion/core import`).not.toMatch(
+        /from\s+["']@fusion\/core["']/,
+      );
+      expect(bundled, `${pluginId} should not mention the private @fusion/core package`).not.toContain(
+        '"@fusion/core"',
+      );
+    }
+
+    expect(inspectedPluginIds.length).toBeGreaterThan(0);
   });
 
   it("dist/plugins/fusion-plugin-whatsapp-chat/ is staged with a valid manifest", () => {

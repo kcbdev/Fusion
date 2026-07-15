@@ -741,6 +741,16 @@ In the split sidebar the title cell must allow the title to wrap to two lines (h
   background: var(--status-in-review-bg);
   color: var(--in-review);
 }
+
+/*
+FNXC:TaskCardPlanReviewBadge 2026-07-11-12:16:
+ListView uses the same active-review token as TaskCard for the FN-7831 Reviewing badge. Keep the modifier styling token-only and geometry-neutral so grouped cards and table rows preserve existing responsive layout.
+*/
+.list-status-badge--reviewing {
+  background: color-mix(in srgb, var(--in-review) 18%, transparent);
+  color: var(--in-review);
+  box-shadow: inset 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--in-review) 35%, transparent);
+}
 .list-status-badge--done {
   background: var(--status-done-bg);
   color: var(--done);
@@ -961,8 +971,11 @@ In the split sidebar the title cell must allow the title to wrap to two lines (h
   border-bottom: 1px solid var(--border);
 }
 
-/* === List View Mobile Responsive === */
-@media (max-width: 768px) {
+/* === List View Single-Pane Responsive ===
+FNXC:ListView 2026-07-10-00:00 (FN-7809):
+Tablet-width List view shares the mobile single-pane scaffolding so the full-width toolbar and QuickEntryBox are not clipped by the desktop split sidebar. Mobile behavior stays unchanged; desktop split rules remain active above the tablet tier.
+*/
+@media (max-width: 1024px) {
   .list-toolbar {
     padding: var(--space-md);
     flex-wrap: wrap;
@@ -1025,8 +1038,8 @@ In the split sidebar the title cell must allow the title to wrap to two lines (h
   }
 }
 
-/* === List View Mobile Cards (FN-1140) === */
-@media (max-width: 768px) {
+/* === List View Single-Pane Cards (FN-1140, FN-7809) === */
+@media (max-width: 1024px) {
   /* Hide the table on mobile — card layout is rendered via JS */
   .list-table {
     display: none;

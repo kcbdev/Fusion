@@ -365,6 +365,21 @@ function mockMobileViewport() {
   }));
 }
 
+function mockTabletViewport() {
+  ensureMatchMedia();
+  Object.defineProperty(window, "innerWidth", { value: 900, configurable: true });
+  return vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+    matches: query === "(min-width: 769px) and (max-width: 1024px)",
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 function mockDesktopViewport() {
   ensureMatchMedia();
   Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
@@ -608,13 +623,15 @@ describe("ListView", () => {
     const viewportSpy = mockDesktopViewport();
     const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
     const mockOnOpenDetail = vi.fn();
+    const onPopOut = vi.fn();
 
-    renderListView({ tasks, onOpenDetail: mockOnOpenDetail });
+    renderListView({ tasks, onOpenDetail: mockOnOpenDetail, onPopOut });
 
     const row = screen.getByText("FN-001").closest("tr");
     fireEvent.click(row!);
 
     expect(mockOnOpenDetail).not.toHaveBeenCalled();
+    expect(onPopOut).not.toHaveBeenCalled();
     expect(localStorage.getItem(scopedStorageKey("kb-dashboard-list-selected-task"))).toBe("FN-001");
     expect(row?.className).toContain("list-row--selected");
     await waitFor(() => {
@@ -625,20 +642,94 @@ describe("ListView", () => {
     viewportSpy.mockRestore();
   });
 
+  it("routes desktop List row clicks and keyboard opens to the task popup when enabled", () => {
+    const viewportSpy = mockDesktopViewport();
+    const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
+    const onOpenDetail = vi.fn();
+    const onPopOut = vi.fn();
+
+    renderListView({ tasks, onOpenDetail, onPopOut, openMobileTasksInPopup: true });
+
+    const row = screen.getByText("FN-001").closest("tr") as HTMLElement;
+    fireEvent.click(row);
+
+    expect(onPopOut).toHaveBeenCalledWith(tasks[0]);
+    expect(onPopOut).toHaveBeenCalledTimes(1);
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("list-split-detail-content")).toBeNull();
+    expect(localStorage.getItem(scopedStorageKey("kb-dashboard-list-selected-task"))).toBeNull();
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onPopOut).toHaveBeenCalledTimes(2);
+    expect(onPopOut).toHaveBeenLastCalledWith(tasks[0]);
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("list-split-detail-content")).toBeNull();
+    viewportSpy.mockRestore();
+  });
+
+  it("falls back to desktop docked detail when popup routing is enabled without onPopOut", async () => {
+    const viewportSpy = mockDesktopViewport();
+    const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
+    const onOpenDetail = vi.fn();
+
+    renderListView({ tasks, onOpenDetail, openMobileTasksInPopup: true });
+
+    const row = screen.getByText("FN-001").closest("tr") as HTMLElement;
+    fireEvent.click(row);
+
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(localStorage.getItem(scopedStorageKey("kb-dashboard-list-selected-task"))).toBe("FN-001");
+    await waitFor(() => {
+      expect(screen.getByTestId("list-split-detail-content")).toBeInTheDocument();
+    });
+    viewportSpy.mockRestore();
+  });
+
   it("calls onOpenDetail on mobile row click", () => {
     const viewportSpy = mockMobileViewport();
     const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
     const mockOnOpenDetail = vi.fn();
+    const onPopOut = vi.fn();
 
-    renderListView({ tasks, onOpenDetail: mockOnOpenDetail });
+    renderListView({ tasks, onOpenDetail: mockOnOpenDetail, onPopOut });
 
     const card = document.querySelector('.list-card[data-id="FN-001"]');
     fireEvent.click(card!);
 
     expect(mockOnOpenDetail).toHaveBeenCalledWith(tasks[0], { origin: "list-mobile" });
     expect(mockOnOpenDetail).toHaveBeenCalledTimes(1);
+    expect(onPopOut).not.toHaveBeenCalled();
     expect(fetchTaskDetail).not.toHaveBeenCalled();
     viewportSpy.mockRestore();
+  });
+
+  it("routes mobile and tablet List cards to the task popup when enabled", () => {
+    const mobileViewportSpy = mockMobileViewport();
+    const mobileTasks = [createMockTask({ id: "FN-001", title: "Mobile popup" })];
+    const mobileOnOpenDetail = vi.fn();
+    const mobileOnPopOut = vi.fn();
+
+    const mobileRender = renderListView({ tasks: mobileTasks, onOpenDetail: mobileOnOpenDetail, onPopOut: mobileOnPopOut, openMobileTasksInPopup: true });
+    fireEvent.click(document.querySelector('.list-card[data-id="FN-001"]') as HTMLElement);
+
+    expect(mobileOnPopOut).toHaveBeenCalledWith(mobileTasks[0]);
+    expect(mobileOnOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("list-split-detail-content")).toBeNull();
+    mobileRender.unmount();
+    mobileViewportSpy.mockRestore();
+
+    const tabletViewportSpy = mockTabletViewport();
+    const tabletTasks = [createMockTask({ id: "FN-002", title: "Tablet popup" })];
+    const tabletOnOpenDetail = vi.fn();
+    const tabletOnPopOut = vi.fn();
+
+    renderListView({ tasks: tabletTasks, onOpenDetail: tabletOnOpenDetail, onPopOut: tabletOnPopOut, openMobileTasksInPopup: true });
+    fireEvent.click(document.querySelector('.list-card[data-id="FN-002"]') as HTMLElement);
+
+    expect(tabletOnPopOut).toHaveBeenCalledWith(tabletTasks[0]);
+    expect(tabletOnOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("list-split-detail-content")).toBeNull();
+    tabletViewportSpy.mockRestore();
   });
 
   it("opens the task context menu from desktop row right-click without selecting or opening detail", async () => {
@@ -715,6 +806,27 @@ describe("ListView", () => {
     expect(onPauseTask).not.toHaveBeenCalled();
     expect(onRetryTask).not.toHaveBeenCalled();
     expect(onArchiveTask).not.toHaveBeenCalled();
+    viewportSpy.mockRestore();
+  });
+
+  it("opens Planning Mode from eligible list row menus and omits it for executing rows", async () => {
+    const viewportSpy = mockDesktopViewport();
+    const onPlanningMode = vi.fn();
+    const onOpenDetail = vi.fn();
+    const tasks = [
+      createMockTask({ id: "FN-030", title: "Planning row", description: "Seed from list", column: "triage" }),
+      createMockTask({ id: "FN-031", title: "Executing row", description: "Do not plan", column: "in-progress", status: "executing" }),
+    ];
+
+    renderListView({ tasks, onOpenDetail, onPlanningMode });
+
+    fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-030"]') as HTMLElement, { clientX: 40, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Plan" }));
+    expect(onPlanningMode).toHaveBeenCalledWith("Seed from list", null);
+    expect(onOpenDetail).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(document.querySelector('.list-row[data-id="FN-031"]') as HTMLElement, { clientX: 40, clientY: 50 });
+    expect(screen.queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument();
     viewportSpy.mockRestore();
   });
 
@@ -1705,6 +1817,40 @@ describe("ListView", () => {
     viewportSpy.mockRestore();
   });
 
+  it("renders tablet List view as a single full-width pane without split chrome", () => {
+    const viewportSpy = mockTabletViewport();
+    const tasks = [createMockTask({ id: "FN-001", title: "Tablet task" })];
+
+    const { container } = renderListView({ tasks });
+
+    expect(container.querySelector(".list-view--single-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("list-split-layout")).toBeNull();
+    expect(screen.queryByTestId("list-split-sidebar")).toBeNull();
+    expect(screen.queryByTestId("list-split-resize-handle")).toBeNull();
+    expect(screen.queryByTestId("list-split-detail")).toBeNull();
+    expect(container.querySelector(".list-toolbar .list-action-cluster")).toBeInTheDocument();
+    expect(within(container.querySelector(".list-toolbar .list-action-cluster") as HTMLElement).getByText("+ New Task")).toBeInTheDocument();
+    expect(container.querySelector(".list-quick-entry-above-table .quick-entry-box")).toBeInTheDocument();
+    expect(container.querySelector(".list-cards")).toBeInTheDocument();
+    expect(container.querySelector("table.list-table")).toBeNull();
+    viewportSpy.mockRestore();
+  });
+
+  it("opens tablet task detail through the single-pane detail route", () => {
+    const viewportSpy = mockTabletViewport();
+    const task = createMockTask({ id: "FN-001", title: "Tablet open" });
+    const onOpenDetail = vi.fn();
+
+    const { container } = renderListView({ tasks: [task], onOpenDetail });
+
+    fireEvent.click(container.querySelector('.list-card[data-id="FN-001"]') as HTMLElement);
+
+    expect(onOpenDetail).toHaveBeenCalledWith(task, { origin: "list-mobile" });
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("list-split-detail-content")).toBeNull();
+    viewportSpy.mockRestore();
+  });
+
   it("sorts tasks by ID when ID header is clicked", () => {
     const tasks = [
       createMockTask({ id: "FN-003", title: "Third", column: "triage" }),
@@ -1814,6 +1960,84 @@ describe("ListView", () => {
     } finally {
       cleanupCss();
     }
+  });
+
+  it("shows the Reviewing badge in the desktop table status cell while Plan Review runs", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-7831",
+        status: "planning",
+        enabledWorkflowSteps: ["plan-review"],
+        workflowStepResults: [
+          {
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            status: "pending",
+            startedAt: "2026-07-11T12:00:00.000Z",
+          },
+        ],
+      } as Partial<Task>),
+    ];
+
+    renderListView({ tasks });
+
+    const row = screen.getByText("FN-7831").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Reviewing")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("planning")).toBeInTheDocument();
+  });
+
+  it("shows the Reviewing badge in grouped mobile cards while Plan Review runs", () => {
+    const matchMediaSpy = mockMobileViewport();
+    try {
+      const tasks = [
+        createMockTask({
+          id: "FN-7831",
+          status: "planning",
+          enabledWorkflowSteps: ["plan-review"],
+          workflowStepResults: [
+            {
+              workflowStepId: "plan-review",
+              workflowStepName: "Plan Review",
+              status: "pending",
+              startedAt: "2026-07-11T12:00:00.000Z",
+            },
+          ],
+        } as Partial<Task>),
+      ];
+
+      renderListView({ tasks });
+
+      const card = screen.getByText("FN-7831").closest(".list-card");
+      expect(card).not.toBeNull();
+      expect(within(card as HTMLElement).getByText("Reviewing")).toBeInTheDocument();
+      expect(within(card as HTMLElement).getByText("planning")).toBeInTheDocument();
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
+  it("does not show the Reviewing badge after Plan Review completes", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-7831",
+        status: "planning",
+        enabledWorkflowSteps: ["plan-review"],
+        workflowStepResults: [
+          {
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            status: "passed",
+            startedAt: "2026-07-11T12:00:00.000Z",
+            completedAt: "2026-07-11T12:01:00.000Z",
+          },
+        ],
+      } as Partial<Task>),
+    ];
+
+    renderListView({ tasks });
+
+    expect(screen.queryByText("Reviewing")).not.toBeInTheDocument();
   });
 
   it("renders paused tasks with dimmed styling", () => {
@@ -2100,7 +2324,7 @@ describe("ListView", () => {
     const css = readFileSync("app/components/ListView.css", "utf8");
     const actionClusterRule = css.match(/\.list-action-cluster,\s*\n\.list-sidebar-controls__actions\s*\{[^}]*\}/)?.[0] ?? "";
     const toolbarRule = css.match(/\.list-sidebar-controls__toolbar\s*\{[^}]*\}/)?.[0] ?? "";
-    const mobileToolbarRule = css.match(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.list-toolbar\s*\{[^}]*padding:\s*var\(--space-sm\) var\(--space-md\);[^}]*\}/)?.[0] ?? "";
+    const singlePaneToolbarRule = css.match(/@media\s*\(max-width:\s*1024px\)[\s\S]*?\.list-toolbar\s*\{[^}]*padding:\s*var\(--space-sm\) var\(--space-md\);[^}]*\}/)?.[0] ?? "";
 
     expect(actionClusterRule).toContain("flex-wrap: nowrap");
     expect(actionClusterRule).toContain("justify-content: center");
@@ -2108,7 +2332,23 @@ describe("ListView", () => {
     expect(actionClusterRule).toContain("min-width: max-content");
     expect(actionClusterRule).toContain("overflow-x: auto");
     expect(toolbarRule).toContain("justify-content: center");
-    expect(mobileToolbarRule).toContain("justify-content: center");
+    expect(singlePaneToolbarRule).toContain("justify-content: center");
+  });
+
+  it("loads CSS fixture rules that apply single-pane non-clipping layout at tablet while keeping desktop split rules", () => {
+    const css = loadAllAppCss();
+    const splitHideRule = css.match(/@media\s*\(max-width:\s*1024px\)[\s\S]*?\.list-split-resize-handle,\s*\n\s*\.list-split-detail\s*\{[^}]*display:\s*none;[^}]*\}/)?.[0] ?? "";
+    const cardRule = css.match(/@media\s*\(max-width:\s*1024px\)[\s\S]*?\.list-table\s*\{[^}]*display:\s*none;[^}]*\}[\s\S]*?\.list-cards\s*\{[^}]*width:\s*100%;[^}]*\}/)?.[0] ?? "";
+    const desktopSplitRule = css.match(/\.list-split-layout\s*\{[^}]*grid-template-columns:\s*auto 0 minmax\(0, 1fr\);[^}]*\}/)?.[0] ?? "";
+
+    expect(splitHideRule).toContain("max-width: 1024px");
+    expect(splitHideRule).toContain(".list-split-resize-handle");
+    expect(splitHideRule).toContain("display: none");
+    expect(cardRule).toContain(".list-table");
+    expect(cardRule).toContain("display: none");
+    expect(cardRule).toContain(".list-cards");
+    expect(cardRule).toContain("width: 100%");
+    expect(desktopSplitRule).toContain("grid-template-columns: auto 0 minmax(0, 1fr)");
   });
 
   it("keeps Bulk Edit, View, and + New Task together in the mobile toolbar controls", () => {
@@ -3901,7 +4141,7 @@ describe("ListView - Bulk Selection", () => {
     const checkbox = screen.getByLabelText("Select FN-001");
     clickInAct(checkbox);
 
-    expect(screen.getByText("Bulk Edit Models & Node:")).toBeDefined();
+    expect(screen.getByText("Bulk Edit Models, Thinking & Node:")).toBeDefined();
   });
 
   it("shows bulk edit toolbar when tasks are selected", () => {
@@ -3924,7 +4164,7 @@ describe("ListView - Bulk Selection", () => {
     const checkbox = screen.getByLabelText("Select FN-001");
     clickInAct(checkbox);
 
-    expect(screen.getByText("Bulk Edit Models & Node:")).toBeDefined();
+    expect(screen.getByText("Bulk Edit Models, Thinking & Node:")).toBeDefined();
   });
 
   it("disables apply button when no model changes selected", () => {
@@ -3986,7 +4226,7 @@ describe("ListView - Bulk Selection", () => {
     enterBulkEditMode();
     await user.click(screen.getByLabelText("Select FN-001"));
 
-    expect(screen.getByText("Bulk Edit Models & Node:")).toBeInTheDocument();
+    expect(screen.getByText("Bulk Edit Models, Thinking & Node:")).toBeInTheDocument();
     const applyButton = screen.getByRole("button", { name: "Apply" });
     expect(applyButton).toBeDisabled();
 
@@ -4522,6 +4762,7 @@ describe("ListView - Bulk Selection", () => {
       expect(firstApplyArgs?.[2]).toBe("gpt-4o");
       expect(firstApplyArgs?.[3]).toBeUndefined();
       expect(firstApplyArgs?.[4]).toBeUndefined();
+      expect(firstApplyArgs?.[8]).toBeUndefined();
     });
 
     // After a successful apply, controls reset to No change and disable Apply again.
@@ -4556,7 +4797,43 @@ describe("ListView - Bulk Selection", () => {
       expect(clearApplyArgs?.[2]).toBeNull();
       expect(clearApplyArgs?.[3]).toBeUndefined();
       expect(clearApplyArgs?.[4]).toBeUndefined();
+      expect(clearApplyArgs?.[8]).toBeUndefined();
     });
+  });
+
+  it("forwards bulk thinking-level selections and omits the field for no-change", async () => {
+    const user = userEvent.setup();
+    const availableModels = [
+      { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
+    ];
+    const tasks = [createMockTask({ id: "FN-001" })];
+    const mockedBatchUpdateTaskModels = vi.mocked(batchUpdateTaskModels);
+    mockedBatchUpdateTaskModels.mockResolvedValue({ updated: [{ ...tasks[0], thinkingLevel: "high" }], count: 1 });
+
+    render(<ListView tasks={tasks} onMoveTask={vi.fn()} onOpenDetail={vi.fn()} addToast={mockAddToast} projectId={TEST_PROJECT_ID} availableModels={availableModels} />);
+    enterBulkEditMode();
+    await user.click(screen.getByLabelText("Select FN-001"));
+
+    const thinkingSelect = screen.getByLabelText("Thinking Level");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+
+    await user.selectOptions(thinkingSelect, "high");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      const args = mockedBatchUpdateTaskModels.mock.calls.at(-1);
+      expect(args?.[0]).toEqual(["FN-001"]);
+      expect(args?.[1]).toBeUndefined();
+      expect(args?.[2]).toBeUndefined();
+      expect(args?.[7]).toBeUndefined();
+      expect(args?.[8]).toBe("high");
+      expect(args?.[9]).toBe(TEST_PROJECT_ID);
+    });
+
+    await user.click(screen.getByLabelText("Select FN-001"));
+    expect(screen.getByLabelText("Thinking Level")).toHaveValue("__no_change__");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
   });
 
   describe("Bulk node override", () => {

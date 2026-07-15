@@ -11,12 +11,24 @@ export { ALL_STAGED_BUNDLED_IDS };
 const RUNTIME_PLUGINS_WITH_MCP_SCHEMA_SERVER = new Set([
   "fusion-plugin-openclaw-runtime",
   "fusion-plugin-droid-runtime",
+  // FNXC:GrokAcp 2026-07-11-14:00: Grok ACP ships mcp-schema-server.cjs so
+  // session/new can forward executable Fusion fn_* tools to grok agent stdio.
+  "fusion-plugin-grok-runtime",
+  // FNXC:OmpAcp 2026-07-14-00:05: OMP ACP ships the same bridge asset for fn_* tools.
+  "fusion-plugin-omp-runtime",
 ]);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = join(__dirname, "..", "..");
 const dashboardClientSrc = join(__dirname, "..", "dashboard", "dist", "client");
 const dashboardClientDest = join(__dirname, "dist", "client");
+// FNXC:RuntimeStartupWiring 2026-06-24-11:15:
+// The PostgreSQL schema baseline (0000_initial.sql) is read at runtime by the
+// schema applier relative to the compiled module location. When @fusion/core
+// is bundled into dist/bin.js, the applier's __dirname resolves to dist/, so
+// the migration SQL must be staged into dist/migrations to remain resolvable.
+const pgMigrationsSrc = join(__dirname, "..", "core", "src", "postgres", "migrations");
+const pgMigrationsDest = join(__dirname, "dist", "migrations");
 const piClaudeCliSrc = join(__dirname, "..", "pi-claude-cli");
 const piClaudeCliDest = join(__dirname, "dist", "pi-claude-cli");
 const droidCliSrc = join(__dirname, "..", "droid-cli");
@@ -39,6 +51,7 @@ const compoundEngineeringPluginSrc = join(__dirname, "..", "..", "plugins", "fus
 const compoundEngineeringPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-compound-engineering");
 const linearImportPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-linear-import");
 const linearImportPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-linear-import");
+const pluginSdkCoreRuntimeShim = join(__dirname, "src", "plugin-sdk-core-runtime-shim.ts");
 const dashboardClientStub = `<!doctype html>
 <html lang="en">
   <head>
@@ -171,12 +184,31 @@ async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = fal
     platform: "node",
     target: "node22",
     outfile: join(destDir, "bundled.js"),
-    external: ["@fusion/core", "@fusion/engine"],
+    external: ["@fusion/engine"],
     alias: {
       "@fusion/plugin-sdk": join(__dirname, "..", "plugin-sdk", "src", "index.ts"),
+      /*
+       * FNXC:BundledPlugins 2026-07-13-00:00:
+       * FN-7936 / issue #2059 requires every published bundled.js to be self-contained. The plugin-sdk source re-exports WORKFLOW_EXTENSION_SCHEMA_VERSION, workflowExtensionRegistryId, and createBoardActionServices from private @fusion/core; resolve those runtime values to the shared shim here so npm-installed bundled plugins never crash with Cannot find package '@fusion/core'.
+       */
+      "@fusion/core": pluginSdkCoreRuntimeShim,
     },
     logLevel: "warning",
   });
+
+  const skillsSourceDir = join(srcDir, "src", "skills");
+  if (existsSync(skillsSourceDir)) {
+    const skillsDestDir = join(destDir, "skills");
+    /*
+     * FNXC:BundledPlugins 2026-07-14-12:00:
+     * FN-7955 / issue #2094 requires plugin-local runtime-read assets to ship with @runfusion/fusion. esbuild bundle:true only inlines statically imported JS/TS, so files read from disk through resolveBundledSkillsRoot() or PluginSkillContribution.skillFiles, such as nested SKILL.md files under src/skills, must be explicitly staged into dist/plugins/<id>/skills/ or the published npm tarball silently contains zero skill bodies.
+     */
+    cpSync(skillsSourceDir, skillsDestDir, { recursive: true });
+    if (!existsSync(skillsDestDir)) {
+      throw new Error(`[tsup] Missing staged skills for ${pluginId}: expected ${skillsDestDir}`);
+    }
+    console.log(`Staged plugin skills for ${pluginId} to dist/plugins/${pluginId}/skills`);
+  }
 
   if (withMcpAsset) {
     const mcpServerAsset = join(srcDir, "src", "mcp-schema-server.cjs");
@@ -271,7 +303,6 @@ function assertAllStagedBundledPluginsLoadable() {
 }
 
 const pluginSdkEntry = join(__dirname, "..", "plugin-sdk", "src", "index.ts");
-const pluginSdkCoreRuntimeShim = join(__dirname, "src", "plugin-sdk-core-runtime-shim.ts");
 
 const cliBuildConfig = {
   entry: ["src/bin.ts", "src/extension.ts"],
@@ -285,12 +316,23 @@ const cliBuildConfig = {
   // Native module: leave node-pty (aliased to @homebridge fork) out of the
   // bundle. esbuild can't statically resolve its conditional native require()s
   // (build/Release/pty.node, build/Debug/conpty.node, ...).
+  //
+  // FNXC:RuntimeStartupWiring 2026-06-24-11:00:
+  // embedded-postgres ships platform-specific optional packages
+  // (@embedded-postgres/darwin-arm64, linux-x64, windows-x64, ...) that it
+  // loads via dynamic import() at runtime based on process.platform/arch.
+  // esbuild tries to resolve those dynamic imports at bundle time and fails
+  // because only the current platform's binary is installed. Externalize the
+  // whole family (plus the umbrella package) so the native binaries are
+  // resolved at runtime from node_modules, exactly like node-pty above.
   external: [
     "node-pty",
     "@homebridge/node-pty-prebuilt-multiarch",
     "dockerode",
     "ssh2",
     "cpu-features",
+    "embedded-postgres",
+    /^@embedded-postgres\//,
   ],
   splitting: false,
   // Keep clean disabled so the dedicated plugin-sdk tsup config can emit into
@@ -301,6 +343,23 @@ const cliBuildConfig = {
     js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
   },
   onSuccess: async () => {
+    // FNXC:RuntimeStartupWiring 2026-06-24-11:15:
+    // FNXC:AutomationIsolation 2026-07-13-22:37: Stage the complete versioned PostgreSQL migration directory (including automation project isolation) into dist/migrations so existing installations upgrade before project cron runners start.
+    // Stage the PostgreSQL schema migrations into dist/migrations so the schema applier can read them at runtime after
+    // @fusion/core is bundled into dist/bin.js. Without this, the PG boot
+    // path fails with ENOENT for dist/migrations/0000_initial.sql.
+    if (existsSync(pgMigrationsSrc)) {
+      if (existsSync(pgMigrationsDest)) {
+        rmSync(pgMigrationsDest, { recursive: true, force: true });
+      }
+      mkdirSync(pgMigrationsDest, { recursive: true });
+      cpSync(pgMigrationsSrc, pgMigrationsDest, { recursive: true });
+      console.log("Copied PostgreSQL migrations to dist/migrations/");
+    } else {
+      console.warn(
+        `WARNING: PostgreSQL migrations source not found at ${pgMigrationsSrc}; DATABASE_URL boot will fail to apply schema migrations.`,
+      );
+    }
     if (existsSync(desktopRuntimeDest)) {
       rmSync(desktopRuntimeDest, { recursive: true, force: true });
     }

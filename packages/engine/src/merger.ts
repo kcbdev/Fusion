@@ -180,7 +180,13 @@ async function resolveMergerMcpServers(store?: TaskStore, agentId?: string | nul
  * Best-effort: any per-worktree failure is recorded as an audit event and the
  * loop continues — the merge has already landed and the auto-sync is convenience.
  */
-async function runMergeAdvanceAutoSync(input: {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path: after a push-time divergence rebase CAS-advances
+refs/heads/<integrationBranch>, the same other-worktree catch-up (stash-and-ff / ff-only)
+must run so the user's checkout doesn't show the rebased commits inverted as staged changes.
+*/
+export async function runMergeAdvanceAutoSync(input: {
   store: TaskStore;
   audit: RunAuditor;
   taskId: string;
@@ -1980,8 +1986,9 @@ Do not refactor, rename broadly, or make opportunistic improvements.
       }),
       settings,
       mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
-      // Skill selection: use assigned agent skills if available, otherwise role fallback
+      // FNXC:PluginSkills 2026-07-12-00:00: Merger verification-fix sessions forward plugin skill body dirs with requested names so plugin merge guidance is discoverable in live sessions.
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+      ...(skillContext && skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
       taskId,
       taskTitle: taskForSkillContext?.title,
       onFallbackModelUsed: createFallbackModelObserver({
@@ -3175,7 +3182,9 @@ ${fileList}
     }),
     settings,
     mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
+    // FNXC:PluginSkills 2026-07-12-00:00: Autostash conflict sessions must preserve plugin skill body dirs from the shared skill context.
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+    ...(skillContext && skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
     onFallbackModelUsed: createFallbackModelObserver({
@@ -3593,7 +3602,9 @@ ${fileList}
     }),
     settings,
     mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
+    // FNXC:PluginSkills 2026-07-12-00:00: Autostash hard-fail recovery sessions keep plugin body discovery paths aligned with requested plugin skills.
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+    ...(skillContext && skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
     onFallbackModelUsed: createFallbackModelObserver({
@@ -6981,7 +6992,13 @@ function getCommandErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isNonFastForwardPushError(message: string): boolean {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path (merger-ai.ts pushAfterMergeToRemote): the production
+runAiMerge pipeline needs the same rejected-push classification the legacy step-8b path used,
+so divergence (remote moved) can be distinguished from hard failures (auth, missing remote).
+*/
+export function isNonFastForwardPushError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("non-fast-forward")
     || normalized.includes("[rejected]")
@@ -7001,7 +7018,13 @@ function isRebaseInProgress(rootDir: string): boolean {
   }
 }
 
-function parsePushRemoteTarget(rootDir: string, pushRemote?: string, fallbackBranch?: string): { remote: string; branch: string } {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path (merger-ai.ts pushAfterMergeToRemote) so the
+`pushRemote` setting keeps one parser: "origin" (target branch defaults to the integration
+branch) or "origin main" (explicit remote + target branch).
+*/
+export function parsePushRemoteTarget(rootDir: string, pushRemote?: string, fallbackBranch?: string): { remote: string; branch: string } {
   const rawTarget = pushRemote?.trim() || "origin";
   const [remoteToken, ...branchTokens] = rawTarget.split(/\s+/).filter(Boolean);
   const remote = remoteToken || "origin";
@@ -7306,6 +7329,15 @@ export async function pushToRemoteAfterMerge(
     assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
     integrationBranch?: string;
+    /*
+    FNXC:MergePush 2026-07-11-22:10:
+    When true, push `HEAD:refs/heads/<branch>` instead of the local branch ref. The unified
+    AI merge path calls this from a DETACHED clean-room worktree (never the user's checkout),
+    where `git pull --rebase` rewrites the detached HEAD — the local refs/heads/<branch> is
+    only advanced afterwards via compare-and-swap by the caller. Without this, the push would
+    resend the stale local ref after a divergence rebase and reject non-fast-forward forever.
+    */
+    pushHeadRefspec?: boolean;
   },
 ): Promise<{ pushed: boolean; error?: string }> {
   let target: { remote: string; branch: string };
@@ -7333,7 +7365,9 @@ export async function pushToRemoteAfterMerge(
     return { pushed: false, error: message };
   }
 
-  const pushCommand = `git push ${quoteArg(remote)} ${quoteArg(branch)}`;
+  const pushCommand = options?.pushHeadRefspec
+    ? `git push ${quoteArg(remote)} ${quoteArg(`HEAD:refs/heads/${branch}`)}`
+    : `git push ${quoteArg(remote)} ${quoteArg(branch)}`;
 
   try {
     throwIfAborted(options?.signal, taskId);
@@ -7714,7 +7748,7 @@ export async function syncGroupPrOnLanding(input: {
   syncGroupPr: import("./group-merge-coordinator.js").SyncGroupPrFn;
 }): Promise<void> {
   const { store, groupId, cwd, syncGroupPr } = input;
-  const latestGroup = store.getBranchGroup(groupId);
+  const latestGroup = await store.getBranchGroup(groupId);
   if (!latestGroup || latestGroup.prNumber == null || latestGroup.prState !== "open") {
     return;
   }
@@ -7727,7 +7761,7 @@ export async function syncGroupPrOnLanding(input: {
   // Guard against stale snapshots: a newer landing/promotion may have stored a
   // different (e.g. newer open) PR for this group while we were awaiting the
   // sync. Re-read and only persist when the snapshot still matches.
-  const currentGroup = store.getBranchGroup(groupId);
+  const currentGroup = await store.getBranchGroup(groupId);
   if (
     !currentGroup ||
     currentGroup.prNumber !== latestGroup.prNumber ||
@@ -7738,7 +7772,7 @@ export async function syncGroupPrOnLanding(input: {
   // Out-of-band reconciliation: if GitHub reports the PR is no longer open
   // (closed/merged), persist the corrected prState rather than leaving a stale "open".
   if (reconciled.prState !== currentGroup.prState) {
-    store.updateBranchGroup(currentGroup.id, {
+    void store.updateBranchGroup(currentGroup.id, {
       prState: reconciled.prState,
       prNumber: reconciled.prNumber,
       prUrl: reconciled.prUrl,
@@ -7881,7 +7915,7 @@ export async function aiMergeTask(
       }).catch((err) => {
         // Non-fatal: never fail the merge/landing because PR sync failed.
         try {
-          store.recordRunAuditEvent({
+          void store.recordRunAuditEvent({
             taskId,
             agentId: "merger",
             runId: `merge-${taskId}`,
@@ -8369,18 +8403,18 @@ export async function aiMergeTask(
       (settings.autoMerge === false && task.autoMerge !== true) ||
       providerManualRoute;
     const initialState = autoMergeManuallyGated ? "manual-required" : "queued";
-    const existingRecord = store.getMergeRequestRecord(task.id);
+    const existingRecord = await store.getMergeRequestRecordAsync(task.id);
     const currentState = existingRecord?.state ?? initialState;
     if (!existingRecord) {
-      store.upsertMergeRequestRecord(task.id, { state: initialState });
+      await store.upsertMergeRequestRecord(task.id, { state: initialState });
     }
 
     if (!autoMergeManuallyGated) {
       if (currentState === "retrying") {
-        store.transitionMergeRequestState(task.id, "queued");
-        store.transitionMergeRequestState(task.id, "running");
+        await store.transitionMergeRequestState(task.id, "queued");
+        await store.transitionMergeRequestState(task.id, "running");
       } else if (currentState === "queued") {
-        store.transitionMergeRequestState(task.id, "running");
+        await store.transitionMergeRequestState(task.id, "running");
       }
     }
 
@@ -8401,7 +8435,7 @@ export async function aiMergeTask(
   if (integrationRoot.mode === "reuse-task-worktree") {
     // FN-5353: ensure the target task is in mergeQueue before attempting strict
     // targetTaskId lease acquisition for reuse handoff.
-    store.enqueueMergeQueue(task.id, { priority: task.priority });
+    await store.enqueueMergeQueue(task.id, { priority: task.priority });
     try {
       reuseHandoff = await acquireReuseHandoff({
         task,
@@ -9661,7 +9695,7 @@ export async function aiMergeTask(
   // 5. Execute merge with retry logic
   // Cross-process safety net: abort if another task is already mid-merge.
   // The engine's drainMergeQueue also checks, but this catches direct callers.
-  const activeMerge = store.getActiveMergingTask(taskId);
+  const activeMerge = await store.getActiveMergingTask(taskId);
   if (activeMerge) {
     throw new Error(
       `Cannot merge ${taskId}: task ${activeMerge} is already merging (cross-process conflict)`,
@@ -12055,8 +12089,9 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     settings,
     // FNXC:McpConfig 2026-06-25-23:04: The primary merge-authoring agent is part of the merger lane and receives the resolved MCP set under the shared runtime-support guard, matching conflict/verification merge sessions without exposing secret material.
     mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
-    // Skill selection: use assigned agent skills if available, otherwise role fallback
+    // FNXC:PluginSkills 2026-07-12-00:00: Merge-authoring sessions forward plugin skill body dirs so plugin-contributed merger skills load their bodies.
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+    ...(skillContext && skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
     onFallbackModelUsed: createFallbackModelObserver({
@@ -12442,9 +12477,9 @@ async function completeTask(
   const task = await store.moveTask(taskId, "done");
   const settings = await store.getSettings();
   if (isMergeRequestContractShadowEnabled(settings) && preMoveTask?.autoMerge !== false) {
-    const mergeRequestRecord = store.getMergeRequestRecord(taskId);
+    const mergeRequestRecord = await store.getMergeRequestRecordAsync(taskId);
     if (mergeRequestRecord) {
-      store.transitionMergeRequestState(taskId, "succeeded");
+      await store.transitionMergeRequestState(taskId, "succeeded");
     }
   }
   result.task = task;

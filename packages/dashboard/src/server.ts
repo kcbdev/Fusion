@@ -15,8 +15,9 @@ import type {
   MessageStore,
   AgentLogEntry,
   TaskIdIntegrityReport,
+  RunAuditEvent,
 } from "@fusion/core";
-import { AgentStore, ChatStore, setRunningAgentCountSource } from "@fusion/core";
+import { AgentStore, ChatStore, queryRunAuditEvents, setRunningAgentCountSource } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
 import { createSSE, disconnectSSEClient, markSSEClientAlive } from "./sse.js";
@@ -69,7 +70,7 @@ import type { SkillsAdapter } from "./skills-adapter.js";
 import { createAuthMiddleware, authenticateUpgradeRequest, getDaemonToken } from "./auth-middleware.js";
 import { setupCliSessionWebSocket } from "./cli-session-ws.js";
 import { createCliSessionsRouter } from "./routes/cli-sessions.js";
-import { getProjectIdFromRequest } from "./routes/context.js";
+import { getProjectIdFromRequest, resolveStoreForProjectId } from "./routes/context.js";
 import type { CliRelaunchRegistry } from "./cli-session-transport.js";
 import { validateRemoteAuthToken } from "./remote-auth.js";
 import { getCliPackageVersion, isUnresolvedCliPackageVersion } from "./cli-package-version.js";
@@ -202,19 +203,26 @@ export async function resolveScopedStore(
   projectId: string | undefined,
   store: TaskStore,
   engineManager?: import("@fusion/engine").ProjectEngineManager,
+  launchProjectId?: string,
+  // FNXC:CentralProjectIdentity 2026-07-13-23:55: thread the caller's ServerOptions so
+  // the shared one-time launch-dir fallback warning routes through runtimeLogger
+  // instead of console.warn and isn't consumed on the unstructured sink first.
+  options?: ServerOptions,
 ): Promise<TaskStore> {
-  if (!projectId) {
-    return store;
-  }
-
-  if (engineManager) {
-    const engine = engineManager.getEngine(projectId);
-    if (engine) {
-      return engine.getTaskStore();
-    }
-  }
-
-  return await getOrCreateProjectStore(projectId);
+  /*
+  FNXC:CentralProjectIdentity 2026-07-14-00:15:
+  Realtime scoped-store resolution delegates to the SINGLE shared id-based core
+  (routes/context.ts resolveStoreForProjectId) so the realtime path and route path
+  can never drift. This exported signature (separate engineManager/launchProjectId
+  params) is retained for caller compatibility; callers derive both from `options`
+  (engineManager = options.engineManager, launchProjectId = options.engine.getProjectId()),
+  so folding `projectId ?? launchProjectId` into the shared core is equivalent.
+  Note: engineManager/launchProjectId params below are consumed via `options` inside
+  the shared core; they remain in the signature only for backwards compatibility.
+  */
+  void engineManager;
+  void launchProjectId;
+  return resolveStoreForProjectId(projectId ?? launchProjectId, store, options);
 }
 
 export interface ServerOptions {
@@ -306,7 +314,8 @@ export interface ServerOptions {
     watchMission(missionId: string): void;
     unwatchMission(missionId: string): void;
     isWatching(missionId: string): boolean;
-    getAutopilotStatus(missionId: string): import("@fusion/core").AutopilotStatus;
+    // FNXC:MissionStore 2026-06-28-12:45: getAutopilotStatus is async (union store).
+    getAutopilotStatus(missionId: string): Promise<import("@fusion/core").AutopilotStatus>;
     checkAndStartMission(missionId: string): Promise<void>;
     recoverStaleMission(missionId: string): Promise<void>;
     start(): void;
@@ -352,7 +361,7 @@ export interface ServerOptions {
     FNXC:ChatSkills 2026-06-16-19:10:
     The dashboard passes this structural runner into ChatManager, which needs optional plugin skill discovery so chat can load enabled plugin skills such as ce-debug.
     */
-    getPluginSkills?(): Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
+    getPluginSkills?(): Array<{ pluginId: string; pluginRoot?: string; skill: { skillId?: string; name: string; description?: string; enabled?: boolean; skillFiles?: string[] } }>;
     reloadPlugin?(pluginId: string): Promise<unknown>;
     checkPluginSetup?(pluginId: string): Promise<import("@fusion/core").PluginSetupCheckResult>;
     installPluginSetup?(pluginId: string): Promise<void | { success: boolean; error?: string }>;
@@ -501,6 +510,44 @@ export interface ServerOptions {
     key: string | Buffer;
     ca?: string | Buffer | Array<string | Buffer>;
   };
+  /*
+   * FNXC:PostgresHealth 2026-06-24-16:00:
+   * Optional PostgreSQL health layer. When provided, the /api/health and
+   * /api/health/refresh endpoints use PostgreSQL-native health checks
+   * (connectivity probe, schema drift, task-ID integrity) instead of the
+   * SQLite-specific integrity_check path. This is the integration seam
+   * between the async PostgreSQL data layer and the dashboard health surface.
+   * When absent, the endpoints fall back to the legacy SQLite health checks
+   * via store.getDatabaseHealth().
+   */
+  postgresHealthLayer?: import("@fusion/core").AsyncDataLayer;
+  /*
+  FNXC:SystemPanel 2026-07-12-11:15:
+  Host-process control surface for the dashboard System panel (Command Center →
+  System). The host CLI injects these; the /api/system routes consume them.
+  `requestRestart` returns false when no supervising parent will respawn the
+  process (then the UI disables restart actions). `sourceWorkspaceRoot` is set
+  only when running from a Fusion source checkout, which gates the
+  "Rebuild & restart" controls.
+  */
+  systemControl?: {
+    supervised: boolean;
+    requestRestart: (reason: string) => boolean;
+    sourceWorkspaceRoot?: string;
+  };
+  /** Bounded host-process log history + live tail for the System panel log viewer. */
+  systemLogs?: {
+    getRecent(limit?: number): SystemLogEntry[];
+    subscribe(listener: (entry: SystemLogEntry) => void): () => void;
+  };
+}
+
+/** System panel log entry shape (mirrors the CLI log sink's ring buffer). */
+export interface SystemLogEntry {
+  timestamp: Date;
+  level: "info" | "warn" | "error";
+  message: string;
+  prefix?: string;
 }
 
 function hasDashboardEngine(options?: ServerOptions): boolean {
@@ -1050,14 +1097,21 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   }
 
   // Create ChatStore for chat session management (available for SSE event forwarding)
-  const chatStore = options?.chatStore ?? new ChatStore(store.getFusionDir(), store.getDatabase());
+  // FNXC:RuntimeSatelliteAsync 2026-06-24-21:45:
+  // ChatStore dual-path: uses async layer in backend mode, sync DB otherwise.
+  const chatLayer = store.getAsyncLayer();
+  const chatStore = options?.chatStore ?? new ChatStore(
+    store.getFusionDir(),
+    chatLayer ? null : store.getDatabase(),
+    { asyncLayer: chatLayer },
+  );
   store.on("task:moved", (data: { task: Task; from: string; to: string }) => {
     if (data.to !== "archived") return;
     /*
     FNXC:TaskDetailPlannerChatRetention 2026-06-30-18:45:
     Task-detail planner chats are retained after done when a user interacted, but task archival is the retention cutoff. Delete exact task-planner sessions on archive so normal chats and other tasks' planner chats remain intact while chat:session:deleted events clear dashboard caches.
     */
-    chatStore.deleteSessionsForAgentId(`${TASK_PLANNER_CHAT_AGENT_ID_PREFIX}${data.task.id}`);
+    void chatStore.deleteSessionsForAgentId(`${TASK_PLANNER_CHAT_AGENT_ID_PREFIX}${data.task.id}`);
   });
   options?.engine?.attachChatStore?.(chatStore);
   if (typeof options?.engineManager?.getAllEngines === "function") {
@@ -1088,6 +1142,22 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
     const engineManager = options?.engineManager;
 
+    // FNXC:MissionStore 2026-06-28-13:10:
+    // Both MissionStore and the PG-backend AsyncMissionStore now extend EventEmitter and
+    // emit the same mission/milestone/slice/feature events, so SSE subscribes to whichever
+    // getMissionStore() resolves — live mission refresh works in both backends. (Previously
+    // this instanceof-narrowed to the sync store and passed undefined in PG mode, leaving
+    // mission SSE degraded.) createSSE still handles undefined for a missing store.
+    const safeGetMissionStore = (
+      s: TaskStore,
+    ): ReturnType<TaskStore["getMissionStore"]> | undefined => {
+      try {
+        return s.getMissionStore();
+      } catch {
+        return undefined;
+      }
+    };
+
     if (!projectId) {
       // Create AgentStore for default project SSE
       const { AgentStore: AgentStoreClass } = await import("@fusion/core");
@@ -1096,8 +1166,8 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       const defaultMessageStore = options?.engine?.getMessageStore();
       createSSE(
         store,
-        store.getMissionStore(),
-        aiSessionStore,
+        safeGetMissionStore(store),
+        aiSessionStore!,
         store.getPluginStore(),
         undefined,
         defaultAgentStore,
@@ -1140,8 +1210,8 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       }
       createSSE(
         scopedStore,
-        scopedStore.getMissionStore(),
-        aiSessionStore,
+        safeGetMissionStore(scopedStore),
+        aiSessionStore!,
         scopedStore.getPluginStore(),
         {
           projectId,
@@ -1161,7 +1231,11 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
    * Uses module-level resolveScopedStore with current closure context.
    */
   async function resolveProjectScopedStore(projectId: string | undefined): Promise<TaskStore> {
-    return resolveScopedStore(projectId, store, options?.engineManager);
+    // FNXC:CentralProjectIdentity 2026-07-13-23:53:
+    // Thread the daemon's registered launch project id so a realtime request
+    // without projectId resolves the explicit launch project (registry-bound
+    // injected store) rather than the implicit raw-store fallback.
+    return resolveScopedStore(projectId, store, options?.engineManager, options?.engine?.getProjectId?.(), options);
   }
 
   // Per-task SSE endpoint for live agent log streaming
@@ -1367,19 +1441,43 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   }
 
   // Create AiSessionStore for background task persistence
-  const aiSessionStore = options?.aiSessionStore ?? new AiSessionStore(store.getDatabase());
-  aiSessionStore.recoverStaleSessions();
-  setPlanningAiSessionStore(aiSessionStore);
-  setSubtaskAiSessionStore(aiSessionStore);
-  setMissionAiSessionStore(aiSessionStore);
-  setMilestoneSliceAiSessionStore(aiSessionStore);
+  // FNXC:RuntimeSatelliteCompletion 2026-06-25-00:05:
+  // AiSessionStore dual-path: uses async layer in backend mode, sync DB otherwise.
+  const aiSessionLayer = store.getAsyncLayer();
+  const aiSessionStore: AiSessionStore | undefined = options?.aiSessionStore ?? new AiSessionStore(
+    aiSessionLayer ? null as unknown as import("@fusion/core").Database : store.getDatabase(),
+    { asyncLayer: aiSessionLayer },
+  );
+  if (aiSessionStore) {
+    // FNXC:RuntimeSatelliteCompletion 2026-06-25-00:20:
+    // recoverStaleSessions + rehydrateFromStore are now async. Fire-and-forget
+    // at startup since the server must return the Express app synchronously.
+    // The recovery completes before the first request in practice (event loop
+    // drains microtasks before I/O), and is best-effort regardless.
+    void aiSessionStore.recoverStaleSessions();
+    setPlanningAiSessionStore(aiSessionStore);
+    setSubtaskAiSessionStore(aiSessionStore);
+    setMissionAiSessionStore(aiSessionStore);
+    setMilestoneSliceAiSessionStore(aiSessionStore);
+  }
 
-  const planningRehydratedCount = rehydratePlanningSessions(aiSessionStore);
-  const subtaskRehydratedCount = rehydrateSubtaskSessions(aiSessionStore);
-  const missionRehydratedCount = rehydrateMissionSessions(aiSessionStore);
-  const milestoneSliceRehydratedCount = rehydrateMilestoneSliceSessions(aiSessionStore);
-  const totalRehydrated =
-    planningRehydratedCount + subtaskRehydratedCount + missionRehydratedCount + milestoneSliceRehydratedCount;
+  // Fire-and-forget rehydration; store references for logging.
+  let planningRehydratedCount = 0;
+  let subtaskRehydratedCount = 0;
+  let missionRehydratedCount = 0;
+  let milestoneSliceRehydratedCount = 0;
+  if (aiSessionStore) {
+    void rehydratePlanningSessions(aiSessionStore).then((c) => { planningRehydratedCount = c; });
+    void rehydrateSubtaskSessions(aiSessionStore).then((c) => { subtaskRehydratedCount = c; });
+    void rehydrateMissionSessions(aiSessionStore).then((c) => { missionRehydratedCount = c; });
+    void rehydrateMilestoneSliceSessions(aiSessionStore).then((c) => { milestoneSliceRehydratedCount = c; });
+  }
+  // FNXC:RuntimeSatelliteCompletion 2026-06-25-00:25:
+  // Rehydration counts are logged asynchronously after the fire-and-forget
+  // promises resolve. The synchronous total is 0 since the promises haven't
+  // settled yet. This is intentional: the server must return the Express app
+  // synchronously, and rehydration is best-effort.
+  const totalRehydrated = 0;
   if (totalRehydrated > 0) {
     runtimeLogger.info("AI session rehydrate summary", {
       message: "Rehydrated AI sessions from SQLite",
@@ -1392,7 +1490,14 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   }
 
   // Create AgentStore for chat prompt enrichment (initialized lazily by ChatManager)
-  const chatAgentStore = new AgentStore({ rootDir: store.getFusionDir() });
+  // FNXC:SqliteFinalRemoval 2026-06-26-11:00:
+  // In backend mode, pass the AsyncDataLayer so AgentStore delegates to the
+  // async helpers; otherwise use the legacy SQLite path.
+  const chatAgentLayer = store.getAsyncLayer();
+  const chatAgentStore = new AgentStore({
+    rootDir: store.getFusionDir(),
+    ...(chatAgentLayer ? { asyncLayer: chatAgentLayer } : {}),
+  });
 
   // Create ChatManager for AI chat message handling.
   /*
@@ -1408,7 +1513,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   back to the loader only in UI-only mode where no engine exists.
   */
   const chatManager = options?.chatManager ?? new ChatManager(
-    chatStore,
+    chatStore!,
     store.getRootDir(),
     chatAgentStore,
     resolveChatManagerPluginRunner(options),
@@ -1437,7 +1542,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     }
   }
 
-  if (options?.cliSessionTransport && options.cliAgentHubResolver) {
+  if (options?.cliSessionTransport && options.cliAgentHubResolver && chatStore) {
     try {
       const cliTransportStore = options.cliSessionTransport.store;
       // The transport's `manager` is typed for the attach/inject transport slice;
@@ -1499,8 +1604,9 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     }
   }
 
-  const runAiSessionCleanup = (maxAgeMs: number, source: "initial" | "scheduled") => {
-    const result = aiSessionStore.cleanupStaleSessions(maxAgeMs);
+  const runAiSessionCleanup = async (maxAgeMs: number, source: "initial" | "scheduled") => {
+    if (!aiSessionStore) return { terminalDeleted: 0, orphanedDeleted: 0 };
+    const result = await aiSessionStore.cleanupStaleSessions(maxAgeMs);
     runtimeLogger.info("AI session cleanup summary", {
       message: "Removed stale AI sessions",
       source,
@@ -1515,9 +1621,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   const scheduleAiSessionCleanup = (cleanupIntervalMs: number, maxAgeMs: number) => {
     clearAiSessionCleanupInterval();
     aiSessionCleanupIntervalHandle = setInterval(() => {
-      try {
-        runAiSessionCleanup(maxAgeMs, "scheduled");
-      } catch (err) {
+      runAiSessionCleanup(maxAgeMs, "scheduled").catch((err) => {
         runtimeLogger.error("AI session cleanup failed", {
           message: "Scheduled AI session cleanup failed",
           source: "scheduled",
@@ -1525,7 +1629,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
           cleanupIntervalMs,
           ...normalizeErrorForLog(err),
         });
-      }
+      });
     }, cleanupIntervalMs);
     aiSessionCleanupIntervalHandle.unref?.();
   };
@@ -1605,7 +1709,42 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     }
   }
 
-  app.get("/api/health", (_req, res) => {
+  /*
+   * FNXC:PostgresHealth 2026-06-24-16:10:
+   * The /api/health endpoint is async because PostgreSQL health checks
+   * (connectivity probe, task-ID integrity via Drizzle) are inherently async.
+   * When postgresHealthLayer is provided, the endpoint uses PostgreSQL-native
+   * checks; otherwise it falls back to the legacy SQLite health checks.
+   * VAL-HEALTH-001: healthy backend reports green; VAL-HEALTH-002: corrupt/
+   * unreachable backend surfaces degraded status + errors.
+   */
+  app.get("/api/health", async (_req, res) => {
+    const pgLayer = options?.postgresHealthLayer;
+    if (pgLayer) {
+      const { checkPostgresHealth } = await import("@fusion/core");
+      const { detectTaskIdIntegrityAnomaliesAsync } = await import("@fusion/core");
+      const errors = await checkPostgresHealth(pgLayer).catch((err: unknown) => [
+        `PostgreSQL health check failed: ${err instanceof Error ? err.message : String(err)}`,
+      ]);
+      const integrityReport = await detectTaskIdIntegrityAnomaliesAsync(pgLayer.db).catch(() => ({
+        status: "ok" as const,
+        checkedAt: new Date().toISOString(),
+        anomalies: [],
+      }));
+      res.json(buildHealthPayload({
+        database: {
+          healthy: errors.length === 0,
+          corruptionDetected: errors.length > 0,
+          corruptionErrors: errors.slice(0, 5),
+          lastCheckedAt: new Date(),
+          isRunning: false,
+        },
+        taskIdIntegrityReport: integrityReport,
+        cliPackageVersion,
+        engineAvailable: hasDashboardEngine(options),
+      }));
+      return;
+    }
     res.json(buildHealthPayload({
       database: store.getDatabaseHealth(),
       taskIdIntegrityReport: store.getTaskIdIntegrityReport(),
@@ -1688,8 +1827,23 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     const startIso = new Date(effectiveStartMs).toISOString();
     const endIso = new Date(nowMs).toISOString();
 
+    const auditFilter = { startTime: startIso, endTime: endIso, limit: 50_000 };
+    const asyncLayer = scopedStore.getAsyncLayer();
+    /*
+    FNXC:ReliabilityHealth 2026-07-14-16:13:
+    Backend-mode Reliability must use the authoritative async run-audit reader. The synchronous reader is a SQLite/test compatibility surface and intentionally degrades to an empty result under PostgreSQL.
+    */
+    const runAuditEventsPromise: Promise<RunAuditEvent[]> = asyncLayer
+      ? queryRunAuditEvents(asyncLayer.db, auditFilter).then((events) => events.map((event) => ({
+          ...event,
+          domain: event.domain as RunAuditEvent["domain"],
+          mutationType: event.mutationType as RunAuditEvent["mutationType"],
+          taskId: event.taskId ?? undefined,
+          metadata: event.metadata ?? undefined,
+        })))
+      : Promise.resolve(scopedStore.getRunAuditEvents(auditFilter));
     const [runAuditEvents, enteredByDay, bouncedByDay, durationEvents, mergedTaskIds] = await Promise.all([
-      Promise.resolve(scopedStore.getRunAuditEvents({ startTime: startIso, endTime: endIso, limit: 50_000 })),
+      runAuditEventsPromise,
       scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, toColumn: "in-review" }),
       scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, fromColumn: "in-review", toColumn: "in-progress" }),
       scopedStore.getInReviewDurationEvents({ since: startIso, until: endIso }),
@@ -1788,18 +1942,69 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     res.json({ resetAt });
   });
 
-  app.post("/api/health/refresh", (_req, res) => {
-    // Force-recompute integrity + database health, then shape the response via
-    // buildHealthPayload so this endpoint cannot drift from GET /api/health as
-    // the payload evolves (the `engine` field had to be hand-synced here
-    // before). The refreshed snapshots are passed in directly so the response
-    // reflects the freshly-recomputed values, not a separately-read cache.
+  app.post("/api/health/refresh", async (_req, res) => {
+    /*
+     * FNXC:PostgresHealth 2026-06-24-16:15:
+     * Force-recompute integrity + database health. When postgresHealthLayer
+     * is provided, uses PostgreSQL-native checks (VAL-HEALTH-002: clears stale
+     * corruption banner after repair). Otherwise falls back to the legacy
+     * SQLite refresh path.
+     */
+    const pgLayer = options?.postgresHealthLayer;
+    if (pgLayer) {
+      const { checkPostgresHealth } = await import("@fusion/core");
+      const { detectTaskIdIntegrityAnomaliesAsync } = await import("@fusion/core");
+      const errors = await checkPostgresHealth(pgLayer).catch((err: unknown) => [
+        `PostgreSQL health check failed: ${err instanceof Error ? err.message : String(err)}`,
+      ]);
+      const integrityReport = await detectTaskIdIntegrityAnomaliesAsync(pgLayer.db).catch(() => ({
+        status: "ok" as const,
+        checkedAt: new Date().toISOString(),
+        anomalies: [],
+      }));
+      res.json(buildHealthPayload({
+        database: {
+          healthy: errors.length === 0,
+          corruptionDetected: errors.length > 0,
+          corruptionErrors: errors.slice(0, 5),
+          lastCheckedAt: new Date(),
+          isRunning: false,
+        },
+        taskIdIntegrityReport: integrityReport,
+        cliPackageVersion,
+        engineAvailable: hasDashboardEngine(options),
+      }));
+      return;
+    }
     res.json(buildHealthPayload({
       database: store.refreshDatabaseHealth(),
       taskIdIntegrityReport: store.refreshTaskIdIntegrityReport(),
       cliPackageVersion,
       engineAvailable: hasDashboardEngine(options),
     }));
+  });
+
+  /*
+   * FNXC:PostgresHealth 2026-06-24-16:20:
+   * Explicit compaction command: runs VACUUM/ANALYZE on the project-schema
+   * tables and reports per-table stats (VAL-HEALTH-005). Only available when
+   * the PostgreSQL health layer is provided; returns 501 otherwise.
+   */
+  app.post("/api/health/compact", async (_req, res) => {
+    const pgLayer = options?.postgresHealthLayer;
+    if (!pgLayer) {
+      res.status(501).json({ error: "PostgreSQL compaction is not available (no postgresHealthLayer configured)." });
+      return;
+    }
+    try {
+      const { vacuumAnalyze } = await import("@fusion/core");
+      const result = await vacuumAnalyze(pgLayer.db);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        error: `VACUUM/ANALYZE failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   });
 
   app.get("/api/updates/check", async (_req, res) => {
@@ -1899,7 +2104,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   const apiRouter = createApiRoutes(store, {
     ...options,
     runtimeLogger,
-    aiSessionStore,
+    aiSessionStore: aiSessionStore as AiSessionStore,
     chatStore,
     chatManager,
     skillsAdapter: options?.skillsAdapter,
@@ -1930,13 +2135,22 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   // API Error Handling Middleware - MUST be after API routes but before SPA fallback
   // This ensures API errors return JSON instead of falling through to the SPA fallback (which returns HTML)
    
+  /*
+  FNXC:ApiErrorDiagnostics 2026-07-10-14:00:
+  The /api error boundary is the chokepoint for every unhandled per-request error.
+  It must LOG the underlying error (stack + cause), not just echo a message, so a
+  500 is root-causable server-side — the reported "task write API returns 500 for
+  every task" was undiagnosable because the wrapped error's origin was never
+  recorded. The client-facing body stays generic in production (avoid leaking
+  internals); pass `error: err` so sendErrorResponse logs the stack/cause.
+  */
   app.use("/api", (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (res.headersSent) {
       return;
     }
 
     if (err instanceof ApiError) {
-      sendErrorResponse(res, err.statusCode, err.message, { details: err.details });
+      sendErrorResponse(res, err.statusCode, err.message, { details: err.details, error: err });
       return;
     }
 
@@ -1948,7 +2162,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
           ? err.message
           : fallbackMessage;
 
-    sendErrorResponse(res, 500, message);
+    sendErrorResponse(res, 500, message, { error: err });
   });
 
   if (!isHeadless) {
@@ -2039,7 +2253,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
     server.once("close", () => {
       clearAiSessionCleanupInterval();
-      aiSessionStore.stopScheduledCleanup();
+      aiSessionStore?.stopScheduledCleanup();
       otelExporter?.stop();
       otelExporter = null;
       (apiRouter as Router & { dispose?: () => void }).dispose?.();
@@ -2139,7 +2353,7 @@ export function setupTerminalWebSocket(
     try {
       if (projectId) {
         // When projectId is provided, resolve the scoped store and get its root dir
-        const scopedStore = await resolveScopedStore(projectId, store, options?.engineManager);
+        const scopedStore = await resolveScopedStore(projectId, store, options?.engineManager, options?.engine?.getProjectId?.(), options);
         scopedRootDir = scopedStore.getRootDir();
         terminalService = getTerminalService(scopedRootDir);
       } else {
@@ -2373,7 +2587,7 @@ export function setupBadgeWebSocket(
     }
     
     // Create scoped store
-    scopedStore = await resolveScopedStore(projectId, store, options?.engineManager);
+    scopedStore = await resolveScopedStore(projectId, store, options?.engineManager, options?.engine?.getProjectId?.(), options);
     scopedStores.set(projectId, scopedStore);
     return scopedStore;
   };
@@ -2436,6 +2650,14 @@ export function setupBadgeWebSocket(
 
     const onTaskUpdated = (task: Task) => {
       const cacheKey = `${scopeKey}:${task.id}`;
+      // FNXC:BadgeSnapshotEviction 2026-07-10-15:00: evict (not re-cache) when a
+      // task is archived off the live board, and skip the publish so peers don't
+      // re-cache it. An unarchive re-emits task:updated with a live column and
+      // re-primes the entry. See isBadgeEligibleTask.
+      if (!isBadgeEligibleTask(task)) {
+        badgeSnapshots.delete(cacheKey);
+        return;
+      }
       const previousSnapshot = badgeSnapshots.get(cacheKey);
       const nextSnapshot: BadgeSnapshot = {
         prInfo: task.prInfo ?? null,
@@ -2471,6 +2693,13 @@ export function setupBadgeWebSocket(
 
     const onTaskCreated = (task: Task) => {
       const cacheKey = `${scopeKey}:${task.id}`;
+      // FNXC:BadgeSnapshotEviction 2026-07-10-15:00: an already-archived task
+      // (e.g. restored/imported into the archive) must not seed the live-board
+      // badge cache — same eligibility rule as the update listener.
+      if (!isBadgeEligibleTask(task)) {
+        badgeSnapshots.delete(cacheKey);
+        return;
+      }
       badgeSnapshots.set(cacheKey, {
         prInfo: task.prInfo ?? null,
         issueInfo: task.issueInfo ?? null,
@@ -2592,6 +2821,19 @@ export function setupBadgeWebSocket(
     dashboardApp.badgeWsManager = null;
     dashboardApp.__fnWebSocketsAttached = false;
   });
+}
+
+/*
+FNXC:BadgeSnapshotEviction 2026-07-10-15:00:
+The in-memory badge-snapshot cache is keyed by task id and only ever removed a task
+on hard-delete, so archived tasks accumulated for the daemon's whole lifetime — a slow
+memory leak on long-running servers with task churn. Badge snapshots are only needed for
+tasks visible on the live board; archived tasks leave it. This predicate is the single
+eligibility rule used by both the create and update listeners (and mirrored by the
+startup prime's `includeArchived:false`). Exported for unit coverage of the invariant.
+*/
+export function isBadgeEligibleTask(task: Pick<Task, "column">): boolean {
+  return task.column !== "archived";
 }
 
 /** Compare two badge snapshots for equality */

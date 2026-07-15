@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useId, useEffect } from "react"
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { FileEdit, Eye, ListOrdered, WrapText, ChevronDown, ChevronUp } from "lucide-react";
+import { FileEdit, Eye, ListOrdered, WrapText, ChevronDown, ChevronUp, Save } from "lucide-react";
 import { EditorView, lineNumbers } from "@codemirror/view";
 import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
@@ -19,6 +19,9 @@ interface FileEditorProps {
   showLineNumbers?: boolean;
   onToggleLineNumbers?: () => void;
   canToggleLineNumbers?: boolean;
+  autoSaveEnabled?: boolean;
+  onToggleAutoSave?: () => void;
+  canToggleAutoSave?: boolean;
   toolbarExpanded?: boolean;
   forceToolbarActionsVisible?: boolean;
   toolbarActionsId?: string;
@@ -69,6 +72,9 @@ export function FileEditor({
   showLineNumbers = false,
   onToggleLineNumbers,
   canToggleLineNumbers = true,
+  autoSaveEnabled = false,
+  onToggleAutoSave,
+  canToggleAutoSave = true,
   toolbarExpanded,
   forceToolbarActionsVisible = false,
   toolbarActionsId: externalToolbarActionsId,
@@ -94,6 +100,9 @@ export function FileEditor({
   const previewRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const syncingFromPropsRef = useRef(false);
+  const localEditVersionRef = useRef(0);
+  const contentEditVersionsRef = useRef<Map<string, number>>(new Map([[content, 0]]));
+  const lastPropEditVersionRef = useRef(0);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -111,7 +120,8 @@ export function FileEditor({
   const effectiveShowPreview = isMarkdown && (readOnly ? true : showPreview);
   const shouldRenderLineNumbers = showLineNumbers && !readOnly && !effectiveShowPreview;
   const shouldShowLineNumbersToggle = Boolean(onToggleLineNumbers) && canToggleLineNumbers && !readOnly && !effectiveShowPreview;
-  const hasToolbarActions = isMarkdown || !readOnly || shouldShowLineNumbersToggle;
+  const shouldShowAutoSaveToggle = Boolean(onToggleAutoSave) && canToggleAutoSave && !readOnly && !effectiveShowPreview;
+  const hasToolbarActions = isMarkdown || !readOnly || shouldShowLineNumbersToggle || shouldShowAutoSaveToggle;
   const languageExtension = useMemo(() => resolveCodeMirrorLanguage(filePath), [filePath]);
 
   const handleEditClick = useCallback(() => setShowPreview(false), []);
@@ -176,7 +186,10 @@ export function FileEditor({
         themeOverlay,
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || syncingFromPropsRef.current) return;
-          onChangeRef.current(update.state.doc.toString());
+          const nextContent = update.state.doc.toString();
+          localEditVersionRef.current += 1;
+          contentEditVersionsRef.current.set(nextContent, localEditVersionRef.current);
+          onChangeRef.current(nextContent);
         }),
       ],
     });
@@ -242,14 +255,44 @@ export function FileEditor({
     });
   }, [darkThemeActive]);
 
+  /*
+   * FNXC:FileViewer 2026-07-10-22:52:
+   * FN-7810 found that the bounded self-echo Set could evict a stale value during long sessions, and it could miss end-of-file Enter flows where a trailing header newline raced an older prop. Use monotonic edit versions for every local CodeMirror emission instead: any prop whose known version is older than the live editor or last accepted prop is a stale self-echo at any session length, while never-emitted external reload/save-normalization content still replaces the document with the caret clamped into range.
+   */
   useEffect(() => {
     const view = editorViewRef.current;
     if (!view) return;
     const currentContent = view.state.doc.toString();
-    if (currentContent === content) return;
+    if (currentContent === content) {
+      const acknowledgedVersion = contentEditVersionsRef.current.get(content) ?? localEditVersionRef.current;
+      contentEditVersionsRef.current.set(content, acknowledgedVersion);
+      lastPropEditVersionRef.current = Math.max(lastPropEditVersionRef.current, acknowledgedVersion);
+      return;
+    }
+
+    const incomingEditVersion = contentEditVersionsRef.current.get(content);
+    const currentEditVersion = contentEditVersionsRef.current.get(currentContent) ?? localEditVersionRef.current;
+    const isStaleSelfEcho = incomingEditVersion !== undefined && incomingEditVersion < Math.max(currentEditVersion, lastPropEditVersionRef.current);
+    if (isStaleSelfEcho) return;
+
+    const previousSelection = view.state.selection.main;
+    const nextLength = content.length;
+    const clampPosition = (position: number) => Math.max(0, Math.min(position, nextLength));
     syncingFromPropsRef.current = true;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
-    syncingFromPropsRef.current = false;
+    try {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: content },
+        selection: {
+          anchor: clampPosition(previousSelection.anchor),
+          head: clampPosition(previousSelection.head),
+        },
+      });
+      const externalContentVersion = localEditVersionRef.current;
+      contentEditVersionsRef.current.set(content, externalContentVersion);
+      lastPropEditVersionRef.current = Math.max(lastPropEditVersionRef.current, externalContentVersion);
+    } finally {
+      syncingFromPropsRef.current = false;
+    }
   }, [content]);
 
   return (
@@ -276,6 +319,12 @@ export function FileEditor({
                 </button>
               </>
             ) : null}
+            {shouldShowAutoSaveToggle && (
+              <button className={`btn btn-sm file-editor-toolbar-button ${autoSaveEnabled ? "btn-primary" : ""}`} onClick={onToggleAutoSave} aria-label={t("fileEditor.toggleAutoSave", "Toggle auto-save")} aria-pressed={autoSaveEnabled} title={t("fileEditor.toggleAutoSave", "Toggle auto-save")} data-testid="file-editor-auto-save-toggle">
+                <Save size={14} />
+                <span>{t("fileEditor.autoSave", "Auto-save")}</span>
+              </button>
+            )}
             {shouldShowLineNumbersToggle && (
               <button className={`btn btn-sm file-editor-toolbar-button ${showLineNumbers ? "btn-primary" : ""}`} onClick={onToggleLineNumbers} aria-label={t("fileEditor.toggleLineNumbers", "Toggle line numbers")} aria-pressed={showLineNumbers} title={t("fileEditor.toggleLineNumbers", "Toggle line numbers")}>
                 <ListOrdered size={14} />

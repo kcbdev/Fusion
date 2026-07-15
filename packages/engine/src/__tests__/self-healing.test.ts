@@ -112,6 +112,7 @@ vi.mock("../merger.js", () => ({
 }));
 
 import { SelfHealingManager, isBranchAheadOfBase, MAX_AUTO_MERGE_RETRIES } from "../self-healing.js";
+import { HEARTBEAT_ERROR_RECOVERY_METADATA_KEY, HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON, readHeartbeatErrorRetryCount } from "../agent-heartbeat.js";
 import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
@@ -189,6 +190,17 @@ function createMockStore(overrides: Record<string, unknown> = {}): TaskStore & E
     getBootstrappedAt: vi.fn().mockReturnValue(null),
     getRootDir: vi.fn().mockReturnValue("/tmp/test-project"),
     clearStaleExecutionStartBranchReferences: vi.fn().mockReturnValue([]),
+    /*
+    FNXC:SqliteFinalRemoval 2026-06-25-16:30:
+    The TaskStore contract now exposes isBackendMode() and getAsyncLayer() (added
+    during the SQLite-to-PostgreSQL cutover). Mock stores must implement these so
+    the backend-mode guards in SelfHealingManager (WAL checkpoint, FTS maintenance,
+    pruneOperationalLogs) take the SQLite path when the mock represents a SQLite
+    store. This is not appeasement — it is keeping the mock in sync with the store
+    interface contract.
+    */
+    isBackendMode: vi.fn().mockReturnValue(false),
+    getAsyncLayer: vi.fn().mockReturnValue(null),
     ...overrides,
   }) as unknown as TaskStore & EventEmitter;
   return store;
@@ -814,6 +826,7 @@ describe("SelfHealingManager", () => {
       const recoverPartialProgressNoTaskDoneFailures = vi.spyOn(manager, "recoverPartialProgressNoTaskDoneFailures").mockResolvedValue(1);
       const recoverOrphanedExecutions = vi.spyOn(manager, "recoverOrphanedExecutions").mockResolvedValue(1);
       const recoverApprovedTriageTasks = vi.spyOn(manager, "recoverApprovedTriageTasks").mockResolvedValue(1);
+      const resetDurableAgentErrorStateOnStartup = vi.spyOn(manager, "resetDurableAgentErrorStateOnStartup").mockResolvedValue(1);
       const recoverOrphanedAgents = vi.spyOn(manager, "recoverOrphanedAgents").mockResolvedValue(1);
       const recoverAgentsRunningOnInactiveTasks = vi.spyOn(manager, "recoverAgentsRunningOnInactiveTasks").mockResolvedValue(1);
       const clearStaleBlockedBy = vi.spyOn(manager, "clearStaleBlockedBy").mockResolvedValue(1);
@@ -832,6 +845,7 @@ describe("SelfHealingManager", () => {
       expect(recoverPartialProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
       expect(recoverOrphanedExecutions).toHaveBeenCalledTimes(1);
       expect(recoverApprovedTriageTasks).toHaveBeenCalledTimes(1);
+      expect(resetDurableAgentErrorStateOnStartup).toHaveBeenCalledTimes(1);
       expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
       expect(recoverAgentsRunningOnInactiveTasks).toHaveBeenCalledTimes(1);
       expect(clearStaleBlockedBy).toHaveBeenCalledTimes(1);
@@ -884,10 +898,12 @@ describe("SelfHealingManager", () => {
         enginePaused: true,
       } as unknown as Settings);
       const recoverCompletedTasks = vi.spyOn(manager, "recoverCompletedTasks").mockResolvedValue(1);
+      const resetDurableAgentErrorStateOnStartup = vi.spyOn(manager, "resetDurableAgentErrorStateOnStartup").mockResolvedValue(1);
 
       await manager.runStartupRecovery();
 
       expect(recoverCompletedTasks).not.toHaveBeenCalled();
+      expect(resetDurableAgentErrorStateOnStartup).not.toHaveBeenCalled();
     });
 
     it("runStartupRecovery skips while globalPause is active", async () => {
@@ -906,6 +922,145 @@ describe("SelfHealingManager", () => {
     });
   });
 
+  describe("resetDurableAgentErrorStateOnStartup", () => {
+    function createStatefulMockAgentStore(agents: Agent[]): AgentStore & { getAgent(id: string): Agent | undefined } {
+      const agentMap = new Map<string, Agent>(agents.map((agent) => [agent.id, { ...agent, metadata: agent.metadata ? { ...agent.metadata } : agent.metadata }]));
+      return {
+        getAgent: (id: string) => agentMap.get(id),
+        listAgents: vi.fn().mockImplementation(async (filter?: { state?: string }) => {
+          const values = Array.from(agentMap.values());
+          return filter?.state ? values.filter((agent) => agent.state === filter.state) : values;
+        }),
+        updateAgentState: vi.fn().mockImplementation(async (id: string, state: Agent["state"]) => {
+          const agent = agentMap.get(id);
+          if (agent) {
+            agentMap.set(id, { ...agent, state });
+          }
+        }),
+        updateAgent: vi.fn().mockImplementation(async (id: string, patch: Partial<Agent>) => {
+          const agent = agentMap.get(id);
+          if (agent) {
+            agentMap.set(id, { ...agent, ...patch });
+          }
+        }),
+      } as unknown as AgentStore & { getAgent(id: string): Agent | undefined };
+    }
+
+    it("returns 0 when no agentStore", async () => {
+      const result = await manager.resetDurableAgentErrorStateOnStartup();
+      expect(result).toBe(0);
+    });
+
+    it("resets fresh error and exhausted parked agents on runStartupRecovery while preserving suppression guards", async () => {
+      const now = Date.now();
+      const staleModuleError = "Error: Cannot find module '/tmp/fusion-old/node_modules/@fusion/engine/dist/index.js' imported from /tmp/fusion-old/packages/engine/src/agent.js";
+      const agents = [
+        {
+          id: "fresh-error",
+          state: "error",
+          lastError: "socket hang up",
+          updatedAt: new Date(now).toISOString(),
+          metadata: {
+            unrelated: "keep",
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: { consecutiveAttempts: 3, nextRetryAt: new Date(now + 360_000).toISOString() },
+            durableErrorRecovery: { attempts: 3, nextRetryAt: new Date(now + 360_000).toISOString(), exhausted: false },
+          },
+        } as unknown as Agent,
+        {
+          id: "exhausted-parked",
+          state: "paused",
+          pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+          lastError: "Failed to start agent session: spawn ENOENT",
+          updatedAt: new Date(now).toISOString(),
+          metadata: {
+            unrelated: "keep-too",
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: { consecutiveAttempts: 5, updatedAt: new Date(now).toISOString() },
+            durableErrorRecovery: { attempts: 5, exhausted: true, nextRetryAt: new Date(now + 600_000).toISOString() },
+          },
+        } as unknown as Agent,
+        { id: "operator-actionable", state: "error", lastError: "OAuth token does not meet scope requirements", updatedAt: new Date(now).toISOString(), metadata: { untouched: true } } as unknown as Agent,
+        { id: "stale-module", state: "error", lastError: staleModuleError, updatedAt: new Date(now).toISOString(), metadata: { untouched: true } } as unknown as Agent,
+        { id: "error-unrecoverable", state: "paused", pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON, lastError: "socket hang up", updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        {
+          id: "misattributed-heartbeat-model",
+          state: "paused",
+          pauseReason: "heartbeat-model-unavailable",
+          lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+          runtimeConfig: { enabled: true, modelProvider: "grok-cli", modelId: "grok-4.5", model: "grok-cli/grok-4.5" },
+          updatedAt: new Date(now).toISOString(),
+        } as unknown as Agent,
+        {
+          id: "genuine-heartbeat-model",
+          state: "paused",
+          pauseReason: "heartbeat-model-unavailable",
+          lastError: 'No API key for provider: anthropic. Configure credentials for provider "anthropic" in settings, then resume the agent.',
+          runtimeConfig: { enabled: true, modelProvider: "anthropic", modelId: "claude-opus-4-8", model: "anthropic/claude-opus-4-8" },
+          updatedAt: new Date(now).toISOString(),
+        } as unknown as Agent,
+        { id: "user-paused", state: "paused", pauseReason: "manual", lastError: "socket hang up", updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        { id: "ephemeral", state: "error", lastError: "socket hang up", metadata: { agentKind: "task-worker" }, updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        { id: "disabled", state: "error", lastError: "socket hang up", runtimeConfig: { enabled: false }, updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        { id: "live-agent", state: "error", lastError: "socket hang up", updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        { id: "healthy-active", state: "active", updatedAt: new Date(now).toISOString() } as unknown as Agent,
+        { id: "healthy-idle", state: "idle", updatedAt: new Date(now).toISOString() } as unknown as Agent,
+      ];
+      const agentStore = createStatefulMockAgentStore(agents);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+      const storeWithSettings = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false, taskStuckTimeoutMs: 60_000 } as unknown as Settings),
+        recordRunAuditEvent,
+      });
+      const managerWithAgents = new SelfHealingManager(storeWithSettings, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+        hasActiveAgentExecution: (agentId) => agentId === "live-agent",
+      });
+
+      await managerWithAgents.runStartupRecovery();
+
+      for (const agentId of ["fresh-error", "exhausted-parked", "misattributed-heartbeat-model"]) {
+        const agent = agentStore.getAgent(agentId)!;
+        expect(agent.state).toBe("active");
+        expect(agent.lastError).toBeUndefined();
+        expect(agent.pauseReason).toBeUndefined();
+        expect(readHeartbeatErrorRetryCount(agent)).toBe(0);
+        expect(agent.metadata?.durableErrorRecovery).toBeUndefined();
+        expect(agent.metadata?.[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]).toEqual(expect.objectContaining({ consecutiveAttempts: 0 }));
+        expect((agent.metadata?.[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY] as Record<string, unknown>).nextRetryAt).toBeUndefined();
+        expect((agent.metadata?.[HEARTBEAT_ERROR_RECOVERY_METADATA_KEY] as Record<string, unknown>).exhausted).toBeUndefined();
+      }
+      expect(agentStore.getAgent("fresh-error")?.metadata?.unrelated).toBe("keep");
+      expect(agentStore.getAgent("exhausted-parked")?.metadata?.unrelated).toBe("keep-too");
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledTimes(3);
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("fresh-error", { reason: "startup-error-reset", attempt: 1 });
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("exhausted-parked", { reason: "startup-error-reset", attempt: 1 });
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("misattributed-heartbeat-model", { reason: "startup-error-reset", attempt: 1 });
+
+      const resetAudits = recordRunAuditEvent.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.mutationType === "agent:reset-error-state-on-startup");
+      expect(resetAudits).toHaveLength(3);
+      expect(resetAudits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ target: "fresh-error", metadata: expect.objectContaining({ agentId: "fresh-error", priorState: "error", source: "self-healing" }) }),
+        expect.objectContaining({ target: "exhausted-parked", metadata: expect.objectContaining({ agentId: "exhausted-parked", priorState: "paused", priorPauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, source: "self-healing" }) }),
+        expect.objectContaining({ target: "misattributed-heartbeat-model", metadata: expect.objectContaining({ agentId: "misattributed-heartbeat-model", priorState: "paused", priorPauseReason: "heartbeat-model-unavailable", source: "self-healing" }) }),
+      ]));
+      expect(recordRunAuditEvent.mock.calls.map(([event]) => event.mutationType).filter((type) => type === "agent:auto-recover-error-state")).toHaveLength(0);
+      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(3);
+
+      for (const untouchedId of ["operator-actionable", "stale-module", "error-unrecoverable", "genuine-heartbeat-model", "user-paused", "ephemeral", "disabled", "live-agent", "healthy-active", "healthy-idle"]) {
+        expect(agentStore.updateAgentState).not.toHaveBeenCalledWith(untouchedId, expect.anything());
+        expect(agentStore.updateAgent).not.toHaveBeenCalledWith(untouchedId, expect.anything());
+      }
+      expect(agentStore.getAgent("operator-actionable")?.lastError).toBe("OAuth token does not meet scope requirements");
+      expect(agentStore.getAgent("stale-module")?.lastError).toBe(staleModuleError);
+      expect(agentStore.getAgent("error-unrecoverable")?.pauseReason).toBe(HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON);
+      managerWithAgents.stop();
+    });
+  });
+
   describe("recoverOrphanedAgents", () => {
     function createMockAgentStore(agents: Agent[]): AgentStore {
       return {
@@ -920,24 +1075,31 @@ describe("SelfHealingManager", () => {
       expect(result).toBe(0);
     });
 
-    it("skips a manager-present error-state agent whose lastError is not transient (default permanent classification)", async () => {
+    it("recovers a manager-present error-state agent whose lastError is absent", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
         { id: "manager-1", state: "active", updatedAt: new Date(now).toISOString() } as Agent,
-        { id: "report-1", state: "error", reportsTo: "manager-1", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        { id: "report-1", state: "error", reportsTo: "manager-1", updatedAt: new Date(now - 120_000).toISOString(), metadata: {} } as Agent,
       ]);
-      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      // No lastError at all classifies as "permanent" (default), so this agent
-      // is correctly skipped — but via the transient-classification guard, not
-      // because its manager is present. See the "manager-present" tests below
-      // for FN-7672's actual invariant: manager presence alone must no longer
-      // exclude a durable error-state agent from the recovery sweep.
-      expect(result).toBe(0);
-      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-1", "active");
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("report-1", { lastError: undefined, pauseReason: undefined });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "report-1",
+        metadata: expect.objectContaining({ agentId: "report-1", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("report-1", { reason: "transient-error", attempt: 1 });
       managerWithAgents.stop();
     });
 
@@ -953,7 +1115,7 @@ describe("SelfHealingManager", () => {
      * the manager-present path is now considered (subject to all existing
      * guards, unweakened).
      */
-    it("recovers a transient error-state agent even when its manager is present and active", async () => {
+    it("recovers a generic error-state agent even when its manager is present and active", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -962,7 +1124,7 @@ describe("SelfHealingManager", () => {
           id: "report-1",
           state: "error",
           reportsTo: "manager-1",
-          lastError: "socket hang up",
+          lastError: "Unexpected end of JSON input",
           metadata: {},
           updatedAt: new Date(now - 120_000).toISOString(),
         } as Agent,
@@ -978,12 +1140,23 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(1);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-1", "active");
-      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("report-1", { lastError: undefined });
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("report-1", { lastError: undefined, pauseReason: undefined });
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("report-1", { reason: "transient-error", attempt: 1 });
       managerWithAgents.stop();
     });
 
-    it("does NOT auto-recover a manager-present agent whose error is operator-actionable (FN-7672 auth-credential cluster shape)", async () => {
+    /*
+     * FNXC:AgentHeartbeat 2026-07-12-20:10:
+     * The FN-7672 auth-credential cluster shape turned out to be a routine Claude
+     * Max OAuth token rotation (~8 h lifetime): the in-flight call 401s with
+     * "authentication_error: Invalid authentication credentials" even though
+     * refreshed credentials already exist, and the next call succeeds. That shape
+     * is now classified transient/recoverable, so the sweep AUTO-RECOVERS it
+     * (bounded by the shared retry budget) instead of parking a whole fleet of
+     * durable agents paused/"error-unrecoverable" for a human. Genuinely
+     * operator-actionable auth failures (scope grants, bad API keys) still park.
+     */
+    it("auto-recovers a manager-present agent stuck on an OAuth token-rotation 401 (former unrecoverable-park shape)", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -994,6 +1167,42 @@ describe("SelfHealingManager", () => {
           reportsTo: "manager-1",
           lastError:
             'Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"},"request_id":"req_011CcpL6f3iXHxeHfMUjg9o8"}',
+          metadata: {},
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-auth", "active");
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("report-auth", { lastError: undefined, pauseReason: undefined });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "report-auth",
+        metadata: expect.objectContaining({ agentId: "report-auth", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("report-auth", { reason: "transient-error", attempt: 1 });
+      managerWithAgents.stop();
+    });
+
+    it("still parks a manager-present agent whose auth error is genuinely operator-actionable (OAuth scope grant)", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "manager-1", state: "active", updatedAt: new Date(now).toISOString() } as Agent,
+        {
+          id: "report-scope",
+          state: "error",
+          reportsTo: "manager-1",
+          lastError:
+            'Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token does not meet scope requirements"}}',
           updatedAt: new Date(now - 120_000).toISOString(),
         } as Agent,
       ]);
@@ -1001,8 +1210,75 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-scope", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "report-scope",
+        expect.objectContaining({
+          pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({ attempts: 0, lastReason: "non-recoverable-error" }),
+          }),
+        }),
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-parked-unrecoverable",
+        target: "report-scope",
+        metadata: expect.objectContaining({ agentId: "report-scope", attempts: 0, limit: 5, source: "self-healing" }),
+      }));
+      managerWithAgents.stop();
+    });
+
+    it("un-parks an agent previously parked error-unrecoverable whose lastError now classifies recoverable", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "parked-generic",
+          state: "paused",
+          pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+          lastError: "Failed to start agent session: spawn ENOENT",
+          metadata: {},
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+        // Same pauseReason but genuinely operator-actionable error: stays parked.
+        {
+          id: "parked-scope",
+          state: "paused",
+          pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+          lastError: "OAuth token does not meet scope requirements",
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+        // Different pauseReason (e.g. user/budget pause): never touched.
+        {
+          id: "parked-budget",
+          state: "paused",
+          pauseReason: "budget-exhausted",
+          lastError: "Invalid authentication credentials",
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("parked-generic", "active");
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("parked-generic", { lastError: undefined, pauseReason: undefined });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "parked-generic",
+        metadata: expect.objectContaining({ agentId: "parked-generic", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
+      expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("parked-generic", { reason: "transient-error", attempt: 1 });
+      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("parked-scope", expect.anything());
+      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("parked-budget", expect.anything());
       managerWithAgents.stop();
     });
 
@@ -1038,12 +1314,13 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(1);
-      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(1);
+      expect(result).toBe(2);
+      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(2);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-transient", "active");
+      // Rotation-shaped auth 401s are transient credential rotations — recovered, not parked.
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-auth-1", "active");
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("sibling-healthy-1", expect.anything());
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("sibling-healthy-2", expect.anything());
-      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("report-auth-1", expect.anything());
       managerWithAgents.stop();
     });
 
@@ -1086,11 +1363,12 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(1);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("orphan-1", "active");
-      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("orphan-1", { lastError: undefined });
+      expect(agentStore.updateAgent).toHaveBeenLastCalledWith("orphan-1", { lastError: undefined, pauseReason: undefined });
       expect(agentStore.updateAgent).toHaveBeenCalledWith(
         "orphan-1",
         expect.objectContaining({
           metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 1 }),
             durableErrorRecovery: expect.objectContaining({
               attempts: 1,
               exhausted: false,
@@ -1099,6 +1377,11 @@ describe("SelfHealingManager", () => {
           }),
         }),
       );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:auto-recover-error-state",
+        target: "orphan-1",
+        metadata: expect.objectContaining({ agentId: "orphan-1", attempt: 1, limit: 5, source: "self-healing" }),
+      }));
       expect(restartDurableAgentHeartbeat).toHaveBeenCalledWith("orphan-1", { reason: "transient-error", attempt: 1 });
       managerWithAgents.stop();
     });
@@ -1118,7 +1401,29 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
-    it("skips non-transient/operator-actionable durable errors", async () => {
+    it("does not park runtime-disabled unrecoverable durable errors", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-disabled",
+          state: "error",
+          lastError: "invalid api key",
+          runtimeConfig: { enabled: false },
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("parks non-transient/operator-actionable durable errors", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -1128,8 +1433,12 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-perm", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-perm",
+        expect.objectContaining({ pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON }),
+      );
       managerWithAgents.stop();
     });
 
@@ -1278,6 +1587,25 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
+    it("does not park an unrecoverable error while active agent execution is present", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "agent-active-auth", state: "error", lastError: "invalid api key", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        hasActiveAgentExecution: (agentId) => agentId === "agent-active-auth",
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
     it("suppresses transient recovery when active agent execution is present", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
@@ -1317,18 +1645,67 @@ describe("SelfHealingManager", () => {
       const result = await managerWithAgents.recoverOrphanedAgents();
 
       expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-exhausted", "paused");
       expect(agentStore.updateAgent).toHaveBeenCalledWith(
         "agent-exhausted",
         expect.objectContaining({
           metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 5 }),
             durableErrorRecovery: expect.objectContaining({
+              attempts: 5,
               exhausted: true,
               lastReason: "retry-budget-exhausted",
             }),
           }),
         }),
       );
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("agent-exhausted", { pauseReason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-retry-exhausted",
+        target: "agent-exhausted",
+        metadata: expect.objectContaining({ agentId: "agent-exhausted", attempts: 5, limit: 5, source: "self-healing" }),
+      }));
+      managerWithAgents.stop();
+    });
+
+    it("honors heartbeat timer recovery attempts when the self-healing sweep checks exhaustion", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-shared-budget",
+          state: "error",
+          lastError: "socket hang up",
+          updatedAt: new Date(now - 120_000).toISOString(),
+          metadata: { [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: { consecutiveAttempts: 4 } },
+        } as unknown as Agent,
+      ]);
+      const restartDurableAgentHeartbeat = vi.fn().mockResolvedValue(true);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        restartDurableAgentHeartbeat,
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(restartDurableAgentHeartbeat).not.toHaveBeenCalled();
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-shared-budget", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-shared-budget",
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            [HEARTBEAT_ERROR_RECOVERY_METADATA_KEY]: expect.objectContaining({ consecutiveAttempts: 5 }),
+            durableErrorRecovery: expect.objectContaining({ attempts: 5, exhausted: true }),
+          }),
+        }),
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-retry-exhausted",
+        target: "agent-shared-budget",
+        metadata: expect.objectContaining({ attempts: 5, limit: 5, source: "self-healing" }),
+      }));
       managerWithAgents.stop();
     });
 
@@ -1367,7 +1744,7 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(1);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("orphan-2", "active");
-      expect(agentStore.updateAgent).toHaveBeenCalledWith("orphan-2", { lastError: undefined });
+      expect(agentStore.updateAgent).toHaveBeenCalledWith("orphan-2", { lastError: undefined, pauseReason: undefined });
       managerWithAgents.stop();
     });
 
@@ -2757,6 +3134,216 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    it("recovers merge-active unusable-worktree failures before merge re-drive can reuse phantom metadata", async () => {
+      const enqueueMerge = vi.fn();
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        enqueueMerge,
+      });
+      const strandedTasks = (["merging", "merging-pr", "merging-fix"] as const).map((status) => ({
+        id: `FN-7802-${status}`,
+        column: "in-review",
+        paused: false,
+        status,
+        scopeOverride: true,
+        scopeOverrideReason: "operator requested main-checkout retry",
+        worktree: `/tmp/project/.worktrees/${status}-phantom`,
+        branch: `fusion/fn-7802-${status}`,
+        sessionFile: `/tmp/project/.fusion/sessions/${status}.json`,
+        error: `Refusing to start coding agent in missing worktree: /tmp/project/.worktrees/${status}-phantom`,
+        worktreeSessionRetryCount: 3,
+        steps: [{ status: "done" }, { status: "pending" }],
+        log: [],
+      }));
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue(strandedTasks);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(3);
+      for (const task of strandedTasks) {
+        expect(store.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+          status: null,
+          error: null,
+          worktree: null,
+          branch: null,
+          sessionFile: null,
+          worktreeSessionRetryCount: 0,
+          recoveryRetryCount: 1,
+        }));
+        expect(store.moveTask).toHaveBeenCalledWith(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
+      }
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:reconcile-missing-worktree-merge-active" }));
+      expect(enqueueMerge).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("bounds repeated merge-active stale-metadata clears with recoveryRetryCount", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-MERGE-ACTIVE-CAP",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          scopeOverride: true,
+          worktree: "/tmp/project/.worktrees/fn-7802-cap",
+          branch: "fusion/FN-7802-MERGE-ACTIVE-CAP",
+          sessionFile: "/tmp/project/.fusion/sessions/fn-7802-cap.json",
+          error: "Refusing to start coding agent in missing worktree: /tmp/project/.worktrees/fn-7802-cap",
+          worktreeSessionRetryCount: 3,
+          recoveryRetryCount: 3,
+          steps: [{ status: "done" }, { status: "pending" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-7802-MERGE-ACTIVE-CAP",
+        "Auto-recovery exhausted (3/3) for merge-active unusable-worktree stale-metadata clears — leaving in-review for human inspection",
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:auto-recover-worktree-session-exhausted",
+        metadata: expect.objectContaining({ counter: "recoveryRetryCount", source: "merge-active-sweep" }),
+      }));
+
+      managerWithRecovery.stop();
+    });
+
+    it("recovers merge-active unusable-worktree failures even when task.worktree is already null", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-NULL-WORKTREE",
+          column: "in-review",
+          paused: false,
+          status: "merging-fix",
+          worktree: null,
+          branch: "fusion/FN-7802-NULL-WORKTREE",
+          sessionFile: "/tmp/project/.fusion/sessions/fn-7802-null.json",
+          error: "Refusing to start coding agent in unregistered git worktree: /tmp/project/.worktrees/fn-7802-null",
+          worktreeSessionRetryCount: 3,
+          steps: [{ status: "done" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-7802-NULL-WORKTREE", expect.objectContaining({
+        worktree: null,
+        branch: null,
+        sessionFile: null,
+        worktreeSessionRetryCount: 0,
+        recoveryRetryCount: 1,
+      }));
+      expect(store.moveTask).toHaveBeenCalledWith("FN-7802-NULL-WORKTREE", "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
+      managerWithRecovery.stop();
+    });
+
+    it("does not automate merge-active unusable-worktree recovery when auto-merge is off", async () => {
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ autoMerge: false, globalPause: false, enginePaused: false });
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-AUTOMERGE-OFF",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          worktree: "/tmp/project/.worktrees/fn-7802-auto-off",
+          branch: "fusion/FN-7802-AUTOMERGE-OFF",
+          error: "Refusing to start coding agent in missing worktree: /tmp/project/.worktrees/fn-7802-auto-off",
+          steps: [{ status: "done" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-missing-worktree-merge-active-no-action",
+        metadata: expect.objectContaining({ reason: "auto-merge-off" }),
+      }));
+      managerWithRecovery.stop();
+    });
+
+    it("emits no-action for workspace tasks instead of single-repo missing-worktree recovery", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-WORKSPACE",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          worktree: null,
+          workspaceWorktrees: { app: { worktree: "/tmp/ws/app", branch: "fusion/FN-7802-WORKSPACE" } },
+          error: "Refusing to start coding agent in missing worktree: /tmp/ws/app",
+          steps: [{ status: "done" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-missing-worktree-merge-active-no-action",
+        metadata: expect.objectContaining({ reason: "workspace-task" }),
+      }));
+      managerWithRecovery.stop();
+    });
+
+    it("leaves live worktrees and status-none review rows out of merge-active recovery", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      mockedClassifyTaskWorktree.mockResolvedValueOnce({ ok: true });
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-LIVE",
+          column: "in-review",
+          paused: false,
+          status: "merging",
+          worktree: "/tmp/project/.worktrees/fn-7802-live",
+          branch: "fusion/FN-7802-LIVE",
+          error: "Refusing to start coding agent in missing worktree: /tmp/project/.worktrees/fn-7802-live",
+          steps: [{ status: "done" }],
+          log: [],
+        },
+        {
+          id: "FN-7802-NONE",
+          column: "in-review",
+          paused: false,
+          status: null,
+          worktree: "/tmp/project/.worktrees/fn-7802-none",
+          branch: "fusion/FN-7802-NONE",
+          error: "Refusing to start coding agent in missing worktree: /tmp/project/.worktrees/fn-7802-none",
+          steps: [{ status: "done" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverMissingWorktreeReviewFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:reconcile-missing-worktree-merge-active-no-action",
+        target: "FN-7802-LIVE",
+      }));
+      managerWithRecovery.stop();
+    });
+
     it("does not requeue non-matching in-review failures", async () => {
       const managerWithRecovery = new SelfHealingManager(store, {
         rootDir: "/tmp/test-project",
@@ -2798,6 +3385,93 @@ describe("SelfHealingManager", () => {
       expect(store.updateTask).not.toHaveBeenCalled();
       expect(store.moveTask).not.toHaveBeenCalled();
 
+      managerWithRecovery.stop();
+    });
+  });
+
+  describe("reconcileTaskWorktreeMetadata", () => {
+    beforeEach(() => {
+      (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ autoMerge: true, globalPause: false, enginePaused: false });
+    });
+
+    it("clears phantom active worktree metadata for scopeOverride main-checkout tasks", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      mockedExistsSync.mockReturnValue(false);
+      mockedGetRegisteredWorktreeBranchMap.mockResolvedValue(new Map<string, string>());
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-SCOPE",
+          column: "in-review",
+          paused: false,
+          status: "merging-fix",
+          scopeOverride: true,
+          worktree: "/tmp/project/.worktrees/fn-7802-phantom",
+          branch: "fusion/FN-7802-SCOPE",
+          sessionFile: "/tmp/project/.fusion/sessions/fn-7802-scope.json",
+          steps: [{ status: "done" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.reconcileTaskWorktreeMetadata();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-7802-SCOPE", { worktree: null, branch: null, sessionFile: null });
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:auto-recover-worktree-metadata-cleared" }));
+      managerWithRecovery.stop();
+    });
+
+    it("does NOT clear worktree metadata for a scopeOverride task that is genuinely in-progress (FN-5256 guard)", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      mockedExistsSync.mockReturnValue(false);
+      mockedGetRegisteredWorktreeBranchMap.mockResolvedValue(new Map<string, string>());
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-SCOPE-INPROGRESS",
+          column: "in-progress",
+          paused: false,
+          status: null,
+          scopeOverride: true,
+          worktree: "/tmp/project/.worktrees/fn-7802-live",
+          branch: "fusion/FN-7802-SCOPE-INPROGRESS",
+          sessionFile: "/tmp/project/.fusion/sessions/fn-7802-live.json",
+          steps: [{ status: "in-progress" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.reconcileTaskWorktreeMetadata();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:auto-recover-worktree-metadata-skipped-active" }));
+      managerWithRecovery.stop();
+    });
+
+    it("does NOT clear worktree metadata for a scopeOverride in-review task mid-step (status: null)", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+      mockedExistsSync.mockReturnValue(false);
+      mockedGetRegisteredWorktreeBranchMap.mockResolvedValue(new Map<string, string>());
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-7802-SCOPE-REVIEW-STEP",
+          column: "in-review",
+          paused: false,
+          status: null,
+          scopeOverride: true,
+          worktree: "/tmp/project/.worktrees/fn-7802-review-live",
+          branch: "fusion/FN-7802-SCOPE-REVIEW-STEP",
+          sessionFile: "/tmp/project/.fusion/sessions/fn-7802-review-live.json",
+          steps: [{ status: "in-progress" }],
+          log: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.reconcileTaskWorktreeMetadata();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ mutationType: "task:auto-recover-worktree-metadata-skipped-active" }));
       managerWithRecovery.stop();
     });
   });
@@ -10391,4 +11065,86 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
     });
   });
 
+});
+
+describe("stranded AI merge clean-room recovery", () => {
+  it("lands an approved detached clean-room commit before re-emitting merge handoff", async () => {
+    vi.useRealTimers();
+    const task = {
+      id: "FN-5858",
+      lineageId: "lineage-5858",
+      column: "in-review",
+      branch: "fusion/fn-5858",
+      paused: false,
+      status: null,
+      steps: [{ status: "done" }],
+      log: [
+        { action: "Task marked done by agent", timestamp: new Date(Date.now() - 20 * 60_000).toISOString() },
+        { action: "AI merge review (pass 2): approved", timestamp: new Date(Date.now() - 12 * 60_000).toISOString() },
+      ],
+    } as unknown as Task;
+    const movedTask = { ...task, column: "done" } as unknown as Task;
+    const testStore = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ autoMerge: true, globalPause: false, enginePaused: false } as unknown as Settings),
+      listTasks: vi.fn().mockResolvedValue([task]),
+      getTask: vi.fn().mockResolvedValue(task),
+      moveTask: vi.fn().mockResolvedValue(movedTask),
+      updateTask: vi.fn().mockImplementation(async (_id: string, patch: Partial<Task>) => Object.assign(task as object, patch)),
+    });
+    const testManager = new SelfHealingManager(testStore, { rootDir: "/tmp/test-project", requeueForAutoMerge: vi.fn().mockResolvedValue(true) });
+
+    const originalReaddir = mockedReaddirSync.getMockImplementation();
+    const originalExec = mockedExecSync.getMockImplementation();
+    mockedReaddirSync.mockImplementation((path: any) => {
+      if (String(path).includes(".ai-merge") || String(path).includes("fusion-ai-merge")) {
+        return ["fusion-ai-merge-fn-5858-abcd"] as any;
+      }
+      return [] as any;
+    });
+    mockedExecSync.mockImplementation((command: string) => {
+      if (command.includes("git rev-parse --verify HEAD")) return Buffer.from("dddddddddddddddddddddddddddddddddddddddd\n");
+      if (command.includes("git show -s --format")) {
+        return Buffer.from("FN-5858: render headings\x1fFusion-Task-Id: FN-5858\nFusion-Task-Lineage: lineage-5858\n");
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/main'")) return Buffer.from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+      if (command.includes("git merge-base --is-ancestor 'dddddddddddddddddddddddddddddddddddddddd' 'refs/heads/main'")) {
+        throw new Error("not already landed");
+      }
+      if (command.includes("git merge-base --is-ancestor 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'dddddddddddddddddddddddddddddddddddddddd'")) {
+        return Buffer.from("");
+      }
+      if (command.includes("git diff-tree")) return Buffer.from("Packages/Editor/file.ts\n");
+      if (command.includes("git rev-parse --abbrev-ref HEAD")) return Buffer.from("main\n");
+      if (command.includes("git rev-parse HEAD")) return Buffer.from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+      if (command.includes("git status --porcelain")) return Buffer.from("");
+      if (command.includes("git merge --ff-only 'dddddddddddddddddddddddddddddddddddddddd'")) return Buffer.from("");
+      return Buffer.from("");
+    });
+
+    try {
+      await testManager.recoverCompletionHandoffLimbo();
+    } finally {
+      testManager.stop();
+      if (originalReaddir) mockedReaddirSync.mockImplementation(originalReaddir);
+      else mockedReaddirSync.mockReset();
+      if (originalExec) mockedExecSync.mockImplementation(originalExec);
+      else mockedExecSync.mockReset();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    }
+
+    expect(testStore.enqueueMergeQueue).not.toHaveBeenCalled();
+    expect(testStore.moveTask).toHaveBeenCalledWith("FN-5858", "done", expect.anything());
+    expect(testStore.updateTask).toHaveBeenCalledWith("FN-5858", expect.objectContaining({
+      mergeRetries: 0,
+      mergeDetails: expect.objectContaining({
+        commitSha: "dddddddddddddddddddddddddddddddddddddddd",
+        mergeConfirmed: true,
+        landedFiles: ["Packages/Editor/file.ts"],
+      }),
+    }));
+    expect(testStore.logEntry).toHaveBeenCalledWith(
+      "FN-5858",
+      expect.stringContaining("Auto-recovered stranded AI merge clean-room commit dddddddd"),
+    );
+  });
 });

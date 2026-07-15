@@ -65,6 +65,7 @@ import { NodeProvider, useNodeContext } from "./context/NodeContext";
 import { FileBrowserProvider } from "./context/FileBrowserContext";
 import { ShellProvider } from "./context/ShellContext";
 import { RetryWarningProvider } from "./context/RetryWarningContext";
+import { CostBadgeProvider } from "./context/CostBadgeContext";
 import { ShellHostProvider, useShellHostContext } from "./context/ShellHostContext";
 import { useShellConnection } from "./hooks/useShellConnection";
 import { useStashOrphanCount } from "./hooks/useStashOrphanCount";
@@ -221,6 +222,15 @@ export interface DashboardShortcutPopupHandlers {
   closePoppedOutTask: (taskId: string) => void;
   closeQuickChat: () => void;
   closeTerminal: () => void;
+}
+
+export function isTaskPopupVisibleForView(options: {
+  taskPopupsBoardListOnly: boolean;
+  taskView: TaskView;
+  originTaskView?: TaskView;
+}): boolean {
+  if (!options.taskPopupsBoardListOnly) return true;
+  return (options.originTaskView === "board" || options.originTaskView === "list") && options.originTaskView === options.taskView;
 }
 
 /*
@@ -463,7 +473,10 @@ function AppInner() {
   FNXC:FloatingWindow 2026-06-22-20:45:
   Open popped-out task-detail windows. Each entry is a task snapshot rendered inside its own movable, resizable, non-blocking FloatingWindow. Several can be open at once and coexist with the right-dock pop-out and terminal (all click-through overlays). Snapshots survive a tasks revalidation; rendering prefers the live row by id and falls back to the snapshot. Pop-out dedupes by task id — re-popping an already-open task is a no-op (its window stays; focus-to-front in FloatingWindow handles re-raising on click).
   */
-  const { tasks: poppedOutTasks, popOut: popOutTaskDetail, close: closePoppedOutTask } = usePoppedOutTasks();
+  const { entries: poppedOutTaskEntries, popOut: popOutTaskDetail, close: closePoppedOutTask } = usePoppedOutTasks();
+  const popOutTaskDetailForCurrentView = useCallback((task: Task | TaskDetail) => {
+    popOutTaskDetail(task, taskView);
+  }, [popOutTaskDetail, taskView]);
 
   const boardSourceTasks = isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks;
   const [graphWorkflowSelection, setGraphWorkflowSelection] = useState<GraphWorkflowSelection | null>(null);
@@ -619,6 +632,9 @@ function AppInner() {
     capacityRiskTodoThreshold,
     openTasksInRightSidebar,
     openMobileTasksInPopup,
+    taskPopupsBoardListOnly,
+    showCostBadgeOnCards,
+    modelPricingOverrides,
     taskDetailChatFirst,
     quickChatButtonMode,
     quickChatCloseOnOutsideClick,
@@ -638,6 +654,21 @@ function AppInner() {
     togglePlanAutoApprove,
     refresh: refreshAppSettings,
   } = useAppSettings(currentProject?.id);
+
+  const taskPopupsVisibleOnCurrentView = useCallback((originTaskView?: TaskView) => isTaskPopupVisibleForView({
+    taskPopupsBoardListOnly,
+    taskView,
+    originTaskView,
+  }), [taskPopupsBoardListOnly, taskView]);
+  /*
+  FNXC:TaskPopupViewGating 2026-07-13-00:00:
+  Default-off preserves today's globally visible task popups. When enabled, a popup is render-attached to the Board/List view where it was opened: switching views unmounts the FloatingWindow without clearing the hook snapshot, and returning to that same view remounts it with the shared persisted geometry.
+  */
+  const visiblePoppedOutTaskEntries = useMemo(
+    () => poppedOutTaskEntries.filter((entry) => taskPopupsVisibleOnCurrentView(entry.originTaskView)),
+    [poppedOutTaskEntries, taskPopupsVisibleOnCurrentView],
+  );
+  const visiblePoppedOutTasks = useMemo(() => visiblePoppedOutTaskEntries.map((entry) => entry.task), [visiblePoppedOutTaskEntries]);
 
   const pluginDashboardViews = useMemo<PluginDashboardViewEntry[]>(() => {
     /*
@@ -1024,7 +1055,7 @@ function AppInner() {
     */
     return closeTopmostDashboardPopupForShortcut(
       {
-        poppedOutTaskIds: poppedOutTasks.map((task) => task.id),
+        poppedOutTaskIds: visiblePoppedOutTasks.map((task) => task.id),
         quickChatOpen,
         terminalOpen: modalManager.terminalOpen,
         modalClosers: [
@@ -1053,7 +1084,7 @@ function AppInner() {
         closeTerminal: closeTerminalWithNav,
       },
     );
-  }, [closePoppedOutTask, closeTerminalWithNav, modalManager, poppedOutTasks, quickChatOpen]);
+  }, [closePoppedOutTask, closeTerminalWithNav, modalManager, quickChatOpen, visiblePoppedOutTasks]);
 
   const openFilesWithNav = useCallback((workspace?: string, initialFile?: string | null) => {
     modalManager.openFiles(workspace, initialFile);
@@ -1253,7 +1284,7 @@ function AppInner() {
 
   // Props for the extracted <MainContent> switch (see components/dashboard/MainContent.tsx).
   // Every value is passed by its App name; the switch renders the same subtrees as before.
-  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openTaskPopup: popOutTaskDetail, openMobileTasksInPopup, openFileInBrowser, onMoveTask: moveTask, onDeleteTask: deleteTask, onArchiveTask: archiveTask, onRevertTask: revertTask, onMergeTask: mergeTask, onRetryTask: retryTask, onBypassReview: bypassReview, onResetTask: resetTask, onDuplicateTask: duplicateTask, onTaskUpdated: (task: Task) => ingestCreatedTasks([task]), openSettings: (section?: string) => openSettingsWithNav(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), prAuthAvailable, autoMerge, taskDetailChatFirst, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
+  const rightDock = useRightDockController({ active: rightDockActive, projectId: currentProject?.id, addToast, settingsLoaded, researchReadinessVersion, goalAnchorId, tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks, workflowSteps, subscribePluginEvents, openDetailTask, openTaskPopup: popOutTaskDetailForCurrentView, openMobileTasksInPopup, openFileInBrowser, onMoveTask: moveTask, onDeleteTask: deleteTask, onArchiveTask: archiveTask, onRevertTask: revertTask, onMergeTask: mergeTask, onRetryTask: retryTask, onBypassReview: bypassReview, onResetTask: resetTask, onDuplicateTask: duplicateTask, onTaskUpdated: (task: Task) => ingestCreatedTasks([task]), openSettings: (section?: string) => openSettingsWithNav(section as SectionId), onOpenUsage: openUsageWithNav, onOpenActivityLog: openActivityLogWithNav, onOpenGitHubImport: openGitHubImportWithNav, onOpenGitManager: openGitManagerWithNav, onOpenSchedules: openSchedulesWithNav, onSendSelectionToTask: modalManager.openNewTaskWithDescription, onCreateTaskFromInsight: handleInsightTaskCreate, onNavigateToMission: handleOpenMission, onTaskCreated: (task: Task) => ingestCreatedTasks([task]), prAuthAvailable, autoMerge, taskDetailChatFirst, visibilityOptions: { experimentalFeatures: { insights: insightsEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled, researchView: researchEnabled, evalsView: evalsEnabled, goalsView: goalsEnabled }, showSkillsTab: skillsEnabled, todosEnabled, pluginDashboardViews }, footerVisible: executorFooterVisible });
 
   /*
   FNXC:OpenTasksInRightSidebar 2026-06-28-00:00:
@@ -1272,7 +1303,7 @@ function AppInner() {
     });
 
     if (route === "popup") {
-      popOutTaskDetail(task);
+      popOutTaskDetailForCurrentView(task);
       return;
     }
 
@@ -1282,7 +1313,7 @@ function AppInner() {
     }
 
     openTaskDetailInMainPanel(task, initialTab);
-  }, [isMobile, openMobileTasksInPopup, openTaskDetailInMainPanel, openTasksInRightSidebar, popOutTaskDetail, rightDock, rightDockActive]);
+  }, [isMobile, openMobileTasksInPopup, openTaskDetailInMainPanel, openTasksInRightSidebar, popOutTaskDetailForCurrentView, rightDock, rightDockActive]);
 
   useEffect(() => {
     if (!openTasksInRightSidebar) {
@@ -1338,6 +1369,7 @@ function AppInner() {
     mergeStrategy,
     planAutoApproveEnabled,
     settingsLoaded,
+    openMobileTasksInPopup,
     taskDetailChatFirst,
     skillsEnabled,
     experimentalFeatures,
@@ -1354,7 +1386,7 @@ function AppInner() {
     agentsEnabled,
     agentOnboardingEnabled,
     handleOpenTaskLogs,
-    popOutTaskDetail,
+    popOutTaskDetail: popOutTaskDetailForCurrentView,
     selectedPrId,
     insightsEnabled,
     handleInsightTaskCreate,
@@ -1506,6 +1538,7 @@ function AppInner() {
       <NavigationHistoryProvider value={{ pushNav, replaceCurrent, removeNav }}>
         <FileBrowserProvider openFile={openFileInBrowser}>
           <RetryWarningProvider value={maxTotalRetriesBeforeFail * RETRY_WARNING_RATIO}>
+            <CostBadgeProvider value={{ enabled: showCostBadgeOnCards, pricingOverrides: modelPricingOverrides }}>
         {isFirstEverBoot ? (
           <>
             <DashboardLoader stage={loadingStage} />
@@ -1631,6 +1664,7 @@ function AppInner() {
           initialCommand={modalManager.terminalInitialCommand}
           initialCommandGeneration={modalManager.terminalInitialCommandGeneration}
           projectId={currentProject.id}
+          footerVisible={executorFooterVisible}
         />
       )}
       </div>
@@ -1772,8 +1806,11 @@ function AppInner() {
 
       FNXC:TaskPopupLayer 2026-07-04-18:36:
       Ordinary task-detail popups belong to the board/task-detail layer, not the global floating-utility stack. Pass the task-detail layer so board/right-dock task opens preserve the visible board context while utility windows keep the higher app-wide raise/focus contract.
+
+      FNXC:TaskPopupViewGating 2026-07-13-00:00:
+      Rendering uses visible entries only; the source hook keeps hidden popup snapshots mounted in React state rather than clearing them on view change. This distinction lets the opt-in setting attach each popup to its originating Board/List view while default-off continues to render all open popups globally.
       */}
-      {poppedOutTasks.map((snapshot) => {
+      {visiblePoppedOutTaskEntries.map(({ task: snapshot }) => {
         const liveTask = tasks.find((candidate) => candidate.id === snapshot.id) ?? snapshot;
         const close = () => closePoppedOutTask(snapshot.id);
         return (
@@ -1793,7 +1830,7 @@ function AppInner() {
               projectId={currentProject?.id}
               tasks={tasks}
               embedded
-              onOpenDetail={popOutTaskDetail}
+              onOpenDetail={popOutTaskDetailForCurrentView}
               onMoveTask={moveTask}
               onDeleteTask={deleteTask}
               onMergeTask={mergeTask}
@@ -1856,6 +1893,7 @@ function AppInner() {
             )}
           </>
         )}
+            </CostBadgeProvider>
           </RetryWarningProvider>
         </FileBrowserProvider>
       </NavigationHistoryProvider>

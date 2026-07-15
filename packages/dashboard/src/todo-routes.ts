@@ -7,7 +7,8 @@ import {
   notFound,
   internalError,
 } from "./api-error.js";
-import { getOrCreateProjectStore } from "./project-store-resolver.js";
+import { getScopedStore as resolveScopedRequestStore } from "./routes/context.js";
+import type { ServerOptions } from "./server.js";
 
 function rethrowAsApiError(error: unknown, fallbackMessage = "Internal server error"): never {
   if (error instanceof ApiError) {
@@ -56,16 +57,19 @@ function validateStringArray(arr: unknown, fieldName: string): string[] {
   return arr;
 }
 
-export function createTodoRouter(store: TaskStore): Router {
+export function createTodoRouter(store: TaskStore, options?: ServerOptions): Router {
   const router = Router();
   const requestContext = new AsyncLocalStorage<TaskStore>();
 
   function getProjectIdFromRequest(req: Request): string | undefined {
-    if (typeof req.query.projectId === "string" && req.query.projectId.trim()) {
-      return req.query.projectId;
+    // FNXC:BranchGroupProjectScoping 2026-07-14-06:15: return the trimmed id, not the raw padded string.
+    if (typeof req.query.projectId === "string") {
+      const projectId = req.query.projectId.trim();
+      if (projectId) return projectId;
     }
-    if (req.body && typeof req.body === "object" && typeof req.body.projectId === "string" && req.body.projectId.trim()) {
-      return req.body.projectId;
+    if (req.body && typeof req.body === "object" && typeof req.body.projectId === "string") {
+      const projectId = req.body.projectId.trim();
+      if (projectId) return projectId;
     }
     return undefined;
   }
@@ -77,8 +81,11 @@ export function createTodoRouter(store: TaskStore): Router {
 
   router.use(async (req: Request, _res: Response, next) => {
     try {
-      const projectId = getProjectIdFromRequest(req);
-      const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : store;
+      // FNXC:CentralProjectIdentity 2026-07-13-23:54:
+      // Resolve an explicit central-registry project id (request id → registered
+      // launch project id → raw launch store as last resort) via the shared seam,
+      // replacing the implicit projectId?getOrCreate:store fallback.
+      const scopedStore = await resolveScopedRequestStore(req, store, options);
       requestContext.run(scopedStore, next);
     } catch (error) {
       next(error);
@@ -89,7 +96,7 @@ export function createTodoRouter(store: TaskStore): Router {
     try {
       const projectId = getProjectIdFromRequest(req) ?? "";
       const todoStore = getScopedStore().getTodoStore();
-      const lists = todoStore.getListsWithItems(projectId);
+      const lists = await todoStore.getListsWithItems(projectId);
       res.json(lists);
     } catch (error) {
       rethrowAsApiError(error, "Failed to list todo lists");
@@ -101,7 +108,7 @@ export function createTodoRouter(store: TaskStore): Router {
       const projectId = getProjectIdFromRequest(req) ?? "";
       const title = validateTitle((req.body as { title?: unknown }).title);
       const todoStore = getScopedStore().getTodoStore();
-      const list = todoStore.createList(projectId, { title });
+      const list = await todoStore.createList(projectId, { title });
       res.status(201).json(list);
     } catch (error) {
       rethrowAsApiError(error, "Failed to create todo list");
@@ -119,7 +126,7 @@ export function createTodoRouter(store: TaskStore): Router {
 
       const title = validateTitle(input.title);
       const todoStore = getScopedStore().getTodoStore();
-      const updated = todoStore.updateList(id, { title });
+      const updated = await todoStore.updateList(id, { title });
 
       if (!updated) {
         throw notFound(`Todo list ${id} not found`);
@@ -135,7 +142,7 @@ export function createTodoRouter(store: TaskStore): Router {
     try {
       const { id } = req.params;
       const todoStore = getScopedStore().getTodoStore();
-      todoStore.deleteList(id);
+      await todoStore.deleteList(id);
       res.status(204).send();
     } catch (error) {
       rethrowAsApiError(error, "Failed to delete todo list");
@@ -147,7 +154,7 @@ export function createTodoRouter(store: TaskStore): Router {
       const { id: listId } = req.params;
       const text = validateText((req.body as { text?: unknown }).text);
       const todoStore = getScopedStore().getTodoStore();
-      const item = todoStore.createItem(listId, { text });
+      const item = await todoStore.createItem(listId, { text });
       res.status(201).json(item);
     } catch (error) {
       rethrowAsApiError(error, "Failed to create todo item");
@@ -171,7 +178,7 @@ export function createTodoRouter(store: TaskStore): Router {
       }
 
       const todoStore = getScopedStore().getTodoStore();
-      const item = todoStore.updateItem(id, updates);
+      const item = await todoStore.updateItem(id, updates);
       if (!item) {
         throw notFound(`Todo item ${id} not found`);
       }
@@ -186,7 +193,7 @@ export function createTodoRouter(store: TaskStore): Router {
     try {
       const { id } = req.params;
       const todoStore = getScopedStore().getTodoStore();
-      todoStore.deleteItem(id);
+      await todoStore.deleteItem(id);
       res.status(204).send();
     } catch (error) {
       rethrowAsApiError(error, "Failed to delete todo item");
@@ -198,7 +205,7 @@ export function createTodoRouter(store: TaskStore): Router {
       const { id: listId } = req.params;
       const itemIds = validateStringArray((req.body as { itemIds?: unknown }).itemIds, "itemIds");
       const todoStore = getScopedStore().getTodoStore();
-      todoStore.reorderItems(listId, itemIds);
+      await todoStore.reorderItems(listId, itemIds);
       res.status(204).send();
     } catch (error) {
       rethrowAsApiError(error, "Failed to reorder todo items");

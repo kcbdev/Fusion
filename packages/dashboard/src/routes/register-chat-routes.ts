@@ -4,14 +4,19 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { THINKING_LEVELS, type EnrichedChatSession, type ChatAttachment } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
-import { resolveProjectChatContext } from "../chat-project-services.js";
+/*
+FNXC:GrokAcp 2026-07-11-18:30:
+List/create and ChatManager share resolveProjectChatContext (not getOrCreateProjectStore /
+getOrCreateScopedChatStore at this layer). Direct imports of those helpers were leftover after
+the store-alignment fix and failed lint as unused; keep manager construction on the resolved
+store/chatStore pair only.
+*/
+import { getOrCreateScopedChatManager, resolveProjectChatContext } from "../chat-project-services.js";
 import { CHAT_ALLOWED_MIME_TYPES, CHAT_MAX_ATTACHMENT_SIZE } from "./chat-attachment-config.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import { TASK_PLANNER_CHAT_AGENT_ID_PREFIX } from "../chat.js";
 import type { ApiRoutesContext } from "./types.js";
-import { getOrCreateScopedChatManager, getOrCreateScopedChatStore } from "../chat-project-services.js";
-import { getOrCreateProjectStore } from "../project-store-resolver.js";
 
 interface ChatRouteDeps {
   parseLastEventId: (req: import("express").Request) => number | undefined;
@@ -113,12 +118,21 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       if (!options?.chatManager) throw new ApiError(503, "Chat manager not available");
       return options.chatManager;
     }
-    const projectStore = await getOrCreateProjectStore(projectId);
-    const chatStore = getOrCreateScopedChatStore(projectStore);
+    /*
+    FNXC:GrokAcp 2026-07-11-17:00:
+    Chat list/create use resolveProjectChatContext, which falls back to the host
+    default store when no engine is running for the project (nested dashboard /
+    lockfile-blocked engines). ChatManager must use that same store/chatStore
+    pair — getOrCreateProjectStore alone pointed at a different fusion dir, so
+    sessions visible in the UI 404'd on sendMessage ("Chat session not found").
+    Prefer the engine plugin runner when available; otherwise the host runner
+    (e.g. Grok ACP 0.2) so CLI runtimes still resolve.
+    */
+    const { store: scopedStore, chatStore } = await resolveScopedChatStore(projectId);
     const engine = options?.engineManager?.getEngine(projectId);
     const projectPluginRunner = engine?.getPluginRunner?.();
     const pluginRunner = projectPluginRunner ?? options?.pluginRunner;
-    return getOrCreateScopedChatManager(projectStore, chatStore, pluginRunner, Boolean(projectPluginRunner));
+    return getOrCreateScopedChatManager(scopedStore, chatStore, pluginRunner, Boolean(projectPluginRunner), engine?.getMessageStore());
   }
   const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
 
@@ -179,14 +193,28 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       }
 
       const agentId = `${TASK_PLANNER_CHAT_AGENT_ID_PREFIX}${task.id}`;
-      const existing = chatStore.findLatestActiveSessionForTarget({
+      let existing = await chatStore.findLatestActiveSessionForTarget({
         agentId,
         ...(projectId ? { projectId } : {}),
       });
 
+      // FNXC:CentralProjectIdentity 2026-07-14-00:15:
+      // ctx projectId now resolves to the launch id, so a projectId-filtered lookup
+      // misses legacy active planner sessions created with a null projectId → we'd
+      // create a duplicate. On a scoped miss, retry unscoped and reuse a matched
+      // legacy (null-projectId) session for this task-specific agent. The projectId
+      // is not stamped onto it: ChatSessionUpdateInput has no projectId field, so no
+      // clean update path exists — reusing it is enough to prevent the duplicate.
+      if (!existing && projectId) {
+        const legacy = await chatStore.findLatestActiveSessionForTarget({ agentId });
+        if (legacy && legacy.projectId == null) {
+          existing = legacy;
+        }
+      }
+
       if (existing) {
         const session = modelProvider && modelId
-          ? chatStore.updateSession(existing.id, { modelProvider, modelId })
+          ? await chatStore.updateSession(existing.id, { modelProvider, modelId })
           : existing;
         res.json({ session });
         return;
@@ -196,7 +224,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
         throw badRequest(`Task ${task.id} is archived; planner chat cannot be started for archived tasks`);
       }
 
-      const session = chatStore.createSession({
+      const session = await chatStore.createSession({
         agentId,
         title: `${task.id} planner chat`,
         projectId: projectId ?? null,
@@ -261,8 +289,8 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       }
 
       let sessions = isResumeLookup
-        ? (() => {
-            const matched = chatStore.findLatestActiveSessionForTarget({
+        ? await (async () => {
+            const matched = await chatStore.findLatestActiveSessionForTarget({
               agentId: agentId!.trim(),
               ...(projectId && { projectId }),
               ...(hasModelProvider && hasModelId
@@ -275,7 +303,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
 
             return matched ? [matched] : [];
           })()
-        : chatStore.listSessions({
+        : await chatStore.listSessions({
             ...(projectId && { projectId }),
             ...(status && { status: status as "active" | "archived" }),
             ...(agentId && { agentId }),
@@ -284,7 +312,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       // Enrich sessions with last message preview
       if (sessions.length > 0) {
         const sessionIds = sessions.map((s) => s.id);
-        const lastMessages = chatStore.getLastMessageForSessions(sessionIds);
+        const lastMessages = await chatStore.getLastMessageForSessions(sessionIds);
 
         if (!isResumeLookup) {
           const settings = await scopedStore.getSettings();
@@ -312,7 +340,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
         */
         let contentMatches: Map<string, string> | undefined;
         if (isContentSearch && !isResumeLookup) {
-          contentMatches = chatStore.searchSessionsByMessageContent(q!.trim(), sessions.map((s) => s.id));
+          contentMatches = await chatStore.searchSessionsByMessageContent(q!.trim(), sessions.map((s) => s.id));
           sessions = sessions.filter((session) => contentMatches!.has(session.id));
         }
 
@@ -366,7 +394,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const { store: scopedStore, projectId } = await getProjectContext(req);
       const { chatStore } = await resolveScopedChatStore(projectId);
       const { AgentStore } = await import("@fusion/core");
-      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir(), asyncLayer: scopedStore.getAsyncLayer() ?? undefined });
       await agentStore.init();
 
       const { agentId, title, modelProvider, modelId, thinkingLevel: rawThinkingLevel } = req.body as {
@@ -414,7 +442,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       }
 
       // Create the chat session with projectId for multi-project scoping
-      const session = chatStore.createSession({
+      const session = await chatStore.createSession({
         agentId: agentId.trim(),
         title: title?.trim() || null,
         projectId: projectId ?? null,
@@ -441,7 +469,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
@@ -461,24 +489,95 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
 
   /**
    * PATCH /api/chat/sessions/:id
-   * Update a chat session (title, status).
-   * Body: { title?: string, status?: "active" | "archived" }
+   * Update a chat session (title, status, thinkingLevel, model, or agent target).
+   * Body: { title?: string, status?: "active" | "archived", thinkingLevel?: string | null,
+   *         modelProvider?: string | null, modelId?: string | null, agentId?: string }
+   *
+   * FNXC:Chat-ThinkingLevel 2026-07-12-19:30:
+   * FN-7775 only let a user pick a session's thinking level at creation time
+   * (POST /chat/sessions). FN-7898 lets an EXISTING model-loop session's
+   * reasoning-effort level be changed mid-conversation from the in-chat
+   * composer control, distinct from that create-time picker. `null`/`""`
+   * is an explicit clear back to the project/global default (mirrors the
+   * create-time semantics where an absent/empty thinkingLevel means
+   * "inherit"); omitting the key entirely leaves the session's stored
+   * value untouched, matching the existing title/status behavior below.
+   *
+   * FNXC:Chat-ModelSwitch 2026-07-12-20:15:
+   * FN-7908 extends this SAME route (rather than adding a new one) so the
+   * brain-icon popup introduced by FN-7898 can also retarget an active
+   * Direct chat's model or switch it to a real agent mid-conversation.
+   * modelProvider/modelId are validated as a pair via the existing
+   * validateModelPair helper (used elsewhere in this file for task-planner
+   * session creation); agentId is validated as a non-empty string. Both are
+   * forwarded to chatStore.updateSession only when present in the body so
+   * omitted keys stay untouched, matching the thinkingLevel/title/status
+   * pattern above.
    */
   router.patch("/chat/sessions/:id", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
       const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
-      const { title, status } = req.body as { title?: string; status?: string };
+      const {
+        title,
+        status,
+        thinkingLevel: rawThinkingLevel,
+        modelProvider: rawModelProvider,
+        modelId: rawModelId,
+        agentId: rawAgentId,
+      } = req.body as {
+        title?: string;
+        status?: string;
+        thinkingLevel?: string | null;
+        modelProvider?: string | null;
+        modelId?: string | null;
+        agentId?: string;
+      };
 
       // Validate status if provided
       if (status !== undefined && status !== "active" && status !== "archived") {
         throw badRequest("status must be 'active' or 'archived'");
       }
 
-      const session = chatStore.updateSession(sessionId, {
+      // Normalize thinkingLevel before persisting: undefined leaves the field
+      // untouched (key omitted below), null/empty-string is an explicit clear
+      // to inherit the default, and any other value is validated against
+      // THINKING_LEVELS via the existing validateThinkingLevel helper.
+      let normalizedThinkingLevel: string | null | undefined;
+      if (rawThinkingLevel !== undefined) {
+        if (rawThinkingLevel === null || (typeof rawThinkingLevel === "string" && rawThinkingLevel.trim() === "")) {
+          normalizedThinkingLevel = null;
+        } else {
+          const validated = validateThinkingLevel(rawThinkingLevel);
+          normalizedThinkingLevel = validated ?? null;
+        }
+      }
+
+      // FNXC:Chat-ModelSwitch — modelProvider/modelId are only validated (and
+      // therefore only forwarded) when at least one of them is present in the
+      // body, so a PATCH that omits both keys entirely leaves the session's
+      // stored model target untouched instead of tripping the pair-mismatch
+      // check below.
+      const modelPairProvided = rawModelProvider !== undefined || rawModelId !== undefined;
+      const { modelProvider: normalizedModelProvider, modelId: normalizedModelId } = modelPairProvided
+        ? validateModelPair(rawModelProvider, rawModelId)
+        : {};
+
+      let normalizedAgentId: string | undefined;
+      if (rawAgentId !== undefined) {
+        if (typeof rawAgentId !== "string" || rawAgentId.trim() === "") {
+          throw badRequest("agentId must be a non-empty string");
+        }
+        normalizedAgentId = rawAgentId.trim();
+      }
+
+      const session = await chatStore.updateSession(sessionId, {
         ...(title !== undefined && { title: title?.trim() || null }),
         ...(status !== undefined && { status }),
+        ...(normalizedThinkingLevel !== undefined && { thinkingLevel: normalizedThinkingLevel }),
+        ...(modelPairProvided && { modelProvider: normalizedModelProvider ?? null, modelId: normalizedModelId ?? null }),
+        ...(normalizedAgentId !== undefined && { agentId: normalizedAgentId }),
       });
 
       if (!session) {
@@ -503,7 +602,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
       const sessionId = String(req.params.id);
 
-      const deleted = chatStore.deleteSession(sessionId);
+      const deleted = await chatStore.deleteSession(sessionId);
       if (!deleted) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
@@ -529,7 +628,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const sessionId = String(req.params.id);
 
       // Verify session exists
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
@@ -558,7 +657,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
 
       const effectiveLimit = Math.min(limit, 200);
 
-      const messages = chatStore.getMessages(sessionId, {
+      const messages = await chatStore.getMessages(sessionId, {
         limit: effectiveLimit,
         offset,
         ...(before && { before }),
@@ -579,7 +678,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const { chatStore } = await resolveScopedChatStore(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
@@ -646,13 +745,18 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const chatManager = await resolveScopedChatManager(req.query.projectId as string | undefined);
 
       const sessionId = String(req.params.id);
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
 
+      // FNXC:CentralProjectIdentity 2026-07-14-00:15:
+      // ctx projectId now resolves to the launch id, but legacy sessions stored a
+      // null/undefined projectId before scoping existed. Treat those as launch-owned
+      // so attaching to their in-flight stream is not spuriously 404'd; only reject a
+      // session that is explicitly stamped with a DIFFERENT project id.
       const { projectId } = await getProjectContext(req);
-      if (projectId !== undefined && session.projectId !== projectId) {
+      if (projectId !== undefined && session.projectId != null && session.projectId !== projectId) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
 
@@ -755,7 +859,7 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       }
 
       // Verify session exists
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
@@ -924,19 +1028,19 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
       const messageId = String(req.params.messageId);
 
       // Verify session exists
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
 
       // Check if message exists
-      const message = chatStore.getMessage(messageId);
+      const message = await chatStore.getMessage(messageId);
       if (!message) {
         throw notFound(`Message ${messageId} not found`);
       }
 
       // Delete the message
-      const deleted = chatStore.deleteMessage(messageId);
+      const deleted = await chatStore.deleteMessage(messageId);
       if (!deleted) {
         throw notFound(`Message ${messageId} not found`);
       }
@@ -973,12 +1077,12 @@ export function registerChatRoutes(ctx: ApiRoutesContext, deps: ChatRouteDeps): 
         throw badRequest("content must be a non-empty string");
       }
 
-      const session = chatStore.getSession(sessionId);
+      const session = await chatStore.getSession(sessionId);
       if (!session) {
         throw notFound(`Chat session ${sessionId} not found`);
       }
 
-      const message = chatStore.getMessage(messageId);
+      const message = await chatStore.getMessage(messageId);
       if (!message || message.sessionId !== sessionId) {
         throw notFound(`Message ${messageId} not found`);
       }

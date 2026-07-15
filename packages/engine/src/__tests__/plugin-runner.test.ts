@@ -150,6 +150,7 @@ describe("PluginRunner", () => {
       off: mockOff,
       getTask: vi.fn(),
       getDatabase: vi.fn().mockReturnValue({ runPluginSchemaInits: mockRunPluginSchemaInits }),
+      isBackendMode: vi.fn().mockReturnValue(false),
       recordRunAuditEvent: vi.fn(),
     };
 
@@ -894,7 +895,7 @@ describe("PluginRunner", () => {
     });
 
     it("getPluginSkills returns cached skills after init", async () => {
-      const skills = [{ pluginId: "test-plugin", skill: { skillId: "s1", name: "Skill", description: "d", skillFiles: ["./skill.md"] } }];
+      const skills = [{ pluginId: "test-plugin", pluginRoot: "/tmp/test-plugin", skill: { skillId: "s1", name: "Skill", description: "d", skillFiles: ["./skill.md"] } }];
       mockPluginLoader.getPluginSkills.mockReturnValue(skills);
       await pluginRunner.init();
       const first = pluginRunner.getPluginSkills();

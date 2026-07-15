@@ -29,11 +29,17 @@ const mockRun = {
   results: { summary: "done", findings: [], citations: [] },
 };
 
-const researchStoreMock = {
+/*
+FNXC:PostgresCutover 2026-07-10: the branch's getSyncResearchStore gates the
+research CLI on `instanceof ResearchStore`; give the mock store that prototype
+so the mocked class check passes.
+*/
+const { MockResearchStore } = vi.hoisted(() => ({ MockResearchStore: class MockResearchStore {} }));
+const researchStoreMock = Object.assign(Object.create(MockResearchStore.prototype), {
   getRun: vi.fn(() => mockRun),
   listRuns: vi.fn(() => [mockRun]),
   createExport: vi.fn(),
-};
+});
 
 const storeMock = {
   init: vi.fn(),
@@ -62,6 +68,10 @@ const { resolveResearchSettingsMock, providerRegistryMock, writeFileMock } = vi.
 // non-wait fire-and-forget branch in `runResearchCreate`).
 vi.mock("@fusion/core", () => ({
   TaskStore: makeConstructibleMock(() => storeMock),
+  // FNXC:PostgresCutover 2026-07-10: getStore() consults the PG startup factory
+  // first; null routes the test through the legacy `new TaskStore` mock path.
+  createTaskStoreForBackend: vi.fn(async () => null),
+  ResearchStore: MockResearchStore,
   resolveResearchSettings: resolveResearchSettingsMock,
   RESEARCH_RUN_STATUSES: ["queued", "running", "cancelling", "retry_waiting", "completed", "failed", "cancelled", "timed_out", "retry_exhausted"],
   RESEARCH_EXPORT_FORMATS: ["json", "markdown", "pdf"],
@@ -79,6 +89,20 @@ vi.mock("@fusion/engine", () => ({
 // (none of these tests pass `projectName`, so `resolveProjectPathOnly` is
 // unused at runtime here, but it must exist on the mock module).
 vi.mock("../../project-context.js", () => ({
+  asLocalProjectContext: vi.fn((store: unknown) => ({
+    projectId: process.cwd(),
+    projectPath: process.cwd(),
+    projectName: "current-project",
+    isRegistered: false,
+    store,
+  })),
+  closeProjectStore: vi.fn(async (context: { store?: { close?: () => unknown } }) => {
+    try {
+      await context?.store?.close?.();
+    } catch {
+      // best-effort
+    }
+  }),
   resolveProject: vi.fn(async () => undefined),
   resolveProjectPathOnly: vi.fn(async () => undefined),
 }));
@@ -130,6 +154,24 @@ describe("research commands", () => {
     await runResearchList({ json: true, status: "completed", limit: 3 });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"runs"'));
     expect(researchStoreMock.listRuns).toHaveBeenCalledWith({ status: "completed", limit: 3 });
+  });
+
+  /*
+  FNXC:ResearchCliPostgres 2026-07-13-22:38:
+  The CLI must accept the PostgreSQL-backed research store's promise-returning API instead of requiring the legacy ResearchStore prototype. Awaiting both backends preserves the synchronous test path while proving PG list results reach the operator.
+  */
+  it("lists runs through an async PostgreSQL research store", async () => {
+    const asyncStore = {
+      getRun: vi.fn(async () => mockRun),
+      listRuns: vi.fn(async () => [mockRun]),
+      createExport: vi.fn(async () => undefined),
+    };
+    storeMock.getResearchStore.mockReturnValueOnce(asyncStore as never);
+
+    await runResearchList({ json: true, status: "completed", limit: 3 });
+
+    expect(asyncStore.listRuns).toHaveBeenCalledWith({ status: "completed", limit: 3 });
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"runs"'));
   });
 
   it("rejects invalid list status", async () => {

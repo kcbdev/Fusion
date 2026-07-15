@@ -17,9 +17,12 @@ import type { TaskStore } from "@fusion/core";
 import {
   InsightLifecycleError,
   InsightStore,
+  THINKING_LEVELS,
   executeInsightRunLifecycle,
   resolvePlanningSettingsModel,
   retryInsightRunLifecycle,
+  type AsyncInsightStore,
+  type InsightRun,
   type InsightCategory,
   type MemoryInsightCategory,
   type InsightStatus,
@@ -28,6 +31,7 @@ import {
   type InsightRunListOptions,
   type InsightRunStatus,
   type Settings,
+  type ThinkingLevel,
 } from "@fusion/core";
 import {
   ApiError,
@@ -41,7 +45,9 @@ import {
   startInsightRunSweeper,
   sweepStaleInsightRuns,
 } from "./insight-run-sweeper.js";
-import { createFnAgent, promptWithFallback, resolveMcpServersForStore } from "@fusion/engine";
+import { createFnAgent, promptWithFallback, resolveMcpServersForStore, resolvePlanningThinkingLevel } from "@fusion/engine";
+import { getScopedStore as resolveScopedRequestStore } from "./routes/context.js";
+import type { ServerOptions } from "./server.js";
 
 /**
  * Re-throws an error as an ApiError, converting unknown errors to internal errors.
@@ -56,11 +62,14 @@ function rethrowAsApiError(error: unknown, fallbackMessage = "Internal server er
  * Extract projectId from query params or body.
  */
 function getProjectId(req: Request): string | undefined {
-  if (typeof req.query.projectId === "string" && req.query.projectId.trim()) {
-    return req.query.projectId;
+  // FNXC:BranchGroupProjectScoping 2026-07-14-06:15: return the trimmed id, not the raw padded string.
+  if (typeof req.query.projectId === "string") {
+    const projectId = req.query.projectId.trim();
+    if (projectId) return projectId;
   }
-  if (req.body && typeof req.body === "object" && typeof req.body.projectId === "string" && req.body.projectId.trim()) {
-    return req.body.projectId;
+  if (req.body && typeof req.body === "object" && typeof req.body.projectId === "string") {
+    const projectId = req.body.projectId.trim();
+    if (projectId) return projectId;
   }
   return undefined;
 }
@@ -96,20 +105,31 @@ const INSIGHT_CATEGORY_BY_MEMORY_CATEGORY: Record<MemoryInsightCategory, Insight
 
 const activeRunControllers = new Map<string, AbortController>();
 
-function maybeRecoverOrphanedActiveRun(params: {
-  insightStore: InsightStore;
-  run: ReturnType<InsightStore["getRun"]>;
+/*
+ * FNXC:InsightStore 2026-06-28-10:10:
+ * Insight-run EXECUTION (POST /run, POST /runs/:id/retry) + the orphan recovery
+ * helpers drive whichever backend store getInsightStore() resolves: the sync
+ * SQLite `InsightStore` in legacy mode, or the PostgreSQL `AsyncInsightStore` in
+ * backend mode. Both share method names returning identical shapes, so callers
+ * type the store as this union and `await` every call. The interim PG-mode 503
+ * (getSyncInsightStore) is gone — run execution now works in both backends.
+ */
+type RouteInsightStore = InsightStore | AsyncInsightStore;
+
+async function maybeRecoverOrphanedActiveRun(params: {
+  insightStore: RouteInsightStore;
+  run: InsightRun | null | undefined;
   now: Date;
-}): boolean {
+}): Promise<boolean> {
   const { insightStore, run, now } = params;
-  return recoverOrphanedInsightRun({
+  return (await recoverOrphanedInsightRun({
     insightStore,
     run,
     now,
     activeRunControllers,
     source: "manual",
     graceMs: ORPHAN_GRACE_MS,
-  }).recovered;
+  })).recovered;
 }
 
 async function withAbort<T>(signal: AbortSignal, task: Promise<T>): Promise<T> {
@@ -128,11 +148,12 @@ async function executeInsightAttempt(params: {
   projectId: string;
   runId: string;
   signal: AbortSignal;
-  insightStore: InsightStore;
+  insightStore: RouteInsightStore;
   taskStore?: TaskStore;
   settings: Settings;
   modelProvider?: string;
   modelId?: string;
+  thinkingLevel?: ThinkingLevel;
 }): Promise<{ summary: string; insightsCreated: number; insightsUpdated: number }> {
   const {
     readWorkingMemory,
@@ -157,6 +178,7 @@ async function executeInsightAttempt(params: {
   const hasCustomModel = params.modelProvider && params.modelId;
   const fallbackProvider = hasCustomModel ? settingsProvider : undefined;
   const fallbackModelId = hasCustomModel ? settingsModelId : undefined;
+  const effectiveThinkingLevel = resolvePlanningThinkingLevel(params.settings, params.thinkingLevel);
 
   const existingInsights = await readInsightsMemory(params.rootDir);
   const mcpServers = (await resolveMcpServersForStore(params.taskStore ?? {})).servers;
@@ -172,6 +194,11 @@ async function executeInsightAttempt(params: {
     defaultModelId: finalModelId,
     fallbackProvider,
     fallbackModelId,
+    /*
+     * FNXC:Insights-ThinkingLevel 2026-07-12-19:24:
+     * Insight generation now persists a per-run reasoning-effort selection in inputMetadata.metadata.thinkingLevel and resolves it through the planning lane so manual runs and retries honor the same operator choice.
+     */
+    defaultThinkingLevel: effectiveThinkingLevel,
     systemPrompt: [
       "You extract durable project insights from working memory notes.",
       "Return only valid JSON that matches the requested schema.",
@@ -206,7 +233,7 @@ async function executeInsightAttempt(params: {
     const title = toInsightTitle(insight.content);
     const fingerprint = computeInsightFingerprint(title, category);
 
-    const upsertedInsight = params.insightStore.upsertInsight(params.projectId, {
+    const upsertedInsight = await params.insightStore.upsertInsight(params.projectId, {
       title,
       content: insight.content,
       category,
@@ -251,25 +278,40 @@ function toInsightTitle(content: string): string {
 /**
  * Create the insights router.
  */
-export function createInsightsRouter(store: TaskStore): Router {
+export function createInsightsRouter(store: TaskStore, options?: ServerOptions): Router {
   const router = Router();
   const requestContext = new AsyncLocalStorage<TaskStore>();
 
-  const rootInsightStore = typeof (store as { getInsightStore?: () => InsightStore }).getInsightStore === "function"
-    ? (store as { getInsightStore: () => InsightStore }).getInsightStore()
-    : undefined;
+  /*
+   * FNXC:InsightStore 2026-06-28-10:10:
+   * The startup sweep + background sweeper now drive EITHER backend: the sync
+   * SQLite InsightStore or the PostgreSQL AsyncInsightStore. Both expose the same
+   * method names (listStalePendingRuns/updateRun/appendRunEvent), and the sweeper
+   * helpers `await` every call, so the eager root-store + background sweeper wire
+   * up whenever getInsightStore() resolves to either store. The previous
+   * sync-only instanceof gate (a PG-mode capability gap) is removed.
+   */
+  let rootInsightStore: RouteInsightStore | undefined;
+  if (typeof (store as { getInsightStore?: () => unknown }).getInsightStore === "function") {
+    try {
+      const resolved = (store as { getInsightStore: () => unknown }).getInsightStore();
+      rootInsightStore = resolved as RouteInsightStore;
+    } catch {
+      rootInsightStore = undefined;
+    }
+  }
 
   if (rootInsightStore) {
-    try {
-      sweepStaleInsightRuns({
-        insightStore: rootInsightStore,
-        activeRunControllers,
-        graceMs: ORPHAN_GRACE_MS,
-        source: "startup",
-      });
-    } catch (error) {
+    // FNXC:InsightStore 2026-06-28-10:10: sweep is async; swallow rejection so a
+    // backend hiccup at boot never breaks router construction.
+    void sweepStaleInsightRuns({
+      insightStore: rootInsightStore,
+      activeRunControllers,
+      graceMs: ORPHAN_GRACE_MS,
+      source: "startup",
+    }).catch((error) => {
       console.warn("[insight-sweeper] startup sweep failed", error);
-    }
+    });
 
     const { dispose: disposeSweeper } = startInsightRunSweeper({
       insightStore: rootInsightStore,
@@ -288,11 +330,10 @@ export function createInsightsRouter(store: TaskStore): Router {
    */
   router.use(async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const projectId = getProjectId(req);
-      const scopedStore = projectId
-        // Import here to avoid circular dependency issues
-        ? await import("./project-store-resolver.js").then(({ getOrCreateProjectStore }) => getOrCreateProjectStore(projectId))
-        : store;
+      // FNXC:CentralProjectIdentity 2026-07-13-23:54:
+      // Resolve an explicit central-registry project id via the shared seam
+      // (request id → registered launch project id → raw launch store last resort).
+      const scopedStore = await resolveScopedRequestStore(req, store, options);
       requestContext.run(scopedStore, () => {
         next();
       });
@@ -307,8 +348,14 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   /**
    * Get the InsightStore from the current request context.
+   *
+   * FNXC:InsightStore 2026-06-27-09:20:
+   * Returns the union `InsightStore | AsyncInsightStore`: the sync SQLite store in
+   * legacy mode, the AsyncDataLayer-backed AsyncInsightStore in PG backend mode.
+   * The interim 503 guard is gone — read/write handlers `await` the result so
+   * either backend works.
    */
-  function getInsightStore(): InsightStore {
+  function getInsightStore() {
     const store = requestContext.getStore();
     if (!store) {
       throw new ApiError(500, "Store context not available");
@@ -318,7 +365,7 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── List Insights ───────────────────────────────────────────────────────
 
-  router.get("/", (req: Request, res: Response) => {
+  router.get("/", async (req: Request, res: Response) => {
     try {
       const store = getInsightStore();
       const options: InsightListOptions = {};
@@ -359,8 +406,8 @@ export function createInsightsRouter(store: TaskStore): Router {
         options.offset = offset;
       }
 
-      const insights = store.listInsights(options);
-      const count = store.countInsights(options);
+      const insights = await store.listInsights(options);
+      const count = await store.countInsights(options);
       res.json({ insights, count });
     } catch (error) {
       rethrowAsApiError(error, "Failed to list insights");
@@ -385,26 +432,39 @@ export function createInsightsRouter(store: TaskStore): Router {
       const settings = await taskStore.getSettings();
       const rawProvider = typeof req.body.modelProvider === "string" ? req.body.modelProvider.trim() : undefined;
       const rawModelId = typeof req.body.modelId === "string" ? req.body.modelId.trim() : undefined;
+      const rawThinkingLevel = typeof req.body.thinkingLevel === "string" ? req.body.thinkingLevel.trim() : undefined;
+      const thinkingLevel = rawThinkingLevel
+        ? THINKING_LEVELS.includes(rawThinkingLevel as ThinkingLevel)
+          ? rawThinkingLevel as ThinkingLevel
+          : undefined
+        : undefined;
+      if (rawThinkingLevel && !thinkingLevel) {
+        throw badRequest(`Invalid thinkingLevel: ${rawThinkingLevel}`);
+      }
       // Require both provider and model ID together — partial values are discarded
       const modelProvider = rawProvider && rawModelId ? rawProvider : undefined;
       const modelId = rawProvider && rawModelId ? rawModelId : undefined;
       const controller = new AbortController();
 
-      // Stash model selection in inputMetadata.metadata so retries can recover it
+      /*
+       * FNXC:Insights-ThinkingLevel 2026-07-12-19:24:
+       * Insight runs store the operator's model and reasoning-effort selection in inputMetadata.metadata instead of adding schema columns, because retries must recover exactly the per-run values used for generation.
+       */
       const inputMetadata = typeof req.body.inputMetadata === "object" && req.body.inputMetadata !== null
         ? { ...req.body.inputMetadata }
         : {};
-      if (modelProvider || modelId) {
+      if (modelProvider || modelId || thinkingLevel) {
         inputMetadata.metadata = {
           ...(typeof inputMetadata.metadata === "object" && inputMetadata.metadata !== null ? inputMetadata.metadata : {}),
           ...(modelProvider ? { modelProvider } : {}),
           ...(modelId ? { modelId } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
         };
       }
 
-      const existingActiveRun = insightStore.findActiveRun(projectId, trigger);
+      const existingActiveRun = await insightStore.findActiveRun(projectId, trigger);
       if (existingActiveRun) {
-        maybeRecoverOrphanedActiveRun({
+        await maybeRecoverOrphanedActiveRun({
           insightStore,
           run: existingActiveRun,
           now: new Date(),
@@ -434,6 +494,7 @@ export function createInsightsRouter(store: TaskStore): Router {
             settings,
             modelProvider,
             modelId,
+            thinkingLevel,
           });
         },
       });
@@ -444,7 +505,7 @@ export function createInsightsRouter(store: TaskStore): Router {
       if (error instanceof InsightLifecycleError && error.code === "active_run_conflict") {
         const projectId = getProjectId(req) ?? "";
         const trigger: InsightRunTrigger = (req.body.trigger as InsightRunTrigger) ?? "manual";
-        const activeRun = getInsightStore().findActiveRun(projectId, trigger);
+        const activeRun = await getInsightStore().findActiveRun(projectId, trigger);
         throw new ApiError(409, "Insight generation is already running", {
           code: "ACTIVE_RUN_CONFLICT",
           activeRunId: activeRun?.id,
@@ -458,7 +519,7 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── List Runs ──────────────────────────────────────────────────────────
 
-  router.get("/runs", (req: Request, res: Response) => {
+  router.get("/runs", async (req: Request, res: Response) => {
     try {
       const store = getInsightStore();
       const options: InsightRunListOptions = {};
@@ -495,8 +556,10 @@ export function createInsightsRouter(store: TaskStore): Router {
         options.offset = offset;
       }
 
+      // FNXC:InsightStore 2026-06-28-10:10: drive-by sweep runs against either
+      // backend (sync InsightStore or async AsyncInsightStore) — await it.
       try {
-        sweepStaleInsightRuns({
+        await sweepStaleInsightRuns({
           insightStore: store,
           activeRunControllers,
           graceMs: ORPHAN_GRACE_MS,
@@ -506,7 +569,7 @@ export function createInsightsRouter(store: TaskStore): Router {
         console.warn("[insight-sweeper] drive-by sweep failed", error);
       }
 
-      const runs = store.listRuns(options);
+      const runs = await store.listRuns(options);
       res.json({ runs });
     } catch (error) {
       rethrowAsApiError(error, "Failed to list runs");
@@ -515,13 +578,15 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Get Run ────────────────────────────────────────────────────────────
 
-  router.get("/runs/:id", (req: Request, res: Response) => {
+  router.get("/runs/:id", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
 
+      // FNXC:InsightStore 2026-06-28-10:10: drive-by sweep runs against either
+      // backend (sync InsightStore or async AsyncInsightStore) — await it.
       try {
-        sweepStaleInsightRuns({
+        await sweepStaleInsightRuns({
           insightStore: store,
           activeRunControllers,
           graceMs: ORPHAN_GRACE_MS,
@@ -531,7 +596,7 @@ export function createInsightsRouter(store: TaskStore): Router {
         console.warn("[insight-sweeper] drive-by sweep failed", error);
       }
 
-      const run = store.getRun(id);
+      const run = await store.getRun(id);
       if (!run) {
         throw notFound(`Run not found: ${id}`);
       }
@@ -541,36 +606,36 @@ export function createInsightsRouter(store: TaskStore): Router {
     }
   });
 
-  router.get("/runs/:id/events", (req: Request, res: Response) => {
+  router.get("/runs/:id/events", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const run = store.getRun(id);
+      const run = await store.getRun(id);
       if (!run) throw notFound(`Run not found: ${id}`);
-      res.json({ events: store.listRunEvents(id) });
+      res.json({ events: await store.listRunEvents(id) });
     } catch (error) {
       rethrowAsApiError(error, "Failed to list run events");
     }
   });
 
-  router.post("/runs/:id/cancel", (req: Request, res: Response) => {
+  router.post("/runs/:id/cancel", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const run = store.getRun(id);
+      const run = await store.getRun(id);
       if (!run) throw notFound(`Run not found: ${id}`);
       if (!["pending", "running"].includes(run.status)) {
         throw new ApiError(409, `Run ${id} is already terminal`);
       }
 
       const now = new Date().toISOString();
-      store.appendRunEvent(id, { type: "cancel_requested", status: run.status, message: "Cancellation requested" });
-      const updated = store.updateRun(id, {
+      await store.appendRunEvent(id, { type: "cancel_requested", status: run.status, message: "Cancellation requested" });
+      const updated = await store.updateRun(id, {
         lifecycle: { ...run.lifecycle, cancellationRequestedAt: now },
       });
 
       if (run.status === "pending") {
-        const cancelled = store.updateRun(id, {
+        const cancelled = await store.updateRun(id, {
           status: "cancelled",
           error: "Cancelled before execution started",
           cancelledAt: now,
@@ -597,7 +662,7 @@ export function createInsightsRouter(store: TaskStore): Router {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const existing = store.getRun(id);
+      const existing = await store.getRun(id);
       if (!existing) throw notFound(`Run not found: ${id}`);
       if (existing.status !== "failed") {
         throw new ApiError(409, `Run ${id} must be failed to retry`);
@@ -612,13 +677,17 @@ export function createInsightsRouter(store: TaskStore): Router {
       const settings = await taskStore.getSettings();
       const controller = new AbortController();
 
-      // Recover model selection from the original run's inputMetadata
+      // Recover model and reasoning-effort selection from the original run's inputMetadata.
       const originalMetadata = existing.inputMetadata?.metadata;
       const retryModelProvider = typeof (originalMetadata as Record<string, unknown> | undefined)?.modelProvider === "string"
         ? (originalMetadata as Record<string, unknown>).modelProvider as string
         : undefined;
       const retryModelId = typeof (originalMetadata as Record<string, unknown> | undefined)?.modelId === "string"
         ? (originalMetadata as Record<string, unknown>).modelId as string
+        : undefined;
+      const retryThinkingLevel = typeof (originalMetadata as Record<string, unknown> | undefined)?.thinkingLevel === "string"
+        && THINKING_LEVELS.includes((originalMetadata as Record<string, unknown>).thinkingLevel as ThinkingLevel)
+        ? (originalMetadata as Record<string, unknown>).thinkingLevel as ThinkingLevel
         : undefined;
 
       const { run } = await retryInsightRunLifecycle({
@@ -640,6 +709,7 @@ export function createInsightsRouter(store: TaskStore): Router {
             settings,
             modelProvider: retryModelProvider,
             modelId: retryModelId,
+            thinkingLevel: retryThinkingLevel,
           });
         },
       });
@@ -659,11 +729,11 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Get Insight ────────────────────────────────────────────────────────
 
-  router.get("/:id", (req: Request, res: Response) => {
+  router.get("/:id", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const insight = store.getInsight(id);
+      const insight = await store.getInsight(id);
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -675,7 +745,7 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Update Insight ─────────────────────────────────────────────────────
 
-  router.patch("/:id", (req: Request, res: Response) => {
+  router.patch("/:id", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
@@ -700,7 +770,7 @@ export function createInsightsRouter(store: TaskStore): Router {
         input.status = req.body.status;
       }
 
-      const insight = store.updateInsight(id, input as Parameters<typeof store.updateInsight>[1]);
+      const insight = await store.updateInsight(id, input as Parameters<typeof store.updateInsight>[1]);
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -712,11 +782,11 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Delete Insight ──────────────────────────────────────────────────────
 
-  router.delete("/:id", (req: Request, res: Response) => {
+  router.delete("/:id", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const deleted = store.deleteInsight(id);
+      const deleted = await store.deleteInsight(id);
       if (!deleted) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -728,11 +798,11 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Dismiss Insight ────────────────────────────────────────────────────
 
-  router.post("/:id/dismiss", (req: Request, res: Response) => {
+  router.post("/:id/dismiss", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const insight = store.updateInsight(id, { status: "dismissed" });
+      const insight = await store.updateInsight(id, { status: "dismissed" });
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -742,11 +812,11 @@ export function createInsightsRouter(store: TaskStore): Router {
     }
   });
 
-  router.post("/:id/archive", (req: Request, res: Response) => {
+  router.post("/:id/archive", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const insight = store.updateInsight(id, { status: "archived" });
+      const insight = await store.updateInsight(id, { status: "archived" });
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -756,11 +826,11 @@ export function createInsightsRouter(store: TaskStore): Router {
     }
   });
 
-  router.post("/:id/unarchive", (req: Request, res: Response) => {
+  router.post("/:id/unarchive", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const insight = store.updateInsight(id, { status: "confirmed" });
+      const insight = await store.updateInsight(id, { status: "confirmed" });
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }
@@ -772,11 +842,11 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Create Task from Insight ────────────────────────────────────────────
 
-  router.post("/:id/create-task", (req: Request, res: Response) => {
+  router.post("/:id/create-task", async (req: Request, res: Response) => {
     try {
       const id = String(req.params.id);
       const store = getInsightStore();
-      const insight = store.getInsight(id);
+      const insight = await store.getInsight(id);
       if (!insight) {
         throw notFound(`Insight not found: ${id}`);
       }

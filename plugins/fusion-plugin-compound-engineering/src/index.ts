@@ -46,7 +46,7 @@ export {
   CE_PLUGIN_ID,
   CE_WORK_SOURCE_TYPE,
 } from "./session/orchestrator.js";
-export { getStage, listStages, registerStage } from "./session/stage-registry.js";
+export { getStage, listPipelineStages, listStages, registerStage } from "./session/stage-registry.js";
 export {
   settingsSchema,
   getDefaultProvider,
@@ -81,11 +81,14 @@ const plugin = definePlugin({
     // drain is fired-and-forgotten (never awaited) so a slow sweep cannot blow
     // the hook budget; correctness does not depend on it firing because the next
     // reconcile() sweep re-derives the transition from board truth.
-    onTaskMoved: (task, fromColumn, toColumn, ctx) => {
+    onTaskMoved: async (task, fromColumn, toColumn, ctx) => {
       const store = getCePipelineStore(ctx);
-      const link = store.findByTaskId(task.id);
+      // Use the async sibling so backend (PG) mode queries Drizzle instead of
+      // throwing on the null sync Database. In SQLite mode it falls back to the
+      // sync path internally.
+      const link = await store.findByTaskIdAsync(task.id);
       if (!link) return; // not a CE-linked task → ignore fast.
-      store.enqueueSync({
+      await store.enqueueSyncAsync({
         cePipelineId: link.cePipelineId,
         taskId: task.id,
         reason: "task_moved",
@@ -96,23 +99,21 @@ const plugin = definePlugin({
       // so an on-demand reconcile (route/refresh) converges later; we just skip
       // the inline sweep.
       if (!getReconcileOnHooks(ctx.settings)) return;
-      void Promise.resolve()
-        .then(() => reconcileCePipelines(ctx))
+      void reconcileCePipelines(ctx)
         .catch((err) => ctx.logger.warn(`CE reconcile (onTaskMoved) failed: ${String(err)}`));
     },
-    onTaskCompleted: (task, ctx) => {
+    onTaskCompleted: async (task, ctx) => {
       const store = getCePipelineStore(ctx);
-      const link = store.findByTaskId(task.id);
+      const link = await store.findByTaskIdAsync(task.id);
       if (!link) return;
-      store.enqueueSync({
+      await store.enqueueSyncAsync({
         cePipelineId: link.cePipelineId,
         taskId: task.id,
         reason: "task_completed",
         toColumn: "done",
       });
       if (!getReconcileOnHooks(ctx.settings)) return;
-      void Promise.resolve()
-        .then(() => reconcileCePipelines(ctx))
+      void reconcileCePipelines(ctx)
         .catch((err) => ctx.logger.warn(`CE reconcile (onTaskCompleted) failed: ${String(err)}`));
     },
     // Install the bundled, pinned ce-* SKILL.md files into a plugin-local,
@@ -167,7 +168,7 @@ const plugin = definePlugin({
         ctx.logger.error(`Compound Engineering agent install failed: ${message}`);
       }
 
-      recoverStaleSessionsForContext(ctx, { reason: "load", force: true, emitEvent: true });
+      await recoverStaleSessionsForContext(ctx, { reason: "load", force: true, emitEvent: true });
     },
   },
   // Expose the plugin-local ce-* persona-definition directory to executor /

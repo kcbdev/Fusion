@@ -36,8 +36,9 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { realpathSync } from "node:fs";
+import { realpathSync, readdirSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertNotWorkspaceTaskMerge,
@@ -45,6 +46,7 @@ import {
   evaluateNoCommitsNoOpFinalize,
   getPrimaryPrInfo,
   getTaskMergeBlocker,
+  normalizeMergeAdvanceAutoSyncMode,
   resolvePersistAgentThinkingLog,
   resolveTaskMergeTarget,
   resolveValidatorSettingsModel,
@@ -67,7 +69,15 @@ import { checkSessionError } from "./usage-limit-detector.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createRunAuditor, generateSyntheticRunId, type RunAuditor } from "./run-audit.js";
 import { createLogger } from "./logger.js";
-import { captureSingleCommitLandedMetadata, syncGroupPrOnLanding, type MergerOptions } from "./merger.js";
+import {
+  captureSingleCommitLandedMetadata,
+  isNonFastForwardPushError,
+  parsePushRemoteTarget,
+  pushToRemoteAfterMerge,
+  runMergeAdvanceAutoSync,
+  syncGroupPrOnLanding,
+  type MergerOptions,
+} from "./merger.js";
 import { resolveBranchGroupMergeRouting, type BranchGroupMergeRouting, type SyncGroupPrFn } from "./group-merge-coordinator.js";
 import { DEFAULT_COMMIT_AUTHOR_EMAIL, DEFAULT_COMMIT_AUTHOR_NAME } from "./worktree-hooks.js";
 import { installWorktreeDependencies } from "./merge-dependency-sync.js";
@@ -81,6 +91,8 @@ import cycle (merger-ai-worktree imports `MIN_TEMP_WORKTREE_REAP_AGE_MS` from se
 */
 import { isRepoLanded, findProvenLandedCommit, FUSION_TASK_ID_TRAILER_KEY } from "./workspace-land-predicate.js";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
+import { getCommitTaskOwnership } from "./already-merged-detector.js";
+import { resolveLegacyAiMergeRootPath } from "./worktree-paths.js";
 import {
   cleanupAiMergeWorktree,
   pruneExistingAiMergeWorktrees,
@@ -126,6 +138,133 @@ function getErrorMessage(err: unknown): string {
 
 function short(sha: string): string {
   return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 8) : sha;
+}
+
+function getApprovedAiMergeReviewShas(task: Task | undefined): Set<string> {
+  const shas = new Set<string>();
+  for (const entry of task?.log ?? []) {
+    if (typeof entry.action !== "string") continue;
+    const match = entry.action.match(/AI merge review \(pass \d+\): approved(?:\s+(?:squash|commit)\s+([0-9a-f]{7,40}))?/i);
+    if (match?.[1]) shas.add(match[1].toLowerCase());
+  }
+  return shas;
+}
+
+function taskHasApprovedAiMergeReview(task: Task | undefined): boolean {
+  return (task?.log ?? []).some((entry) =>
+    typeof entry.action === "string"
+    && /AI merge review \(pass \d+\): approved/.test(entry.action)
+  );
+}
+
+function matchesApprovedAiMergeSha(squashSha: string, approvedShas: Set<string>): boolean {
+  if (approvedShas.size === 0) return true;
+  const normalized = squashSha.toLowerCase();
+  return Array.from(approvedShas).some((approved) => normalized === approved || normalized.startsWith(approved) || approved.startsWith(normalized));
+}
+
+type PreexistingAiMergeRecoveryCandidate = {
+  mergeRoot: string;
+  squashSha: string;
+  tipSha: string;
+  alreadyLanded: boolean;
+};
+
+function listAiMergeWorktreeCandidates(taskId: string, projectRootDir: string, settings?: Settings): string[] {
+  const prefix = `fusion-ai-merge-${taskId.toLowerCase()}-`;
+  const roots = Array.from(new Set([resolveAiMergeRoot(projectRootDir, settings), resolveLegacyAiMergeRootPath(projectRootDir), tmpdir()]));
+  const testWorkerRoot = process.env.FUSION_TEST_WORKER_ROOT;
+  if (testWorkerRoot) {
+    try {
+      for (const entry of readdirSync(testWorkerRoot)) {
+        if (entry.startsWith("redir-")) roots.push(join(testWorkerRoot, entry));
+      }
+    } catch {
+      // Best effort for the test harness' bounded temp-dir redirection root.
+    }
+  }
+  const candidates: string[] = [];
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root).filter((entry) => entry.startsWith(prefix));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) candidates.push(join(root, entry));
+  }
+  return candidates;
+}
+
+async function recoverApprovedPreexistingAiMergeWorktree(
+  repoRootDir: string,
+  integrationBranch: string,
+  ctx: LandRepoContext,
+): Promise<LandOneRepoResult | null> {
+  const { taskId, settings, store, audit, log, allowDirtyLocalCheckoutSync, stashResolveAgent, signal } = ctx;
+  throwIfAborted(signal, taskId);
+  const task = await store.getTask(taskId).catch(() => undefined);
+  if (!taskHasApprovedAiMergeReview(task)) return null;
+
+  const approvedShas = getApprovedAiMergeReviewShas(task);
+  const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], repoRootDir);
+  const recoverableCandidates: PreexistingAiMergeRecoveryCandidate[] = [];
+  for (const candidate of listAiMergeWorktreeCandidates(taskId, repoRootDir, settings)) {
+    let mergeRoot = candidate;
+    try { mergeRoot = realpathSync(candidate); } catch { /* keep original */ }
+    if (activeSessionRegistry.isPathActive(candidate) || activeSessionRegistry.isPathActive(mergeRoot)) continue;
+
+    try {
+      throwIfAborted(signal, taskId);
+      const squashSha = await git(["rev-parse", "--verify", "HEAD"], mergeRoot);
+      if (!squashSha || squashSha === tipSha) continue;
+      if (!matchesApprovedAiMergeSha(squashSha, approvedShas)) continue;
+      const show = await git(["show", "-s", "--format=%s%x1f%b", squashSha], mergeRoot);
+      const [subject = "", body = ""] = show.split("\x1f");
+      if (!getCommitTaskOwnership(taskId, task?.lineageId, subject, body).owned) continue;
+
+      const alreadyLanded = await gitOk(["merge-base", "--is-ancestor", squashSha, `refs/heads/${integrationBranch}`], repoRootDir);
+      const tipIsAncestor = await gitOk(["merge-base", "--is-ancestor", tipSha, squashSha], repoRootDir);
+      if (!alreadyLanded && !tipIsAncestor) continue;
+      recoverableCandidates.push({ mergeRoot, squashSha, tipSha, alreadyLanded });
+    } catch (err: unknown) {
+      await log(`AI merge: skipped pre-existing clean-room recovery candidate ${mergeRoot}: ${getErrorMessage(err)}`);
+    }
+  }
+
+  /*
+  FNXC:AIMergeRecovery 2026-07-10-23:06:
+  Approved clean-room recovery must bind the candidate commit to the reviewed squash. New review logs carry the squash SHA; legacy logs without a SHA can recover only when exactly one same-task candidate is possible, otherwise recovery defers to the normal merge path rather than finalizing the wrong clean room.
+  */
+  if (recoverableCandidates.length !== 1) {
+    if (recoverableCandidates.length > 1) {
+      await log(`AI merge: skipped pre-existing clean-room recovery because ${recoverableCandidates.length} same-task approved candidates were ambiguous`);
+    }
+    return null;
+  }
+
+  const selected = recoverableCandidates[0];
+  throwIfAborted(signal, taskId);
+  if (!selected.alreadyLanded) {
+    const land = await landSquash({
+      projectRootDir: repoRootDir,
+      mergeRoot: selected.mergeRoot,
+      integrationBranch,
+      tipSha: selected.tipSha,
+      squashSha: selected.squashSha,
+      taskId,
+      audit,
+      resolveConflicts: stashResolveAgent,
+      allowDirtyLocalCheckoutSync,
+    });
+    if (land.outcome !== "advanced") return null;
+    await log(`AI merge: recovered approved pre-existing clean-room commit ${short(selected.squashSha)} before pruning`);
+    await audit.git({ type: "merge:ai-landed", target: integrationBranch, metadata: { taskId, landedSha: selected.squashSha, source: "pre-prune-clean-room-recovery", mergeRoot: selected.mergeRoot } }).catch(() => undefined);
+    return { outcome: "landed", squashSha: selected.squashSha, localSync: land.localSync, tipSha: selected.tipSha, integrationBranch };
+  }
+
+  await log(`AI merge: recovered already-landed clean-room commit ${short(selected.squashSha)} before pruning`);
+  return { outcome: "landed", squashSha: selected.squashSha, localSync: "skipped-other-branch", tipSha: selected.tipSha, integrationBranch };
 }
 
 export {
@@ -613,6 +752,12 @@ export async function landOneRepo(
     includeTaskId, trailers, taskTitle, signal, store,
   } = ctx;
 
+  // If a prior merger died after the clean-room squash was approved but before
+  // landing/finalization, land that commit before the normal pre-merge prune can
+  // delete the only easy reference to it.
+  const recovered = await recoverApprovedPreexistingAiMergeWorktree(repoRootDir, integrationBranch, ctx);
+  if (recovered) return recovered;
+
   // Pre-merge prune is rooted at THIS sub-repo (KTD1): N per-repo clean rooms for
   // one task share the `fusion-ai-merge-<taskId>-` prefix, so a prune rooted at a
   // shared root could reap a sibling repo's live clean room. Rooting it at
@@ -991,10 +1136,115 @@ export async function runAiMerge(
       };
     }
     await log(`AI merge: ${branch} had no net changes vs ${integrationBranch} — finalizing as no-op`);
-    return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.tipSha, audit, log, { empty: true }, mergeTarget, groupRouting, options.syncGroupPr);
+    const noOpFinalized = await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.tipSha, audit, log, { empty: true }, mergeTarget, groupRouting, options.syncGroupPr);
+    await runPushAfterMergeStep({ store, projectRootDir, taskId, settings, integrationBranch, audit, log, options, result: noOpFinalized });
+    return noOpFinalized;
   }
 
-  return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.squashSha, audit, log, { empty: false }, mergeTarget, groupRouting, options.syncGroupPr);
+  const finalized = await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.squashSha, audit, log, { empty: false }, mergeTarget, groupRouting, options.syncGroupPr);
+  await runPushAfterMergeStep({ store, projectRootDir, taskId, settings, integrationBranch, audit, log, options, result: finalized });
+  return finalized;
+}
+
+/*
+FNXC:MergePush 2026-07-11-22:25:
+Post-finalization push step for the sole production merge path. Runs AFTER the task is
+finalized (mirrors the legacy contract: "task marked done anyway; local main may diverge
+from origin" on failure) so a push problem can never park or roll back a landed merge.
+Also runs after an empty/no-op finalize: the integration ref may still be ahead of the
+remote from earlier merges whose pushes failed, and pushing an up-to-date remote is a
+free no-op — this makes the setting self-healing. Every attempt emits a `push:origin`
+run-audit event; failures additionally get a durable task-log entry.
+*/
+async function runPushAfterMergeStep(input: {
+  store: TaskStore;
+  projectRootDir: string;
+  taskId: string;
+  settings: Settings;
+  integrationBranch: string;
+  audit: RunAuditor;
+  log: (message: string) => Promise<void>;
+  options: MergerOptions;
+  result: MergeResult;
+}): Promise<void> {
+  const { store, projectRootDir, taskId, settings, integrationBranch, audit, log, options, result } = input;
+  if (settings.pushAfterMerge !== true || settings.mergeStrategy === "pull-request") return;
+  try {
+    const pushOutcome = await pushAfterMergeToRemote({
+      store,
+      projectRootDir,
+      taskId,
+      settings,
+      integrationBranch,
+      audit,
+      log,
+      signal: options.signal,
+      onAgentText: options.onAgentText,
+      onSession: options.onSession,
+    });
+    result.pushedToRemote = pushOutcome.pushed;
+    if (pushOutcome.error) result.pushError = pushOutcome.error;
+    await audit.git({
+      type: "push:origin",
+      target: taskId,
+      metadata: {
+        integrationBranch,
+        remote: pushOutcome.remote ?? settings.pushRemote ?? "origin",
+        targetBranch: pushOutcome.targetBranch,
+        outcome: pushOutcome.pushed ? "success" : "failed",
+        refAdvanced: pushOutcome.refAdvanced,
+        ...(pushOutcome.error ? { stderrPreview: pushOutcome.error.slice(0, 500) } : {}),
+      },
+    }).catch(() => undefined);
+    if (pushOutcome.pushed) {
+      await log(`Push after merge: pushed ${integrationBranch} to ${pushOutcome.remote}/${pushOutcome.targetBranch}`);
+      // A divergence rebase rewrote the landed squash — refresh the recorded
+      // commitSha/stats so mergeDetails don't reference an orphaned commit
+      // (mirrors the legacy post-push refresh).
+      if (pushOutcome.refAdvanced && pushOutcome.rebasedSha) {
+        try {
+          const latest = await store.getTask(taskId).catch(() => null);
+          const details = latest?.mergeDetails;
+          if (details?.commitSha && details.commitSha !== pushOutcome.rebasedSha) {
+            const { filesChanged, insertions, deletions } = await captureSingleCommitLandedMetadata(projectRootDir, pushOutcome.rebasedSha);
+            await store.updateTask(taskId, {
+              mergeDetails: { ...details, commitSha: pushOutcome.rebasedSha, filesChanged, insertions, deletions },
+            });
+          }
+        } catch (refreshErr: unknown) {
+          aiMergeLog.warn(`${taskId}: post-push mergeDetails refresh failed: ${getErrorMessage(refreshErr)}`);
+        }
+      }
+    } else {
+      aiMergeLog.warn(`${taskId}: push to remote failed: ${pushOutcome.error}`);
+      await store.logEntry(
+        taskId,
+        `Push to remote failed after merge — task finalized anyway; local ${integrationBranch} may diverge from ${pushOutcome.remote ?? "origin"}: ${pushOutcome.error}`,
+        "PushToRemoteFailed",
+      ).catch(() => undefined);
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "MergeAbortedError") {
+      // The task already finalized — an abort mid-push must not re-surface as a
+      // failed/aborted merge. Skip quietly; the next merge's push reconciles.
+      aiMergeLog.warn(`${taskId}: push after merge aborted by shutdown signal — skipping (merge already finalized)`);
+      return;
+    }
+    const message = getErrorMessage(err);
+    result.pushedToRemote = false;
+    result.pushError = message;
+    aiMergeLog.error(`${taskId}: push to remote threw: ${message}`);
+    await audit.git({
+      type: "push:origin",
+      target: taskId,
+      metadata: { integrationBranch, remote: settings.pushRemote ?? "origin", outcome: "failed", stderrPreview: message.slice(0, 500) },
+    }).catch(() => undefined);
+    await store.logEntry(
+      taskId,
+      `Push to remote threw after merge — task finalized anyway; local ${integrationBranch} may diverge from origin: ${message}`,
+      "PushToRemoteFailed",
+    ).catch(() => undefined);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,7 +1787,7 @@ async function mergeAndReview(input: {
     });
 
     if (verdict.verdict === "approve") {
-      await log(`AI merge review (pass ${attempt + 1}): approved`);
+      await log(`AI merge review (pass ${attempt + 1}): approved squash ${head}`);
       return head;
     }
 
@@ -1556,6 +1806,156 @@ async function mergeAndReview(input: {
 
     priorReasons = verdict.reasons;
     await log(`AI merge review (pass ${attempt + 1}): rejected (${verdict.severity}) — ${verdict.reasons.join("; ")}`);
+  }
+}
+
+/*
+FNXC:MergePush 2026-07-11-22:25:
+Push-after-merge for the unified AI merge path. The `pushAfterMerge` setting was only ever
+implemented in the soft-deprecated legacy `aiMergeTask` pipeline (merger.ts step 8b), so after
+master-plan U0 made `runAiMerge` the sole merge path the setting silently did nothing — merges
+landed on the local integration ref and the remote fell permanently behind. This helper restores
+the behavior without ever touching the user's working tree:
+
+1. Fast path — a pure ref-to-ref `git push <remote> refs/heads/<ib>:refs/heads/<target>` from the
+   project root. Push is working-tree-independent, so a dirty checkout or a checkout on a
+   different branch can never break the common case (remote is simply behind or up to date).
+2. Divergence path — a rejected non-fast-forward push means the remote gained commits the local
+   ref lacks. Mirror the clean-room philosophy of the merge itself: build a throwaway DETACHED
+   worktree at the local integration tip and run the legacy `pushToRemoteAfterMerge` pipeline
+   inside it (`git pull --rebase` + AI conflict resolution + bounded non-FF retries), pushing
+   `HEAD:refs/heads/<target>`. On success, CAS-advance the local integration ref to the rebased
+   sha (explicit non-FF opt-in — rebase rewrites by construction) and run the standard
+   merge-advance auto-sync so checkouts on that branch catch up.
+
+Failures are ALWAYS non-fatal: the merge already landed locally, so the task finalization must
+never be blocked or rolled back by a push problem. Outcome is surfaced via the `push:origin`
+run-audit event, a task-log entry, and MergeResult.pushedToRemote/pushError.
+*/
+export async function pushAfterMergeToRemote(input: {
+  store: TaskStore;
+  projectRootDir: string;
+  taskId: string;
+  settings: Settings;
+  integrationBranch: string;
+  audit: RunAuditor;
+  log: (message: string) => Promise<void>;
+  signal?: AbortSignal;
+  onAgentText?: (delta: string) => void;
+  onSession?: (session: { dispose: () => void }) => void;
+}): Promise<{ pushed: boolean; remote?: string; targetBranch?: string; refAdvanced?: boolean; rebasedSha?: string; error?: string }> {
+  const { store, projectRootDir, taskId, settings, integrationBranch, audit, log, signal } = input;
+
+  let remote: string;
+  let targetBranch: string;
+  try {
+    const target = parsePushRemoteTarget(projectRootDir, settings.pushRemote, integrationBranch);
+    remote = target.remote;
+    targetBranch = target.branch;
+  } catch (err: unknown) {
+    return { pushed: false, error: `invalid push remote configuration: ${getErrorMessage(err)}` };
+  }
+
+  const localRef = `refs/heads/${integrationBranch}`;
+  const localSha = await git(["rev-parse", "--verify", localRef], projectRootDir).catch(() => "");
+  if (!localSha) {
+    return { pushed: false, remote, targetBranch, error: `local integration ref ${localRef} not found` };
+  }
+
+  // 1. Fast path: ref-to-ref push, no working tree involved.
+  throwIfAborted(signal, taskId);
+  let fastPathError: string;
+  try {
+    await git(["push", remote, `${localRef}:refs/heads/${targetBranch}`], projectRootDir, { timeout: 120_000 });
+    return { pushed: true, remote, targetBranch };
+  } catch (err: unknown) {
+    fastPathError = getErrorMessage(err);
+  }
+  if (!isNonFastForwardPushError(fastPathError)) {
+    return { pushed: false, remote, targetBranch, error: fastPathError };
+  }
+
+  // 2. Divergence path: remote moved ahead — rebase in a detached clean room.
+  await log(`Push after merge: ${remote}/${targetBranch} has diverged — rebasing in a clean room before pushing`);
+  let pushRoot: string | undefined;
+  let worktreeAdded = false;
+  const registeredPaths = new Set<string>();
+  try {
+    pushRoot = await mkdtemp(join(resolveAiMergeRoot(projectRootDir, settings), `fusion-ai-merge-push-${taskId.toLowerCase()}-`));
+    for (const p of [pushRoot]) {
+      activeSessionRegistry.registerPath(p, { taskId, kind: "ai-merge", ownerKey: `ai-merge-push:${taskId}` });
+      registeredPaths.add(p);
+    }
+    await git(["worktree", "add", "--detach", pushRoot, localSha], projectRootDir);
+    worktreeAdded = true;
+    let canonicalPushRoot = pushRoot;
+    try {
+      canonicalPushRoot = realpathSync(pushRoot);
+    } catch {
+      canonicalPushRoot = pushRoot;
+    }
+    if (!registeredPaths.has(canonicalPushRoot)) {
+      activeSessionRegistry.registerPath(canonicalPushRoot, { taskId, kind: "ai-merge", ownerKey: `ai-merge-push:${taskId}` });
+      registeredPaths.add(canonicalPushRoot);
+    }
+
+    const pushResult = await pushToRemoteAfterMerge(store, canonicalPushRoot, taskId, settings, {
+      integrationBranch: targetBranch,
+      pushHeadRefspec: true,
+      signal,
+      onAgentText: input.onAgentText,
+      onSession: input.onSession,
+    });
+    if (!pushResult.pushed) {
+      return { pushed: false, remote, targetBranch, error: pushResult.error };
+    }
+
+    // The clean-room HEAD is what the remote now has. Advance the local
+    // integration ref to match (CAS against the pre-push tip; a concurrent
+    // local advance loses the race and the NEXT merge's push reconciles).
+    const rebasedSha = await git(["rev-parse", "HEAD"], canonicalPushRoot).catch(() => "");
+    if (!rebasedSha || rebasedSha === localSha) {
+      return { pushed: true, remote, targetBranch };
+    }
+    const adv = await advanceIntegrationBranchRef({
+      rootDir: canonicalPushRoot,
+      projectRootDir,
+      integrationBranch,
+      newSha: rebasedSha,
+      expectedCurrentSha: localSha,
+      taskId,
+      audit,
+      allowNonFastForward: true,
+    });
+    if (!adv.advanced) {
+      await log(`Push after merge: pushed rebased result to ${remote}/${targetBranch}, but ${integrationBranch} moved concurrently — local ref left as-is (${adv.reason}); the next merge's push will reconcile`);
+      return { pushed: true, remote, targetBranch, refAdvanced: false, rebasedSha };
+    }
+    const autoSyncMode = normalizeMergeAdvanceAutoSyncMode(settings.mergeAdvanceAutoSync);
+    if (autoSyncMode !== "off") {
+      try {
+        await runMergeAdvanceAutoSync({
+          store,
+          audit,
+          taskId,
+          projectRootDir,
+          integrationBranch,
+          previousSha: localSha,
+          newSha: rebasedSha,
+          mode: autoSyncMode,
+        });
+      } catch (syncErr: unknown) {
+        aiMergeLog.warn(`${taskId}: merge-advance auto-sync after push rebase threw — continuing: ${getErrorMessage(syncErr)}`);
+      }
+    }
+    return { pushed: true, remote, targetBranch, refAdvanced: true, rebasedSha };
+  } finally {
+    for (const registeredPath of registeredPaths) {
+      activeSessionRegistry.unregisterPath(registeredPath);
+    }
+    if (pushRoot) {
+      await cleanupAiMergeWorktree({ taskId, mergeRoot: pushRoot, projectRootDir, worktreeAdded, audit, log });
+    }
   }
 }
 

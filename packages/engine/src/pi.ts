@@ -79,7 +79,7 @@ import { READONLY_ALLOWLIST, filterCustomToolsForReadonly, isReadonlyAllowed } f
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
 import { isModelAuthTierIncompatibilityError, isProviderModelNotFoundError, isUnsupportedMessageRoleError } from "./transient-error-detector.js";
 import { logMcpForwardingSkipped, runtimeSupportsMcp } from "./mcp-runtime-support.js";
-import { connectMcpSessionTools, type McpClientFactory, type McpSessionToolset } from "./mcp-session-tools.js";
+import { connectMcpSessionTools, McpSessionBootstrapError, type McpClientFactory, type McpSessionToolset } from "./mcp-session-tools.js";
 export { isModelAuthTierIncompatibilityError } from "./transient-error-detector.js";
 
 const RTK_ACCEPTED_REWRITE_EXIT_CODES = new Set([0, 3]);
@@ -969,6 +969,7 @@ export interface FallbackModelUsedPayload {
   taskId?: string;
   taskTitle?: string;
   timestamp?: string;
+  failureCategory?: "authentication" | "rate-limit" | "model-selection" | "provider-error";
 }
 
 export class ModelFallbackExhaustedError extends Error {
@@ -1904,7 +1905,7 @@ export function wrapToolsWithActionGate(
   tools: ToolDefinition[],
   gateContext: AgentActionGateContext | undefined,
 ): ToolDefinition[] {
-  if (!gateContext || gateContext.isEphemeral) {
+  if (!gateContext) {
     return tools;
   }
 
@@ -2327,6 +2328,18 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
         clientFactory: options.mcpClientFactory,
         logger: piLog,
       });
+      /*
+       * FNXC:McpConfig 2026-07-12-17:02:
+       * MAIN-008 requires a configured MCP bootstrap failure to be observably
+       * different from a genuine zero-server/tool catalog. Fail session creation
+       * using names plus coarse categories only, and dispose every partially
+       * connected client before the error crosses the runtime boundary.
+       */
+      const bootstrapFailures = mcpToolset.skipped.filter(({ reason }) => reason !== "disabled");
+      if (bootstrapFailures.length > 0) {
+        await mcpToolset.dispose();
+        throw new McpSessionBootstrapError(bootstrapFailures);
+      }
     } else if (forwardedMcpServers.length > 0 && isReadonly) {
       piLog.log(`readonly session — MCP servers (${forwardedMcpServers.length}) skipped`);
     }
@@ -2357,10 +2370,18 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       ...allowlistFilteredCustomTools.allowed,
     ];
     const toolsWithRtkRewrite = wrapToolsWithRtkRewrite(toolChainStart);
-    const toolsWithPermanentGating = wrapToolsWithPermanentAgentGating(
-      toolsWithRtkRewrite,
-      options.permanentAgentGating,
-    );
+    /*
+     * FNXC:AgentGating 2026-07-12-17:22:
+     * MAIN-008 requires one approval authority per tool call. Executor sessions
+     * provide the status-aware action gate for permanent, ephemeral, and
+     * fallback task-worker identities; applying the legacy permanent gate
+     * inside it would reject the call again after the outer gate consumed an
+     * approved request. Standalone lanes without actionGateContext retain the
+     * permanent gate unchanged.
+     */
+    const toolsWithPermanentGating = options.actionGateContext
+      ? toolsWithRtkRewrite
+      : wrapToolsWithPermanentAgentGating(toolsWithRtkRewrite, options.permanentAgentGating);
     const toolsWithActionGate = wrapToolsWithActionGate(
       toolsWithPermanentGating,
       options.actionGateContext,
@@ -2482,10 +2503,28 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     });
   };
 
-  const emitFallbackUsed = async (triggerPoint: "session-creation" | "prompt-time"): Promise<void> => {
+  const emitFallbackUsed = async (
+    triggerPoint: "session-creation" | "prompt-time",
+    primaryFailure: unknown,
+  ): Promise<void> => {
     if (!options.onFallbackModelUsed || !selectedModel || !fallbackModel || !hasDistinctFallback) {
       return;
     }
+    const failureMessage = primaryFailure instanceof Error ? primaryFailure.message : String(primaryFailure);
+    const normalizedFailure = failureMessage.toLowerCase();
+    const failureCategory: FallbackModelUsedPayload["failureCategory"] =
+      normalizedFailure.includes("auth")
+      || normalizedFailure.includes("api key")
+      || normalizedFailure.includes("credential")
+      || normalizedFailure.includes("oauth")
+      || normalizedFailure.includes("401")
+      || normalizedFailure.includes("403")
+        ? "authentication"
+        : normalizedFailure.includes("rate limit") || normalizedFailure.includes("429") || normalizedFailure.includes("quota")
+          ? "rate-limit"
+          : isRetryableModelSelectionError(failureMessage)
+            ? "model-selection"
+            : "provider-error";
     await options.onFallbackModelUsed({
       primaryModel: `${selectedModel.provider}/${selectedModel.id}`,
       fallbackModel: `${fallbackModel.provider}/${fallbackModel.id}`,
@@ -2493,6 +2532,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       taskId: options.taskId,
       taskTitle: options.taskTitle,
       timestamp: new Date().toISOString(),
+      failureCategory,
     });
   };
 
@@ -2517,7 +2557,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     } catch (fallbackErr: unknown) {
       throw makeFallbackExhaustedError("session-creation", 2, fallbackErr);
     }
-    await emitFallbackUsed("session-creation");
+    await emitFallbackUsed("session-creation", err);
     piLog.log("Fallback session created successfully");
   }
 
@@ -2672,7 +2712,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
       usingFallback = true;
       const fallbackSession = await swapPromptSession(fallbackModel);
-      await emitFallbackUsed("prompt-time");
+      await emitFallbackUsed("prompt-time", err);
 
       // Retry with fallback model, also with auto-compaction support
       try {

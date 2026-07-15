@@ -767,6 +767,12 @@ Bundled workspace plugin pattern:
 - Register the lazy dashboard component in host code (currently `packages/dashboard/app/plugins/registerBundledPluginViews.ts`)
 - CLI bundling inlines backend plugin code from workspace packages; dashboard view modules are imported by the dashboard build via the host registry
 
+<!-- FNXC:BundledPlugins 2026-07-13-00:00: FN-7936 requires `@runfusion/fusion` bundled plugin backend outputs to be install-self-contained. The CLI bundler resolves plugin-sdk runtime re-exports from `@fusion/core` through `plugin-sdk-core-runtime-shim.ts`, so `packages/cli/dist/plugins/<id>/bundled.js` must not ship private `@fusion/*` runtime specifiers that npm installs cannot resolve. -->
+Bundled `bundled.js` outputs must be self-contained at runtime. Do not leave private workspace package imports such as `@fusion/core` in emitted bundled plugin code; `@fusion/plugin-sdk` core runtime re-exports are resolved through the CLI runtime shim during packaging.
+
+<!-- FNXC:BundledPlugins 2026-07-14-12:00: FN-7955 requires runtime-read bundled plugin assets to be self-contained too. esbuild only inlines statically imported code, so package-local files read from disk, including Compound Engineering `src/skills/<id>/SKILL.md` bodies, must be copied by `bundlePluginEntry()` into the matching `packages/cli/dist/plugins/<id>/skills/` tree before publishing. -->
+If a bundled plugin reads package-local files at runtime, stage those assets explicitly during CLI packaging. `bundlePluginEntry()` copies any committed `src/skills/` directory into `dist/plugins/<id>/skills/`; use the same pattern for similar runtime-read assets instead of assuming esbuild will include files that are never imported.
+
 ### Bundled plugin build-freshness guard
 
 <!-- FNXC:BundledPlugins 2026-06-17-22:31: Bundled plugins can load gitignored compiled artifacts before source during workspace/dev resolution, so plugin authors need a documented recovery path when the generic freshness guard detects stale dist output. -->
@@ -1099,6 +1105,16 @@ Any state can transition to:
 | `stopped` | Plugin shut down gracefully |
 | `error` | Plugin failed during load or execution |
 
+### Updating path-registered plugins
+
+For plugins installed from a filesystem path, the normal update loop is now:
+
+1. Pull or edit the plugin source.
+2. Rebuild the plugin entrypoint if your plugin uses a build step.
+3. Restart Fusion, or disable and re-enable the plugin.
+
+On the next load/reload, Fusion re-imports the plugin module and refreshes the persisted manifest `version` and `settingsSchema` from the rebuilt manifest. Existing per-project enablement and saved setting values are preserved, so you do not need to unregister and re-register a path-based plugin just to expose a new version or settings field.
+
 ---
 
 ## 12. Testing Plugins
@@ -1201,7 +1217,7 @@ This keeps regressions durable while preserving clear ownership boundaries acros
 
 ## 13. Publishing Plugins
 
-For end-to-end standalone packaging, `pnpm pack`, and installing on another machine, follow the [External Plugin Authoring guide](./plugins/external-authoring.md).
+For end-to-end standalone packaging, `pnpm pack`, and installing on another machine, follow the [External Plugin Authoring guide](./plugins/external-authoring.md). Run `fn plugin publish --dry-run .` before packing to validate the manifest, compiled entrypoint, lifecycle hook shape, and optional version bump without installing, uploading, or tagging anything.
 
 ### Package Requirements
 
@@ -1236,7 +1252,12 @@ For end-to-end standalone packaging, `pnpm pack`, and installing on another mach
    pnpm build
    ```
 
-3. Publish to npm:
+3. Run the non-mutating publish preflight:
+   ```bash
+   fn plugin publish --dry-run . --previous-version 0.9.0
+   ```
+
+4. Publish to npm:
    ```bash
    npm publish --access public
    ```
@@ -1486,16 +1507,19 @@ const skills: PluginSkillContribution[] = [
     skillId: "web-research",
     name: "Web Research",
     description: "Finds and summarizes web sources for a task",
-    skillFiles: ["skills/web-research/SKILL.md"],
+    skillFiles: ["skills/research/web-research/SKILL.md"],
     enabled: true,
     triggerPatterns: ["research", "search the web", "find sources"],
   },
 ];
 ```
 
-`skillFiles` are relative to the plugin root. `skillId` must be kebab-case.
+`skillFiles` are relative to the plugin root. The first entry, `skillFiles[0]`, is the authoritative body file that Fusion resolves for the skill, so plugins can organize skill bodies in category subdirectories such as `skills/research/web-research/SKILL.md` while keeping a short `skillId`. When `skillFiles` is omitted or empty, Fusion falls back to the compatibility path `skills/<name>/SKILL.md`. `skillId` must be kebab-case.
 
 Plugin skills are discovered per requesting project: the Skills view and workflow editor surface `plugin:<id>` skills only when that plugin is enabled for that project's plugin state, even if the daemon was started from a different directory.
+
+<!-- FNXC:PluginSkills 2026-07-12-00:00: GitHub #2017 requires plugin skill bodies to be available anywhere native skills are available. The engine threads enabled plugin skill body discovery paths into agent sessions, and the dashboard reads the resolved plugin-package SKILL.md/reference files instead of showing a runtime placeholder. -->
+Enabled plugin skills are delivered to agent sessions from their plugin-package `SKILL.md` files. Fusion resolves the first `skillFiles` entry (or the compatibility fallback) through the plugin root, adds the skill body directory to the session's skill discovery paths, and keeps the requested skill name in the same selection filter used for native and installed skills. The Skills view also reads the resolved `SKILL.md` plus sibling reference files from disk, so users can inspect the exact guidance agents receive.
 
 ## 16. Registering Workflow Steps
 

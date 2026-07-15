@@ -62,6 +62,7 @@ export {
   askQuestionParams,
   workflowListParams,
   workflowGetParams,
+  workflowValidateParams,
   workflowSelectParams,
   workflowCreateParams,
   workflowUpdateParams,
@@ -69,7 +70,23 @@ export {
   workflowSettingsParams,
   traitListParams,
   executeApprovedAgentProvisioning,
+  createWorkflowValidateTool,
+  validateWorkflowIrDryRun,
+  type WorkflowValidateDryRunError,
 } from "./agent-tools.js";
+export {
+  POSTGRES_MIGRATION_HELP_URL,
+  POSTGRES_MIGRATION_COMPLETE_NOTICE_KIND,
+  POSTGRES_MIGRATION_NOTICE_KIND,
+  deliverPostgresMigrationNoticeIfNeeded,
+  deliverPostgresMigrationCompleteNoticeIfNeeded,
+  isPostgresMigrationNoticeVersion,
+  type DeliverPostgresMigrationNoticeArgs,
+  type DeliverPostgresMigrationCompleteNoticeArgs,
+  type PostgresMigrationCompleteNoticeResult,
+  type PostgresMigrationNoticeLog,
+  type PostgresMigrationNoticeResult,
+} from "./postgres-migration-notice.js";
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
 export { TriageProcessor, type TriageProcessorOptions } from "./triage.js";
 export { TaskExecutor, type TaskExecutorOptions } from "./executor.js";
@@ -115,6 +132,19 @@ export {
   type WorkflowRuntimePrimitiveProvider,
   type WorkflowRuntimePrimitiveFactory,
 } from "./workflow-runtime-primitive-provider.js";
+export {
+  MERGE_ACTIVE_MISSING_WORKTREE_STATUSES,
+  MISSING_WORKTREE_SESSION_PREFIXES,
+  classifyMissingWorktreeSessionStartFailure,
+  extractMissingWorktreePathFromSessionStartFailure,
+  hasStepProgress,
+  isInReviewMissingWorktreeSessionStartFailure,
+  isMergeActiveMissingWorktreeSessionStartFailure,
+  isMissingWorktreeSessionStartFailure,
+  isRecoverableMissingWorktreeReviewFailure,
+  isRecoverableMissingWorktreeReviewFailureNoProgress,
+  isRecoverableMissingWorktreeReviewFailureWithProgress,
+} from "./restart-recovery-coordinator.js";
 export {
   WorkflowCustomNodeExecutionService,
   type WorkflowCustomNodeExecutionServiceDeps,
@@ -836,6 +866,7 @@ export {
   describeAgentModel,
   resolveExecutorThinkingLevel,
   resolveExecutorFallbackThinkingLevel,
+  resolvePlanningThinkingLevel,
   resolvePlanningFallbackThinkingLevel,
   resolveValidatorFallbackThinkingLevel,
   resolveTitleSummarizerFallbackThinkingLevel,

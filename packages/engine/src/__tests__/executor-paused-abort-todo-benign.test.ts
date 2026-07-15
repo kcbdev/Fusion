@@ -193,22 +193,47 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
   });
 
   it.each([
-    { label: "explicit user pause", overrides: { column: "todo", userPaused: true }, provenance: "hard-cancel" as const },
-    { label: "global pause", overrides: { column: "todo" }, provenance: "global-pause" as const },
+    {
+      label: "explicit user pause",
+      overrides: { column: "todo", userPaused: true },
+      provenance: "hard-cancel" as const,
+      expectedBenign: "benign, paused awaiting explicit unpause",
+      expectedProvenance: "explicit user pause",
+    },
+    {
+      label: "global pause",
+      overrides: { column: "todo" },
+      provenance: "global-pause" as const,
+      expectedBenign: "benign, cleared for normal scheduling",
+      expectedProvenance: "global pause",
+    },
+    {
+      // FN-7851 pause-bounce regression: a pause-button pause that survived the
+      // executor teardown via preservePause lands in todo with `paused: true`.
+      // It must be classified as a task pause (NOT an engine-internal abort),
+      // stay parked, and never auto-continue the session.
+      label: "task pause (pause button, preserved across teardown)",
+      overrides: { column: "todo", paused: true },
+      provenance: "hard-cancel" as const,
+      expectedBenign: "benign, paused awaiting explicit unpause",
+      expectedProvenance: "task pause",
+    },
   ])(
     "does NOT auto-resume a $label that landed in todo",
-    async ({ overrides, provenance }) => {
+    async ({ overrides, provenance, expectedBenign, expectedProvenance }) => {
       // The auto-continue is scoped strictly to the engine-internal abort
-      // provenance. A genuine operator pause (userPaused) or a global engine
-      // pause that ended up in todo must stay parked-benign and wait for
-      // explicit resume — auto-resuming it would override the operator's intent.
+      // provenance. A genuine operator pause (userPaused OR a preserved
+      // pause-button `paused`) or a global engine pause that ended up in todo
+      // must stay parked-benign and wait for explicit resume — auto-resuming it
+      // would override the operator's intent.
       const { store, task, executor } = makeHarness(overrides, provenance);
       (executor as any).addActiveWorktree(task.id, task.worktree);
       const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
 
       await invokeGraphFailure(executor, task);
 
-      expect(logText(store)).toContain("benign, cleared for normal scheduling");
+      expect(logText(store)).toContain(expectedBenign);
+      expect(logText(store)).toContain(`during ${expectedProvenance} with task`);
       expect(logText(store)).not.toContain("auto-continuing the agent session");
       await flushScheduledRetry();
       expect(executeSpy).not.toHaveBeenCalled();
@@ -713,5 +738,46 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
     expect(logText(store)).toContain("operator action required");
     await flushScheduledRetry();
     expect(graphSpy).not.toHaveBeenCalled();
+  });
+
+  /*
+  FNXC:WorkflowLifecycle 2026-07-12:
+  Live-acceptance repro: the workflow merge boundary hard-cancels the in-flight
+  executor session on the in-progress → in-review move, the AI merge lands, the
+  task advances to done — and the aborted graph run's teardown then reached the
+  operator-action sink and logged "operator action required" on a task that
+  finished perfectly. A pause-abort observed in a terminal SUCCESS column must
+  be benign across BOTH terminal columns (done and archived): no alarming log,
+  no failed park, marker cleared, worktree slot released.
+  */
+  describe("terminal-success columns are benign (post-merge hard-cancel false alarm)", () => {
+    it.each([
+      { column: "done" as const },
+      { column: "archived" as const },
+    ])("classifies a hard-cancel pause abort on a '$column' task as benign", async ({ column }) => {
+      const { store, task, executor } = makeHarness({ column });
+      (executor as any).addActiveWorktree(task.id, task.worktree);
+
+      await invokeGraphFailure(executor, task, {
+        interruptedNodeId: "merge",
+        interruptedAbortKind: "engine-pause",
+        visitedNodeIds: ["plan", "execute", "merge"],
+        context: { "node:merge:value": "merged", "node:merge:abortKind": "engine-pause" },
+      });
+
+      // No operator-action alarm and no PAUSE_ABORT_PARK markers in the log.
+      expect(logText(store)).not.toContain("operator action required");
+      expect(logText(store)).not.toContain("Workflow graph failure surfaced");
+      // The benign completion note is logged instead.
+      expect(logText(store)).toContain(`after the task already completed ('${column}') — benign, no action needed`);
+      // Never parked failed.
+      const parkedFailed = store.updateTask.mock.calls.some(
+        (call: unknown[]) => (call[1] as { status?: string } | undefined)?.status === "failed",
+      );
+      expect(parkedFailed).toBe(false);
+      // Marker cleared + worktree slot released so nothing re-fires or leaks.
+      expect((executor as any).pausedAborted.has(task.id)).toBe(false);
+      expect((executor as any).activeWorktrees.has(task.id)).toBe(false);
+    });
   });
 });

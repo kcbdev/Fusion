@@ -177,6 +177,32 @@ describe("settings defaults invariants", () => {
     });
   });
 
+  describe("taskPopupsBoardListOnly default", () => {
+    it("keeps taskPopupsBoardListOnly explicitly false in project defaults", () => {
+      expect(DEFAULT_PROJECT_SETTINGS.taskPopupsBoardListOnly).toBe(false);
+      expect("taskPopupsBoardListOnly" in DEFAULT_PROJECT_SETTINGS).toBe(true);
+      expect(PROJECT_SETTINGS_KEYS).toContain("taskPopupsBoardListOnly");
+    });
+
+    it("keeps taskPopupsBoardListOnly project-scoped only", () => {
+      expect("taskPopupsBoardListOnly" in DEFAULT_GLOBAL_SETTINGS).toBe(false);
+      expect(GLOBAL_SETTINGS_KEYS).not.toContain("taskPopupsBoardListOnly");
+    });
+  });
+
+  describe("showCostBadgeOnCards default", () => {
+    it("keeps showCostBadgeOnCards explicitly false in project defaults", () => {
+      expect(DEFAULT_PROJECT_SETTINGS.showCostBadgeOnCards).toBe(false);
+      expect("showCostBadgeOnCards" in DEFAULT_PROJECT_SETTINGS).toBe(true);
+      expect(PROJECT_SETTINGS_KEYS).toContain("showCostBadgeOnCards");
+    });
+
+    it("keeps showCostBadgeOnCards project-scoped only", () => {
+      expect("showCostBadgeOnCards" in DEFAULT_GLOBAL_SETTINGS).toBe(false);
+      expect(GLOBAL_SETTINGS_KEYS).not.toContain("showCostBadgeOnCards");
+    });
+  });
+
   describe("taskDetailChatFirst default", () => {
     it("keeps taskDetailChatFirst explicitly false in project defaults", () => {
       expect(DEFAULT_PROJECT_SETTINGS.taskDetailChatFirst).toBe(false);

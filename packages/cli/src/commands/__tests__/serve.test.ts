@@ -352,6 +352,8 @@ const mocks = vi.hoisted(() => {
     const pluginLoader = {
       loadPlugin: vi.fn().mockResolvedValue(undefined),
       loadAllPlugins: vi.fn().mockResolvedValue({ loaded: 0, errors: 0 }),
+      getPluginSkills: vi.fn().mockReturnValue([]),
+      stopAllPlugins: vi.fn().mockResolvedValue(undefined),
       stopPlugin: vi.fn().mockResolvedValue(undefined),
       reloadPlugin: vi.fn().mockResolvedValue(undefined),
       getPluginRoutes: vi.fn().mockReturnValue([]),
@@ -381,6 +383,7 @@ const mocks = vi.hoisted(() => {
   };
 
   const refreshAllCustomProviderModels = vi.fn().mockResolvedValue({ refreshed: 0, failed: 0, skipped: 0 });
+  const createSkillsAdapterMock = vi.fn().mockReturnValue(undefined);
 
   const agentSemaphoreCtor = vi.fn().mockImplementation(function () {
     return {
@@ -532,6 +535,7 @@ const mocks = vi.hoisted(() => {
     missionAutopilotInstances,
     missionExecutionLoopInstances,
     notifierInstances,
+    pluginLoaderInstances,
     projectEngineInstances,
     listenCalls,
     taskStoreCtor,
@@ -560,6 +564,7 @@ const mocks = vi.hoisted(() => {
     authStorage,
     modelRegistry,
     refreshAllCustomProviderModels,
+    createSkillsAdapterMock,
     globalSettingsGetSettings,
     reset() {
       taskStores.length = 0;
@@ -623,14 +628,23 @@ vi.mock("@fusion/core", async (importOriginal) => {
 });
 
 vi.mock("@fusion/dashboard", () => ({
+  // FNXC:TestInfrastructure 2026-07-13-10:25: Source files named-import these from @fusion/dashboard barrel; mock must surface them.
+  registerGithubTrackingHook: vi.fn(),
+  // FNXC:CliTests 2026-07-13-08:10: @fusion/dashboard barrel re-exports cli-package-version helpers; mock must surface them for startup model sync.
+isUnresolvedCliPackageVersion: vi.fn(() => false),
+resolveCliPackageVersionInfo: vi.fn(() => ({ version: "0.0.0-test", isUnresolved: false })),
+  getCliPackageVersion: vi.fn(() => "0.0.0"),
+  // FNXC:CliTests 2026-07-13-08:00: getCliPackageVersion added to @fusion/dashboard barrel export; mock must surface it for daemon/serve startup model sync.
   createServer: mocks.createServerMock,
   GitHubClient: vi.fn().mockImplementation(function () {
     return {};
   }),
-  createSkillsAdapter: vi.fn().mockReturnValue(undefined),
+  createSkillsAdapter: mocks.createSkillsAdapterMock,
   getProjectSettingsPath: vi.fn().mockReturnValue("/tmp/project/.fusion/settings.json"),
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
   refreshAllCustomProviderModels: mocks.refreshAllCustomProviderModels,
+  // FNXC:CliTests 2026-07-13-09:40: Missing dashboard barrel exports added for mock completeness (scripts/check-mock-completeness.mjs gate).
+  registerGithubTrackingHook: vi.fn(),
 }));
 
 vi.mock("@fusion/engine", async (importOriginal) => {
@@ -765,6 +779,22 @@ describe("runServe", () => {
     expect(mockSyncStartupModels).toHaveBeenCalledTimes(1);
   });
 
+  // FNXC:DaemonSignalExit 2026-07-10-16:00: `fn serve` must honor the same POSIX
+  // exit-code contract as `fn daemon` — a memory-pressure SIGTERM exits non-zero
+  // (143) so `Restart=on-failure` restarts it; SIGINT exits 130. Guards against
+  // the two headless-server paths regressing independently.
+  it("exits 143 on SIGTERM-initiated shutdown", async () => {
+    await runServe(0, {});
+    await triggerSignal("SIGTERM");
+    expect(process.exit).toHaveBeenCalledWith(143);
+  });
+
+  it("exits 130 on SIGINT-initiated shutdown", async () => {
+    await runServe(0, {});
+    await triggerSignal("SIGINT");
+    expect(process.exit).toHaveBeenCalledWith(130);
+  });
+
   it("registers built-in zai GLM-5.2 before refreshing models", async () => {
     await runServe(0, {});
 
@@ -891,6 +921,32 @@ describe("runServe", () => {
     expect(mocks.stuckDetectorInstances[0].start).toHaveBeenCalledTimes(1);
     expect(mocks.selfHealingInstances[0].start).toHaveBeenCalledTimes(1);
     expect(mocks.executorInstances[0].resumeOrphaned).toHaveBeenCalledTimes(1);
+
+    await triggerSignal("SIGINT");
+  });
+
+  /*
+   * FNXC:PluginSkillsPostgres 2026-07-14-17:47:
+   * `fn serve` skill discovery is metadata-only. Its request-scoped loader must not persist synthetic plugin starts, stops, or errors.
+   */
+  it("keeps request-scoped plugin skill discovery read-only", async () => {
+    await runServe(0, {});
+    const adapterOptions = mocks.createSkillsAdapterMock.mock.calls.at(-1)?.[0] as {
+      getPluginSkills?: (rootDir: string, resolvedProjectStore: (typeof mocks.taskStores)[number]) => Promise<unknown[]>;
+    };
+    const resolvedProjectStore = mocks.taskStores[0];
+    resolvedProjectStore.getPluginStore().listPlugins.mockResolvedValue([
+      { id: "enabled-plugin", updatedAt: "2026-07-14T00:00:00.000Z" },
+    ]);
+    mocks.pluginLoaderCtor.mockClear();
+
+    await expect(adapterOptions.getPluginSkills?.("/repo-secondary", resolvedProjectStore)).resolves.toEqual([]);
+    expect(mocks.pluginLoaderCtor).toHaveBeenCalledWith({
+      pluginStore: resolvedProjectStore.getPluginStore(),
+      taskStore: resolvedProjectStore,
+      persistRuntimeState: false,
+    });
+    expect(mocks.pluginLoaderInstances.at(-1)?.stopAllPlugins).toHaveBeenCalledOnce();
 
     await triggerSignal("SIGINT");
   });

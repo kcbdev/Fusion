@@ -99,6 +99,7 @@ describe("HeartbeatTriggerScheduler", () => {
       runtimeConfig: patch.runtimeConfig,
       lastHeartbeatAt: patch.lastHeartbeatAt,
       taskId: patch.taskId,
+      lastError: patch.lastError,
     }) as Agent;
 
     function createLifecycleStore(initialAgents: Agent[] = []): LifecycleStore {
@@ -161,6 +162,50 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(callback).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       expect(callback).toHaveBeenCalledWith(explicitAgent.id, "timer", expect.objectContaining({ intervalMs: 15_000 }));
+    });
+
+    it("keeps recoverable error agents timer-eligible and dispatches their next tick", async () => {
+      const recoverable = baseAgent("agent-recoverable", {
+        state: "error",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 1_000 },
+        lastError: "socket hang up",
+      });
+      const exhausted = baseAgent("agent-exhausted", {
+        state: "error",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 1_000 },
+        lastError: "socket hang up",
+        metadata: { heartbeatErrorRecovery: { consecutiveAttempts: 5 } },
+      });
+      const disabled = baseAgent("agent-disabled-error", {
+        state: "error",
+        runtimeConfig: { enabled: false, heartbeatIntervalMs: 1_000 },
+      });
+      const ephemeral = baseAgent("agent-ephemeral-error", {
+        state: "error",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 1_000 },
+        metadata: { agentKind: "task-worker" },
+      });
+      const operatorActionable = baseAgent("agent-operator-error", {
+        state: "error",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 1_000 },
+        lastError: "invalid api key",
+      });
+      const eventStore = createLifecycleStore([recoverable, exhausted, disabled, ephemeral, operatorActionable]);
+      scheduler = new HeartbeatTriggerScheduler(eventStore as unknown as AgentStore, callback);
+      scheduler.start();
+
+      for (const agent of [recoverable, exhausted, disabled, ephemeral, operatorActionable]) {
+        eventStore.emit("agent:created", agent);
+      }
+
+      expect(scheduler.getRegisteredAgents()).toContain(recoverable.id);
+      expect(scheduler.getRegisteredAgents()).not.toContain(exhausted.id);
+      expect(scheduler.getRegisteredAgents()).not.toContain(disabled.id);
+      expect(scheduler.getRegisteredAgents()).not.toContain(ephemeral.id);
+      expect(scheduler.getRegisteredAgents()).not.toContain(operatorActionable.id);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(callback).toHaveBeenCalledWith(recoverable.id, "timer", expect.objectContaining({ intervalMs: 1_000 }));
     });
 
     it("keeps unrelated updates stable, re-arms interval changes, and clears paused timers", async () => {
@@ -324,6 +369,36 @@ describe("HeartbeatTriggerScheduler", () => {
       await vi.advanceTimersByTimeAsync(60_000);
 
       expect(scheduler.getRegisteredAgents()).toContain("agent-001");
+    });
+
+    it("re-arms a recoverable error agent when timer entry is missing and no lifecycle event fires", async () => {
+      vi.useFakeTimers();
+      const agent = {
+        id: "agent-error-audit",
+        name: "Agent Error Audit",
+        role: "executor",
+        state: "error",
+        lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+        runtimeConfig: { enabled: true, heartbeatIntervalMs: 30_000 },
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        lastError: "socket hang up",
+        metadata: { heartbeatErrorRecovery: { consecutiveAttempts: 1 } },
+      } as Agent;
+      vi.mocked(store.listAgents).mockResolvedValue([agent]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+      scheduler = new HeartbeatTriggerScheduler(store, callback);
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(scheduler.getRegisteredAgents()).toContain(agent.id);
+      scheduler.unregisterAgent(agent.id);
+      expect(scheduler.getRegisteredAgents()).not.toContain(agent.id);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(scheduler.getRegisteredAgents()).toContain(agent.id);
     });
 
     it("marks repaired agent metadata as stale when last heartbeat exceeds the default 2x threshold", async () => {
@@ -758,6 +833,215 @@ describe("HeartbeatTriggerScheduler", () => {
         expect(callback).not.toHaveBeenCalled();
         expect(scheduler.getRegisteredAgents()).not.toContain("agent-long");
         expect(heartbeatLog.log).toHaveBeenCalledWith("Timer audit skipped re-arm for agent-long (active run)");
+      });
+    });
+
+    describe("FN-7939: heartbeat audit driver supervision and bounded re-arm churn", () => {
+      /**
+       * FNXC:AgentHeartbeat 2026-07-13-00:00:
+       * FN-7939 proves the FN-7645/FN-7718 repair layer is not allowed to depend on a single unsupervised audit setInterval. The reported CEO outage kept a timer entry present for ~62,348s, so tests kill the audit driver itself and require the scheduler to self-rearm within a bounded watchdog window instead of waiting for an external stop/start.
+       */
+      function buildAgent(overrides: Partial<Agent> & { id: string; heartbeatIntervalMs: number }): Agent {
+        const { heartbeatIntervalMs, ...rest } = overrides;
+        return {
+          name: rest.id,
+          role: "executor",
+          state: "active",
+          lastHeartbeatAt: "2026-01-01T00:00:00.000Z",
+          runtimeConfig: { enabled: true, heartbeatIntervalMs },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          metadata: {},
+          ...rest,
+        } as Agent;
+      }
+
+      it("self-rearms a stalled audit interval and dispatches a stale present short-interval timer within the bounded watchdog window", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agents: Record<string, Agent> = {
+          "agent-short-stalled-audit": buildAgent({ id: "agent-short-stalled-audit", heartbeatIntervalMs: 300_000 }),
+        };
+        vi.mocked(store.listAgents).mockImplementation(async () => Object.values(agents));
+        vi.mocked(store.getAgent).mockImplementation(async (agentId: string) => agents[agentId] ?? null);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+        vi.mocked(store.updateAgent).mockImplementation(async (agentId: string, updates: Partial<Agent>) => {
+          agents[agentId] = { ...agents[agentId], ...updates } as Agent;
+          return agents[agentId];
+        });
+        callback.mockImplementation(async (agentId: string) => {
+          agents[agentId] = { ...agents[agentId], lastHeartbeatAt: new Date().toISOString() };
+        });
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+
+        const internals = scheduler as unknown as {
+          timerAuditIntervalHandle: ReturnType<typeof setInterval> | null;
+          timers: Map<string, { handle: unknown; kind: string }>;
+        };
+        expect(internals.timerAuditIntervalHandle).not.toBeNull();
+        clearInterval(internals.timerAuditIntervalHandle!);
+        clearInterval(internals.timers.get("agent-short-stalled-audit")!.handle as ReturnType<typeof setInterval>);
+        callback.mockClear();
+        vi.mocked(heartbeatLog.warn).mockClear();
+
+        await vi.advanceTimersByTimeAsync(62_348_000);
+
+        expect(callback).toHaveBeenCalledWith("agent-short-stalled-audit", "timer", expect.anything());
+        expect(agents["agent-short-stalled-audit"].lastHeartbeatAt).not.toBe("2026-01-01T00:00:00.000Z");
+        expect(heartbeatLog.warn).toHaveBeenCalledWith(expect.stringContaining("reason=heartbeat-audit-watchdog-rearmed"));
+        expect(heartbeatLog.warn).toHaveBeenCalledWith(expect.stringContaining("zombie-timer-rearmed"));
+        expect(heartbeatLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("reason=heartbeat-rearm-nonadvancing-escalated"));
+      });
+
+      it("self-rearms a stalled audit interval for the long 3_600_000ms interval bucket without double-auditing while healthy", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agents: Record<string, Agent> = {
+          "agent-long-stalled-audit": buildAgent({ id: "agent-long-stalled-audit", heartbeatIntervalMs: 3_600_000 }),
+        };
+        vi.mocked(store.listAgents).mockImplementation(async () => Object.values(agents));
+        vi.mocked(store.getAgent).mockImplementation(async (agentId: string) => agents[agentId] ?? null);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+        callback.mockImplementation(async (agentId: string) => {
+          agents[agentId] = { ...agents[agentId], lastHeartbeatAt: new Date().toISOString() };
+        });
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+
+        const internals = scheduler as unknown as {
+          timerAuditIntervalHandle: ReturnType<typeof setInterval> | null;
+          timers: Map<string, { handle: unknown; kind: string }>;
+        };
+        clearInterval(internals.timerAuditIntervalHandle!);
+        clearInterval(internals.timers.get("agent-long-stalled-audit")!.handle as ReturnType<typeof setInterval>);
+        callback.mockClear();
+
+        await vi.advanceTimersByTimeAsync(62_348_000);
+
+        expect(callback).toHaveBeenCalledWith("agent-long-stalled-audit", "timer", expect.anything());
+        const longTicks = callback.mock.calls.filter((call) => call[0] === "agent-long-stalled-audit").length;
+        expect(longTicks).toBeGreaterThanOrEqual(1);
+        expect(longTicks).toBeLessThanOrEqual(18);
+      });
+
+      it("does not resurrect a stopped scheduler after the audit watchdog cadence passes", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agent = buildAgent({ id: "agent-stopped-scheduler", heartbeatIntervalMs: 300_000 });
+        vi.mocked(store.listAgents).mockResolvedValue([agent]);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+        scheduler.stop();
+        const internals = scheduler as unknown as {
+          timerAuditIntervalHandle: ReturnType<typeof setInterval> | null;
+          timerAuditWatchdogHandle: ReturnType<typeof setInterval> | null;
+        };
+        expect(internals.timerAuditIntervalHandle).toBeNull();
+        expect(internals.timerAuditWatchdogHandle).toBeNull();
+
+        await vi.advanceTimersByTimeAsync(62_348_000);
+
+        expect(scheduler.isActive()).toBe(false);
+        expect(callback).not.toHaveBeenCalled();
+      });
+
+      it("does not watchdog-rearm or double-audit while the normal audit interval keeps firing", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agent = buildAgent({ id: "agent-healthy-auditor", heartbeatIntervalMs: 300_000 });
+        vi.mocked(store.listAgents).mockResolvedValue([agent]);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+        vi.mocked(heartbeatLog.warn).mockClear();
+
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+        expect(heartbeatLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("reason=heartbeat-audit-watchdog-rearmed"));
+      });
+
+      it("does not escalate repeated zombie re-arms while globalPause intentionally suppresses timer dispatch", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agents: Record<string, Agent> = {
+          "agent-global-pause": buildAgent({ id: "agent-global-pause", heartbeatIntervalMs: 120_000 }),
+        };
+        vi.mocked(store.listAgents).mockImplementation(async () => Object.values(agents));
+        vi.mocked(store.getAgent).mockImplementation(async (agentId: string) => agents[agentId] ?? null);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+        const taskStore = {
+          getSettings: vi.fn().mockResolvedValue({ globalPause: true, enginePaused: false }),
+        } as unknown as TaskStore;
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback, taskStore);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+
+        const timers = (scheduler as unknown as { timers: Map<string, { handle: unknown; kind: string }> }).timers;
+        clearInterval(timers.get("agent-global-pause")!.handle as ReturnType<typeof setInterval>);
+        callback.mockClear();
+        vi.mocked(heartbeatLog.warn).mockClear();
+
+        await vi.advanceTimersByTimeAsync(12 * 60_000);
+
+        expect(callback).not.toHaveBeenCalled();
+        expect(heartbeatLog.warn).toHaveBeenCalledWith(expect.stringContaining("zombie-timer-rearmed"));
+        expect(heartbeatLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("reason=heartbeat-rearm-nonadvancing-escalated"));
+      });
+
+      it("escalates repeated zombie re-arms when skipHeartbeatWhenIdle prevents lastHeartbeatAt from advancing", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+        const agents: Record<string, Agent> = {
+          "agent-churn": buildAgent({
+            id: "agent-churn",
+            heartbeatIntervalMs: 120_000,
+            runtimeConfig: { enabled: true, heartbeatIntervalMs: 120_000, skipHeartbeatWhenIdle: true },
+          }),
+        };
+        vi.mocked(store.listAgents).mockImplementation(async () => Object.values(agents));
+        vi.mocked(store.getAgent).mockImplementation(async (agentId: string) => agents[agentId] ?? null);
+        vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+        vi.mocked(store.updateAgent).mockImplementation(async (agentId: string, updates: Partial<Agent>) => {
+          agents[agentId] = { ...agents[agentId], ...updates } as Agent;
+          return agents[agentId];
+        });
+
+        scheduler = new HeartbeatTriggerScheduler(store, callback);
+        scheduler.start();
+        await vi.advanceTimersByTimeAsync(0);
+
+        const timers = (scheduler as unknown as { timers: Map<string, { handle: unknown; kind: string }> }).timers;
+        clearInterval(timers.get("agent-churn")!.handle as ReturnType<typeof setInterval>);
+        callback.mockClear();
+        vi.mocked(heartbeatLog.warn).mockClear();
+
+        await vi.advanceTimersByTimeAsync(12 * 60_000);
+
+        expect(callback).not.toHaveBeenCalled();
+        expect(heartbeatLog.warn).toHaveBeenCalledWith(expect.stringContaining("reason=heartbeat-rearm-nonadvancing-escalated agentId=agent-churn"));
+        expect((agents["agent-churn"].metadata as Record<string, any>).heartbeatTimerRepair).toEqual(
+          expect.objectContaining({
+            staleAtRepair: true,
+            staleRepairReason: expect.stringContaining("heartbeat-rearm-nonadvancing-escalated"),
+          }),
+        );
       });
     });
 
@@ -1935,11 +2219,11 @@ describe("HeartbeatTriggerScheduler", () => {
       expect(callback).not.toHaveBeenCalled();
     });
 
-    it("timer is unregistered when agent becomes error state (should clear timer)", async () => {
+    it("timer remains registered when agent becomes recoverable error state", async () => {
       scheduler.registerAgent("agent-001", { heartbeatIntervalMs: 5000 });
       expect(scheduler.getRegisteredAgents()).toContain("agent-001");
 
-      // Update to error state
+      // Update to a recoverable durable error state.
       (eventStore.getAgent as ReturnType<typeof vi.fn>).mockImplementation((agentId: string) => ({
         id: agentId,
         name: `Agent ${agentId}`,
@@ -1947,15 +2231,15 @@ describe("HeartbeatTriggerScheduler", () => {
         state: "error" as const,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
+        lastError: "socket hang up",
         metadata: {},
       }));
-      eventStore.emit("agent:updated", { id: "agent-001", state: "error", metadata: {} } as import("@fusion/core").Agent);
+      eventStore.emit("agent:updated", { id: "agent-001", state: "error", lastError: "socket hang up", metadata: {} } as import("@fusion/core").Agent);
 
-      // Timer should be cleared for error agents
-      expect(scheduler.getRegisteredAgents()).not.toContain("agent-001");
+      expect(scheduler.getRegisteredAgents()).toContain("agent-001");
 
-      await vi.advanceTimersByTimeAsync(10000);
-      expect(callback).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(callback).toHaveBeenCalledWith("agent-001", "timer", expect.objectContaining({ intervalMs: 5000 }));
     });
 
     it("timer is unregistered when agent becomes paused state (should clear timer)", async () => {

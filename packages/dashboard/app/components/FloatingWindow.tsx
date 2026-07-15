@@ -55,6 +55,8 @@ export interface FloatingWindowProps {
   closeOnOutsidePointerDown?: boolean;
   /** Layer band for z-index claiming. Task details stay with the board/task-detail surface; utilities use the global floating stack. */
   layer?: "utility" | "task-detail";
+  // FNXC:FloatingWindow 2026-07-11-11:30: accessible name for the dialog overlay so headerless windows (e.g. artifact viewers with their own header chrome) stay queryable/announcable by label.
+  ariaLabel?: string;
 }
 
 const DEFAULT_WIDTH = 720;
@@ -71,6 +73,23 @@ Z-index now comes from the SHARED `floatingWindowStack` module (`nextFloatingZ`/
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 const RESIZE_DIRECTIONS: ResizeDirection[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 export const FLOATING_WINDOW_GEOMETRY_CHANGE_EVENT = "fusion:floating-window-geometry-change";
+
+const FLOATING_WINDOW_OUTSIDE_POINTER_SAFE_SURFACE_SELECTOR = [
+  ".floating-window",
+  ".modal-overlay",
+  "[role=\"dialog\"]",
+  ".model-combobox-dropdown--portal",
+  ".model-nested-menu--portal",
+  ".dep-dropdown--portal",
+  ".node-picker-dropdown--portal",
+  ".agent-picker-dropdown--portal",
+  ".priority-picker-dropdown--portal",
+].join(", ");
+
+/*
+FNXC:FloatingWindow 2026-07-13-08:01:
+FN-7943: Quick Chat's outside-pointer dismissal must treat body-portaled dropdowns as logical children of the FloatingWindow. Keep this selector in sync with the sibling FN-7916 ChatThinkingLevelControl and FN-2860 QuickEntryBox portal guards so model, thinking-level, agent, dependency, node, and priority selections do not dismiss the host chat window while bare-page clicks still close it.
+*/
 
 /** Hash a windowKey into a small bounded cascade index so stacked default windows do not perfectly overlap. */
 function cascadeIndexFor(windowKey: string): number {
@@ -158,6 +177,7 @@ export function FloatingWindow({
   persistGeometryKey,
   closeOnOutsidePointerDown = false,
   layer = "utility",
+  ariaLabel,
 }: FloatingWindowProps) {
   const resolvedMinSize: FloatingWindowSize = minSize ?? { width: DEFAULT_MIN_WIDTH, height: DEFAULT_MIN_HEIGHT };
   const initialGeometry = useRef<{ size: FloatingWindowSize; position: FloatingWindowPosition } | null>(null);
@@ -365,7 +385,7 @@ export function FloatingWindow({
       if (panel?.contains(target)) return;
 
       const targetElement = target instanceof Element ? target : target.parentNode instanceof Element ? target.parentNode : null;
-      if (targetElement?.closest(".floating-window, .modal-overlay, [role=\"dialog\"]")) return;
+      if (targetElement?.closest(FLOATING_WINDOW_OUTSIDE_POINTER_SAFE_SURFACE_SELECTOR)) return;
 
       onClose();
     };
@@ -411,6 +431,7 @@ export function FloatingWindow({
       className="floating-window-overlay"
       role="dialog"
       aria-modal="false"
+      aria-label={ariaLabel}
       data-testid={`floating-window-overlay-${windowKey}`}
       // FNXC:FloatingWindow 2026-06-22-23:00: The z-index MUST live on the position:fixed overlay (which creates a stacking context), not the panel. A panel z-index is trapped inside the overlay's context and loses to page elements that are stacking contexts in body's context (e.g. the right dock at position:absolute z-index:20). With z on the overlay, the whole window sits at the shared floating band in body's stacking context and reliably paints above page content + tap-to-front reorders correctly.
       style={{ zIndex }}

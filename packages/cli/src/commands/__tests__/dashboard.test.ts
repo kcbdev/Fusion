@@ -41,6 +41,47 @@ const { mockSuperviseSpawn } = vi.hoisted(() => ({
     waitExit: vi.fn().mockResolvedValue({ code: 0, signal: null }),
   })),
 }));
+
+const { mockCreateSkillsAdapter } = vi.hoisted(() => ({
+  mockCreateSkillsAdapter: vi.fn().mockReturnValue(undefined),
+}));
+
+/*
+FNXC:SystemPanel 2026-07-12-14:35:
+Fake attached child for runDashboardSupervised: the supervisor now uses a
+plain node:child_process spawn (foreground, TUI-safe) instead of the detached
+superviseSpawn, so tests mock spawn and complete the loop by emitting a clean
+SIGINT close on a microtask (after the supervisor wires its close listener).
+*/
+/*
+FNXC:SystemPanel 2026-07-12-15:10:
+supervisorCloseQueue lets a test script successive child exits (e.g. exit-86
+intentional restart followed by a clean exit-0) so the respawn loop can be
+driven deterministically. Each spawn pops one queued close result; when the
+queue is empty it defaults to a clean `{ code: 0, signal: null }` exit so the
+existing single-spawn supervision tests still terminate the loop.
+*/
+const { mockSupervisorSpawn, supervisorCloseQueue } = vi.hoisted(() => {
+  const supervisorCloseQueue: Array<{ code: number | null; signal: NodeJS.Signals | null }> = [];
+  return {
+    supervisorCloseQueue,
+    mockSupervisorSpawn: vi.fn(() => {
+      const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+      const child = {
+        on(event: string, cb: (...args: unknown[]) => void) {
+          (listeners[event] ??= []).push(cb);
+          return child;
+        },
+        kill: () => true,
+      };
+      const result = supervisorCloseQueue.shift() ?? { code: 0, signal: null };
+      queueMicrotask(() => {
+        for (const cb of listeners["close"] ?? []) cb(result.code, result.signal);
+      });
+      return child;
+    }),
+  };
+});
 vi.mock("../startup-model-sync.js", () => ({
   syncStartupModels: mockSyncStartupModels,
 }));
@@ -143,6 +184,7 @@ function makeMockStore() {
     updateTask: vi.fn().mockResolvedValue({}),
     getRootDir: vi.fn().mockReturnValue("/tmp/test"),
     getFusionDir: vi.fn().mockReturnValue("/tmp/test/.fusion"),
+    getAsyncLayer: vi.fn().mockReturnValue(null),
     getGlobalSettingsStore: vi.fn(() => ({
       getSettings: mockGlobalSettingsGetSettings,
       updateSettings: mockGlobalSettingsUpdateSettings,
@@ -227,6 +269,8 @@ vi.mock("@fusion/core", async (importOriginal) => {
     return {
       loadPlugin: vi.fn().mockResolvedValue(undefined),
       loadAllPlugins: vi.fn().mockResolvedValue({ loaded: 0, errors: 0 }),
+      getPluginSkills: vi.fn().mockReturnValue([]),
+      stopAllPlugins: vi.fn().mockResolvedValue(undefined),
       stopPlugin: vi.fn().mockResolvedValue(undefined),
       reloadPlugin: vi.fn().mockResolvedValue(undefined),
       getPluginRoutes: vi.fn().mockReturnValue([]),
@@ -332,6 +376,7 @@ vi.mock("node:child_process", async (importOriginal) => {
     execSync: mockExecSync,
     execFile: mockExecFile,
     execFileSync: mockExecFileSync,
+    spawn: mockSupervisorSpawn,
   };
 });
 
@@ -358,6 +403,15 @@ const mockListen = vi.fn((port: number) => {
 });
 
 vi.mock("@fusion/dashboard", () => ({
+  // FNXC:TestInfrastructure 2026-07-13-10:25: Source files named-import these from @fusion/dashboard barrel; mock must surface them.
+  registerGithubTrackingHook: vi.fn(),
+  AttachTicketStore: vi.fn(),
+  CliInputAttributionLog: vi.fn(),
+  CliConfirmAdvanceRegistry: vi.fn(),
+  CliRelaunchRegistry: vi.fn(),
+  // FNXC:CliTests 2026-07-13-08:10: @fusion/dashboard barrel re-exports cli-package-version helpers; mock must surface them for startup model sync.
+isUnresolvedCliPackageVersion: vi.fn(() => false),
+resolveCliPackageVersionInfo: vi.fn(() => ({ version: "0.0.0-test", isUnresolved: false })),
   createServer: vi.fn((_store: unknown, opts: Record<string, any> = {}) => {
     if (!opts.onMerge) {
       if (opts.engine) {
@@ -378,12 +432,18 @@ vi.mock("@fusion/dashboard", () => ({
     getPrMergeStatus: mockGetPrMergeStatus,
     mergePr: mockMergePr,
   })),
-  createSkillsAdapter: vi.fn().mockReturnValue(undefined),
+  createSkillsAdapter: mockCreateSkillsAdapter,
   getCliPackageVersion: mockGetCliPackageVersion,
   getProjectSettingsPath: vi.fn().mockReturnValue("/tmp/project/.fusion/settings.json"),
   loadTlsCredentialsFromEnv: vi.fn().mockReturnValue(undefined),
   refreshAllCustomProviderModels: mockRefreshAllCustomProviderModels,
   stopAllDevServers: vi.fn().mockResolvedValue(undefined),
+  // FNXC:CliTests 2026-07-13-09:40: Missing dashboard barrel exports added for mock completeness (scripts/check-mock-completeness.mjs gate).
+  AttachTicketStore: vi.fn(),
+  CliInputAttributionLog: vi.fn(),
+  CliConfirmAdvanceRegistry: vi.fn(),
+  CliRelaunchRegistry: vi.fn(),
+  registerGithubTrackingHook: vi.fn(),
 }));
 
 // ── Mock node:readline ──────────────────────────────────────────────
@@ -861,6 +921,54 @@ async function runDashboard(...args: Parameters<typeof runDashboardImpl>): Retur
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
+
+describe("runDashboard — project-scoped plugin skills", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reuses a backend-aware project store instead of constructing a SQLite PluginStore", async () => {
+    vi.stubEnv("FUSION_NO_EMBEDDED_PG", "1");
+    try {
+      const dashboard = await runDashboard(0, { open: false });
+
+      const adapterOptions = mockCreateSkillsAdapter.mock.calls.at(-1)?.[0] as
+        | { getPluginSkills?: (rootDir: string, resolvedProjectStore?: ReturnType<typeof makeMockStore>) => Promise<unknown[]> }
+        | undefined;
+      expect(adapterOptions?.getPluginSkills).toBeTypeOf("function");
+
+      const { PluginLoader, PluginStore, TaskStore } = await import("@fusion/core");
+      const scopedStore = makeMockStore();
+      vi.mocked(scopedStore.getPluginStore().listPlugins).mockResolvedValue([
+        { id: "enabled-plugin", updatedAt: "2026-07-14T00:00:00.000Z" },
+      ]);
+      const taskStoreConstructor = vi.mocked(TaskStore);
+      taskStoreConstructor.mockClear();
+      const pluginStoreConstructor = vi.mocked(PluginStore);
+      pluginStoreConstructor.mockClear();
+      const pluginLoaderConstructor = vi.mocked(PluginLoader);
+      pluginLoaderConstructor.mockClear();
+
+      await expect(adapterOptions!.getPluginSkills!("/tmp/other-project", scopedStore)).resolves.toEqual([]);
+      expect(pluginStoreConstructor).not.toHaveBeenCalled();
+      expect(taskStoreConstructor).not.toHaveBeenCalled();
+      expect(pluginLoaderConstructor).toHaveBeenCalledWith({
+        pluginStore: scopedStore.getPluginStore(),
+        taskStore: scopedStore,
+        persistRuntimeState: false,
+      });
+      const scopedPluginLoader = pluginLoaderConstructor.mock.results.at(-1)?.value as {
+        stopAllPlugins: ReturnType<typeof vi.fn>;
+      };
+      expect(scopedPluginLoader.stopAllPlugins).toHaveBeenCalledWith();
+
+      dashboard.dispose();
+      expect(scopedStore.close).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("runDashboard — startup model sync", () => {
   beforeEach(() => {
@@ -3506,10 +3614,36 @@ describe("runDashboard update check wiring", () => {
 
 describe("runDashboardSupervised — bounded restart behavior", () => {
   beforeEach(() => {
-    mockSuperviseSpawn.mockClear();
+    mockSupervisorSpawn.mockClear();
+    supervisorCloseQueue.length = 0;
   });
 
-  it("spawns the dashboard without inheriting the supervisor flag or a lifetime cap", async () => {
+  it("respawns on the intentional restart exit code (86) then exits cleanly", async () => {
+    const mod = await import("../dashboard.js");
+    const originalArgv = process.argv;
+    process.argv = [
+      originalArgv[0] ?? process.execPath,
+      "/tmp/fn-entry.mjs",
+      "dashboard",
+      "--supervise",
+    ];
+
+    // First child exits 86 (System-panel restart request → respawn without
+    // consuming the crash budget); the respawned child exits 0 (clean stop).
+    supervisorCloseQueue.push({ code: 86, signal: null }, { code: 0, signal: null });
+
+    try {
+      await mod.runDashboardSupervised(0);
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    // Two spawns proves the exit-86 respawn happened and the loop then returned
+    // cleanly (no crash-budget exhaustion / process.exit).
+    expect(mockSupervisorSpawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("spawns an attached child without the supervision flags and advertises the restart contract", async () => {
     const mod = await import("../dashboard.js");
     const originalArgv = process.argv;
     process.argv = [
@@ -3529,14 +3663,18 @@ describe("runDashboardSupervised — bounded restart behavior", () => {
       process.argv = originalArgv;
     }
 
-    expect(mockSuperviseSpawn).toHaveBeenCalledWith(
+    expect(mockSupervisorSpawn).toHaveBeenCalledWith(
       process.execPath,
-      ["/tmp/fn-entry.mjs", "dashboard", "--host", "127.0.0.1", "--port", "4040"],
+      [...process.execArgv, "/tmp/fn-entry.mjs", "dashboard", "--host", "127.0.0.1", "--port", "4040"],
       expect.objectContaining({
         stdio: "inherit",
-        maxLifetimeMs: Number.POSITIVE_INFINITY,
+        env: expect.objectContaining({ FUSION_RESTART_SUPERVISED: "1" }),
       }),
     );
+    // Attached child (TUI-safe): the supervisor must NOT detach it into a
+    // background process group.
+    const spawnOptions = mockSupervisorSpawn.mock.calls[0]![2] as Record<string, unknown>;
+    expect(spawnOptions.detached).toBeUndefined();
   });
 
   it("preserves global flags before the dashboard subcommand without duplicating dashboard", async () => {
@@ -3550,7 +3688,7 @@ describe("runDashboardSupervised — bounded restart behavior", () => {
       "dashboard",
       "--port",
       "4040",
-      "--supervise",
+      "--no-supervise",
     ];
 
     try {
@@ -3559,12 +3697,12 @@ describe("runDashboardSupervised — bounded restart behavior", () => {
       process.argv = originalArgv;
     }
 
-    expect(mockSuperviseSpawn).toHaveBeenCalledWith(
+    expect(mockSupervisorSpawn).toHaveBeenCalledWith(
       process.execPath,
-      ["/tmp/fn-entry.mjs", "--project", "atlas-notes", "dashboard", "--port", "4040"],
+      [...process.execArgv, "/tmp/fn-entry.mjs", "--project", "atlas-notes", "dashboard", "--port", "4040"],
       expect.objectContaining({
         stdio: "inherit",
-        maxLifetimeMs: Number.POSITIVE_INFINITY,
+        env: expect.objectContaining({ FUSION_RESTART_SUPERVISED: "1" }),
       }),
     );
   });

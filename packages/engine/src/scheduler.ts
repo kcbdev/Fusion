@@ -37,6 +37,7 @@ import { UnlinkedMissionsAdvisoryReporter } from "./unlinked-missions-advisory-r
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { isWorkflowColumnsEnabled, DEFAULT_WORKFLOW_POOL_ID, resolveWorkflowIrForTask } from "@fusion/core";
 import { runHoldReleaseSweep, isUnplannedForExecution, type SlotReservation } from "./hold-release.js";
+import { moveTaskToReplanColumn } from "./replan-target.js";
 import { evaluateParkedAgentTaskLink } from "./task-agent-sync.js";
 
 function shouldRunWorkflowColumnScheduler(_settings: Settings): boolean {
@@ -713,7 +714,7 @@ export class Scheduler {
               if (!mentionsCompletedTask && !currentlyBlockedByCompletedTask) continue;
 
               const markerAcceptedByTaskId = settings.mergeRequestContractShadowEnabled === true
-                ? new Map(dependent.dependencies.map((depId) => [depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null]))
+                ? new Map(await Promise.all(dependent.dependencies.map(async (depId) => [depId, (await this.store.getCompletionHandoffAcceptedMarker(depId)) !== null] as const)))
                 : undefined;
               const unresolvedDeps = getUnmetSchedulingDependencies(
                 dependent,
@@ -766,10 +767,12 @@ export class Scheduler {
         }
       } else if (to === "in-review" || to === "done" || to === "archived") {
         this.recentEngineTodoRequeues.delete(task.id);
-        if (task.dispatchStormCount != null || task.lastDispatchAt != null) {
+        if (task.dispatchStormCount != null || task.lastDispatchAt != null || task.executeRequeueLoopCount != null || task.executeRequeueLoopSignature != null) {
           void this.store.updateTask(task.id, {
             dispatchStormCount: null,
             lastDispatchAt: null,
+            executeRequeueLoopCount: null,
+            executeRequeueLoopSignature: null,
           }).catch((error) => {
             schedulerLog.warn(`Failed to reset dispatch oscillation state for ${task.id} on move to ${to}: ${error instanceof Error ? error.message : String(error)}`);
           });
@@ -812,10 +815,12 @@ export class Scheduler {
       } else if (this.pausedTaskIds.has(task.id)) {
         // Task was paused, now unpaused — trigger scheduling
         this.pausedTaskIds.delete(task.id);
-        if (task.userPaused === false && (task.dispatchStormCount != null || task.lastDispatchAt != null)) {
+        if (task.userPaused === false && (task.dispatchStormCount != null || task.lastDispatchAt != null || task.executeRequeueLoopCount != null || task.executeRequeueLoopSignature != null)) {
           void this.store.updateTask(task.id, {
             dispatchStormCount: null,
             lastDispatchAt: null,
+            executeRequeueLoopCount: null,
+            executeRequeueLoopSignature: null,
           }).catch((error) => {
             schedulerLog.warn(`Failed to reset dispatch oscillation state for ${task.id} on unpause: ${error instanceof Error ? error.message : String(error)}`);
           });
@@ -872,7 +877,7 @@ export class Scheduler {
             if (!mentionsDeletedTask && !currentlyBlockedByDeletedTask) continue;
 
             const markerAcceptedByTaskId = settings.mergeRequestContractShadowEnabled === true
-              ? new Map(dependent.dependencies.map((depId) => [depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null]))
+              ? new Map(await Promise.all(dependent.dependencies.map(async (depId) => [depId, (await this.store.getCompletionHandoffAcceptedMarker(depId)) !== null] as const)))
               : undefined;
             const unresolvedDeps = getUnmetSchedulingDependencies(
               dependent,
@@ -1477,7 +1482,7 @@ export class Scheduler {
       if (mergeShadowEnabled) {
         const dependencyIds = new Set(tasks.flatMap((candidate) => candidate.dependencies));
         for (const depId of dependencyIds) {
-          markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+          markerAcceptedByTaskId.set(depId, (await this.store.getCompletionHandoffAcceptedMarker(depId)) !== null);
         }
       }
       const schedulingDependencyOptions = mergeShadowEnabled
@@ -1541,12 +1546,23 @@ export class Scheduler {
         // also keep their worktree, but after the stuck-kill budget is exhausted they
         // will never merge, so superseding re-implementation tasks (for example FN-4177
         // replaced by FN-4198) must not stay queued behind them. (FN-4200)
+        // FNXC:PostgresCutover 2026-06-27-09:30:
+        // Pre-compute handoff markers before the .filter() because
+        // getCompletionHandoffAcceptedMarker is async and cannot be awaited
+        // inside a synchronous filter callback. Without this, the Promise
+        // object is always !== null, making handoffAccepted incorrectly true.
+        const handoffMarkerMap = new Map<string, boolean>();
+        if (settings.mergeRequestContractShadowEnabled === true) {
+          for (const t of tasks) {
+            if (t.column === "in-review") {
+              handoffMarkerMap.set(t.id, (await this.store.getCompletionHandoffAcceptedMarker(t.id)) !== null);
+            }
+          }
+        }
         const inReviewWithWorktree = tasks.filter(
           (t) => t.column === "in-review" && shouldHoldActiveFileScopeLease(t, tasks, {
             mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
-            handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-              ? this.store.getCompletionHandoffAcceptedMarker(t.id) !== null
-              : false,
+            handoffAccepted: handoffMarkerMap.get(t.id) ?? false,
             schedulingDependencyOptions,
           }),
         );
@@ -1556,14 +1572,14 @@ export class Scheduler {
           if (filteredScope.length === 0) continue;
 
           const handoffAccepted = settings.mergeRequestContractShadowEnabled === true
-            ? this.store.getCompletionHandoffAcceptedMarker(t.id) !== null
+            ? (await this.store.getCompletionHandoffAcceptedMarker(t.id)) !== null
             : false;
           if (!handoffAccepted) {
             setActiveScopeLease(t.id, filteredScope, "in-review");
           }
 
           if (settings.mergeRequestContractShadowEnabled === true) {
-            const mergeRequestRecord = this.store.getMergeRequestRecord(t.id);
+            const mergeRequestRecord = await this.store.getMergeRequestRecordAsync(t.id);
             const { shadowExecutorLeaseApplied, shadowMergeLockApplied, shadowLeaseApplied } =
               computeShadowLeaseParityState(mergeRequestRecord?.state ?? null);
             if (shadowLeaseApplied !== !handoffAccepted) {
@@ -1650,20 +1666,30 @@ export class Scheduler {
         const validation = await this.validateTaskFilesystem(task.id);
         if (!validation.valid) {
           schedulerLog.warn(`Task ${task.id} filesystem validation failed: ${validation.reason}`);
-          await this.store.moveTask(task.id, "triage");
-          await this.store.logEntry(task.id, "Task moved to triage — filesystem validation failed", validation.reason);
+          /*
+          FNXC:WorkflowScheduling 2026-07-13-11:25:
+          The filesystem-validation rebound must set `needs-replan`, not just move. For a
+          plan-in-place workflow the replan column IS "todo", so the move is a no-op — without
+          the status write triage cannot rediscover the card (its PROMPT.md is missing or
+          unreadable, so the seed check throws and skips it) and this branch re-fires every
+          scheduler tick forever, appending a misleading log line each time.
+          */
+          const replanColumn = await moveTaskToReplanColumn(this.store, task);
+          await this.store.updateTask(task.id, { status: "needs-replan" });
+          await this.store.logEntry(task.id, `Task rebounded to ${replanColumn} for re-specification — filesystem validation failed`, validation.reason);
           continue;
         }
 
         // Stale spec enforcement: check if PROMPT.md has aged beyond the configured threshold.
-        // When enabled, stale tasks are moved back to triage with status "needs-replan"
-        // so they receive fresh specification before execution. This guard runs after
-        // filesystem validation so missing/unreadable files skip staleness checks entirely.
+        // When enabled, stale tasks are rebounded to the workflow-aware replan column with
+        // status "needs-replan" so they receive fresh specification before execution
+        // (workflows without a "triage" column replan in place in todo). This guard runs
+        // after filesystem validation so missing/unreadable files skip staleness checks entirely.
         const promptPath = getPromptPath(this.store.getTasksDir(), task.id);
         const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
         if (staleness.isStale) {
           schedulerLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
-          await this.store.moveTask(task.id, "triage");
+          await moveTaskToReplanColumn(this.store, task);
           await this.store.updateTask(task.id, { status: "needs-replan" });
           await this.store.logEntry(task.id, staleness.reason);
           continue;
@@ -2205,7 +2231,7 @@ export class Scheduler {
       if (mergeShadowEnabled) {
         const dependencyIds = new Set(tasks.flatMap((candidate) => candidate.dependencies));
         for (const depId of dependencyIds) {
-          markerAcceptedByTaskId.set(depId, this.store.getCompletionHandoffAcceptedMarker(depId) !== null);
+          markerAcceptedByTaskId.set(depId, (await this.store.getCompletionHandoffAcceptedMarker(depId)) !== null);
         }
       }
       const schedulingDependencyOptions = mergeShadowEnabled
@@ -2228,12 +2254,21 @@ export class Scheduler {
           activeScopeColumns.set(task.id, task.column);
         }
 
+        // FNXC:PostgresCutover 2026-06-27-09:30:
+        // Pre-compute handoff markers before the .filter() because
+        // getCompletionHandoffAcceptedMarker is async.
+        const reviewHandoffMarkerMap = new Map<string, boolean>();
+        if (settings.mergeRequestContractShadowEnabled === true) {
+          for (const t of tasks) {
+            if (t.column === "in-review") {
+              reviewHandoffMarkerMap.set(t.id, (await this.store.getCompletionHandoffAcceptedMarker(t.id)) !== null);
+            }
+          }
+        }
         const inReviewWithWorktree = tasks.filter(
           (task) => task.column === "in-review" && shouldHoldActiveFileScopeLease(task, tasks, {
             mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
-            handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-              ? this.store.getCompletionHandoffAcceptedMarker(task.id) !== null
-              : false,
+            handoffAccepted: reviewHandoffMarkerMap.get(task.id) ?? false,
             schedulingDependencyOptions,
           }),
         );
@@ -2302,8 +2337,12 @@ export class Scheduler {
           const validation = await this.validateTaskFilesystem(task.id);
           if (!validation.valid) {
             schedulerLog.warn(`Task ${task.id} filesystem validation failed: ${validation.reason}`);
-            await this.store.moveTask(task.id, "triage");
-            await this.store.logEntry(task.id, "Task moved to triage — filesystem validation failed", validation.reason);
+            // See the FNXC:WorkflowScheduling 2026-07-13-11:25 note in the legacy loop: the
+            // status write is what makes triage rediscover a card whose replan column equals
+            // its current column.
+            const replanColumn = await moveTaskToReplanColumn(this.store, task);
+            await this.store.updateTask(task.id, { status: "needs-replan" });
+            await this.store.logEntry(task.id, `Task rebounded to ${replanColumn} for re-specification — filesystem validation failed`, validation.reason);
             return null;
           }
 
@@ -2312,7 +2351,7 @@ export class Scheduler {
             const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
             if (staleness.isStale) {
               schedulerLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
-              await this.store.moveTask(task.id, "triage");
+              await moveTaskToReplanColumn(this.store, task);
               await this.store.updateTask(task.id, { status: "needs-replan" });
               await this.store.logEntry(task.id, staleness.reason);
               return null;
@@ -3073,10 +3112,51 @@ export class Scheduler {
 
         for (const slice of activeSlices) {
           const missionAutoTriageEnabled = mission.autopilotEnabled === true || mission.autoAdvance === true;
+          const supersededFixes = missionStore.reconcileSupersededGeneratedFixFeatures?.(slice.id)
+            ?? { supersededCount: 0, featureIds: [] };
+          if (supersededFixes.supersededCount > 0) {
+            totalFixed += supersededFixes.supersededCount;
+            schedulerLog.warn(
+              `Superseded ${supersededFixes.supersededCount} stale generated fix feature(s) during mission reconciliation for slice ${slice.id}`,
+            );
+          }
+          const features = supersededFixes.supersededCount > 0
+            ? missionStore.listFeatures(slice.id)
+            : slice.features;
+          const supersededFeatureIds = new Set(supersededFixes.featureIds);
 
-          for (const feature of slice.features) {
+          if (supersededFixes.supersededCount > 0) {
+            const refreshedSlice = missionStore.getSlice?.(slice.id);
+            if (refreshedSlice?.status === "complete") {
+              /*
+              FNXC:Missions 2026-07-11-12:35:
+              Startup reconciliation can terminalize every stale generated-fix feature in an active slice before the scheduler loop runs no-task recovery.
+              Treat the recomputed complete slice as complete immediately so stale fixes do not keep an active slice from advancing after restart.
+              */
+              await this.onSliceComplete(refreshedSlice);
+              continue;
+            }
+          }
+
+          for (const feature of features) {
             let featureForReconciliation = feature;
             let task: Task | undefined;
+            if (supersededFeatureIds.has(feature.id)) {
+              /*
+              FNXC:Missions 2026-07-11-12:35:
+              The title-to-task map is built before generated-fix supersedence detaches stale task ownership.
+              Skip freshly superseded features so pre-reconciliation task links cannot be restored in the same startup sweep.
+              */
+              continue;
+            }
+            if (feature.status === "done" && this.isGeneratedFixFeature(feature) && !feature.taskId) {
+              /*
+              FNXC:Missions 2026-07-11-12:35:
+              Done generated-fix features with no task ownership are terminal after supersedence clears their board links.
+              Keep any done feature that still has task ownership in startup self-healing so linked task drift can still be repaired.
+              */
+              continue;
+            }
             if (feature.taskId) {
               task = await this.store.getTask(feature.taskId);
             } else {

@@ -14,7 +14,6 @@ import {
   CentralCore,
   TaskStore,
   PluginLoader,
-  PluginStore,
   getTaskMergeBlocker,
   INSIGHT_EXTRACTION_SCHEDULE_NAME,
   processAndAuditInsightExtraction,
@@ -29,7 +28,7 @@ import {
   registerBuiltInZaiProvider,
 } from "@fusion/core";
 import type { AutomationRunResult, ScheduledTask } from "@fusion/core";
-import { createServer, GitHubClient, createSkillsAdapter, getProjectSettingsPath, loadTlsCredentialsFromEnv, refreshAllCustomProviderModels, registerGithubTrackingHook } from "@fusion/dashboard";
+import { createServer, GitHubClient, createSkillsAdapter, getCliPackageVersion, getProjectSettingsPath, isUnresolvedCliPackageVersion, loadTlsCredentialsFromEnv, refreshAllCustomProviderModels, registerGithubTrackingHook } from "@fusion/dashboard";
 import {
   ProjectEngineManager,
   PeerExchangeService,
@@ -341,7 +340,11 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     // Some tests partially mock @fusion/dashboard and omit this export.
   }
 
+  const resolvedCliPackageVersion = getCliPackageVersion(import.meta.url);
+  const cliPackageVersion = isUnresolvedCliPackageVersion(resolvedCliPackageVersion) ? undefined : resolvedCliPackageVersion;
+
   const engineManager = new ProjectEngineManager(sharedCentralCore, {
+    cliPackageVersion,
     getMergeStrategy,
     processPullRequestMerge: (s, wd, taskId, pool) =>
       processPullRequestMergeTask(s, wd, taskId, githubClient, getTaskMergeBlocker, pool),
@@ -547,7 +550,16 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     const schemaHooks = pluginLoader.getPluginSchemaInitHooks();
     if (schemaHooks.length > 0) {
       try {
-        await store.getDatabase().runPluginSchemaInits(schemaHooks);
+        /*
+         * FNXC:SqliteFinalRemoval 2026-06-25-16:25:
+         * Skip SQLite-specific plugin schema init in backend mode (PostgreSQL
+         * uses Drizzle migrations for schema management).
+         */
+        if (store.isBackendMode()) {
+          console.log("[plugins] Schema initialization skipped — backend mode (PostgreSQL Drizzle migrations)");
+        } else {
+          await store.getDatabase().runPluginSchemaInits(schemaHooks);
+        }
       } catch (err) {
         console.error(
           `[plugins] Schema initialization failed: ${err instanceof Error ? err.message : err}`,
@@ -733,11 +745,12 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     string,
     { enabledKey: string; skills: ReturnType<PluginLoader["getPluginSkills"]> }
   >();
-  const getProjectScopedPluginSkills = async (rootDir: string): Promise<ReturnType<PluginLoader["getPluginSkills"]>> => {
+  const getProjectScopedPluginSkills = async (rootDir: string, resolvedProjectStore?: TaskStore): Promise<ReturnType<PluginLoader["getPluginSkills"]>> => {
     const normalizedRootDir = pathResolve(rootDir);
-    const stateStore = new PluginStore(normalizedRootDir, { centralGlobalDir: resolveGlobalDir() });
+    const targetStore = resolvedProjectStore ?? (normalizedRootDir === pathResolve(store.getRootDir()) ? store : undefined);
+    if (!targetStore) return [];
+    const stateStore = targetStore.getPluginStore();
     await stateStore.init();
-    try {
       const enabledPlugins = await stateStore.listPlugins({ enabled: true });
       const enabledKey = enabledPlugins
         .map((plugin) => `${plugin.id}:${plugin.updatedAt}`)
@@ -762,12 +775,18 @@ export async function runDaemon(opts: DaemonOptions = {}) {
         return skills;
       }
 
-      const scopedPluginStore = new PluginStore(normalizedRootDir, { centralGlobalDir: resolveGlobalDir() });
-      const scopedTaskStore = new TaskStore(normalizedRootDir);
-      const scopedPluginLoader = new PluginLoader({ pluginStore: scopedPluginStore, taskStore: scopedTaskStore });
+      const scopedPluginStore = targetStore.getPluginStore();
+      /*
+       * FNXC:PluginSkillsPostgres 2026-07-14-17:47:
+       * Request-scoped skill discovery is read-only across every CLI server surface. Loading and stopping plugins here must not rewrite durable runtime state for the target project.
+       */
+      const scopedPluginLoader = new PluginLoader({
+        pluginStore: scopedPluginStore,
+        taskStore: targetStore,
+        persistRuntimeState: false,
+      });
       try {
         await scopedPluginStore.init();
-        await scopedTaskStore.init();
         const { errors } = await scopedPluginLoader.loadAllPlugins();
         if (errors > 0) {
           console.warn(`[plugins] Project-scoped plugin skill loading for ${normalizedRootDir} had ${errors} error(s)`);
@@ -777,12 +796,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
         return skills;
       } finally {
         await scopedPluginLoader.stopAllPlugins();
-        scopedPluginStore.close();
-        scopedTaskStore.close();
       }
-    } finally {
-      stateStore.close();
-    }
   };
 
   const skillsAdapter = packageManager
@@ -962,7 +976,20 @@ export async function runDaemon(opts: DaemonOptions = {}) {
 
   let shuttingDown = false;
 
-  const shutdown = async () => {
+  /*
+  FNXC:DaemonSignalExit 2026-07-10-14:00:
+  When the host terminates the daemon under memory pressure it sends SIGTERM, which
+  this handler turns into a graceful shutdown. Exiting 0 on a signal made a
+  memory-pressure kill indistinguishable from a clean operator stop, so a
+  `Restart=on-failure` systemd unit treated it as success and left the daemon dead.
+  Exit with the POSIX 128+signal convention (SIGINT=130, SIGTERM=143) so
+  `Restart=on-failure` restarts an externally-killed daemon; a deliberate
+  `systemctl stop` still won't restart (systemd honors the requested inactive
+  state regardless of exit code). A non-signal shutdown() caller still exits 0.
+  */
+  const SIGNAL_EXIT_CODES: Record<string, number> = { SIGINT: 130, SIGTERM: 143 };
+
+  const shutdown = async (signal?: NodeJS.Signals) => {
     if (shuttingDown) return;
     shuttingDown = true;
 
@@ -1006,14 +1033,14 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     }
 
     store.close();
-    process.exit(0);
+    process.exit(signal ? (SIGNAL_EXIT_CODES[signal] ?? 128) : 0);
   };
 
   process.on("SIGINT", () => {
-    void shutdown();
+    void shutdown("SIGINT");
   });
   process.on("SIGTERM", () => {
-    void shutdown();
+    void shutdown("SIGTERM");
   });
 
   // Ignore SIGHUP so the daemon survives SSH session disconnects

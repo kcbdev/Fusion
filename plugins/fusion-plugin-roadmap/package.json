@@ -1,6 +1,6 @@
 {
   "name": "@fusion-plugin-examples/roadmap",
-  "version": "0.1.41",
+  "version": "0.1.44",
   "type": "module",
   "description": "Roadmap plugin package for Fusion",
   "private": true,
@@ -29,6 +29,7 @@
   "dependencies": {
     "@fusion/core": "workspace:*",
     "@fusion/plugin-sdk": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
     "lucide-react": "^0.542.0",
     "react": "^19.0.0",

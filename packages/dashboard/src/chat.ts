@@ -35,7 +35,11 @@ import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { SessionEventBuffer } from "./sse-buffer.js";
-import { formatChatAttachmentContents, readChatAttachmentContents } from "./chat-attachment-content.js";
+import {
+  formatChatAttachmentContents,
+  formatChatImageAttachmentHints,
+  readChatAttachmentContents,
+} from "./chat-attachment-content.js";
 import { buildTaskPlannerChatContext, TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE } from "./task-planner-chat-context.js";
 import { formatTaskPlannerChatMetrics } from "./task-planner-chat-metrics.js";
 import { emitWorkflowSseEvent, type WorkflowSseEventType } from "./sse.js";
@@ -687,6 +691,17 @@ export type ChatStreamEvent =
   | { type: "tool_end"; data: { toolName: string; isError: boolean; result?: unknown } }
   | { type: "fallback"; data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" } }
   | {
+      type: "warning";
+      data: {
+        code: "tool-schema-reduced";
+        toolSchemaReduced: true;
+        reason: "message-store-unavailable";
+        sessionId: string;
+        agentId: string;
+        projectId: string | null;
+      };
+    }
+  | {
       type: "done";
       data: {
         messageId: string;
@@ -1051,7 +1066,7 @@ export class ChatManager {
       FNXC:ChatSkills 2026-06-16-19:10:
       Agent chat receives the project plugin runner through this narrow structural type, so expose enabled plugin skill contributions here without requiring dashboard code to depend on the full engine runner class.
       */
-      getPluginSkills?(): Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
+      getPluginSkills?(): Array<{ pluginId: string; pluginRoot?: string; skill: { skillId?: string; name: string; description?: string; enabled?: boolean; skillFiles?: string[] } }>;
     },
     private getSettings?: () => Promise<Pick<Settings,
       | "fallbackProvider"
@@ -1093,6 +1108,14 @@ export class ChatManager {
    */
   setPluginRunner(pluginRunner: ChatManager["pluginRunner"] | undefined): void {
     this.pluginRunner = pluginRunner;
+  }
+
+  /**
+   * FNXC:ProjectChatRuntime 2026-07-12-11:00:
+   * Project-scoped chat managers can be constructed before the project engine boots, so the engine MessageStore that provides fn_send_message/fn_read_messages must be refreshable post-construction like the plugin runner. Without this FN-7854 refresh seam, a cached desktop manager keeps messaging tools permanently stripped for that session.
+   */
+  setMessageStore(messageStore: MessageStore | undefined): void {
+    this.messageStore = messageStore;
   }
 
   private getPluginRunnerForSkillSelection(): Parameters<typeof buildSessionSkillContextSync>[3] {
@@ -1318,7 +1341,7 @@ export class ChatManager {
    * `--session-id`. Pinning both via SessionManager.open is the only way to
    * keep the CLI session stable across user messages.
    */
-  private resolveCliSessionManager(session: ChatSession): SessionManager {
+  private async resolveCliSessionManager(session: ChatSession): Promise<SessionManager> {
     if (session.cliSessionFile && existsSync(session.cliSessionFile)) {
       try {
         return SessionManager.open(session.cliSessionFile);
@@ -1334,7 +1357,7 @@ export class ChatManager {
     const sessionFile = manager.getSessionFile();
     if (sessionFile) {
       try {
-        this.chatStore.setCliSessionFile(session.id, sessionFile);
+        await this.chatStore.setCliSessionFile(session.id, sessionFile);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         diagnostics.warn(
@@ -1462,16 +1485,16 @@ export class ChatManager {
     ].join("\n");
   }
 
-  private resolveRoomResponders(
+  private async resolveRoomResponders(
     session: ChatSession,
     mentions: ChatMention[],
     availableAgents: Agent[],
-  ): { direct: Agent[]; ambient: Agent[]; nonMemberMentions: ChatMention[] } {
+  ): Promise<{ direct: Agent[]; ambient: Agent[]; nonMemberMentions: ChatMention[] }> {
     if (session.kind !== "room" || !session.roomId) {
       return { direct: [], ambient: [], nonMemberMentions: [] };
     }
 
-    const roomMembers = this.chatStore.listRoomMembers(session.roomId);
+    const roomMembers = await this.chatStore.listRoomMembers(session.roomId);
     const memberIds = new Set(roomMembers.map((member) => member.agentId));
     const agentsById = new Map(availableAgents.map((agent) => [agent.id, agent]));
 
@@ -1513,7 +1536,7 @@ export class ChatManager {
   /**
    * Create a new chat session.
    */
-  createSession(input: ChatSessionCreateInput): ChatSession {
+  async createSession(input: ChatSessionCreateInput): Promise<ChatSession> {
     return this.chatStore.createSession(input);
   }
 
@@ -1524,7 +1547,7 @@ export class ChatManager {
     modelProvider?: string,
     modelId?: string,
   ) {
-    const room = this.chatStore.getRoom(roomId);
+    const room = await this.chatStore.getRoom(roomId);
     if (!room) {
       throw new Error(`Chat room ${roomId} not found`);
     }
@@ -1534,7 +1557,7 @@ export class ChatManager {
     const availableAgents = await this.listAgentsForMentions();
     const availableAgentsById = new Map(availableAgents.map((agent) => [agent.id, agent]));
 
-    for (const member of this.chatStore.listRoomMembers(roomId)) {
+    for (const member of await this.chatStore.listRoomMembers(roomId)) {
       if (availableAgentsById.has(member.agentId)) {
         continue;
       }
@@ -1548,13 +1571,13 @@ export class ChatManager {
 
     const mentions = hasMentionCandidates ? await this.parseMentions(trimmedContent, availableAgents) : [];
 
-    const responderPlan = this.resolveRoomResponders(
+    const responderPlan = await this.resolveRoomResponders(
       { id: `room-${roomId}`, kind: "room", roomId, agentId: "room", status: "active" } as ChatSession,
       mentions,
       availableAgents,
     );
 
-    const userMessage = this.chatStore.addRoomMessage(roomId, {
+    const userMessage = await this.chatStore.addRoomMessage(roomId, {
       role: "user",
       content: trimmedContent,
       senderAgentId: null,
@@ -1567,14 +1590,14 @@ export class ChatManager {
       ...(Array.isArray(attachments) ? { attachments } : {}),
     });
 
-    const roomMembers = this.chatStore.listRoomMembers(roomId);
+    const roomMembers = await this.chatStore.listRoomMembers(roomId);
     const responders = [...responderPlan.direct, ...responderPlan.ambient];
     if (responders.length === 0) {
       if (responderPlan.nonMemberMentions.length > 0) {
         const labels = responderPlan.nonMemberMentions
           .map((mention) => `@${mention.agentName.replace(/\s+/g, "_")}`)
           .join(", ");
-        this.chatStore.addRoomMessage(roomId, {
+        await this.chatStore.addRoomMessage(roomId, {
           role: "assistant",
           senderAgentId: null,
           content: `I couldn't route ${labels} because they are not members of this room.`,
@@ -1598,6 +1621,7 @@ export class ChatManager {
           roomId,
           roomName: room.name,
           roomProjectId: room.projectId ?? null,
+          roomThinkingLevel: room.thinkingLevel ?? null,
           content: trimmedContent,
           latestUserMessageId: userMessage.id,
           attachments,
@@ -1612,7 +1636,7 @@ export class ChatManager {
           continue;
         }
 
-        const assistantMessage = this.chatStore.addRoomMessage(roomId, {
+        const assistantMessage = await this.chatStore.addRoomMessage(roomId, {
           role: "assistant",
           content: response.content,
           thinkingOutput: response.thinkingOutput,
@@ -1650,7 +1674,7 @@ export class ChatManager {
       const labels = responderPlan.nonMemberMentions
         .map((mention) => `@${mention.agentName.replace(/\s+/g, "_")}`)
         .join(", ");
-      this.chatStore.addRoomMessage(roomId, {
+      await this.chatStore.addRoomMessage(roomId, {
         role: "assistant",
         senderAgentId: null,
         content: `Note: ${labels} are not members of this room, so they did not respond.`,
@@ -1667,6 +1691,7 @@ export class ChatManager {
     roomId: string;
     roomName: string;
     roomProjectId?: string | null;
+    roomThinkingLevel?: string | null;
     content: string;
     latestUserMessageId: string;
     attachments?: ChatAttachment[];
@@ -1699,7 +1724,7 @@ export class ChatManager {
     systemPrompt = `${systemPrompt}\n\n${CHAT_AGENT_MESSAGE_ROUTING_GUIDANCE}`;
 
     const roomCompactionSettings = await this.getRoomCompactionSettings();
-    const roomMessages = this.chatStore.getRoomMessages(input.roomId, { limit: roomCompactionSettings.fetchLimit });
+    const roomMessages = await this.chatStore.getRoomMessages(input.roomId, { limit: roomCompactionSettings.fetchLimit });
     const { attachmentContents, imageContents } = await readChatAttachmentContents(
       this.rootDir,
       { kind: "room", roomId: input.roomId },
@@ -1707,6 +1732,7 @@ export class ChatManager {
       diagnostics,
     );
     const attachmentContentBlock = formatChatAttachmentContents(attachmentContents);
+    const imagePathHints = formatChatImageAttachmentHints(imageContents);
     const parsedSkillCommands = parseSkillCommands(input.content);
     const roomPromptParts = [
       `You are replying as ${input.responder.name} in room #${input.roomName}.`,
@@ -1722,6 +1748,9 @@ export class ChatManager {
     if (attachmentContentBlock) {
       roomPromptParts.push(attachmentContentBlock);
     }
+    if (imagePathHints) {
+      roomPromptParts.push(imagePathHints);
+    }
     const roomPrompt = roomPromptParts.join("\n\n");
 
     const responderRuntimeModel = extractRuntimeModel(input.responder.runtimeConfig);
@@ -1732,6 +1761,11 @@ export class ChatManager {
      */
     const effectiveModelProvider = input.modelProvider ?? responderRuntimeModel.provider ?? chatModelSettings.defaultProvider;
     const effectiveModelId = input.modelId ?? responderRuntimeModel.modelId ?? chatModelSettings.defaultModelId;
+    /*
+     * FNXC:Chat-ThinkingLevel 2026-07-12-00:00:
+     * Room responders apply the room-level reasoning-effort default through the engine `defaultThinkingLevel` session option. An unset room value inherits the resolved project/global chat default and every direct or ambient responder in the room receives the same effective level.
+     */
+    const effectiveThinkingLevel = resolveExecutorThinkingLevel(input.roomThinkingLevel ?? undefined, chatModelSettings);
     /*
      * FNXC:ChatModels 2026-07-01-16:42:
      * Room responders should pass configured fallback models even when the room send chose an explicit model. The engine still swaps only for retryable provider/model-selection failures, so an unavailable Sonnet 5 can recover without making ordinary prompt errors ambiguous.
@@ -1776,6 +1810,7 @@ export class ChatManager {
             defaultModelId: effectiveModelId,
           }
         : {}),
+      ...(effectiveThinkingLevel ? { defaultThinkingLevel: effectiveThinkingLevel } : {}),
       ...(allowFallback && chatModelSettings.fallbackProvider && chatModelSettings.fallbackModelId
         ? {
             fallbackProvider: chatModelSettings.fallbackProvider,
@@ -1895,7 +1930,7 @@ export class ChatManager {
     }
     const broadcastOptions = { generationId };
 
-    const session = this.chatStore.getSession(sessionId);
+    const session = await this.chatStore.getSession(sessionId);
 
     // CLI-agent-backed chat: a session that selected a cli-agent executor brokers
     // its composer sends to the live PTY (via the runner) rather than running the
@@ -2016,7 +2051,7 @@ export class ChatManager {
       // Persist user message
       let persistedUserMessageId: string | undefined;
       try {
-        const persistedUserMessage = this.chatStore.addMessage(sessionId, {
+        const persistedUserMessage = await this.chatStore.addMessage(sessionId, {
           role: "user",
           content,
           metadata: mentions.length > 0 ? { mentions } : undefined,
@@ -2170,18 +2205,26 @@ export class ChatManager {
         diagnostics,
       );
       const attachmentContentBlock = formatChatAttachmentContents(attachmentContents);
+      /*
+      FNXC:GrokAcp 2026-07-12-07:30:
+      Name/size-only attachmentSummary is not enough for Grok ACP (image ContentBlocks
+      are unsupported). Include absolute filesystem paths so the agent can open pixels.
+      */
+      const imagePathHints = formatChatImageAttachmentHints(imageContents);
 
       // Send only the new user content. Prior turns are reloaded by the
       // pi/Claude CLI session via SessionManager.open() below — stuffing the
       // transcript back into the user message would balloon the on-disk
       // session every turn (and previously did, see chat-store.ts:setCliSessionFile).
-      const promptContent = [attachmentSummary, attachmentContentBlock, resolvedContent].filter(Boolean).join("\n\n");
+      const promptContent = [attachmentSummary, imagePathHints, attachmentContentBlock, resolvedContent]
+        .filter(Boolean)
+        .join("\n\n");
 
       // Per-chat session continuity: the pi SessionManager (and, transitively,
       // the Claude CLI --resume session it owns) is keyed off the chat. On the
       // first user message we create a fresh, file-backed session and persist
       // its path; subsequent messages reopen the same file.
-      const sessionManager = this.resolveCliSessionManager(session);
+      const sessionManager = await this.resolveCliSessionManager(session);
 
       /*
        * FNXC:ChatMessageEdit 2026-07-07-09:00:
@@ -2194,7 +2237,7 @@ export class ChatManager {
       const parentLeafId = sessionManager.getLeafId();
       if (persistedUserMessageId) {
         try {
-          this.chatStore.updateMessageMetadata(persistedUserMessageId, { piParentLeafId: parentLeafId });
+          await this.chatStore.updateMessageMetadata(persistedUserMessageId, { piParentLeafId: parentLeafId });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           diagnostics.warn(
@@ -2230,6 +2273,26 @@ export class ChatManager {
        * Model-loop chat sessions apply the per-session thinking level through the engine `defaultThinkingLevel` session option; an empty session value inherits the project/global execution default resolved by resolveExecutorThinkingLevel.
        */
       const effectiveThinkingLevel = resolveExecutorThinkingLevel(session.thinkingLevel ?? undefined, chatModelSettings);
+
+      if (agent?.id && !this.messageStore) {
+        const warning = {
+          code: "tool-schema-reduced" as const,
+          toolSchemaReduced: true as const,
+          reason: "message-store-unavailable" as const,
+          sessionId,
+          agentId: agent.id,
+          projectId: session.projectId ?? null,
+        };
+        /*
+         * FNXC:ChatAgentTools 2026-07-12-11:00:
+         * A bound agent with reduced tools must receive an observable signal instead of later discovering missing coordination tools one failed call at a time. FN-7854 keeps the signal lightweight by using diagnostics plus the existing chat stream channel when MessageStore-backed messaging tools cannot be assembled.
+         */
+        diagnostics.warn("Project chat tool schema reduced", warning);
+        chatStreamManager.broadcast(sessionId, {
+          type: "warning",
+          data: warning,
+        }, broadcastOptions);
+      }
 
       const messagingTools = agent?.id && this.messageStore
         ? [
@@ -2415,7 +2478,7 @@ export class ChatManager {
           effectiveModelProvider,
           effectiveModelId,
         );
-        persistFailureMessage(this.chatStore, sessionId, failureInfo);
+        await persistFailureMessage(this.chatStore, sessionId, failureInfo);
         this.flushInFlightGenerationPersist(sessionId, null);
         chatStreamManager.broadcast(sessionId, {
           type: "error",
@@ -2457,7 +2520,7 @@ export class ChatManager {
       if (fallbackInfo) {
         assistantMetadata.fallback = fallbackInfo;
       }
-      const assistantMessage = this.chatStore.addMessage(sessionId, {
+      const assistantMessage = await this.chatStore.addMessage(sessionId, {
         role: "assistant",
         content: finalResponseText,
         thinkingOutput: accumulatedThinking || undefined,
@@ -2523,7 +2586,7 @@ export class ChatManager {
 
       if (accumulatedText || accumulatedThinking || toolCallsAccum.length > 0) {
         try {
-          this.chatStore.addMessage(sessionId, {
+          await this.chatStore.addMessage(sessionId, {
             role: "assistant",
             content: accumulatedText || "(response interrupted before text generation)",
             thinkingOutput: accumulatedThinking || undefined,
@@ -2539,7 +2602,7 @@ export class ChatManager {
       }
 
       try {
-        persistFailureMessage(this.chatStore, sessionId, failureInfo, fallbackInfo ? { fallback: fallbackInfo } : undefined);
+        await persistFailureMessage(this.chatStore, sessionId, failureInfo, fallbackInfo ? { fallback: fallbackInfo } : undefined);
       } catch (persistErr) {
         diagnostics.error(`Failed to persist failure message for session ${sessionId}:`, persistErr);
       }
@@ -2642,12 +2705,12 @@ export class ChatManager {
    * here — callers resend the edited content through the existing streaming `sendMessage` path.
    */
   async rewindSessionForEdit(sessionId: string, fromMessageId: string): Promise<{ retained: ChatMessage[] }> {
-    const session = this.chatStore.getSession(sessionId);
+    const session = await this.chatStore.getSession(sessionId);
     if (!session) {
       throw new Error(`Chat session ${sessionId} not found`);
     }
 
-    const target = this.chatStore.getMessage(fromMessageId);
+    const target = await this.chatStore.getMessage(fromMessageId);
     if (!target || target.sessionId !== sessionId) {
       throw new Error(`Message ${fromMessageId} not found in session ${sessionId}`);
     }
@@ -2664,7 +2727,7 @@ export class ChatManager {
     const parentLeafId = (target.metadata as { piParentLeafId?: string | null } | null)?.piParentLeafId;
     const hasRecordedParentLeaf = target.metadata != null && Object.prototype.hasOwnProperty.call(target.metadata, "piParentLeafId");
 
-    const { retained } = this.chatStore.deleteMessagesFrom(sessionId, fromMessageId);
+    const { retained } = await this.chatStore.deleteMessagesFrom(sessionId, fromMessageId);
 
     if (hasRecordedParentLeaf) {
       /*
@@ -2678,18 +2741,18 @@ export class ChatManager {
        * the new file, so `buildSessionContext()` on the next open cannot include them.
        */
       try {
-        const sessionManager = this.resolveCliSessionManager(session);
+        const sessionManager = await this.resolveCliSessionManager(session);
         if (parentLeafId) {
           const branchedFile = sessionManager.createBranchedSession(parentLeafId);
           if (!branchedFile) {
             throw new Error("createBranchedSession returned no file (non-persisting session)");
           }
-          this.chatStore.setCliSessionFile(sessionId, branchedFile);
+          await this.chatStore.setCliSessionFile(sessionId, branchedFile);
         } else {
           // First-turn edit: nothing precedes the edited message, so there is no path to
           // branch from. A brand-new empty session is the correct "forget everything" state.
           const fresh = SessionManager.create(this.rootDir);
-          this.chatStore.setCliSessionFile(sessionId, fresh.getSessionFile() ?? null);
+          await this.chatStore.setCliSessionFile(sessionId, fresh.getSessionFile() ?? null);
         }
         return { retained };
       } catch (err) {
@@ -2736,14 +2799,14 @@ export class ChatManager {
         }
       }
       const rebuiltFile = rebuilt.getSessionFile();
-      this.chatStore.setCliSessionFile(sessionId, rebuiltFile ?? null);
+      await this.chatStore.setCliSessionFile(sessionId, rebuiltFile ?? null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       diagnostics.warn(
         `Failed to rebuild pi session for chat ${sessionId} from retained history (${message}); clearing CLI session file so no discarded turn can be recalled`,
       );
       try {
-        this.chatStore.setCliSessionFile(sessionId, null);
+        await this.chatStore.setCliSessionFile(sessionId, null);
       } catch {
         // best-effort; nothing further we can do here
       }

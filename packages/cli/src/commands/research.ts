@@ -5,6 +5,7 @@ import {
   RESEARCH_RUN_STATUSES,
   ResearchRunStatus,
   TaskStore,
+  createTaskStoreForBackend,
   resolveResearchSettings,
   type ResearchExportFormat,
   type ResearchRun,
@@ -75,9 +76,21 @@ interface ResearchExportOptions extends ResearchCommandOptions {
   output?: string;
 }
 
+/*
+FNXC:ResearchCliPostgres 2026-07-13-22:38:
+Research CLI execution, lifecycle commands, and exports must use the TaskStore-selected backend. Both ResearchStore and AsyncResearchStore expose the same API; callers await every operation so PostgreSQL promises and legacy synchronous returns preserve identical operator behavior.
+*/
 async function getStore(projectName?: string): Promise<TaskStore> {
   const projectPath = projectName ? await resolveProjectPathOnly(projectName) : undefined;
-  const store = new TaskStore(projectPath ?? process.cwd());
+  const rootDir = projectPath ?? process.cwd();
+  // FNXC:PostgresCutover 2026-07-04: boot the PostgreSQL backend via the startup
+  // factory instead of a legacy SQLite TaskStore whose runtime was removed
+  // (VAL-REMOVAL-005). Falls back to legacy only on FUSION_NO_EMBEDDED_PG=1.
+  const boot = await createTaskStoreForBackend({ rootDir });
+  if (boot) {
+    return boot.taskStore;
+  }
+  const store = new TaskStore(rootDir);
   await store.init();
   return store;
 }
@@ -179,7 +192,7 @@ export async function runResearchCreate(options: ResearchCreateOptions): Promise
     store = await getStore(options.projectName);
     const { orchestrator, settings, resolved, availableProviderTypes } = await getResearchRuntime(store);
 
-    const runId = orchestrator.createRun({
+    const runId = await orchestrator.createRun({
       providers: availableProviderTypes
         .filter((type) => type !== "llm-synthesis")
         .map((type) => ({ type, config: { maxResults: resolved.limits.maxSourcesPerRun, timeoutMs: resolved.limits.requestTimeoutMs } })),
@@ -193,7 +206,7 @@ export async function runResearchCreate(options: ResearchCreateOptions): Promise
     if (!options.waitForCompletion) {
       // Intentionally-long-lived branch — do NOT close `store` here (see
       // the function-level FNXC comment above).
-      const run = store.getResearchStore().getRun(runId);
+      const run = await store.getResearchStore().getRun(runId);
       if (options.json) {
         jsonOut(run);
       } else {
@@ -204,11 +217,7 @@ export async function runResearchCreate(options: ResearchCreateOptions): Promise
     }
 
     const maxWaitMs = Math.max(1_000, Math.min(options.maxWaitMs ?? 90_000, resolved.limits.maxDurationMs));
-    const completed = await Promise.race([
-      runPromise,
-      new Promise<ResearchRun>((resolveRun) => setTimeout(() => {
-        const latest = store!.getResearchStore().getRun(runId);
-        resolveRun(latest ?? ({
+    const fallbackRun = (): ResearchRun => ({
           id: runId,
           query: options.query,
           status: "running",
@@ -217,12 +226,36 @@ export async function runResearchCreate(options: ResearchCreateOptions): Promise
           tags: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        } as ResearchRun));
-      }, maxWaitMs)),
-    ]);
+    });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let didTimeout = false;
+    /*
+    FNXC:ResearchCliPostgres 2026-07-13-23:05:
+    The completion timeout must be cancelled when the run finishes first; otherwise its later asynchronous PostgreSQL read races the store close and can reject without a handler. If the timeout read itself fails, return the same running snapshot used when no persisted run is available.
+    */
+    const timeoutResult = new Promise<ResearchRun>((resolveRun) => {
+      timeout = setTimeout(() => {
+        didTimeout = true;
+        void Promise.resolve(store!.getResearchStore().getRun(runId))
+          .then((latest) => resolveRun(latest ?? fallbackRun()))
+          .catch(() => resolveRun(fallbackRun()));
+      }, maxWaitMs);
+    });
+    let completed = await Promise.race([runPromise, timeoutResult]);
+    if (timeout) clearTimeout(timeout);
 
-    // `waitForCompletion` fully awaited (or timed out on) the run above, so
-    // unlike the fire-and-forget branch, it is safe to close here.
+    /*
+    FNXC:ResearchCliPostgres 2026-07-13-23:52:
+    A CLI completion timeout is also an ownership boundary: cancel and await the active orchestrator before closing its PostgreSQL pool. Closing the store while the run still persists phases can corrupt lifecycle state and surface late unhandled rejections.
+    */
+    if (didTimeout) {
+      await orchestrator.cancelRun(runId);
+      await runPromise.catch(() => undefined);
+      completed = (await store.getResearchStore().getRun(runId)) ?? completed;
+    }
+
+    // The run either completed or was cancelled and drained above, so unlike
+    // the fire-and-forget branch it is safe to close here.
     await closeStore();
 
     if (options.json) {
@@ -243,7 +276,7 @@ export async function runResearchList(options: ResearchListOptions = {}): Promis
         throw new Error(`Invalid status: ${options.status}`);
       }
 
-      const runs = store.getResearchStore().listRuns({
+      const runs = await store.getResearchStore().listRuns({
         status: options.status as ResearchRunStatus | undefined,
         limit: options.limit ? Math.max(1, options.limit) : 20,
       });
@@ -270,7 +303,7 @@ export async function runResearchList(options: ResearchListOptions = {}): Promis
 export async function runResearchShow(runId: string, options: ResearchCommandOptions = {}): Promise<void> {
   try {
     await withResolvedStore(options.projectName, async (store) => {
-      const run = store.getResearchStore().getRun(runId);
+      const run = await store.getResearchStore().getRun(runId);
       if (!run) throw new Error(`Cited-research run not found: ${runId}`);
 
       if (options.json) {
@@ -294,7 +327,7 @@ function renderMarkdown(run: ResearchRun): string {
 export async function runResearchExport(options: ResearchExportOptions): Promise<void> {
   try {
     await withResolvedStore(options.projectName, async (store) => {
-      const run = store.getResearchStore().getRun(options.runId);
+      const run = await store.getResearchStore().getRun(options.runId);
       if (!run) throw new Error(`Cited-research run not found: ${options.runId}`);
 
       const format = (options.format ?? "markdown") as ResearchExportFormat;
@@ -329,7 +362,7 @@ export async function runResearchExport(options: ResearchExportOptions): Promise
 export async function runResearchCancel(runId: string, options: ResearchCommandOptions = {}): Promise<void> {
   try {
     await withResolvedStore(options.projectName, async (store) => {
-      const run = store.getResearchStore().getRun(runId);
+      const run = await store.getResearchStore().getRun(runId);
       if (!run) throw new Error(`Cited-research run not found: ${runId}`);
 
       if (!["queued", "running", "cancelling", "retry_waiting"].includes(run.status)) {
@@ -337,7 +370,7 @@ export async function runResearchCancel(runId: string, options: ResearchCommandO
       }
 
       const { orchestrator } = await getResearchRuntime(store);
-      const cancelled = orchestrator.cancelRun(runId);
+      const cancelled = await orchestrator.cancelRun(runId);
 
       if (options.json) {
         jsonOut({ cancelled, run });
@@ -355,7 +388,7 @@ export async function runResearchCancel(runId: string, options: ResearchCommandO
 export async function runResearchRetry(runId: string, options: ResearchCommandOptions = {}): Promise<void> {
   try {
     await withResolvedStore(options.projectName, async (store) => {
-      const existing = store.getResearchStore().getRun(runId);
+      const existing = await store.getResearchStore().getRun(runId);
       if (!existing) throw new Error(`Cited-research run not found: ${runId}`);
 
       if (existing.status === "retry_exhausted" || existing.lifecycle?.errorCode === "RETRY_EXHAUSTED") {
@@ -369,8 +402,8 @@ export async function runResearchRetry(runId: string, options: ResearchCommandOp
       // unlike `runResearchCreate`'s fire-and-forget branch there is no
       // background execution in flight here — safe to close the store below.
       const { orchestrator } = await getResearchRuntime(store);
-      const newRunId = orchestrator.retryRun(runId);
-      const run = store.getResearchStore().getRun(newRunId);
+      const newRunId = await orchestrator.retryRun(runId);
+      const run = await store.getResearchStore().getRun(newRunId);
 
       if (options.json) {
         jsonOut({ retryOf: runId, run });

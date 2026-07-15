@@ -208,11 +208,16 @@ export type AiPromptLiveCallbacks = {
   onToolEnd?: (name: string, isError: boolean, result?: unknown) => void;
 };
 
+/*
+FNXC:Automations 2026-07-12-20:30:
+FN-7903 applies FN-7900's persisted per-step reasoning effort at runtime. Scheduled and routine AI steps pass `thinkingLevel` before live callbacks so undefined keeps inheriting the resolved default while explicit values become createFnAgent's defaultThinkingLevel.
+*/
 export type AiPromptExecutor = (
   prompt: string,
   modelProvider?: string,
   modelId?: string,
   allowedTools?: string[],
+  thinkingLevel?: string,
   liveCallbacks?: AiPromptLiveCallbacks,
 ) => Promise<string>;
 
@@ -392,7 +397,10 @@ export class CronRunner {
 
         /*
          * FNXC:Automations 2026-06-27-00:00:
-         * Cron execution must claim the due window in SQLite before running so two runner instances, overlapping project/all pollers, or separate engine processes cannot execute the same still-due row. The in-memory inFlight guard remains useful within one process but is not the cross-process authority.
+         * Cron execution must claim the due window in storage before running so two runner instances, overlapping project/all pollers, or separate engine processes cannot execute the same still-due row. The in-memory inFlight guard remains useful within one process but is not the cross-process authority.
+         *
+         * FNXC:AutomationIsolation 2026-07-13-22:37:
+         * PostgreSQL claims include the AutomationStore's bound project ID. A project cron runner may claim its own project or global execution lane, but it must never claim another project's command from the shared table.
          */
         const claimed = await this.automationStore.claimDueSchedule(schedule.id, schedule.nextRunAt);
         if (!claimed) {
@@ -885,6 +893,7 @@ export class CronRunner {
     const defaultModel = resolveExecutionSettingsModel(settings);
     const modelProvider = step.modelProvider?.trim() || defaultModel.provider;
     const modelId = step.modelId?.trim() || defaultModel.modelId;
+    const thinkingLevel = step.thinkingLevel?.trim() || undefined;
 
     const model = modelProvider && modelId
       ? `${modelProvider}/${modelId}`
@@ -894,7 +903,7 @@ export class CronRunner {
 
     try {
       // Race between executor and timeout
-      const resultPromise = this.aiPromptExecutor(step.prompt, modelProvider, modelId, step.allowedTools);
+      const resultPromise = this.aiPromptExecutor(step.prompt, modelProvider, modelId, step.allowedTools, thinkingLevel);
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         setTimeout(() => reject(new Error(`AI prompt step timed out after ${timeoutMs / 1000}s`)), timeoutMs);
       });
@@ -959,13 +968,17 @@ export class CronRunner {
       };
     }
 
-    // Build TaskCreateInput from step fields
+    /*
+    FNXC:Automations 2026-07-12-20:30:
+    Create-task automation steps spawn normal Fusion tasks, so the persisted per-step thinking level must map onto TaskCreateInput.thinkingLevel. Empty values stay unset to preserve task/settings inheritance.
+    */
     const taskInput: TaskCreateInput = {
       title: step.taskTitle?.trim() || undefined,
       description: step.taskDescription.trim(),
       column: (step.taskColumn as Column) || "triage",
       modelProvider: step.modelProvider?.trim() || undefined,
       modelId: step.modelId?.trim() || undefined,
+      thinkingLevel: (step.thinkingLevel?.trim() || undefined) as TaskCreateInput["thinkingLevel"],
       source: {
         sourceType: "cron",
         sourceMetadata: { scheduleId, stepId: step.id },
@@ -1029,7 +1042,7 @@ const AI_AUTOMATION_SYSTEM_PROMPT = [
 export async function createAiPromptExecutor(cwd: string, store?: TaskStore): Promise<AiPromptExecutor> {
   const disposeLog = createLogger("cron-runner");
 
-  return async (prompt: string, modelProvider?: string, modelId?: string, allowedTools?: string[], liveCallbacks?: AiPromptLiveCallbacks): Promise<string> => {
+  return async (prompt: string, modelProvider?: string, modelId?: string, allowedTools?: string[], thinkingLevel?: string, liveCallbacks?: AiPromptLiveCallbacks): Promise<string> => {
     let responseText = "";
     const skillContext = buildSessionSkillContextSync(null, "executor", cwd, undefined);
 
@@ -1039,16 +1052,23 @@ export async function createAiPromptExecutor(cwd: string, store?: TaskStore): Pr
 
     FNXC:McpConfig 2026-06-26-00:00:
     Scheduled AI automations are coding-agent work surfaces. ProjectEngine passes the TaskStore so configured MCP servers are forwarded; lightweight in-process runtime callers may omit the store and keep the pre-existing empty-MCP behavior.
+
+    FNXC:Automations 2026-07-12-20:30:
+    Scheduled/routine automation sessions forward the persisted per-step thinking level as createFnAgent's defaultThinkingLevel. Undefined or whitespace-only values intentionally omit the option so settings-level inheritance remains unchanged.
     */
     const mcpServers = store ? (await resolveMcpServersForStore(store)).servers : undefined;
+    const defaultThinkingLevel = thinkingLevel?.trim() || undefined;
     const { session } = await createFnAgent({
       cwd,
       systemPrompt: AI_AUTOMATION_SYSTEM_PROMPT,
       tools: "coding",
       toolsAllowlist: allowedTools,
+      // FNXC:PluginSkills 2026-07-12-00:00: Automation sessions use the shared executor skill context; forward plugin body dirs when a plugin runner is supplied so requested plugin skills can be discovered.
       ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+      ...(skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
       defaultProvider: modelProvider,
       defaultModelId: modelId,
+      defaultThinkingLevel,
       mcpServers,
       onText: (delta: string) => {
         responseText += delta;

@@ -135,17 +135,37 @@ export function resolveGoalContextForDiagnostics(input: ResolveGoalContextInput)
 }
 
 export async function resolveAndEmitGoalContext(input: ResolveAndEmitGoalContextInput): Promise<GoalContextResolution> {
-  const resolution = resolveGoalContextForDiagnostics({
-    listActiveGoals:
-      typeof input.store.getGoalStore === "function"
-        ? () => input.store.getGoalStore().listGoals({ status: "active" })
-        : undefined,
-  });
+  /*
+  FNXC:GoalStore 2026-07-14-16:13:
+  Goal injection is an async prompt-construction lane and must await either the SQLite GoalStore or PostgreSQL AsyncGoalStore. Treating the async store as unavailable silently removed active goals from every migrated triage, executor, and heartbeat prompt.
+  */
+  let resolution: GoalContextResolution;
+  if (typeof input.store.getGoalStore !== "function") {
+    resolution = { goalContext: "", classification: classifyGoalInjectionFailure("store-unavailable") };
+  } else {
+    try {
+      const goalStore = input.store.getGoalStore();
+      const activeGoals = await goalStore.listGoals({ status: "active" });
+      const injectionResult = buildGoalContextSection({ activeGoals });
+      resolution = {
+        goalContext: injectionResult.text,
+        classification: classifyGoalInjectionResult(injectionResult),
+      };
+    } catch (listError) {
+      resolution = {
+        goalContext: "",
+        classification: classifyGoalInjectionFailure("list-failed", listError),
+      };
+    }
+  }
 
   let provenanceGoalIds: string[] = [];
   if (input.taskId && typeof input.store.getMissionStore === "function") {
     try {
-      provenanceGoalIds = input.store.getMissionStore().listGoalIdsForTask(input.taskId);
+      const resolvedMissionStore = input.store.getMissionStore();
+      if ("listGoalIdsForTask" in resolvedMissionStore && typeof resolvedMissionStore.listGoalIdsForTask === "function") {
+        provenanceGoalIds = await Promise.resolve(resolvedMissionStore.listGoalIdsForTask(input.taskId));
+      }
     } catch (error) {
       diagnosticsLog.warn(
         `failed to resolve goal provenance for task ${input.taskId} in ${input.lane}: ${error instanceof Error ? error.message : String(error)}`,

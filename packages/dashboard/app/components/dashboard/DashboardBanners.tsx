@@ -5,11 +5,13 @@ DashboardBanners is the conditional banner cluster rendered above the dashboard-
 import type { DashboardBannersProps } from "./types";
 import type { SectionId } from "../SettingsModal";
 import { TestModeBanner } from "../TestModeBanner";
+import { SqliteMigrationBanner } from "../SqliteMigrationBanner";
 import { EngineUnavailableBanner } from "../EngineUnavailableBanner";
 import { EngineStatusBanner } from "../EngineStatusBanner";
 import { OAuthReloginBanner } from "../OAuthReloginBanner";
 import { SessionNotificationBanner } from "../SessionNotificationBanner";
 import { CliBinaryInstallBanner } from "../CliBinaryInstallBanner";
+import { StorageMigrationNoticeBanner } from "../StorageMigrationNoticeBanner";
 import { OnboardingResumeCard } from "../OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "../PostOnboardingRecommendations";
 import { UpdateAvailableBanner } from "../UpdateAvailableBanner";
@@ -78,6 +80,10 @@ export function DashboardBanners({
       {viewMode === "project" && currentProject && (
         <>
           <TestModeBanner isActive={isTestMode} />
+          {/* FNXC:PostgresMigrationBanner 2026-07-12: one-time post-auto-migration
+              notice ("data migrated, backup exists") with a Discord Need-help link;
+              self-fetches settings, keyed to re-check on project switch. */}
+          <SqliteMigrationBanner key={`sqlite-migration-${currentProject.id}`} projectId={currentProject.id} />
           {showEngineRemediationBanners && (
             <EngineUnavailableBanner isVisible={dashboardHealth?.engine?.available === false} />
           )}
@@ -101,9 +107,13 @@ export function DashboardBanners({
         />
       )}
       {viewMode === "project" && currentProject && (
-        <CliBinaryInstallBanner
-          onOpenSettings={() => openSettingsWithNav("general" as SectionId)}
-        />
+        <>
+          {/* FNXC:StorageMigrationNotice 2026-07-12-00:00: Keep the one-time storage-backend announcement beside other project-scoped passive notices while its localStorage dismissal remains app-wide. */}
+          <StorageMigrationNoticeBanner />
+          <CliBinaryInstallBanner
+            onOpenSettings={() => openSettingsWithNav("general" as SectionId)}
+          />
+        </>
       )}
       {viewMode === "project" && currentProject && showOnboardingResumeCard && (
         <OnboardingResumeCard onResume={modalManager.openModelOnboarding} />

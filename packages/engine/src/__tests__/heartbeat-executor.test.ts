@@ -25,6 +25,12 @@ vi.mock("../logger.js", async () => {
 });
 vi.mock("../pi.js", () => ({
   createFnAgent: vi.fn(),
+  // FNXC:EngineTestDrift 2026-07-11-22:23:
+  // DefaultPiRuntime.describeModel (runtime-resolution.ts) now reaches the real
+  // pi.js describeModel export on the heartbeat path. The hand-written pi.js
+  // mock must surface it or vitest throws "No describeModel export is defined",
+  // which cascades into createFnAgent failing and every heartbeat ending 'failed'.
+  describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
   promptWithFallback: vi.fn(async (session: any, prompt: string) => {
     await session.prompt(prompt);
   }),
@@ -99,6 +105,9 @@ describe("executeHeartbeat", () => {
       } as unknown as TaskDetail),
       selectNextTaskForAgent: vi.fn().mockResolvedValue(null),
       listTasks: vi.fn().mockResolvedValue([]),
+      // FNXC:WakeDeltaMultiAssign 2026-07-13-12:45:
+      // executeHeartbeat loads assigned inventory for Wake Delta; default empty so existing tests stay no-op.
+      getTasksByAssignedAgent: vi.fn().mockResolvedValue([]),
       createTask: vi.fn().mockResolvedValue({
         id: "FN-002",
         description: "Created task",
@@ -130,6 +139,8 @@ describe("executeHeartbeat", () => {
         updatedAt: new Date().toISOString(),
       }),
       getTaskDocuments: vi.fn().mockResolvedValue([]),
+      // FNXC:HeartbeatTests 2026-07-12-10:00: FN-7835's completeRun(failed) calls this.taskStore.getSettings() to resolve the error-recovery limit inside the failed-state transition block. Without this mock, the call throws TypeError, caught by the outer try-catch — so the agent is never set to "error" (it stays "running" from startRun), breaking every failed-run state-transition assertion. Placed before ...overrides so test-specific getSettings mocks still win.
+      getSettings: vi.fn().mockResolvedValue({}),
       ...overrides,
     } as unknown as TaskStore;
   }
@@ -572,7 +583,7 @@ describe("executeHeartbeat", () => {
       await (monitor as any).buildReportsHealthSection("agent-001", store);
 
       expect(heartbeatLog.log).toHaveBeenCalledWith(
-        expect.stringContaining("[reports-health] stale report agent-overdue intervalSource=persisted-agent"),
+        expect.stringContaining("[reports-health] stale report agent-overdue intervalSource=runtimeConfig"),
       );
       expect(heartbeatLog.log).toHaveBeenCalledWith(expect.stringContaining("staleThresholdMs="));
       expect(heartbeatLog.log).toHaveBeenCalledWith(expect.stringContaining("heartbeatAgeMs="));
@@ -876,9 +887,10 @@ describe("executeHeartbeat", () => {
 
       expect(result).toBeDefined();
       expect(result.status).toBe("completed");
+      // FNXC:HeartbeatTests 2026-07-12-16:10: FN-7878 makes absent/generic durable-agent lastError recoverable, but this executor-harness agent is not recovery-eligible; it should remain a normal invalid-state exit instead of fabricating an unrecoverable park.
       expect(result.resultJson).toEqual({ reason: "invalid_state", state: "error" });
       expect(mockedCreateFnAgent).not.toHaveBeenCalled();
-      expect(store.updateAgentState).not.toHaveBeenCalledWith("agent-001", "active");
+      expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "active");
     });
 
     it("keeps terminated as a run status while pausing the agent", async () => {
@@ -911,10 +923,13 @@ describe("executeHeartbeat", () => {
         status: "completed",
       });
 
+      // FNXC:HeartbeatTests 2026-07-12-16:10: FN-7878 changed generic heartbeat failures such as "Prompt failed" from immediate `error-unrecoverable` parking to bare `error` so the bounded retry budget can run. The subsequent successful run still clears the stale lastError and returns to active.
       expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "error");
-      expect(store.updateAgent).toHaveBeenCalledWith("agent-001", { lastError: "Prompt failed" });
+      expect(store.updateAgentState).not.toHaveBeenCalledWith("agent-001", "paused");
+      expect(store.updateAgent).toHaveBeenCalledWith("agent-001", expect.objectContaining({ lastError: "Prompt failed" }));
       expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "active");
-      expect(store.updateAgent).toHaveBeenCalledWith("agent-001", { lastError: undefined });
+      // FNXC:HeartbeatTests 2026-07-12-10:10: FN-7835's success path also resets error-recovery metadata alongside lastError, so use objectContaining to tolerate the extra metadata key.
+      expect(store.updateAgent).toHaveBeenCalledWith("agent-001", expect.objectContaining({ lastError: undefined }));
     });
 
     it("completes as failed when agent not found in store", async () => {
@@ -1770,6 +1785,75 @@ describe("executeHeartbeat", () => {
       expect(executionPrompt).toContain("## Wake Delta");
       expect(executionPrompt).toContain("wake reason: timer");
       expect(executionPrompt).toContain("autonomous heartbeat run");
+    });
+
+    it("Wake Delta includes multi-assign coordination inventory for sibling assignments", async () => {
+      const now = new Date().toISOString();
+      const getTasksByAssignedAgent = vi.fn().mockResolvedValue([
+        {
+          id: "FN-001",
+          column: "in-progress",
+          title: "Bound task",
+          dependencies: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "FN-220",
+          column: "todo",
+          title: "Sibling todo",
+          dependencies: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+      mockTaskStore = createMockTaskStore({ getTasksByAssignedAgent });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).toContain("- assigned task: FN-001");
+      expect(executionPrompt).toContain("coordination inventory");
+      expect(executionPrompt).toContain("FN-001");
+      expect(executionPrompt).toContain("FN-220");
+      expect(executionPrompt).toContain("(bound)");
+      expect(getTasksByAssignedAgent).toHaveBeenCalledWith("agent-001", { excludeArchived: true });
+    });
+
+    it("exits checkout_conflict without starting a session when lease is held by another agent", async () => {
+      const now = new Date().toISOString();
+      mockTaskStore = createMockTaskStore({
+        getTask: vi.fn().mockResolvedValue({
+          id: "FN-001",
+          title: "Leased elsewhere",
+          description: "desc",
+          prompt: "",
+          steps: [],
+          column: "todo",
+          checkedOutBy: "agent-other",
+          dependencies: [],
+          log: [],
+          attachments: [],
+          createdAt: now,
+          updatedAt: now,
+        } as unknown as TaskDetail),
+      });
+      const store = createStoreWithAgentForExec({ taskId: "FN-001" });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      expect(result.status).toBe("completed");
+      expect(result.resultJson).toEqual({
+        reason: "checkout_conflict",
+        taskId: "FN-001",
+        checkedOutBy: "agent-other",
+      });
+      expect(mockedCreateFnAgent).not.toHaveBeenCalled();
     });
 
     it("identity agent without task gets soul in system prompt", async () => {
@@ -2973,6 +3057,24 @@ describe("executeHeartbeat", () => {
       expect(HEARTBEAT_NO_TASK_SYSTEM_PROMPT).toContain("## Memory Boundaries");
     });
 
+    it("both system prompts include durable critical rules that survive custom HEARTBEAT.md", () => {
+      for (const prompt of [HEARTBEAT_SYSTEM_PROMPT, HEARTBEAT_NO_TASK_SYSTEM_PROMPT]) {
+        expect(prompt).toContain("## Critical Rules");
+        expect(prompt).toContain("Do NOT implement task body work");
+        expect(prompt).toContain("Checkout/claim conflict");
+        expect(prompt).toContain("Blocked-task dedup");
+        expect(prompt).toContain("coordination inventory");
+      }
+    });
+
+    it("strict procedures include disposition checklist and scoped-wake language", () => {
+      expect(HEARTBEAT_PROCEDURE).toContain("Final disposition checklist");
+      expect(HEARTBEAT_PROCEDURE).toContain("Scoped-wake fast path");
+      expect(HEARTBEAT_PROCEDURE).toContain("Blocked dedup");
+      expect(HEARTBEAT_NO_TASK_PROCEDURE).toContain("Final disposition checklist");
+      expect(HEARTBEAT_NO_TASK_PROCEDURE).not.toContain("fn_task_log");
+    });
+
     it("both prompts instruct replies to include reply_to_message_id", () => {
       expect(HEARTBEAT_SYSTEM_PROMPT).toContain("reply_to_message_id");
       expect(HEARTBEAT_NO_TASK_SYSTEM_PROMPT).toContain("reply_to_message_id");
@@ -3043,7 +3145,7 @@ describe("executeHeartbeat", () => {
       expect(callArgs.tools).toBe("coding");
       // fn_artifact_register/list/view, agent config/provisioning, goals/evaluations/identity,
       // task read discovery, workflow discovery/authoring, task promotion, bounded research, clarification, web fetch, memory, and fn_heartbeat_done.
-      expect(callArgs.customTools).toHaveLength(39);
+      expect(callArgs.customTools).toHaveLength(41);
       expect(callArgs.customTools![0]!.name).toBe("fn_task_create");
       expect(callArgs.customTools![1]!.name).toBe("fn_task_log");
       expect(callArgs.customTools![2]!.name).toBe("fn_task_document_write");
@@ -3066,24 +3168,26 @@ describe("executeHeartbeat", () => {
       expect(callArgs.customTools![19]!.name).toBe("fn_task_search");
       expect(callArgs.customTools![20]!.name).toBe("fn_workflow_list");
       expect(callArgs.customTools![21]!.name).toBe("fn_workflow_get");
-      expect(callArgs.customTools![22]!.name).toBe("fn_workflow_create");
-      expect(callArgs.customTools![23]!.name).toBe("fn_workflow_update");
-      expect(callArgs.customTools![24]!.name).toBe("fn_workflow_delete");
-      expect(callArgs.customTools![25]!.name).toBe("fn_workflow_settings");
-      expect(callArgs.customTools![26]!.name).toBe("fn_trait_list");
-      expect(callArgs.customTools![27]!.name).toBe("fn_ask_question");
-      expect(callArgs.customTools![28]!.name).toBe("fn_research_run");
-      expect(callArgs.customTools![29]!.name).toBe("fn_research_list");
-      expect(callArgs.customTools![30]!.name).toBe("fn_research_get");
-      expect(callArgs.customTools![31]!.name).toBe("fn_research_cancel");
-      expect(callArgs.customTools![32]!.name).toBe("fn_workflow_select");
-      expect(callArgs.customTools![33]!.name).toBe("fn_task_promote");
-      expect(callArgs.customTools![34]!.name).toBe("fn_web_fetch");
-      expect(callArgs.customTools![35]!.name).toBe("fn_memory_search");
-      expect(callArgs.customTools![36]!.name).toBe("fn_memory_get");
-      expect(callArgs.customTools![37]!.name).toBe("fn_memory_append");
+      expect(callArgs.customTools![22]!.name).toBe("fn_workflow_validate");
+      expect(callArgs.customTools![23]!.name).toBe("fn_workflow_create");
+      expect(callArgs.customTools![24]!.name).toBe("fn_workflow_update");
+      expect(callArgs.customTools![25]!.name).toBe("fn_workflow_delete");
+      expect(callArgs.customTools![26]!.name).toBe("fn_workflow_settings");
+      expect(callArgs.customTools![27]!.name).toBe("fn_trait_list");
+      expect(callArgs.customTools![28]!.name).toBe("fn_ask_question");
+      expect(callArgs.customTools![29]!.name).toBe("fn_research_run");
+      expect(callArgs.customTools![30]!.name).toBe("fn_research_list");
+      expect(callArgs.customTools![31]!.name).toBe("fn_research_get");
+      expect(callArgs.customTools![32]!.name).toBe("fn_research_cancel");
+      expect(callArgs.customTools![33]!.name).toBe("fn_research_retry");
+      expect(callArgs.customTools![34]!.name).toBe("fn_workflow_select");
+      expect(callArgs.customTools![35]!.name).toBe("fn_task_promote");
+      expect(callArgs.customTools![36]!.name).toBe("fn_web_fetch");
+      expect(callArgs.customTools![37]!.name).toBe("fn_memory_search");
+      expect(callArgs.customTools![38]!.name).toBe("fn_memory_get");
+      expect(callArgs.customTools![39]!.name).toBe("fn_memory_append");
       // fn_heartbeat_done is last (terminal tool)
-      expect(callArgs.customTools![38]!.name).toBe("fn_heartbeat_done");
+      expect(callArgs.customTools![40]!.name).toBe("fn_heartbeat_done");
     });
 
     it("loads workspace memory into system prompt and identity snapshot when inline memory is empty", async () => {
@@ -3683,8 +3787,9 @@ describe("executeHeartbeat", () => {
       expect(result).toBeDefined();
       expect(result.status).toBe("failed");
       expect(result.stderrExcerpt).toContain("Model unavailable");
-      // Agent state should be set to error
+      // FNXC:HeartbeatTests 2026-07-12-16:10: FN-7878 treats generic session startup failures such as "Model unavailable" as recoverable unless an operator-actionable auth/model/billing signal is present.
       expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "error");
+      expect(store.updateAgentState).not.toHaveBeenCalledWith("agent-001", "paused");
     });
 
     it("fails soft on timer heartbeat when model provider credentials are unavailable", async () => {
@@ -4188,4 +4293,3 @@ describe("executeHeartbeat", () => {
 });
 
 // ── Task Creation Tracking Tests ──────────────────────────────────────
-

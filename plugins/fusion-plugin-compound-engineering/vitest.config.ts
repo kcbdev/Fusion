@@ -26,8 +26,10 @@ Keep the ledger entries and excludes removed together; git history remains the a
 FNXC:CompoundEngineeringTests 2026-06-17-19:56:
 FN-6606 re-ran the loaded CE node/package lane with sync.test.ts and work-bridge.test.ts temporarily unexcluded and could not reproduce either the 5000ms test timeout or the later 10000ms hook timeout.
 The current HEAD's shared test-isolation fixes now keep the broad lane stable, so restore both files to active coverage and clear the stale quarantine in lockstep with scripts/lib/test-quarantine.json.
+
+FNXC:CompoundEngineeringTests 2026-07-13-22:37:
+The PostgreSQL session-store port uses getAsyncLayer with a safe SQLite fallback, so the six session/orchestrator files previously excluded for stale TaskStore mocks are active coverage again. The quarantine ledger contains no matching entries; configuration and coverage must remain aligned.
 */
-const quarantinedCompoundEngineeringTests = [];
 const nodeOnlyDashboardTests = [
   "src/dashboard/__tests__/theme-tokens.test.ts",
 ];
@@ -44,6 +46,10 @@ export default defineConfig({
         replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
       },
       { find: "@fusion/core", replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)) },
+      {
+        find: "@fusion/test-utils/pg-test-harness",
+        replacement: fileURLToPath(new URL("../../packages/core/src/__test-utils__/pg-test-harness.ts", import.meta.url)),
+      },
       {
         find: "@fusion/plugin-sdk",
         replacement: fileURLToPath(new URL("../../packages/plugin-sdk/src/index.ts", import.meta.url)),
@@ -92,7 +98,6 @@ export default defineConfig({
           exclude: [
             "src/dashboard/**/__tests__/**/*.test.{ts,tsx}",
             "src/dashboard/**/*.test.{ts,tsx}",
-            ...quarantinedCompoundEngineeringTests,
           ],
         },
       },

@@ -48,14 +48,10 @@ const qualityAppFoundationUiTests = [
   "app/__tests__/board-mobile-corner-rendering.test.ts",
   "app/__tests__/board-tablet-overflow.test.ts",
   "app/__tests__/browser-layout-smoke-fixture.test.ts",
-  "app/__tests__/chat-tool-calls-mobile-layout.test.ts",
   "app/__tests__/column-fixed-width.test.ts",
-  "app/__tests__/component-css-no-raw-rgba.test.ts",
   "app/__tests__/dashboard-component-color-tokenization.test.ts",
-  "app/__tests__/dashboard-css-token-validity.css.test.ts",
   "app/__tests__/dashboard-footer-mobile-layout.test.ts",
   "app/__tests__/detail-body-mobile-overflow.test.ts",
-  "app/__tests__/dev-server-layout-css.test.ts",
   "app/__tests__/executor-status-bar-theme.test.ts",
   "app/__tests__/footer-safe-layout.test.ts",
   "app/__tests__/git-manager-theme-styling.test.ts",
@@ -83,16 +79,13 @@ const qualityAppFoundationUiTests = [
   "app/__tests__/setup-wizard-modal-layout.test.ts",
   "app/__tests__/shell-host.test.ts",
   "app/__tests__/shell-native.test.ts",
-  "app/__tests__/spinner-animation.css.test.ts",
   "app/__tests__/sse-bus.test.ts",
-  "app/__tests__/status-colors-theme.test.ts",
   "app/__tests__/swUpdate.test.ts",
   "app/__tests__/tablet-header-controls.test.tsx",
   "app/__tests__/task-detail-modal-tablet-width.test.ts",
   "app/__tests__/terminal-input.test.ts",
   "app/__tests__/terminal-mobile-header-row.test.ts",
   "app/__tests__/terminal-mobile-keyboard-layout.test.ts",
-  "app/__tests__/text-token-canonicalization.test.ts",
   "app/__tests__/versionCheck.test.ts",
   "app/__tests__/viewport-compensation-keyboard.test.ts",
 ];
@@ -324,10 +317,16 @@ FN-6860 rescued dev-server-process by settling stdout detection and fallback-pro
 
 FNXC:DashboardTestQuarantine 2026-06-22-18:05:
 FN-6937 verified that FN-6860's claimed session-cross-tab ledger removal had not landed: the file was active because this exclude list was empty, but `test-quarantine.json` still carried the stale 2026-06-19 row. The repeated loaded `dashboard-api-quality-backfill` runs and lock-holder mutation proof confirmed FN-6742's rescue still holds, so remove the orphaned ledger row and keep this list empty to restore ledger↔config lockstep.
+
+FNXC:DashboardTestQuarantine 2026-06-25-11:15:
+The SQLite-to-PostgreSQL cutover (feature quarantine-sqlite-internals-tests) quarantines dashboard test files that exercise SQLite-only behavior. knowledge-index.test.ts asserts the knowledge_pages schema via PRAGMA table_info and sqlite_master on the SQLite store, with no PostgreSQL equivalent at this layer. Mirrored in scripts/lib/test-quarantine.json; will be DELETED when the SQLite code is removed.
 */
 /*
-FNXC:DashboardTestQuarantine 2026-06-26-13:16:
-FN-7068 rescued DevServerView.mobile before the deletion deadline by realigning its mobile CSS assertion to the split preview-header and launcher-copy rules in DevServerView.css. Keep this quarantine list empty until a new flaky dashboard file is added with a matching ledger entry.
+FNXC:DashboardTestQuarantine 2026-07-14-07:15:
+The 16 dashboard test files quarantined on 2026-06-25 (cutover batch) were
+deleted per the AGENTS.md deletion ratchet (14 days expired, not rescued).
+Ledger entries removed from scripts/lib/test-quarantine.json in the same commit.
+The array stays empty; add new entries here only with a matching ledger row.
 */
 const quarantinedDashboardTests: string[] = [];
 
@@ -541,6 +540,19 @@ export default defineConfig({
       "@fusion-plugin-examples/grok-runtime": resolve(
         __dirname,
         "../../plugins/fusion-plugin-grok-runtime/src/index.ts",
+      ),
+      /*
+      FNXC:OmpAcp 2026-07-11-23:35:
+      runtime-provider-probes.ts imports probeOmpBinary from @fusion-plugin-examples/omp-runtime.
+      Source aliases avoid missing dist/ on a source checkout.
+      */
+      "@fusion-plugin-examples/omp-runtime/probe": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-omp-runtime/src/probe.ts",
+      ),
+      "@fusion-plugin-examples/omp-runtime": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-omp-runtime/src/index.ts",
       ),
       "@fusion-plugin-examples/roadmap/roadmap-suggestions": resolve(
         __dirname,

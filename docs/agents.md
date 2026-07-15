@@ -10,6 +10,9 @@ Agent-facing docs must preserve the workflow movement boundary: agents can assig
 
 FNXC:WorkflowRouting 2026-06-30-09:20:
 Permanent agents and the published extension now have governed workflow authoring, settings, trait-inspection, and selection tools; docs must describe the broad tool surface while preserving the narrow routing permission boundary.
+
+FNXC:WorkflowAuthoringTools 2026-07-12-00:00:
+Workflow validation is a read-only authoring support tool: agents can run the create/update validator and inspect typed failures, but the tool must not persist workflow rows or count as a mutation gate.
 -->
 
 ## CLI session actions
@@ -37,17 +40,19 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 - Dashboard chat and planning sessions with a scoped task store expose `fn_task_document_write` and `fn_task_document_read`; because neither lane has an ambient task, both tools require an explicit `task_id`.
 - Agent workflow-routing tools follow an intent boundary: agents may select or change a task workflow only when the user explicitly requested that workflow or when the agent created the task. Executors must not call `fn_workflow_select` to reroute the task they are executing unless the task instructions or a user steering comment explicitly asks for the workflow change. Lanes without an ambient task, including dashboard chat/planning and published/pi extension calls outside a task, must pass an explicit `task_id`; task-bound executor paths may default to the current task.
 - Executor, heartbeat, and dashboard chat sessions expose artifact registry tools so agents can publish and inspect multi-type deliverables without relying on the dashboard gallery. Planning sessions intentionally exclude artifact tools until they can thread the existing `MessageStore` dependency.
-- Permanent/custom heartbeat agents and the published/pi extension receive the broad coordination and work-discovery tool surface instead of a narrowly curated subset: read-only task discovery (`fn_task_list`, `fn_task_show`, `fn_task_search`) for work discovery and duplicate avoidance, workflow discovery and authoring (`fn_workflow_list`, `fn_workflow_get`, `fn_workflow_create`, `fn_workflow_update`, `fn_workflow_delete`, `fn_workflow_settings`, `fn_trait_list`), governed research (`fn_research_run`, `fn_research_list`, `fn_research_get`, `fn_research_cancel`), structured clarification (`fn_ask_question`), artifact, memory, messaging, goal, evaluation, identity, and delegation tools. Task-scoped heartbeat sessions also expose current-task workflow selection and promotion (`fn_workflow_select`, `fn_task_promote`); no-task heartbeats omit those because they have no ambient task, while no-task extension/chat/planning lanes expose `fn_workflow_select` but require explicit `task_id`. Workflow creation, updates, settings writes, deletion, and selection remain permission-gated task/agent mutations even when the tools are exposed in the lane. Prompt-injectable lanes strip workflow approval-bypass flags during `fn_workflow_create`/`fn_workflow_update`; executor-owner paths are the only authoring path that may preserve those flags. Executor-only worktree/workspace tools such as `fn_run_verification` and `fn_acquire_repo_worktree` remain out of the ambient heartbeat lane until that lane owns the required worktree/workspace context. The task read tools are store-backed, text-only, and action-gate-recognized as read-only; dangerous actions are controlled at invocation time by each agent's `AgentPermissionPolicy` through the action gate (allow / require approval / block), not by withholding governed tools from the session.
+- Permanent/custom heartbeat agents and the published/pi extension receive the broad coordination and work-discovery tool surface instead of a narrowly curated subset: read-only task discovery (`fn_task_list`, `fn_task_show`, `fn_task_search`) for work discovery and duplicate avoidance, workflow discovery and authoring (`fn_workflow_list`, `fn_workflow_get`, `fn_workflow_validate`, `fn_workflow_create`, `fn_workflow_update`, `fn_workflow_delete`, `fn_workflow_settings`, `fn_trait_list`), governed research (`fn_research_run`, `fn_research_list`, `fn_research_get`, `fn_research_cancel`), structured clarification (`fn_ask_question`), artifact, memory, messaging, goal, evaluation, identity, and delegation tools. Task-scoped heartbeat sessions also expose current-task workflow selection and promotion (`fn_workflow_select`, `fn_task_promote`); no-task heartbeats omit those because they have no ambient task, while no-task extension/chat/planning lanes expose `fn_workflow_select` but require explicit `task_id`. Workflow creation, updates, settings writes, deletion, and selection remain permission-gated task/agent mutations even when the tools are exposed in the lane. Prompt-injectable lanes strip workflow approval-bypass flags during `fn_workflow_create`/`fn_workflow_update`; executor-owner paths are the only authoring path that may preserve those flags. Executor-only worktree/workspace tools such as `fn_run_verification` and `fn_acquire_repo_worktree` remain out of the ambient heartbeat lane until that lane owns the required worktree/workspace context. The task read tools are store-backed, text-only, and action-gate-recognized as read-only; dangerous actions are controlled at invocation time by each agent's `AgentPermissionPolicy` through the action gate (allow / require approval / block), not by withholding governed tools from the session.
 - `agent.taskId` is an active-execution linkage, not durable ownership. It may legitimately point at a `todo`/`triage` task only while the agent has live run or executor-active proof; task-move sync and self-healing clear stale parked, terminal, or unresolved links otherwise. `fn_list_agents` and `fn_agent_show` therefore include column context in the human-readable `Current Task` line, such as `(triage)`, `(in-progress)`, `(not active — done)`, or `(unresolved)`, so coordinators can distinguish transient planning ownership from drift.
+- `fn_agent_show` prints `Last Error`, `Pause Reason`, and compact `Error Recovery` counter details when present. `fn_list_agents` prints the same diagnostics only for agents currently in `error` or `paused`, keeping healthy rows compact while making durable-agent recovery state inspectable without direct DB/log access.
 
 ### Artifact registry tools
 
 Artifact tools operate on the shared artifact registry, so artifacts are visible across agents and tasks when the caller has the artifact ID or can discover it through filters.
 
-- `fn_artifact_register` registers a `document`, `image`, `video`, `audio`, or `other` artifact with `title`, optional `description`, optional `mimeType`, optional inline text `content`, optional `uri`/path reference, and optional `taskId`. Tool callers should provide either inline `content` or a `uri`/path reference for media stored elsewhere. Executor/heartbeat sessions infer the registering agent as `authorId`; dashboard chat uses the `dashboard-chat` author and requires `task_id` because chat has no ambient task.
+- `fn_artifact_register` registers a `document`, `image`, `video`, `audio`, or `other` artifact with `title`, optional `description`, optional `mimeType`, and exactly one payload source: inline text `content`, a local file `path` (preferred for media the agent saved to disk — screenshots, wireframes, mockups, screen recordings, PDF exports; the file is copied into managed artifact storage with MIME inference and image/video/PDF signature validation), base64 `dataBase64` image bytes, or a `uri` reference for media stored elsewhere. HTML mockups register as `type="document"` + `mimeType="text/html"` (inline `content` or `path`) and render as live sandboxed previews in the Artifacts view; PDFs (`mimeType="application/pdf"`, `path`) open in an embedded viewer; videos stream with range-request seeking. Executor sessions resolve relative `path` values against the task worktree and default `taskId` to the executing task; task-scoped heartbeat sessions resolve relative `path` values against the acquired heartbeat worktree and default `taskId` to the assigned task; dashboard chat uses the `dashboard-chat` author and requires `task_id` because chat has no ambient task. `path` values are containment-checked before any file read: the realpath-canonicalized file must stay inside the session's workspace directory (`baseDir`) or the OS temp directory (where browser/screenshot tooling writes captures); relative paths are rejected outright in lanes without a workspace directory (dashboard chat, no-task heartbeats), which are bounded to tmpdir-only absolute paths.
 - `fn_artifact_list` lists artifacts across agents and tasks with optional `type`, `authorId`, `taskId`, `search`, `limit`, and `offset` filters. Dashboard chat's scoped variant requires `task_id` and otherwise supports `type`, `authorId`, `search`, `limit`, and `offset` for that task.
 - `fn_artifact_view` fetches one artifact by `id`, returning registry metadata plus inline `content` when present or the stored `uri`/path reference for media artifacts.
 - Successful registration emits a best-effort `system` → `user` inbox notification to `DASHBOARD_USER_ID` with `artifactId`, `artifactType`, `title`, `authorId`, and optional `taskId` metadata. Notification delivery failures are logged and must never fail or roll back the artifact registration.
+- On first startup under Fusion `0.59.x`, the engine also sends one best-effort `system` → `user` inbox notice per project about the upcoming embedded-Postgres storage migration, keyed by `metadata.kind = "postgres-migration-notice"` so restarts do not duplicate it.
 
 For the user-facing gallery and notification UX, see [Artifacts View](./dashboard-guide.md#artifacts-view) and [Mailbox View](./dashboard-guide.md#mailbox-view). For storage layout and hydration semantics, see [Artifact registry](./storage.md#artifact-registry-fn-6777).
 
@@ -351,25 +356,25 @@ If a heartbeat cannot create/run a session due to unavailable provider credentia
 
 ### Durable-agent transient error auto-recovery
 
-Self-healing may auto-recover **durable (non-ephemeral)** agents stuck in `state="error"` when all eligibility checks pass:
+Durable-agent error recovery is coordinated between the heartbeat timer path and the self-healing sweep. Either entry path may auto-recover **durable (non-ephemeral)** agents stuck in `state="error"` only when all eligibility checks pass:
 
 - agent is non-ephemeral (`isEphemeralAgent(...) === false`)
 - heartbeat runtime is enabled (`runtimeConfig.enabled !== false`)
 - no active heartbeat execution is already running for the agent
 - `lastError` classifies as transient network/infrastructure failure
 - `lastError` is **not** operator-actionable (credentials/model/billing-style failures)
+- stale worktree/module-resolution failures remain suppressed instead of auto-restarted
 
-When eligible, self-healing uses bounded retries with persisted metadata at `agent.metadata.durableErrorRecovery`:
+Both paths use the same persisted retry budget, `agent.metadata.heartbeatErrorRecovery.consecutiveAttempts`, with the default cap of `5` attempts (settings-overridable through `heartbeatErrorRecoveryAttempts`). The timer path provides fast recovery on the agent's own interval; the self-healing sweep is the backstop for stale `error` agents whose timer was lost, delayed, or did not re-tick. Engine startup adds a clean-slate reset before the steady-state sweep: eligible `state="error"` agents and durable agents parked with `pauseReason="error-retry-exhausted"` have `heartbeatErrorRecovery` and legacy `durableErrorRecovery` reset, `lastError`/exhaustion pause state cleared, and their heartbeat re-armed immediately. That restart-triggered reset intentionally bypasses the sweep's staleness, cooldown, and exhausted-budget gates because restarting the engine is treated like an operator Retry click. Self-healing still persists `agent.metadata.durableErrorRecovery` for sweep-specific cooldown and stale-path details:
 
 - exponential cooldown (`30s` base, capped at `15m`)
-- retry budget cap (`5` attempts)
-- persisted `attempts`, `lastAttemptAt`, `nextRetryAt`, `exhausted`, and `lastReason`
+- persisted `attempts`, `lastAttemptAt`, `nextRetryAt`, `exhausted`, `lastReason`, and stale missing-module path counters
 
-On restart attempts, the runtime triggers the normal heartbeat pipeline with `source: "automation"` and a structured `contextSnapshot.selfHealing` payload so operators can audit recovery runs in heartbeat history.
+On restart attempts, the runtime triggers the normal heartbeat pipeline with `source: "automation"` and a structured `contextSnapshot.selfHealing` payload so operators can audit recovery runs in heartbeat history. The sweep flips `error → active` before calling `executeHeartbeat`, so the heartbeat run does not re-enter run-entry error recovery or double-count the same recovery.
 
-Self-healing intentionally leaves agents in `error` (no auto-restart) when blockers are operator-actionable or non-transient, when cooldown has not elapsed, when active execution is present, or when retry budget is exhausted.
+Self-healing intentionally refuses to auto-restart agents when blockers are operator-actionable or non-transient. Runtime-enabled durable agents in that terminal bucket are parked `paused` with `pauseReason="error-unrecoverable"` so operators see that credential/model/configuration repair is required; transient retry-budget exhaustion still parks with `pauseReason="error-retry-exhausted"`. Stale worktree/module-resolution suppression, active execution, runtime-disabled agents, ephemeral agents, user-paused agents, and `error-unrecoverable` parks remain excluded from both the steady-state retry path and the startup clean-slate reset; cooldown windows and exhausted-budget gates are bypassed only by the startup reset for otherwise recoverable agents.
 
-**Manager presence does not gate this sweep (FN-7672):** eligibility for durable `state="error"` recovery does *not* depend on whether the agent's `reportsTo` manager is present/active. `HeartbeatTriggerScheduler` clears timers entirely once an agent enters `state="error"`, so this recovery sweep is the *only* path back to a healthy heartbeat for a durable agent stuck in `error` — a present manager does not make the agent any less stuck. (A separate, unrelated `managerMissing` check still gates recovery of orphaned `state="running"` agents — a different failure mode where a live process's manager row was deleted.) FN-7672 root-caused a correlated 4-agent error cluster reporting to one active manager (a transient upstream auth/session blip) that could never have self-healed under the old manager-missing-only gate, even once the underlying cause resolved.
+**Manager presence does not gate this sweep (FN-7672/FN-7844):** eligibility for durable `state="error"` recovery does *not* depend on whether the agent's `reportsTo` manager is present/active. The timer path is now the fast path for heartbeat-managed error agents, while this recovery sweep remains the maintenance backstop for durable agents that are still stale in `error`; a present manager does not make the agent any less stuck. (A separate, unrelated `managerMissing` check still gates recovery of orphaned `state="running"` agents — a different failure mode where a live process's manager row was deleted.) FN-7672 root-caused a correlated 4-agent error cluster reporting to one active manager (a transient upstream auth/session blip) that could never have self-healed under the old manager-missing-only gate, even once the underlying cause resolved.
 
 - **Timer trigger:** run completes and the durable agent returns to `state="active"` (recoverable soft-fail).
 - **Assignment / on-demand trigger:** run completes with `resultJson.actionRequired = true`, then the durable agent is paused with `pauseReason="heartbeat-model-unavailable"` and `lastError` set to actionable credential guidance (including the missing provider name when detectable).
@@ -599,6 +604,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
 | `engineerBacklogAutoClaim` | `boolean` | inherits project (`false`) | Opt this engineer-role agent into no-task backlog auto-claim for implementation tasks. Executor-role agents remain eligible by default; explicit routing/delegation is unchanged. |
+| `assignmentPolicy` | `"auto" \| "explicit-only" \| "none"` | `"auto"` | Per-agent task-routing eligibility (issue #2015). `auto` keeps default behavior. `explicit-only` removes the agent from the scheduler auto-assign pool and backlog auto-claim but still accepts direct assignment/delegation. `none` guarantees the agent can never be bound to an implementation task by ANY path — scheduler, auto-claim, delegation, checkout, or `override=true` — use it for liaison/observer agents whose mandate excludes product work. Enforced at every binding primitive (`claimTaskForAgent`, `checkoutTask`, `assignTask`, inbox selection, `fn_delegate_task`, dashboard assign/checkout routes). |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Per-agent override for no-task candidate lines rendered in prompts. Integer `0-10`; `0` suppresses candidate injection. |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
@@ -923,6 +929,10 @@ fn message delete MSG-123
 fn agent mailbox AGENT-001
 ```
 
+## Permanent agent playbooks
+
+Worked manager/IC/message/blocked/no-task scenarios live in [Permanent Agent Heartbeat Playbooks](./agents-playbooks.md). Prefer those examples over re-deriving tick behavior from engine source.
+
 ## Heartbeat Prompt Composition and Autonomous Run Behavior
 
 Heartbeat runs are composed from multiple prompt layers so each wake has full identity and operating context:
@@ -943,9 +953,15 @@ Heartbeat runs are composed from multiple prompt layers so each wake has full id
 3. **Execution prompt framing**
    - `Identity Snapshot` block (agent ID/role + loaded soul/instructions/memory preview; `memory: loaded` when either inline memory or workspace `MEMORY.md` is present)
    - `Wake Delta` block (source, trigger detail, wake reason, assignment/comments/messages)
+   - Optional multi-assign inventory under Wake Delta (`your assigned tasks (coordination inventory…)`) ranked from `assignedAgentId` rows (cap 8); not an implement-from-heartbeat queue
    - Heartbeat procedure block (task-scoped or no-task variant, plus optional per-agent procedure override file)
+   - System prompts always include **Critical Rules** (one action, no implement-from-heartbeat, checkout no-retry, blocked dedup) so custom `HEARTBEAT.md` cannot erase them
 
 This structure ensures every run re-anchors on identity, wake reason, and current context before taking action.
+
+**Heartbeat skill policy:** heartbeat sessions load the waking agent’s `metadata.skills` plus enabled plugin skills. There is **no** role fallback to the published `fusion` operator skill on the heartbeat lane.
+
+**Default HEARTBEAT.md seed:** `ensureDefaultHeartbeatProcedureFile` is create-if-missing only. Operator edits to an existing per-agent procedure file are preserved; upgrade without force does not overwrite content.
 
 #### Wake reason values (message wakes)
 
@@ -1269,17 +1285,19 @@ Heartbeat runs from the Agents panel run on a **separate control-plane lane** th
 Cadence:
 - **Immediate startup audit**: runs once in `start()` after lifecycle watchers are attached
 - **Periodic audit**: runs every 60s while the scheduler is active
-- **Cleanup**: periodic sweep interval is cleared in `stop()`
+- **FN-7939 audit watchdog**: an independent watchdog supervises the 60s audit driver and re-arms/runs it when the audit liveness timestamp is stale for a bounded multiple of the cadence
+- **Cleanup**: periodic sweep and watchdog intervals are cleared in `stop()`
 
 Repair eligibility:
 - Durable (non-ephemeral/task-worker) agent
 - `runtimeConfig.enabled !== false`
 - Agent state is tickable: `active`, `running`, or `idle`
-- Agent is missing from the scheduler's in-memory `timers` map
+- Agent is missing from the scheduler's in-memory `timers` map, or has a present timer entry but `lastHeartbeatAt` is stale beyond the repair threshold (zombie timer)
 
 Repair outcomes:
 - **Missing timer, not stale**: timer is re-armed and INFO diagnostics are logged (`agentId`, resolved interval, elapsed time since `lastHeartbeatAt`)
-- **Missing timer, stale**: timer is re-armed, WARN diagnostics are logged, and `agent.metadata.heartbeatTimerRepair` is updated (`repairedAt`, `staleAtRepair`, `elapsedMs`, `staleThresholdMs`)
+- **Missing/present timer, stale**: timer is re-armed, WARN diagnostics are logged, and `agent.metadata.heartbeatTimerRepair` is updated (`repairedAt`, `staleAtRepair`, `staleRepairReason`)
+- **Repeated non-advancing zombie repair**: after the bounded scheduler threshold, metadata includes the consecutive count/escalation flag and logs `reason=heartbeat-rearm-nonadvancing-escalated` instead of silently churning forever
 
 Stale threshold:
 - Repair staleness defaults to **`2 × heartbeatIntervalMs`**

@@ -20,6 +20,13 @@ vi.mock("lucide-react", () => ({
   RotateCw: () => <svg />,
   Zap: () => <svg />,
   AlertTriangle: () => <svg />,
+  // FNXC:PriorityIconsMock 2026-07-12 — utils/priorityIndicator.tsx builds its PRIORITY_INDICATORS map at
+  // module load (low=ArrowDown, normal=Flag, high=ArrowUp, urgent=TriangleAlert). TaskCard imports it
+  // transitively, so the mock MUST export all four or the suite fails to load with a "[vitest] No export" error.
+  ArrowDown: () => <svg />,
+  Flag: () => <svg />,
+  ArrowUp: () => <svg />,
+  TriangleAlert: () => <svg />,
 }));
 
 vi.mock("../../hooks/useTaskDiffStats", () => ({
@@ -48,6 +55,19 @@ vi.mock("../../api", () => ({
 
 vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: vi.fn(async () => true) }),
+}));
+/*
+FNXC:RuntimeFallbackUI 2026-07-11-00:00:
+RuntimeFallbackBadge (commit 0bed997af / FUX-022) calls the shared useToast() hook directly. TaskCard
+embeds RuntimeFallbackBadge and this file renders <TaskCard> outside a ToastProvider, so mock the hook
+to avoid "useToast must be used within ToastProvider", matching the TaskCard.test.tsx pattern.
+*/
+vi.mock("../../hooks/useToast", () => ({
+  useToast: () => ({
+    addToast: vi.fn(),
+    removeToast: vi.fn(),
+    toasts: [],
+  }),
 }));
 
 const noop = () => {};

@@ -16,6 +16,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { StepSessionExecutor } from "../step-session-executor.js";
 import { executorLog } from "../logger.js";
 import { withRateLimitRetry } from "../rate-limit-retry.js";
+import { MAX_RECOVERY_RETRIES } from "../recovery-policy.js";
+import { executingTaskLock } from "../active-session-registry.js";
 import { runVerificationCommand as mockedRunVerificationCommand } from "../verification-utils.js";
 import {
   createMockStore,
@@ -68,7 +70,7 @@ describe("Workflow Steps Execution", () => {
     }) as any);
   }
 
-  it("exposes read-only artifact discovery tools even without an assigned agent", async () => {
+  it("exposes artifact discovery and register tools even without an assigned agent", async () => {
     const store = createMockStore();
     const task = {
       id: "FN-ART-1",
@@ -108,12 +110,12 @@ describe("Workflow Steps Execution", () => {
     await executor.execute(task as any);
 
     /*
-    FNXC:ArtifactRegistry 2026-06-21-07:04:
-    Read-only artifact list/view tools are cross-agent discovery surfaces, so legacy or unassigned executor sessions still receive them; only fn_artifact_register requires an assigned author id.
+    FNXC:ArtifactRegistry 2026-07-12-07:00:
+    FN-7790 (commits 9024f3a63 / a8eafbbb1: agent-created visual artifacts end-to-end) made fn_artifact_register available for ALL executor sessions, not just assigned-agent sessions, so artifact creation works even without an assigned author. The previous gate (register requires assigned agent) was intentionally removed. Update the assertion to reflect the new behavior.
     */
     expect(toolNames).toContain("fn_artifact_list");
     expect(toolNames).toContain("fn_artifact_view");
-    expect(toolNames).not.toContain("fn_artifact_register");
+    expect(toolNames).toContain("fn_artifact_register");
   });
 
   it("requeues to todo after 3 retries when the agent exits without calling fn_task_done", async () => {
@@ -244,6 +246,109 @@ describe("Workflow Steps Execution", () => {
       expect.objectContaining({ id: "FN-001" }),
       expect.objectContaining({ message: "Agent finished without calling fn_task_done (after 3 retries)" }),
     );
+  });
+
+  it("clears a stale assistant-continuation resume session and requeues without marking the task failed", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-ASSISTANT-STALE",
+      title: "Stale assistant continuation",
+      description: "Test stale assistant continuation recovery",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "in-progress" as const }],
+      currentStep: 0,
+      log: [],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      sessionFile: "/tmp/stale-session.jsonl",
+      worktree: "/tmp/test/.worktrees/fn-assistant-stale",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask.mockResolvedValue(task as any);
+    store.moveTask.mockImplementation(async () => {
+      expect(executingTaskLock.has("FN-ASSISTANT-STALE")).toBe(false);
+      expect((executor as any).activeWorktrees.has("FN-ASSISTANT-STALE")).toBe(false);
+      return task as any;
+    });
+
+    const staleSession = {
+      prompt: vi.fn().mockRejectedValue(new Error("Cannot continue from message role: assistant")),
+      dispose: vi.fn(),
+      subscribe: vi.fn(),
+      on: vi.fn(),
+      sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+      state: {},
+    };
+    mockedCreateFnAgent.mockResolvedValue({ session: staleSession } as any);
+
+    const onError = vi.fn();
+    const executor = new TaskExecutor(store, "/tmp/test", { onError });
+    const markGraphExecuteSelfRequeued = vi.spyOn(executor as any, "markGraphExecuteSelfRequeued");
+    (executor as any).activeWorktrees.set("FN-ASSISTANT-STALE", new Set([task.worktree]));
+
+    await executor.execute(task as any);
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-ASSISTANT-STALE", {
+      sessionFile: null,
+      recoveryRetryCount: 1,
+      nextRecoveryAt: expect.any(String),
+    });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-ASSISTANT-STALE", {
+      sessionFile: null,
+      status: null,
+      error: null,
+    });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-ASSISTANT-STALE", "todo", { preserveResumeState: true });
+    expect(markGraphExecuteSelfRequeued).toHaveBeenCalledWith("FN-ASSISTANT-STALE");
+    expect(executingTaskLock.has("FN-ASSISTANT-STALE")).toBe(false);
+    expect((executor as any).activeWorktrees.has("FN-ASSISTANT-STALE")).toBe(false);
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("fails a repeated stale assistant-continuation after the fresh-session retry budget is exhausted", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-ASSISTANT-STALE-EXHAUSTED",
+      title: "Repeated stale assistant continuation",
+      description: "Test bounded stale assistant continuation recovery",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "in-progress" as const }],
+      currentStep: 0,
+      recoveryRetryCount: MAX_RECOVERY_RETRIES,
+      log: [],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      sessionFile: "/tmp/stale-session.jsonl",
+      worktree: "/tmp/test/.worktrees/fn-assistant-stale-exhausted",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask.mockResolvedValue(task as any);
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockRejectedValue(new Error("Cannot continue from message role: assistant")),
+        dispose: vi.fn(),
+        subscribe: vi.fn(),
+        on: vi.fn(),
+        sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+        state: {},
+      },
+    } as any);
+    const onError = vi.fn();
+    const executor = new TaskExecutor(store, "/tmp/test", { onError });
+
+    await executor.execute(task as any);
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-ASSISTANT-STALE-EXHAUSTED", {
+      status: "failed",
+      error: "Cannot continue from message role: assistant",
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
+    });
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-ASSISTANT-STALE-EXHAUSTED", "todo", expect.anything());
+    expect(onError).toHaveBeenCalledOnce();
   });
 
   describe("FN-5436: pending-review skip on no-fn_task_done exit", () => {
@@ -430,7 +535,8 @@ describe("Workflow Steps Execution", () => {
       await executor.execute(baseTask as any);
 
       expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-5436-D", { workflowStepRetries: undefined, taskDoneRetryCount: null });
+      // FNXC:ExecutorRetry 2026-07-13: Use objectContaining because production now passes additional fields (executeRequeueLoopCount, executeRequeueLoopSignature, branch, worktree, sessionFile) in the same updateTask call.
+      expect(store.updateTask).toHaveBeenCalledWith("FN-5436-D", expect.objectContaining({ workflowStepRetries: undefined, taskDoneRetryCount: null }));
       expect(store.updateTask).not.toHaveBeenCalledWith("FN-5436-D", {
         status: "failed",
         error: "executor-exit-while-review-pending",

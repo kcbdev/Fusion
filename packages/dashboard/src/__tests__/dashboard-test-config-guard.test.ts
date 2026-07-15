@@ -11,7 +11,7 @@ const dashboardRoot = join(__dirname, "..", "..");
 const dashboardPackageJsonPath = join(dashboardRoot, "package.json");
 const vitestConfigPath = join(dashboardRoot, "vitest.config.ts");
 const dashboardQualityScriptPath = join(dashboardRoot, "scripts", "run-quality-tests.mjs");
-const qualityParityBaselineFileCount = 746;
+const qualityParityBaselineFileCount = 726;
 
 interface QualityLane {
   name: string;
@@ -156,7 +156,6 @@ describe("dashboard test config guard", () => {
       expect(vitestConfig).toContain(`name: \"${projectName}\"`);
     }
 
-    expect(vitestConfig).toContain('"app/__tests__/spinner-animation.css.test.ts"');
     expect(vitestConfig).toContain('"scripts/__tests__/{run-quality-tests,run-vitest-with-heap}.test.ts"');
   });
 
