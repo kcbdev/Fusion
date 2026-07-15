@@ -32,7 +32,7 @@ import { schedulerLog } from "./logger.js";
 import { type PrMonitor, type PrComment } from "./pr-monitor.js";
 import { reconcileMissionFeatureState } from "./mission-feature-sync.js";
 import { evaluateSpecStaleness, getPromptPath } from "./spec-staleness.js";
-import { resolveEffectiveNode } from "./effective-node.js";
+import { resolveEffectiveNode, type EffectiveNode } from "./effective-node.js";
 import { applyUnavailableNodePolicy, decideOwningNodeHandoff } from "./node-routing-policy.js";
 import type { NodeDispatchValidationResult } from "./node-dispatch-validation.js";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
@@ -46,6 +46,20 @@ import { isWorkflowColumnsEnabled, DEFAULT_WORKFLOW_POOL_ID, resolveWorkflowIrFo
 import { runHoldReleaseSweep, isUnplannedForExecution, type SlotReservation } from "./hold-release.js";
 import { moveTaskToReplanColumn } from "./replan-target.js";
 import { evaluateParkedAgentTaskLink } from "./task-agent-sync.js";
+
+/*
+FNXC:WorkflowScheduling 2026-07-15-12:55:
+Every dispatch pass resolves a routing node, so logging each resolution at info level reprinted `routed to node=local (source=local)` for every task on every poll and buried real scheduler events in the TUI log pane.
+Local routing is the default nobody needs told about: it is debug-only (`FUSION_DEBUG=scheduler`). Remote routing stays at info because it explains where work actually went and is what an operator reaches for when a task runs on the wrong host.
+*/
+function logTaskRouting(taskId: string, node: EffectiveNode): void {
+  const message = `Task ${taskId} routed to node=${node.nodeId ?? "local"} (source=${node.source})`;
+  if (node.nodeId === undefined) {
+    schedulerLog.debug(message);
+    return;
+  }
+  schedulerLog.log(message);
+}
 
 function shouldRunWorkflowColumnScheduler(_settings: Settings): boolean {
   /*
@@ -1902,7 +1916,7 @@ export class Scheduler {
 
         // Resolve effective node for routing
         let effectiveNode = resolveEffectiveNode(freshTask, settings);
-        schedulerLog.log(`Task ${task.id} routed to node=${effectiveNode.nodeId ?? "local"} (source=${effectiveNode.source})`);
+        logTaskRouting(task.id, effectiveNode);
 
         // Enforce dispatch configuration validation before node-health fallback logic.
         if (effectiveNode.nodeId !== undefined && this.options.validateNodeDispatch) {
@@ -2426,7 +2440,7 @@ export class Scheduler {
           }
 
           let effectiveNode = resolveEffectiveNode(freshTask, settings);
-          schedulerLog.log(`Task ${task.id} routed to node=${effectiveNode.nodeId ?? "local"} (source=${effectiveNode.source})`);
+          logTaskRouting(task.id, effectiveNode);
 
           if (effectiveNode.nodeId !== undefined && this.options.validateNodeDispatch) {
             const nodeValidation = await this.options.validateNodeDispatch(effectiveNode.nodeId);
