@@ -844,6 +844,30 @@ export function getWorkflowSettingValuesImpl(store: TaskStore, workflowId: strin
     }
 }
 
+/**
+ * FNXC:WorkflowModelLanes 2026-07-14-16:26:
+ * PostgreSQL-backed workflow execution must read the migrated per-project workflow values instead of the synchronous backend fallback. Model lanes, fallback lanes, thinking levels, and other workflow policy are authoritative in this row after the settings hard-move.
+ */
+export async function getWorkflowSettingValuesAsyncImpl(
+    store: TaskStore,
+    workflowId: string,
+    projectId: string,
+  ): Promise<Record<string, unknown>> {
+    if (!store.backendMode) return store.getWorkflowSettingValues(workflowId, projectId);
+    const rows = await store.asyncLayer!.db
+      .select({ values: schema.project.workflowSettings.values })
+      .from(schema.project.workflowSettings)
+      .where(and(
+        eq(schema.project.workflowSettings.workflowId, workflowId),
+        eq(schema.project.workflowSettings.projectId, projectId),
+      ))
+      .limit(1);
+    const values = rows[0]?.values;
+    return values && typeof values === "object" && !Array.isArray(values)
+      ? values as Record<string, unknown>
+      : {};
+}
+
 export function parseWorkflowPromptOverrideJsonImpl(store: TaskStore, raw: string | null | undefined): Record<string, string> {
     if (!raw) return {};
     try {
@@ -862,22 +886,54 @@ export function parseWorkflowPromptOverrideJsonImpl(store: TaskStore, raw: strin
     }
 }
 
+/** FNXC:WorkflowModelLanes 2026-07-14-16:26: Async workflow resolution must retain migrated project-scoped prompt overrides in PostgreSQL backend mode. */
+export async function getWorkflowPromptOverridesAsyncImpl(
+    store: TaskStore,
+    workflowId: string,
+    projectId: string,
+  ): Promise<Record<string, string>> {
+    if (!store.backendMode) return store.getWorkflowPromptOverrides(workflowId, projectId);
+    const rows = await store.asyncLayer!.db
+      .select({ overrides: schema.project.workflowPromptOverrides.overrides })
+      .from(schema.project.workflowPromptOverrides)
+      .where(and(
+        eq(schema.project.workflowPromptOverrides.workflowId, workflowId),
+        eq(schema.project.workflowPromptOverrides.projectId, projectId),
+      ))
+      .limit(1);
+    const overrides = rows[0]?.overrides;
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return {};
+    const out: Record<string, string> = {};
+    for (const [nodeId, value] of Object.entries(overrides as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim()) out[nodeId] = value;
+    }
+    return out;
+}
+
 export async function updateWorkflowPromptOverridesImpl(store: TaskStore,
     workflowId: string,
     projectId: string,
     patch: Record<string, string | null | undefined>,
   ): Promise<Record<string, string>> {
     /*
-     * FNXC:SqliteFinalRemoval 2026-06-26:
-     * P1 fix: no backendMode branch existed, so this threw in PG mode. In
-     * backend mode, read-merge-upsert the workflow_prompt_overrides row via
-     * Drizzle inside a transactionImmediate (preserving the lost-update guard
-     * the sync path's transactionImmediate provides). overrides is jsonb.
+     * FNXC:WorkflowModelLanes 2026-07-14-16:26:
+     * Keep PostgreSQL prompt override patches on the same authoritative transaction path as workflow settings; a backend sync-default read must never erase sibling overrides.
      */
     if (store.backendMode) {
       const layer = store.asyncLayer!;
-      return layer.transactionImmediate(async () => {
-        const current = await store.getWorkflowPromptOverrides(workflowId, projectId);
+      return layer.transactionImmediate(async (tx) => {
+        const rows = await tx
+          .select({ overrides: schema.project.workflowPromptOverrides.overrides })
+          .from(schema.project.workflowPromptOverrides)
+          .where(and(
+            eq(schema.project.workflowPromptOverrides.workflowId, workflowId),
+            eq(schema.project.workflowPromptOverrides.projectId, projectId),
+          ))
+          .limit(1);
+        const rawCurrent = rows[0]?.overrides;
+        const current = rawCurrent && typeof rawCurrent === "object" && !Array.isArray(rawCurrent)
+          ? rawCurrent as Record<string, string>
+          : {};
         const next: Record<string, string> = { ...current };
         for (const [nodeId, value] of Object.entries(patch)) {
           if (typeof value !== "string" || value.trim().length === 0) {
@@ -888,7 +944,7 @@ export async function updateWorkflowPromptOverridesImpl(store: TaskStore,
         }
 
         const now = new Date().toISOString();
-        await layer.db
+        await tx
           .insert(schema.project.workflowPromptOverrides)
           .values({
             workflowId,

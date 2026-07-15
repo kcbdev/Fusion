@@ -15,8 +15,9 @@ import type {
   MessageStore,
   AgentLogEntry,
   TaskIdIntegrityReport,
+  RunAuditEvent,
 } from "@fusion/core";
-import { AgentStore, ChatStore, setRunningAgentCountSource } from "@fusion/core";
+import { AgentStore, ChatStore, queryRunAuditEvents, setRunningAgentCountSource } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
 import { createSSE, disconnectSSEClient, markSSEClientAlive } from "./sse.js";
@@ -1826,8 +1827,23 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     const startIso = new Date(effectiveStartMs).toISOString();
     const endIso = new Date(nowMs).toISOString();
 
+    const auditFilter = { startTime: startIso, endTime: endIso, limit: 50_000 };
+    const asyncLayer = scopedStore.getAsyncLayer();
+    /*
+    FNXC:ReliabilityHealth 2026-07-14-16:13:
+    Backend-mode Reliability must use the authoritative async run-audit reader. The synchronous reader is a SQLite/test compatibility surface and intentionally degrades to an empty result under PostgreSQL.
+    */
+    const runAuditEventsPromise: Promise<RunAuditEvent[]> = asyncLayer
+      ? queryRunAuditEvents(asyncLayer.db, auditFilter).then((events) => events.map((event) => ({
+          ...event,
+          domain: event.domain as RunAuditEvent["domain"],
+          mutationType: event.mutationType as RunAuditEvent["mutationType"],
+          taskId: event.taskId ?? undefined,
+          metadata: event.metadata ?? undefined,
+        })))
+      : Promise.resolve(scopedStore.getRunAuditEvents(auditFilter));
     const [runAuditEvents, enteredByDay, bouncedByDay, durationEvents, mergedTaskIds] = await Promise.all([
-      Promise.resolve(scopedStore.getRunAuditEvents({ startTime: startIso, endTime: endIso, limit: 50_000 })),
+      runAuditEventsPromise,
       scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, toColumn: "in-review" }),
       scopedStore.getTaskMovedCountsByDay({ since: startIso, until: endIso, fromColumn: "in-review", toColumn: "in-progress" }),
       scopedStore.getInReviewDurationEvents({ since: startIso, until: endIso }),

@@ -2744,7 +2744,7 @@ export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
 
       if (params.action === "get") {
         try {
-          const stored = store.getWorkflowSettingValues(workflowId, projectId);
+          const stored = await store.getWorkflowSettingValuesAsync(workflowId, projectId);
           const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
           const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
           const orphaned = findOrphanedSettingValues(declarations, stored);

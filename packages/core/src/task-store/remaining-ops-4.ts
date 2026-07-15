@@ -8,6 +8,7 @@
  */
 import {TaskStore, isWorkflowColumnsCompatibilityFlagEnabled} from "../store.js";
 import {resolveEntryColumnId} from "../workflow-reconciliation.js";
+import {resolveWorkflowIrForTask} from "../workflow-ir-resolver.js";
 import * as schema from "../postgres/schema/index.js";
 import type {MoveTaskOptions, MoveTaskInternalOptions} from "../store.js";
 import {TASK_BRANCH_CONTEXT_METADATA_KEY} from "../store.js";
@@ -372,7 +373,10 @@ export async function prepareWorkflowMovePolicyPreflightImpl(store: TaskStore, i
     if (!isWorkflowColumnsCompatibilityFlagEnabled(mergedSettingsForMove)) return undefined;
     if (task.column === toColumn) return undefined;
 
-    const workflowIr = store.resolveTaskWorkflowIrSync(id);
+    /* FNXC:WorkflowModelLanes 2026-07-14-16:31: PostgreSQL move preflight must validate against the task's migrated workflow selection, not the synchronous builtin:coding fallback. */
+    const workflowIr = store.backendMode
+      ? await resolveWorkflowIrForTask(store, id)
+      : store.resolveTaskWorkflowIrSync(id);
     const workflowSignature = serializeWorkflowIr(workflowIr);
     const bypassGuards = store.resolveWorkflowBypassGuards(moveSource, options);
     const fromColumn = task.column;

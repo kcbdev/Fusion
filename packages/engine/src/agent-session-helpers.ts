@@ -559,7 +559,14 @@ export function resolveHeartbeatSessionModels(
   }
 
   const executionSettingsModel = resolveExecutionSettingsModel(settings);
-  const resolvedModel = pickSettingsThenRuntimeModel(executionSettingsModel, assignedAgentRuntimeConfig);
+  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+  /*
+  FNXC:AgentHeartbeat 2026-07-14-16:13:
+  Durable-agent heartbeats must use the complete model assigned to that agent. Shared project execution defaults are only a fallback for an absent or incomplete assignment; otherwise one broken project override can park every heterogeneous agent under the same unrelated provider.
+  */
+  const resolvedModel = hasCompleteRuntimeModel(assignedRuntimeModel)
+    ? assignedRuntimeModel
+    : pickSettingsThenRuntimeModel(executionSettingsModel, assignedAgentRuntimeConfig);
 
   return {
     defaultProvider: resolvedModel.provider,

@@ -5168,7 +5168,9 @@ export class TaskExecutor {
         return false;
       }
       try {
-        selection = this.store.getTaskWorkflowSelection(task.id);
+        selection = typeof this.store.getTaskWorkflowSelectionAsync === "function"
+          ? await this.store.getTaskWorkflowSelectionAsync(task.id)
+          : this.store.getTaskWorkflowSelection(task.id);
       } catch (err) {
         await this.handleGraphFailure(task, {
           disposition: "failed",
@@ -5940,7 +5942,9 @@ export class TaskExecutor {
     if (!isExperimentalFeatureEnabled(settings, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG)) return;
     if (typeof this.store.getTaskWorkflowSelection !== "function") return;
     try {
-      const selection = this.store.getTaskWorkflowSelection(taskId);
+      const selection = typeof this.store.getTaskWorkflowSelectionAsync === "function"
+        ? await this.store.getTaskWorkflowSelectionAsync(taskId)
+        : this.store.getTaskWorkflowSelection(taskId);
       if (!selection) return;
       const def = await this.store.getWorkflowDefinition?.(selection.workflowId);
       if (!def) return;

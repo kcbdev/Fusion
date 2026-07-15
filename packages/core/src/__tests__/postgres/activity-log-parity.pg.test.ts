@@ -83,6 +83,14 @@ pgDescribe("activity log parity (PostgreSQL)", () => {
     await h.adminDb().update(schema.project.activityLog).set({ timestamp: "2026-07-13T20:01:00.000Z" }).where(eq(schema.project.activityLog.id, moved.id));
     await h.adminDb().update(schema.project.activityLog).set({ timestamp: "2026-07-13T20:02:00.000Z" }).where(eq(schema.project.activityLog.id, latest.id));
 
+    expect((await h.adminDb().select({ projectId: schema.project.activityLog.projectId, id: schema.project.activityLog.id }).from(schema.project.activityLog))
+      .filter((row) => row.id !== "other-project-event"))
+      .toEqual(expect.arrayContaining([
+        { projectId: h.layer().projectId ?? "__legacy_unscoped__", id: first.id },
+        { projectId: h.layer().projectId ?? "__legacy_unscoped__", id: moved.id },
+        { projectId: h.layer().projectId ?? "__legacy_unscoped__", id: latest.id },
+      ]));
+
     expect((await store.getActivityLog({ limit: 2 })).map((event) => event.taskId)).toEqual([
       "FN-002",
       "FN-001",
@@ -99,5 +107,51 @@ pgDescribe("activity log parity (PostgreSQL)", () => {
       .from(schema.project.activityLog)
       .where(eq(schema.project.activityLog.projectId, "other-project"));
     expect(otherProject).toEqual([{ id: "other-project-event" }]);
+  });
+
+  it("serves reliability duration and merged-task metrics without accessing SQLite", async () => {
+    const store = h.store();
+    const projectId = h.layer().projectId ?? "__legacy_unscoped__";
+    await h.adminDb().insert(schema.project.activityLog).values([
+      {
+        projectId,
+        id: "reliability-entered",
+        timestamp: "2026-07-14T20:01:00.000Z",
+        type: "task:moved",
+        taskId: "FN-REL-1",
+        details: "Entered review",
+        metadata: { from: "in-progress", to: "in-review" },
+      },
+      {
+        projectId,
+        id: "reliability-done",
+        timestamp: "2026-07-14T20:02:00.000Z",
+        type: "task:moved",
+        taskId: "FN-REL-1",
+        details: "Completed review",
+        metadata: { from: "in-review", to: "done" },
+      },
+      {
+        projectId,
+        id: "reliability-merged",
+        timestamp: "2026-07-14T20:03:00.000Z",
+        type: "task:merged",
+        taskId: "FN-REL-1",
+        details: "Merged",
+      },
+      {
+        projectId: "other-project",
+        id: "reliability-other-project",
+        timestamp: "2026-07-14T20:04:00.000Z",
+        type: "task:merged",
+        taskId: "FN-REL-OTHER",
+        details: "Must stay isolated",
+      },
+    ]);
+
+    const window = { since: "2026-07-14T20:00:00.000Z", until: "2026-07-14T20:05:00.000Z" };
+    const durationEvents = await store.getInReviewDurationEvents(window);
+    expect(durationEvents.map((event) => event.id)).toEqual(["reliability-entered", "reliability-done"]);
+    expect(await store.getTaskMergedTaskIds(window)).toEqual(new Set(["FN-REL-1"]));
   });
 });

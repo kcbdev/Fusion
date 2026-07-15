@@ -2030,9 +2030,11 @@ export class TriageProcessor {
      * FNXC:PlanValidation 2026-06-30-09:20:
      * Triage may run Plan Review before the graph reaches `plan-review`; the graph later skips an already-passed Plan Review result. Read the selected workflow's Plan Review template flag here so Coding (per-step review) enforces external-integration evidence in the same Plan Review gate, while default Coding and other workflows stay unblocked.
      */
-    const selection = typeof this.store.getTaskWorkflowSelection === "function"
-      ? this.store.getTaskWorkflowSelection(task.id)
-      : undefined;
+    const selection = typeof this.store.getTaskWorkflowSelectionAsync === "function"
+      ? await this.store.getTaskWorkflowSelectionAsync(task.id)
+      : typeof this.store.getTaskWorkflowSelection === "function"
+        ? this.store.getTaskWorkflowSelection(task.id)
+        : undefined;
     const workflowId = selection?.workflowId;
     if (!workflowId || typeof this.store.getWorkflowDefinition !== "function") return false;
     const definition = await this.store.getWorkflowDefinition(workflowId).catch((error: unknown) => {
