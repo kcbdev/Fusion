@@ -531,8 +531,15 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
  * The lifecycle startTimeout is 120s; the vitest wrapper must not kill earlier
  * or CI reports false timeouts while postgres is still healthy (and orphans the
  * non-admin postmaster). Use a per-test budget that covers elevated CI.
+ *
+ * FNXC:WindowsDesktopPackaging 2026-07-14-23:10:
+ * Double-start tests (VAL-CONN-006 reuse, already-initialized log) need room
+ * for two elevated boots. A 180s wall was tight: first start ~90s left the
+ * second start racing the vitest budget, which timed out mid-readiness and
+ * left EBUSY orphans on the data dir. 6 minutes covers 2×120s startTimeout
+ * plus stop/teardown margin under loaded windows-latest runners.
  */
-const REAL_PROCESS_TEST_TIMEOUT_MS = process.platform === "win32" ? 180_000 : 60_000;
+const REAL_PROCESS_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 60_000;
 
 embeddedDescribe("embedded-lifecycle: real process (VAL-CONN-001, VAL-CONN-006, VAL-CONN-007)", () => {
   it(
