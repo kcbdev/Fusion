@@ -27,7 +27,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 
 /** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
 export interface NonAdminServerHandle {
@@ -85,19 +85,12 @@ let dedicatedPassword: string | null = null;
  * "user name or password is incorrect" downstream.
  */
 function generatePassword(): string {
+  // FNXC:WindowsDesktopPackaging 2026-07-14-23:50:
+  // Math.random is sufficient: this is a throwaway local helper account that
+  // only hosts the embedded postgres process, not a shared secret. Avoid
+  // spawning powershell for entropy — each spawnSync is ~0.5-1.9s on Windows.
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const seed =
-    spawnSync("powershell", ["-NoProfile", "-Command", "[BitConverter]::ToString([guid]::NewGuid().ToByteArray())"], {
-      encoding: "utf8",
-    }).stdout ?? Math.random().toString(36);
   let s = "";
-  for (const ch of seed) {
-    if (/[a-zA-Z0-9]/.test(ch)) {
-      const idx = parseInt(ch.toLowerCase(), 16);
-      if (Number.isFinite(idx)) s += chars[idx % chars.length];
-    }
-    if (s.length >= 22) break;
-  }
   while (s.length < 22) s += chars[Math.floor(Math.random() * chars.length)];
   // Guarantee the 4 complexity categories (upper, lower, digit, symbol).
   return `Fx9!${s}#kP`;
@@ -133,39 +126,30 @@ function ensureNonAdminUser(): { user: string; password: string } {
 }
 
 /**
- * FNXC:WindowsDesktopPackaging 2026-07-14-22:30:
- * Grant traverse (RX) on each ancestor dir of `leaf` up to the drive root, so
- * the non-admin user can reach `leaf` even when "Bypass traverse checking" is
- * restricted (the windows-2025 runner) or a profile ACL would deny traversal.
- * RX is applied folder-by-folder as a non-inheriting ACE so sibling contents
- * are not over-granted. Best-effort: ancestors that already allow traverse
- * (e.g. C:\) reject harmlessly, and a blocked path surfaces later via the
- * Start-Process error (which carries the full stderr).
+ * FNXC:WindowsDesktopPackaging 2026-07-14-23:50:
+ * Native binary roots already granted RX to the non-admin user this process.
+ * Cached so the (slow) icacls /T recursive grant runs once, not per start —
+ * profiling showed per-start grants took ~37s on windows-2025.
  */
-function grantTraverseChain(user: string, leaf: string): void {
-  let dir = dirname(leaf);
-  for (let depth = 0; depth < 16; depth += 1) {
-    const parent = dirname(dir);
-    if (parent === dir) break; // drive root reached
-    if (existsSync(dir)) {
-      spawnSync("icacls", [dir, "/grant", `${user}:(RX)`, "/C"], { encoding: "utf8" });
-    }
-    dir = parent;
-  }
-}
+const grantedNativeRoots = new Set<string>();
 
 /**
  * Grant the non-admin user full control on the data dir (postgres writes
- * there), read+execute on the native binary root, and traverse on each parent
- * ancestor of both so the user can reach them. F/RX grants fail fast; the
- * traverse walk is best-effort. /T applies the F/RX grants recursively; /C
- * keeps going on non-fatal errors (e.g. unreadable sibling files).
+ * there) and read+execute on the native binary root. We do NOT walk ancestor
+ * dirs granting traverse: icacls is ~1.8s per invocation (~37s for the full
+ * chain, measured on windows-2025), and Windows grants "Bypass traverse
+ * checking" (SeChangeNotifyPrivilege) to Everyone by default, so the non-admin
+ * user can reach a target it has been granted access to without traverse
+ * rights on the intermediates. /T applies the grant to existing children; /C
+ * keeps going on non-fatal errors (e.g. unreadable sibling files). The
+ * native-root grant is cached; the data dir is fresh every start.
  */
 function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
-  for (const [target, perm] of [
-    [dataDir, "(OI)(CI)F"],
-    [nativeRoot, "(OI)(CI)RX"],
+  for (const [target, perm, cacheable] of [
+    [dataDir, "(OI)(CI)F", false],
+    [nativeRoot, "(OI)(CI)RX", true],
   ] as const) {
+    if (cacheable && grantedNativeRoots.has(target)) continue;
     if (!existsSync(target)) {
       throw new Error(`embedded postgres: non-admin grant target does not exist: ${target}`);
     }
@@ -178,9 +162,8 @@ function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string):
           `(icacls status=${r.status}): ${(r.stderr || "").trim().slice(0, 400)}`,
       );
     }
+    if (cacheable) grantedNativeRoots.add(target);
   }
-  grantTraverseChain(user, dataDir);
-  grantTraverseChain(user, nativeRoot);
 }
 
 
