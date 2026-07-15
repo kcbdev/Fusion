@@ -260,6 +260,12 @@ export async function startServerAsNonAdminUser(
   // and "postgres running but not listening" — postgres.log alone can be empty
   // when the bat never reaches the postgres command.
   const wrapperLog = join(runDir, "wrapper.log");
+  // FNXC:WindowsDesktopPackaging 2026-07-15-05:05:
+  // Truncate logs each launch. The bat appends (>>) so a prior stop that wrote
+  // `exit=1` would make the readiness poll throw "exited before becoming ready"
+  // on the next start against a reused data directory (VAL-CONN-006).
+  writeFileSync(logFile, "", "utf8");
+  writeFileSync(wrapperLog, "", "utf8");
   const bat = join(runDir, "launch.bat");
   const args = ["-D", opts.dataDir, "-p", String(opts.port), ...opts.postgresFlags];
   // Set TMP/TEMP inside the granted data dir so the non-admin postgres process
