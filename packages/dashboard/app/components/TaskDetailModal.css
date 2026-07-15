@@ -1062,6 +1062,53 @@ for a "skipped" outcome upstream).
   word-break: break-word;
 }
 
+.detail-error-detail,
+.detail-error-hint {
+  margin-top: var(--space-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.detail-error-detail {
+  color: var(--text);
+}
+
+.detail-error-hint {
+  color: var(--text-muted);
+}
+
+.detail-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.detail-error-retry-picker {
+  display: grid;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.detail-error-retry-picker .select {
+  max-width: 100%;
+}
+
+@media (max-width: 768px) {
+  .detail-error-actions {
+    align-items: stretch;
+  }
+
+  .detail-error-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
 .task-pause-reason {
   margin: var(--space-md) 0 var(--space-lg);
   padding: var(--space-md);

@@ -296,7 +296,8 @@ describe("TaskDetailModal planner Chat tab", () => {
     expect(container.querySelector(".detail-error-alert")).toBeInTheDocument();
   });
 
-  it("does not render empty failed-task alert shells for non-failed or errorless failed tasks", () => {
+  it("renders an actionable generic failed-task alert without an empty message shell", async () => {
+    const onRetryTask = vi.fn().mockResolvedValue(makeTask());
     const { container, rerender } = render(
       <TaskDetailModal
         initialTab="planner-chat"
@@ -307,12 +308,16 @@ describe("TaskDetailModal planner Chat tab", () => {
         onDeleteTask={noopDelete}
         onMergeTask={noopMerge}
         onOpenDetail={noopOpenDetail}
+        onRetryTask={onRetryTask}
         addToast={noop}
       />,
     );
 
-    expect(screen.queryByText("Task Failed")).not.toBeInTheDocument();
-    expect(container.querySelector(".detail-error-alert")).toBeNull();
+    expect(screen.getByText("Task Failed")).toBeInTheDocument();
+    expect(screen.getByText("The task failed before it could complete.")).toBeInTheDocument();
+    expect(container.querySelector(".detail-error-message")?.textContent).not.toBe("");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetryTask).toHaveBeenCalledWith("FN-099");
 
     rerender(
       <TaskDetailModal
@@ -330,6 +335,54 @@ describe("TaskDetailModal planner Chat tab", () => {
 
     expect(screen.queryByText("Task Failed")).not.toBeInTheDocument();
     expect(container.querySelector(".detail-error-alert")).toBeNull();
+  });
+
+  it("surfaces the latest tool error detail and stages a model override before retrying", async () => {
+    const user = userEvent.setup();
+    const { useAgentLogs } = await import("../../hooks/useAgentLogs");
+    const { fetchModels, fetchNodes, updateTask } = await import("../../api");
+    vi.mocked(useAgentLogs).mockReturnValue({
+      entries: [
+        { timestamp: "2026-07-15T16:00:00Z", taskId: "FN-099", text: "older tool", type: "tool_error", detail: "Older failure" },
+        { timestamp: "2026-07-15T16:01:00Z", taskId: "FN-099", text: "write", type: "tool_error", detail: "Permission denied while writing the requested file" },
+      ],
+      loading: false,
+      clear: vi.fn(),
+      loadMore: vi.fn(async () => {}),
+      hasMore: false,
+      total: 2,
+      loadingMore: false,
+    });
+    vi.mocked(fetchModels).mockResolvedValue({ models: [{ provider: "anthropic", id: "claude-alternate", name: "Claude Alternate", reasoning: true, contextWindow: 200000 }], favoriteProviders: [], favoriteModels: [] });
+    vi.mocked(fetchNodes).mockResolvedValue([{ id: "node-alternate", name: "Alternate node", type: "remote", status: "online", maxConcurrent: 1, createdAt: "", updatedAt: "" }]);
+    vi.mocked(updateTask).mockResolvedValue(makeTask({ modelProvider: "anthropic", modelId: "claude-alternate" }));
+    const onRetryTask = vi.fn().mockResolvedValue(makeTask());
+
+    render(
+      <TaskDetailModal
+        initialTab="planner-chat"
+        taskDetailChatFirst
+        task={makeTask({ column: "todo" as any, status: "failed", error: "Workflow graph terminated with failure at node 'steps#0:step-execute'" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onRetryTask={onRetryTask}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Permission denied while writing the requested file")).toBeInTheDocument();
+    expect(screen.getByText("Consider retrying with a different model or node.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry with a different model/node" }));
+    await screen.findByLabelText("Executor model");
+    await user.selectOptions(screen.getByLabelText("Executor model"), "anthropic/claude-alternate");
+    await user.click(screen.getByRole("button", { name: "Apply and retry" }));
+
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("FN-099", { modelProvider: "anthropic", modelId: "claude-alternate" }, undefined));
+    await waitFor(() => expect(onRetryTask).toHaveBeenCalledWith("FN-099"));
+    vi.mocked(useAgentLogs).mockReturnValue({ entries: [], loading: false, clear: vi.fn(), loadMore: vi.fn(async () => {}), hasMore: false, total: null, loadingMore: false });
   });
 });
 

@@ -23,8 +23,8 @@ import { resolveEffectivePlannerOversightLevel } from "../../../core/src/workflo
 import { isNearDuplicateCanonicalInactive } from "../../../core/src/near-duplicate-canonical";
 import { getRevertOfId, findOpenUndoTaskForSource } from "../utils/taskRevert";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { uploadAttachment, deleteAttachment, updateTask, repairOverlapBlocker, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchTaskEffectiveSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, fetchWorkflowSettingValues, nudgeOverseer, stopOverseer, explainOverseer, api } from "../api";
-import type { RevertTaskOptions, RevertTaskResult } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, repairOverlapBlocker, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchTaskEffectiveSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, fetchWorkflowSettingValues, nudgeOverseer, stopOverseer, explainOverseer, fetchModels, fetchNodes, api } from "../api";
+import type { RevertTaskOptions, RevertTaskResult, ModelInfo, NodeInfo } from "../api";
 import type { BoardWorkflowsPayload, WorkflowFieldDefinition, CustomFieldRejection } from "../api";
 import { WorkflowIcon } from "./WorkflowIcon";
 import { ApiRequestError } from "../api";
@@ -1030,6 +1030,12 @@ export function TaskDetailContent({
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
+  const [showFailureRetryPicker, setShowFailureRetryPicker] = useState(false);
+  const [failureRetryModels, setFailureRetryModels] = useState<ModelInfo[]>([]);
+  const [failureRetryNodes, setFailureRetryNodes] = useState<NodeInfo[]>([]);
+  const [failureRetryModel, setFailureRetryModel] = useState("");
+  const [failureRetryNodeId, setFailureRetryNodeId] = useState("");
+  const [isFailureRetrySaving, setIsFailureRetrySaving] = useState(false);
 
   useEffect(() => {
     if (activeTab !== "chat" || isEditing) {
@@ -2307,7 +2313,7 @@ export function TaskDetailContent({
     loadingMore: agentLogLoadingMore,
   } = useAgentLogs(
     task.id,
-    activeTab === "chat" && activitySegment === "raw-logs",
+    task.status === "failed" || (activeTab === "chat" && activitySegment === "raw-logs"),
     projectId,
   );
   useEffect(() => {
@@ -2591,7 +2597,50 @@ export function TaskDetailContent({
       .catch((err) => {
         addToast(getErrorMessage(err), "error");
       });
-  }, [task.id, onRetryTask, requestClose, addToast]);
+  }, [task.id, onRetryTask, requestClose, addToast, t]);
+
+  useEffect(() => {
+    if (!showFailureRetryPicker) return;
+    setFailureRetryModel(task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "");
+    setFailureRetryNodeId(task.nodeId ?? "");
+    void Promise.all([fetchModels(), fetchNodes()])
+      .then(([models, nodes]) => {
+        setFailureRetryModels(models.models);
+        setFailureRetryNodes(nodes);
+      })
+      .catch((err) => addToast(getErrorMessage(err) || t("taskDetail.error.retryOptionsFailed", "Failed to load retry options"), "error"));
+  }, [addToast, showFailureRetryPicker, t, task.id, task.modelId, task.modelProvider, task.nodeId]);
+
+  /*
+  FNXC:TaskFailedBanner 2026-07-15-16:30:
+  The failed-banner picker stages model/node choices and writes one per-task override
+  only when the operator confirms Retry. RoutingTab saves on selection, which would
+  leave an abandoned override when the operator closes this recovery picker.
+  */
+  const handleRetryWithOverride = useCallback(async () => {
+    if (!onRetryTask || isFailureRetrySaving) return;
+    const modelSelection = splitModelSelection(failureRetryModel);
+    const currentModel = task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "";
+    const hasModelChange = failureRetryModel !== currentModel;
+    const hasNodeChange = failureRetryNodeId !== (task.nodeId ?? "");
+    if (!hasModelChange && !hasNodeChange) return;
+
+    setIsFailureRetrySaving(true);
+    try {
+      const updatedTask = await updateTask(task.id, {
+        ...(hasModelChange ? { modelProvider: modelSelection?.provider ?? null, modelId: modelSelection?.modelId ?? null } : {}),
+        ...(hasNodeChange ? { nodeId: failureRetryNodeId || null } : {}),
+      }, projectId);
+      onTaskUpdated?.(updatedTask);
+      await onRetryTask(task.id);
+      addToast(t("taskDetail.retry.retried", "Retried {{id}}", { id: task.id }), "success");
+      requestClose();
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
+    } finally {
+      if (mountedRef.current) setIsFailureRetrySaving(false);
+    }
+  }, [addToast, failureRetryModel, failureRetryNodeId, isFailureRetrySaving, onRetryTask, onTaskUpdated, projectId, requestClose, t, task.id, task.modelId, task.modelProvider, task.nodeId]);
 
   /*
   FNXC:ReviewLaneBypass 2026-07-09-00:00:
@@ -3328,7 +3377,22 @@ export function TaskDetailContent({
   FNXC:TaskDetailPlannerChat 2026-07-01-00:00:
   Maximized Planner Chat reserves vertical room for task identity and the planner conversation, so failed-task chrome is not mounted in that state. Normal detail, Activity expansion, and collapsed Planner Chat still surface task failures immediately.
   */
-  const shouldShowTaskFailureAlert = Boolean(task.status === "failed" && task.error && !isPlannerChatExpanded);
+  /*
+  FNXC:TaskFailedBanner 2026-07-15-16:30:
+  Failed tasks must always expose recovery controls, including legacy/errorless failures,
+  without mounting an empty error-message shell. The default banner fetches agent logs
+  independently of the Raw Logs segment because FN-7995 persists bounded `tool_error`
+  detail there; the Raw-Logs-gated display list is not a diagnostic data source.
+  */
+  const shouldShowTaskFailureAlert = Boolean(task.status === "failed" && !isPlannerChatExpanded);
+  const taskFailureReason = task.error?.trim() || t("taskDetail.error.genericFailureReason", "The task failed before it could complete.");
+  const taskFailureToolDetail = useMemo(() => {
+    const lastToolError = [...agentLogEntries].reverse().find((entry) => entry.type === "tool_error" && entry.detail?.trim());
+    return lastToolError?.detail?.trim().slice(0, 1024);
+  }, [agentLogEntries]);
+  const taskFailureHint = /workflow graph terminated|step-execute|no files? (were )?modified/i.test(`${task.error ?? ""}\n${taskFailureToolDetail ?? ""}`)
+    ? t("taskDetail.error.retryHint", "Consider retrying with a different model or node.")
+    : null;
 
   const taskActionMenuModel = useMemo(() => buildTaskActionMenuModel({
     task,
@@ -4492,11 +4556,76 @@ export function TaskDetailContent({
             </>
           )}
           {shouldShowTaskFailureAlert && (
-            <div className="detail-error-alert">
+            <div className="detail-error-alert" role="alert">
               <span className="detail-error-icon">⚠</span>
               <div className="detail-error-content">
                 <div className="detail-error-title">{t("taskDetail.error.taskFailed", "Task Failed")}</div>
-                <div className="detail-error-message">{task.error}</div>
+                <div className="detail-error-message">{taskFailureReason}</div>
+                {taskFailureToolDetail ? (
+                  <div className="detail-error-detail">
+                    {taskFailureToolDetail}
+                  </div>
+                ) : null}
+                {taskFailureHint ? <div className="detail-error-hint">{taskFailureHint}</div> : null}
+                {onRetryTask && canRetryTask ? (
+                  <div className="detail-error-actions">
+                    <button type="button" className="btn btn-sm" onClick={handleRetry}>
+                      {t("taskDetail.error.retry", "Retry")}
+                    </button>
+                    <button type="button" className="btn btn-sm" onClick={() => setShowFailureRetryPicker(true)}>
+                      {t("taskDetail.error.retryWithModel", "Retry with a different model/node")}
+                    </button>
+                  </div>
+                ) : null}
+                {showFailureRetryPicker && onRetryTask && canRetryTask ? (
+                  <div className="detail-error-retry-picker">
+                    <label htmlFor={`failure-retry-model-${task.id}`}>
+                      {t("taskDetail.error.retryModelLabel", "Executor model")}
+                    </label>
+                    <select
+                      id={`failure-retry-model-${task.id}`}
+                      className="select"
+                      value={failureRetryModel}
+                      disabled={isFailureRetrySaving}
+                      onChange={(event) => setFailureRetryModel(event.target.value)}
+                    >
+                      <option value="">{t("taskDetail.error.retryModelDefault", "Use project default")}</option>
+                      {failureRetryModels.map((model) => (
+                        <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+                          {model.provider}/{model.name || model.id}
+                        </option>
+                      ))}
+                    </select>
+                    <label htmlFor={`failure-retry-node-${task.id}`}>
+                      {t("taskDetail.error.retryNodeLabel", "Execution node")}
+                    </label>
+                    <select
+                      id={`failure-retry-node-${task.id}`}
+                      className="select"
+                      value={failureRetryNodeId}
+                      disabled={isFailureRetrySaving}
+                      onChange={(event) => setFailureRetryNodeId(event.target.value)}
+                    >
+                      <option value="">{t("taskDetail.error.retryNodeDefault", "Use project default")}</option>
+                      {failureRetryNodes.map((node) => (
+                        <option key={node.id} value={node.id}>{node.name} ({node.type})</option>
+                      ))}
+                    </select>
+                    <div className="detail-error-actions">
+                      <button type="button" className="btn btn-sm" onClick={() => setShowFailureRetryPicker(false)} disabled={isFailureRetrySaving}>
+                        {t("common.cancel", "Cancel")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => void handleRetryWithOverride()}
+                        disabled={isFailureRetrySaving || (failureRetryModel === (task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "") && failureRetryNodeId === (task.nodeId ?? ""))}
+                      >
+                        {t("taskDetail.error.confirmRetry", "Apply and retry")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
