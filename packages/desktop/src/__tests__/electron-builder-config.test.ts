@@ -132,11 +132,20 @@ describe("electron-builder desktop config", () => {
     }
   });
 
-  it("unpacks native embedded Postgres processes from app.asar", async () => {
+  it("unpacks full embedded Postgres packages from app.asar", async () => {
+    /*
+     * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:25:
+     * Native-only asarUnpack left dist/index.js inside app.asar; binary paths then
+     * resolved under the archive and chmod/spawn failed on packaged desktop boots.
+     * Assert the full platform + parent packages are unpacked.
+     */
     const builderConfig = await readDesktopFile("electron-builder.yml");
 
     expect(builderConfig).toMatch(
-      /asarUnpack:\s*[\s\S]*?-\s*"node_modules\/@embedded-postgres\/\*\/native\/\*\*\/\*"/m,
+      /asarUnpack:\s*[\s\S]*?-\s*"node_modules\/@embedded-postgres\/\*\*\/\*"/m,
+    );
+    expect(builderConfig).toMatch(
+      /asarUnpack:\s*[\s\S]*?-\s*"node_modules\/embedded-postgres\/\*\*\/\*"/m,
     );
   });
 
@@ -162,6 +171,16 @@ describe("electron-builder desktop config", () => {
       "node_modules/minizlib/**/*",
       "node_modules/yallist/**/*",
       "node_modules/yaml/**/*",
+      // FNXC:DesktopEmbeddedPostgres 2026-07-14-18:25: local-mode Postgres boot deps
+      "node_modules/embedded-postgres/**/*",
+      "node_modules/@embedded-postgres/**/*",
+      "node_modules/postgres/**/*",
+      "node_modules/pg/**/*",
+      "node_modules/async-exit-hook/**/*",
+      // FNXC:DesktopOmpPlugin 2026-07-14-18:55: dashboard-static plugin packages
+      "node_modules/@fusion-plugin-examples/**/*",
+      "node_modules/@fusion/plugin-sdk/**/*",
+      "node_modules/@agentclientprotocol/sdk/**/*",
     ];
 
     for (const dependencyGlob of requiredRuntimeDependencyGlobs) {

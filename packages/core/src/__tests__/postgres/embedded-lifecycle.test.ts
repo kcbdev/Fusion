@@ -25,7 +25,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import postgres from "postgres";
 import {
   EmbeddedPostgresLifecycle,
@@ -34,6 +34,7 @@ import {
   isDataDirInitialized,
   normalizeMacosEmbeddedPostgresDylibSymlinks,
   readPortFromPostmasterPid,
+  resolveElectronAsarUnpackedPath,
   type EmbeddedLifecycleOptions,
 } from "../../postgres/embedded-lifecycle.js";
 
@@ -144,6 +145,36 @@ describe("embedded-lifecycle: constructor + URL helpers (no process)", () => {
       password: "password",
     });
     expect(lifecycle.getPort()).toBe(55433);
+  });
+});
+
+describe("embedded-lifecycle: Electron asar unpacked path rewrite", () => {
+  /*
+   * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:30:
+   * Packaged desktop resolves platform binaries under app.asar even when
+   * asarUnpack places them on disk under app.asar.unpacked. Prove the rewrite
+   * prefers the real unpacked file and leaves ordinary paths alone.
+   */
+  it("rewrites app.asar binary paths to app.asar.unpacked when present", () => {
+    const root = mkdtempSync(join(tmpdir(), "fusion-asar-rewrite-"));
+    try {
+      const asarBin = join(root, "app.asar", "node_modules", "pkg", "bin", "postgres");
+      const unpackedBin = join(root, "app.asar.unpacked", "node_modules", "pkg", "bin", "postgres");
+      mkdirSync(dirname(unpackedBin), { recursive: true });
+      writeFileSync(unpackedBin, "");
+      expect(resolveElectronAsarUnpackedPath(asarBin)).toBe(unpackedBin);
+      expect(resolveElectronAsarUnpackedPath(unpackedBin)).toBe(unpackedBin);
+      expect(resolveElectronAsarUnpackedPath(join(root, "plain", "postgres"))).toBe(
+        join(root, "plain", "postgres"),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the asar path when no unpacked twin exists", () => {
+    const asarOnly = join(tmpdir(), "app.asar", "missing", "postgres");
+    expect(resolveElectronAsarUnpackedPath(asarOnly)).toBe(asarOnly);
   });
 });
 

@@ -45,21 +45,195 @@
 // the flip-embedded-pg-default change; the runtime startup factory is the
 // sole caller and it dynamically imports this module only in that case).
 import {
+  cpSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   symlinkSync,
   unlinkSync,
+  chmodSync,
+  writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { createServer, type Server } from "node:net";
-import { dirname, join, basename } from "node:path";
+import { dirname, join, basename, sep } from "node:path";
 import { createRequire } from "node:module";
 import { createLogger } from "../logger.js";
 import { redactConnectionString } from "./credential-redact.js";
 import type { ResolvedBackend } from "./backend-resolver.js";
 
 const require = createRequire(import.meta.url);
+
+const EMBEDDED_PG_BIN_NAMES = new Set([
+  "postgres",
+  "initdb",
+  "pg_ctl",
+  "postgres.exe",
+  "initdb.exe",
+  "pg_ctl.exe",
+]);
+
+/**
+ * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:30:
+ * Electron packages app code into app.asar. Platform package entrypoints resolve
+ * native binary paths via import.meta.url, so paths look like
+ * `.../app.asar/node_modules/@embedded-postgres/.../native/bin/postgres` even when
+ * asarUnpack places the real files under `app.asar.unpacked/...`.
+ * Node's spawn/chmod against the asar virtual path fail with ENOTDIR; rewrite to
+ * the unpacked real path when that file exists. No-op outside Electron asar trees.
+ */
+export function resolveElectronAsarUnpackedPath(filePath: string): string {
+  if (!filePath) return filePath;
+  // Prefer a materialized runtime-bin path when we already copied binaries out of asar.
+  const materialized = resolveMaterializedEmbeddedPostgresBinary(filePath);
+  if (materialized) return materialized;
+  if (filePath.includes(`${sep}app.asar.unpacked${sep}`)) {
+    return filePath;
+  }
+  const marker = `${sep}app.asar${sep}`;
+  const index = filePath.indexOf(marker);
+  if (index === -1) return filePath;
+  const unpacked =
+    filePath.slice(0, index) +
+    `${sep}app.asar.unpacked${sep}` +
+    filePath.slice(index + marker.length);
+  return existsSync(unpacked) ? unpacked : filePath;
+}
+
+/**
+ * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:45:
+ * Host-local copy of packaged embedded Postgres binaries. Electron can still treat
+ * paths that contain the `app.asar` substring oddly at spawn time on some hosts;
+ * materializing into ~/.fusion avoids asar virtual-path issues entirely.
+ */
+export function embeddedPostgresRuntimeBinRoot(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string {
+  return join(homedir(), ".fusion", "embedded-postgres", "runtime-bin", `${platform}-${arch}`);
+}
+
+function resolveMaterializedEmbeddedPostgresBinary(filePath: string): string | null {
+  const name = basename(filePath);
+  if (!EMBEDDED_PG_BIN_NAMES.has(name)) return null;
+  if (!filePath.includes(`${sep}app.asar`)) return null;
+  const candidate = join(embeddedPostgresRuntimeBinRoot(), "bin", name);
+  return existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:45:
+ * Copy initdb/pg_ctl/postgres (+ lib tree for dyld/@loader_path) from the packaged
+ * native root into ~/.fusion so spawn never has to execute out of app.asar*.
+ * Idempotent: skips when marker + binaries already exist.
+ */
+export function materializeEmbeddedPostgresRuntimeBinaries(nativeRoot: string): string {
+  /*
+   * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:55:
+   * Postgres expects a full install layout next to the binaries: bin/, lib/
+   * (including lib/postgresql extension modules), and share/postgresql.
+   * A shallow bin-only copy fails at start with "could not open directory
+   * .../lib/postgresql". Copy the entire native root recursively.
+   */
+  const destRoot = embeddedPostgresRuntimeBinRoot();
+  const destBin = join(destRoot, "bin");
+  const marker = join(destRoot, ".materialized-from");
+  const sourceMarker = nativeRoot;
+  if (
+    existsSync(marker) &&
+    readFileSync(marker, "utf8").trim() === sourceMarker &&
+    existsSync(join(destBin, process.platform === "win32" ? "postgres.exe" : "postgres")) &&
+    existsSync(join(destRoot, "lib", "postgresql"))
+  ) {
+    return destRoot;
+  }
+
+  mkdirSync(destRoot, { recursive: true });
+  // Recursive copy of bin/lib/share (and any other native install dirs).
+  for (const entry of readdirSync(nativeRoot)) {
+    const from = join(nativeRoot, entry);
+    const to = join(destRoot, entry);
+    cpSync(from, to, { recursive: true, force: true });
+  }
+  // Ensure executables keep +x after asar materialization.
+  if (existsSync(destBin)) {
+    for (const name of readdirSync(destBin)) {
+      try {
+        chmodSync(join(destBin, name), 0o755);
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  // Re-apply macOS ABI compatibility links against the materialized lib dir.
+  normalizeMacosEmbeddedPostgresDylibSymlinks(destRoot);
+  writeFileSync(marker, sourceMarker, "utf8");
+  return destRoot;
+}
+
+let electronAsarNativePathPatchInstalled = false;
+
+type MutableSpawnModule = {
+  spawn: (...args: unknown[]) => unknown;
+};
+type MutableFsPromisesModule = {
+  stat: (...args: unknown[]) => unknown;
+  chmod: (...args: unknown[]) => unknown;
+};
+
+/**
+ * FNXC:DesktopEmbeddedPostgres 2026-07-14-18:30:
+ * Install once before constructing embedded-postgres. That library calls
+ * fs.promises.stat/chmod and child_process.spawn on binary paths derived from
+ * asar module URLs; without this patch, packaged desktop local mode cannot boot
+ * Postgres (ENOTDIR).
+ *
+ * Mutate the CJS exports objects (`require("child_process")` / `require("fs/promises")`)
+ * rather than the frozen ESM namespace (`import * as ...`). Node's builtin ESM named
+ * exports are live bindings onto those CJS export properties, so spawn/stat/chmod
+ * sites in both CJS and ESM observe the rewrite. Safe outside Electron — rewrite
+ * is a no-op without asar.
+ */
+export function installElectronAsarNativePathPatch(): void {
+  if (electronAsarNativePathPatchInstalled) return;
+  electronAsarNativePathPatchInstalled = true;
+
+  // Materialize only when the platform package lives under Electron's asar tree.
+  // Dev/CLI installs already use real filesystem paths and must not copy binaries.
+  try {
+    const nativeRoot = resolveGenericEmbeddedPostgresNativeRoot();
+    if (nativeRoot && nativeRoot.includes(`${sep}app.asar`)) {
+      const sourceRoot = resolveElectronAsarUnpackedPath(nativeRoot);
+      if (existsSync(join(sourceRoot, "bin"))) {
+        materializeEmbeddedPostgresRuntimeBinaries(sourceRoot);
+      }
+    }
+  } catch {
+    // Materialization is best-effort; path rewrite still helps when possible.
+  }
+
+  const childProcessMod = require("child_process") as MutableSpawnModule;
+  const originalSpawn = childProcessMod.spawn.bind(childProcessMod);
+  childProcessMod.spawn = (command: unknown, ...rest: unknown[]) => {
+    const fixedCommand =
+      typeof command === "string" ? resolveElectronAsarUnpackedPath(command) : command;
+    return originalSpawn(fixedCommand, ...rest);
+  };
+
+  const fsPromisesMod = require("fs/promises") as MutableFsPromisesModule;
+  const originalStat = fsPromisesMod.stat.bind(fsPromisesMod);
+  fsPromisesMod.stat = (path: unknown, ...rest: unknown[]) => {
+    const fixedPath = typeof path === "string" ? resolveElectronAsarUnpackedPath(path) : path;
+    return originalStat(fixedPath, ...rest);
+  };
+  const originalChmod = fsPromisesMod.chmod.bind(fsPromisesMod);
+  fsPromisesMod.chmod = (path: unknown, ...rest: unknown[]) => {
+    const fixedPath = typeof path === "string" ? resolveElectronAsarUnpackedPath(path) : path;
+    return originalChmod(fixedPath, ...rest);
+  };
+}
 
 /**
  * Lazily resolve the `embedded-postgres` default export. Cached after the
@@ -82,6 +256,10 @@ type EmbeddedPostgresInstance = InstanceType<EmbeddedPostgresCtor>;
 let embeddedPostgresCtorCache: EmbeddedPostgresCtor | null = null;
 function getEmbeddedPostgresCtor(): EmbeddedPostgresCtor {
   if (embeddedPostgresCtorCache) return embeddedPostgresCtorCache;
+  // FNXC:DesktopEmbeddedPostgres 2026-07-14-18:30:
+  // Patch asar binary paths before loading embedded-postgres so its module-level
+  // binary promise and later spawn/chmod use real unpacked executables.
+  installElectronAsarNativePathPatch();
   // Use require() so the bundler leaves this as a runtime resolution (esbuild
   // keeps createRequire'd specifiers out of the static import graph).
   const mod = require("embedded-postgres") as { default: EmbeddedPostgresCtor };
@@ -265,21 +443,41 @@ function resolvePnpmPlatformPackageNativeRoot(packageName: string): string | nul
   }
 }
 
-function resolveMacosEmbeddedPostgresNativeRoot(): string | null {
-  if (process.platform !== "darwin") return null;
-  const packageName = process.arch === "arm64"
-    ? "@embedded-postgres/darwin-arm64"
-    : process.arch === "x64"
-      ? "@embedded-postgres/darwin-x64"
-      : null;
-  if (!packageName) return null;
+function embeddedPostgresPlatformPackageName(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string | null {
+  if (platform === "darwin") {
+    if (arch === "arm64") return "@embedded-postgres/darwin-arm64";
+    if (arch === "x64") return "@embedded-postgres/darwin-x64";
+    return null;
+  }
+  if (platform === "linux") {
+    if (arch === "arm64") return "@embedded-postgres/linux-arm64";
+    if (arch === "x64") return "@embedded-postgres/linux-x64";
+    if (arch === "arm") return "@embedded-postgres/linux-arm";
+    if (arch === "ia32") return "@embedded-postgres/linux-ia32";
+    if (arch === "ppc64") return "@embedded-postgres/linux-ppc64";
+    return null;
+  }
+  if (platform === "win32" && arch === "x64") return "@embedded-postgres/windows-x64";
+  return null;
+}
 
+function resolveGenericEmbeddedPostgresNativeRoot(): string | null {
+  const packageName = embeddedPostgresPlatformPackageName();
+  if (!packageName) return null;
   try {
     const entrypoint = require.resolve(packageName);
-    return join(dirname(entrypoint), "..", "native");
+    return resolveElectronAsarUnpackedPath(join(dirname(entrypoint), "..", "native"));
   } catch {
     return resolvePnpmPlatformPackageNativeRoot(packageName);
   }
+}
+
+function resolveMacosEmbeddedPostgresNativeRoot(): string | null {
+  if (process.platform !== "darwin") return null;
+  return resolveGenericEmbeddedPostgresNativeRoot();
 }
 
 function normalizeBundledMacosDylibs(onLog: (message: string) => void): void {
