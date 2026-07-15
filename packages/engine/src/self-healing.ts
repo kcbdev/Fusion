@@ -1450,8 +1450,10 @@ export class SelfHealingManager {
     }
   }
 
-  async reconcileEngineDowntimeActiveTiming(): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
-    const result = await this.store.reconcileActiveTimingForEngineDowntime();
+  async reconcileEngineDowntimeActiveTiming(
+    opts?: { engineLastActiveAtOverride?: string },
+  ): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
+    const result = await this.store.reconcileActiveTimingForEngineDowntime(new Date(), opts);
     const shifted = result.shiftedTaskIds.length > 0;
     const auditor = createRunAuditor(this.store, {
       runId: generateSyntheticRunId("reconcile-engine-downtime-active-timing", "global"),

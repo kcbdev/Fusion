@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   runtimeStart: vi.fn(async () => undefined),
   runtimeStop: vi.fn(async () => undefined),
   runtimeResumeAfterUnpause: vi.fn(async () => undefined),
+  getSelfHealingManager: vi.fn(() => undefined),
   runAiMerge: vi.fn(),
   landWorkspaceTask: vi.fn(),
   execFile: vi.fn(),
@@ -210,6 +211,7 @@ vi.mock("../runtimes/in-process-runtime.js", () => ({
       getRoutineRunner: vi.fn(),
       getHeartbeatMonitor: vi.fn(),
       getTriggerScheduler: vi.fn(),
+      getSelfHealingManager: mocks.getSelfHealingManager,
       configurePrMonitoring: mocks.runtimeConfigurePrMonitoring,
     };
   }),
@@ -358,6 +360,8 @@ beforeEach(() => {
   mocks.deliverPostgresMigrationCompleteNotice.mockReset();
   mocks.deliverPostgresMigrationCompleteNotice.mockResolvedValue("no-migration");
   mocks.runtimeResumeAfterUnpause.mockClear();
+  mocks.getSelfHealingManager.mockReset();
+  mocks.getSelfHealingManager.mockReturnValue(undefined);
   mocks.notifierStart.mockClear();
   mocks.notifierStop.mockClear();
   mocks.notifierNotifyGridlock.mockClear();
@@ -2756,6 +2760,141 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
       expect((patch as { engineActiveSinceMs: unknown }).engineActiveSinceMs).toEqual(expect.any(Number));
     }
 
+    await engine.stop();
+  });
+
+  it("reconciles active timing exactly once when both pause sources clear together", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mocks.currentStore = mockStore.store;
+    const reconcileEngineDowntimeActiveTiming = vi.fn(async () => ({ shiftedTaskIds: [], downtimeMs: 120_000 }));
+    mocks.getSelfHealingManager.mockReturnValue({ reconcileEngineDowntimeActiveTiming });
+    const engine = createEngine();
+
+    await engine.start();
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: false },
+      {
+        ...baseSettings,
+        autoMerge: true,
+        globalPause: true,
+        enginePaused: true,
+        engineLastActiveAt: "2026-07-15T11:58:00.000Z",
+      },
+    );
+
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledTimes(1);
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledWith({
+      engineLastActiveAtOverride: "2026-07-15T11:58:00.000Z",
+    });
+    await engine.stop();
+  });
+
+  it("waits for active-timing reconciliation before resuming agentic work", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mocks.currentStore = mockStore.store;
+    let resolveReconcile!: () => void;
+    const reconcileEngineDowntimeActiveTiming = vi.fn(() => new Promise<{ shiftedTaskIds: string[]; downtimeMs: number }>((resolve) => {
+      resolveReconcile = () => resolve({ shiftedTaskIds: ["FN-active"], downtimeMs: 120_000 });
+    }));
+    mocks.getSelfHealingManager.mockReturnValue({ reconcileEngineDowntimeActiveTiming });
+    const engine = createEngine();
+    await engine.start();
+
+    const unpause = mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false },
+      { ...baseSettings, autoMerge: true, globalPause: true, engineLastActiveAt: "2026-07-15T11:58:00.000Z" },
+    );
+    await vi.waitFor(() => expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledTimes(1));
+    expect(mocks.runtimeResumeAfterUnpause).not.toHaveBeenCalled();
+
+    resolveReconcile();
+    await unpause;
+    expect(mocks.runtimeResumeAfterUnpause).toHaveBeenCalledTimes(1);
+    await engine.stop();
+  });
+
+  it("reconciles once for either individual unpause, but not while another pause remains", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mocks.currentStore = mockStore.store;
+    const reconcileEngineDowntimeActiveTiming = vi.fn(async () => ({ shiftedTaskIds: [], downtimeMs: 0 }));
+    mocks.getSelfHealingManager.mockReturnValue({ reconcileEngineDowntimeActiveTiming });
+    const engine = createEngine();
+
+    await engine.start();
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: true },
+      { ...baseSettings, autoMerge: true, globalPause: true, enginePaused: true },
+    );
+    expect(reconcileEngineDowntimeActiveTiming).not.toHaveBeenCalled();
+
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: false },
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: true, engineLastActiveAt: "engine-only" },
+    );
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: false },
+      { ...baseSettings, autoMerge: true, globalPause: true, enginePaused: false, engineLastActiveAt: "global-only" },
+    );
+
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledTimes(2);
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenNthCalledWith(1, { engineLastActiveAtOverride: "engine-only" });
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenNthCalledWith(2, { engineLastActiveAtOverride: "global-only" });
+    await engine.stop();
+  });
+
+  it("fails soft when timing reconciliation rejects or its manager is unavailable", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mocks.currentStore = mockStore.store;
+    const reconcileEngineDowntimeActiveTiming = vi.fn(async () => {
+      throw new Error("timing unavailable");
+    });
+    mocks.getSelfHealingManager.mockReturnValue({ reconcileEngineDowntimeActiveTiming });
+    const warn = vi.spyOn(runtimeLog, "warn").mockImplementation(() => undefined);
+    const engine = createEngine();
+    await engine.start();
+    const resume = vi.fn();
+    Object.defineProperty(engine.getRuntime(), "stuckTaskDetector", { get: () => ({ resume }), configurable: true });
+
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, enginePaused: false },
+      { ...baseSettings, autoMerge: true, enginePaused: true },
+    );
+    await Promise.resolve();
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed to reconcile engine downtime active timing"));
+
+    mocks.getSelfHealingManager.mockReturnValue(undefined);
+    await expect(mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false },
+      { ...baseSettings, autoMerge: true, globalPause: true },
+    )).resolves.toBeUndefined();
+    expect(resume).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+    await engine.stop();
+  });
+
+  it("passes the frozen heartbeat once so paused task time is discounted once", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mocks.currentStore = mockStore.store;
+    const startedMs = Date.parse("2026-07-15T11:50:00.000Z");
+    const capturedHeartbeat = "2026-07-15T11:58:00.000Z";
+    let executionStartedAt = new Date(startedMs).toISOString();
+    const reconcileEngineDowntimeActiveTiming = vi.fn(async ({ engineLastActiveAtOverride }: { engineLastActiveAtOverride?: string }) => {
+      const downtimeMs = Date.parse("2026-07-15T12:00:00.000Z") - Date.parse(engineLastActiveAtOverride ?? "");
+      executionStartedAt = new Date(startedMs + downtimeMs).toISOString();
+      return { shiftedTaskIds: ["FN-active"], downtimeMs };
+    });
+    mocks.getSelfHealingManager.mockReturnValue({ reconcileEngineDowntimeActiveTiming });
+    const engine = createEngine();
+    await engine.start();
+
+    await mockStore.emitSettingsUpdated(
+      { ...baseSettings, autoMerge: true, globalPause: false, enginePaused: false, engineLastActiveAt: "2026-07-15T12:00:00.000Z" },
+      { ...baseSettings, autoMerge: true, globalPause: true, enginePaused: true, engineLastActiveAt: capturedHeartbeat },
+    );
+
+    expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledTimes(1);
+    expect(executionStartedAt).toBe("2026-07-15T11:52:00.000Z");
     await engine.stop();
   });
 

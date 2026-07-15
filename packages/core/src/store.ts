@@ -711,19 +711,28 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return atomicWriteTaskJsonWithAuditImpl(this, dir, task, auditInput);
   }
   /*
-  FNXC:TaskTiming 2026-06-25-00:00:
+  FNXC:TaskTiming 2026-07-15-00:00:
   Engine-process downtime is proven by a stale engineLastActiveAt heartbeat.
-  Advance the current active segment anchor, preserving firstExecutionAt and
-  cumulativeActiveMs so wall-clock history and already-accrued active work
-  remain intact. Ported from origin/main FN-7011 during rebase.
+  Same-process unpause callers pass the transition-captured heartbeat so a
+  racing scheduler write cannot erase the stopped-window proof. No opts keeps
+  FN-7011 startup recovery's settings fallback; supplied but invalid opts are
+  intentionally a no-action. Preserve the existing shift arithmetic: callers
+  own exactly-once dispatch because this store method does not deduplicate
+  repeated reconciles. Advance the current active segment anchor, preserving
+  firstExecutionAt and cumulativeActiveMs so wall-clock history and
+  already-accrued active work remain intact.
   */
-  async reconcileActiveTimingForEngineDowntime(now: Date = new Date()): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
+  async reconcileActiveTimingForEngineDowntime(
+    now: Date = new Date(),
+    opts?: { engineLastActiveAtOverride?: string },
+  ): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
     const settings = await this.getSettings();
-    const heartbeatMs = Date.parse(settings.engineLastActiveAt ?? "");
+    const heartbeatValue = opts === undefined ? settings.engineLastActiveAt : opts.engineLastActiveAtOverride;
+    const heartbeatMs = Date.parse(heartbeatValue ?? "");
     const nowMs = now.getTime();
     const thresholdMs = Math.max((settings.pollIntervalMs ?? 15_000) * 2, 60_000);
     const downtimeMs = Number.isFinite(heartbeatMs) && Number.isFinite(nowMs) ? nowMs - heartbeatMs : 0;
-    if (!settings.engineLastActiveAt || downtimeMs <= thresholdMs) {
+    if (!heartbeatValue || !Number.isFinite(heartbeatMs) || downtimeMs <= thresholdMs) {
       return { shiftedTaskIds: [], downtimeMs: Math.max(0, downtimeMs) };
     }
 

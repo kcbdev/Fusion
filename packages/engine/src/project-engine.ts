@@ -4819,7 +4819,26 @@ export class ProjectEngine {
     store: TaskStore,
     settings: Settings,
     source: "Global unpause" | "Engine unpause",
+    engineLastActiveAtOverride?: string,
   ): Promise<void> {
+    /*
+    FNXC:TaskTiming 2026-07-15-00:00:
+    Reconcile paused wall-clock before resuming agentic work or sweeping tasks.
+    Settings listeners do not await one another, so a detached reconcile lets a
+    task leave in-progress before its anchor shifts and incorrectly accrues the
+    paused span. The captured heartbeat preserves the FN-7011 downtime proof
+    even if the scheduler writes a fresh heartbeat during this await.
+    */
+    try {
+      await this.getSelfHealingManager()?.reconcileEngineDowntimeActiveTiming({
+        engineLastActiveAtOverride,
+      });
+    } catch (err: unknown) {
+      runtimeLog.warn(
+        `${source}: failed to reconcile engine downtime active timing: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
     try {
       const runtime = this.runtime as any;
       runtime.resumeAfterUnpause?.().catch((err: Error) =>
@@ -4874,7 +4893,7 @@ export class ProjectEngine {
 
     // 1. Unified pause lifecycle — detector only resumes once BOTH pause sources
     // are clear, and pauses when either source engages.
-    const onPauseLifecycleTransition = ({
+    const onPauseLifecycleTransition = async ({
       settings: s,
       previous: prev,
     }: {
@@ -4891,6 +4910,13 @@ export class ProjectEngine {
 
       if (wasPaused && !isPaused) {
         const source = prev.globalPause && !s.globalPause ? "Global unpause" : "Engine unpause";
+        runtimeLog.log(`${source} — resuming agentic activity`);
+        await this.resumeAfterUnpauseAndSweepInReview(
+          store,
+          s,
+          source,
+          prev.engineLastActiveAt,
+        );
         applyDetectorPauseLifecycle(false, source);
       }
     };
@@ -4934,39 +4960,11 @@ export class ProjectEngine {
     store.on("settings:updated", onAutoMergeDisabled);
     this.settingsHandlers.push(onAutoMergeDisabled);
 
-    // 4. Global unpause — resume orphaned tasks + sweep in-review
-    const onGlobalUnpause = async ({
-      settings: s,
-      previous: prev,
-    }: {
-      settings: Settings;
-      previous: Settings;
-    }) => {
-      if (prev.globalPause && !s.globalPause) {
-        runtimeLog.log("Global unpause — resuming agentic activity");
-        await this.resumeAfterUnpauseAndSweepInReview(store, s, "Global unpause");
-      }
-    };
-    store.on("settings:updated", onGlobalUnpause);
-    this.settingsHandlers.push(onGlobalUnpause);
+    // 4. The unified lifecycle listener above owns unpause. It waits for timing
+    // reconciliation before any agentic resume, avoiding duplicate work when
+    // globalPause and enginePaused clear in one settings update.
 
-    // 5. Engine unpause — same as global unpause
-    const onEngineUnpause = async ({
-      settings: s,
-      previous: prev,
-    }: {
-      settings: Settings;
-      previous: Settings;
-    }) => {
-      if (prev.enginePaused && !s.enginePaused) {
-        runtimeLog.log("Engine unpaused — resuming agentic activity");
-        await this.resumeAfterUnpauseAndSweepInReview(store, s, "Engine unpause");
-      }
-    };
-    store.on("settings:updated", onEngineUnpause);
-    this.settingsHandlers.push(onEngineUnpause);
-
-    // 6. Maintenance interval change — reschedule mergeActive reconciliation
+    // 5. Maintenance interval change — reschedule mergeActive reconciliation
     const onMaintenanceIntervalChange = ({
       settings: s,
       previous: prev,
