@@ -67,6 +67,13 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 import { createLogger } from "../logger.js";
 import { redactConnectionString } from "./credential-redact.js";
 import type { ResolvedBackend } from "./backend-resolver.js";
+import {
+  isWindowsElevatedAdmin,
+  startServerAsNonAdminUser,
+  type NonAdminServerHandle,
+} from "./embedded-windows-admin.js";
+
+export { isWindowsElevatedAdmin } from "./embedded-windows-admin.js";
 
 const require = createRequire(import.meta.url);
 
@@ -668,6 +675,29 @@ function resolveMacosEmbeddedPostgresNativeRoot(): string | null {
   return resolveGenericEmbeddedPostgresNativeRoot();
 }
 
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+ * Resolve the bundled @embedded-postgres/windows-x64 native root (.../native).
+ * Used to stage binaries for the non-admin server boot path under elevation.
+ * Prefer the host-local materialization when available so elevated Windows
+ * desktop launches never spawn postgres.exe from app.asar.
+ */
+function resolveWindowsEmbeddedPostgresNativeRoot(): string | null {
+  if (process.platform !== "win32") return null;
+  const nativeRoot = resolveGenericEmbeddedPostgresNativeRoot();
+  if (!nativeRoot) return null;
+  if (nativeRoot.includes(`${sep}app.asar`)) {
+    try {
+      return materializeEmbeddedPostgresRuntimeBinaries(
+        resolveElectronAsarUnpackedPath(nativeRoot),
+      );
+    } catch {
+      return resolveElectronAsarUnpackedPath(nativeRoot);
+    }
+  }
+  return nativeRoot;
+}
+
 function normalizeBundledMacosDylibs(onLog: (message: string) => void): void {
   const nativeRoot = resolveMacosEmbeddedPostgresNativeRoot();
   if (!nativeRoot) return;
@@ -805,6 +835,13 @@ export class EmbeddedPostgresLifecycle {
   // is false and stop() is a no-op (the owning instance handles shutdown).
   private ownsProcess = true;
   private shutdownHookInstalled = false;
+  /**
+   * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+   * When the process is an elevated Windows admin, the server is booted under a
+   * dedicated non-admin user (see embedded-windows-admin.ts) and this holds the
+   * stop handle. Null for normal (non-elevated / non-Windows) launches.
+   */
+  private nonAdminHandle: NonAdminServerHandle | null = null;
   /**
    * FNXC:PostgresEmbedded 2026-06-26-16:20 (fix migration-review P1 #24):
    * Active start() timeout timer, retained so it can be cleared on success or
@@ -999,7 +1036,38 @@ export class EmbeddedPostgresLifecycle {
       await this.pg.initialise();
     }
 
-    await this.pg.start();
+    // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+    // Under an elevated Windows admin token, postgres refuses to inherit the
+    // process token ("Execution of PostgreSQL by a user with administrative
+    // permissions is not permitted"). initdb + the pg client above ran as the
+    // launching (admin) process and work unchanged; only the SERVER start is
+    // re-homed under a dedicated non-admin local user. Normal (non-elevated /
+    // non-Windows) launches use the inherited-token path as before.
+    // Proven on windows-latest: without this path, CI's embedded-postgres smoke
+    // (and elevated "Run as administrator" desktop) cannot boot Local mode.
+    if (isWindowsElevatedAdmin()) {
+      const nativeRoot = resolveWindowsEmbeddedPostgresNativeRoot();
+      if (!nativeRoot) {
+        throw new Error(
+          "embedded postgres: the process is running elevated on Windows, where " +
+            "PostgreSQL refuses to start under an administrative token, and the " +
+            "non-admin boot path could not locate the bundled " +
+            "@embedded-postgres/windows-x64 native binaries to stage. Run Fusion " +
+            "non-elevated, or ensure the embedded-postgres platform package is installed.",
+        );
+      }
+      this.nonAdminHandle = await startServerAsNonAdminUser({
+        nativeRoot,
+        dataDir: this.options.dataDir,
+        port,
+        postgresFlags: this.options.postgresFlags,
+        onLog: this.options.onLog,
+        onError: this.options.onError,
+        startTimeoutMs: this.options.startTimeoutMs,
+      });
+    } else {
+      await this.pg.start();
+    }
     this.running = true;
     this.ownsProcess = true;
 
@@ -1074,6 +1142,24 @@ export class EmbeddedPostgresLifecycle {
     // don't stop it — the owning instance handles shutdown.
     if (!this.ownsProcess) {
       this.running = false;
+      return;
+    }
+
+    // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+    // Elevated Windows path: the postmaster was started under a dedicated
+    // non-admin user; stop it via the handle instead of embedded-postgres
+    // (which never called .start() and has no process handle).
+    if (this.nonAdminHandle) {
+      try {
+        await this.nonAdminHandle.stop();
+      } catch (err) {
+        this.options.onError(`embedded postgres: error during non-admin stop: ${String(err)}`);
+      } finally {
+        this.nonAdminHandle = null;
+        this.pg = null;
+        this.running = false;
+        runningInstances.delete(this.options.dataDir);
+      }
       return;
     }
 
