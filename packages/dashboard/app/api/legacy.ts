@@ -2765,10 +2765,15 @@ export function apiFetchGitHubIssues(
 }
 
 /** Import a specific GitHub issue as a fn task */
-export function apiImportGitHubIssue(owner: string, repo: string, issueNumber: number, projectId?: string): Promise<Task> {
+/*
+FNXC:GitHubImportTranslate 2026-07-15-14:10:
+`targetLocale` forwards the panel's ACTIVE locale so an imported task carries the same translation the operator previewed.
+The server also falls back to the global `language` setting, so this argument is not load-bearing for the common case — it exists for the one case the server cannot know: a surface whose locale was browser-detected while global `language` is unset (PR #2141 review, P1).
+*/
+export function apiImportGitHubIssue(owner: string, repo: string, issueNumber: number, projectId?: string, targetLocale?: string): Promise<Task> {
   return api<Task>(withProjectId("/github/issues/import", projectId), {
     method: "POST",
-    body: JSON.stringify({ owner, repo, issueNumber }),
+    body: JSON.stringify({ owner, repo, issueNumber, ...(targetLocale ? { targetLocale } : {}) }),
   });
 }
 
@@ -2788,11 +2793,13 @@ export function apiBatchImportGitHubIssues(
   repo: string,
   issueNumbers: number[],
   delayMs?: number,
-  projectId?: string
+  projectId?: string,
+  /** See apiImportGitHubIssue: batch import must carry translations identically. */
+  targetLocale?: string,
 ): Promise<{ results: BatchImportResult[] }> {
   return api<{ results: BatchImportResult[] }>(withProjectId("/github/issues/batch-import", projectId), {
     method: "POST",
-    body: JSON.stringify({ owner, repo, issueNumbers, delayMs }),
+    body: JSON.stringify({ owner, repo, issueNumbers, delayMs, ...(targetLocale ? { targetLocale } : {}) }),
   });
 }
 
@@ -6222,6 +6229,42 @@ export async function translateImportContent(
     },
   );
   return response.fields;
+}
+
+/*
+FNXC:GitHubImportTranslate 2026-07-15-09:30:
+Auto-translate the visible import list in ONE request. The server reads through its durable cache, so a repeat load of the same repo returns instantly and bills nothing; the same cache is what the import path reads, so an imported task carries the translation shown here.
+The server enforces the auto-translate setting and the 50-issue cap itself and echoes `enabled`/`capped` back, so the client never has to duplicate that policy.
+*/
+export interface AutoTranslateImportItem {
+  number: number;
+  title: string;
+  body: string | null;
+  state?: "open" | "closed";
+}
+
+export interface AutoTranslateImportResponse {
+  translations: Record<number, { title: string; body: string }>;
+  enabled: boolean;
+  targetLocale: string | null;
+  /** True when more foreign issues existed than the per-load cap. */
+  capped: boolean;
+}
+
+export async function autoTranslateImportIssues(
+  owner: string,
+  repo: string,
+  items: AutoTranslateImportItem[],
+  targetLocale: string,
+  projectId?: string,
+): Promise<AutoTranslateImportResponse> {
+  return api<AutoTranslateImportResponse>(
+    withProjectId("/github/issues/auto-translate", projectId),
+    {
+      method: "POST",
+      body: JSON.stringify({ owner, repo, items, targetLocale }),
+    },
+  );
 }
 
 /** User-facing error copy for translateImportContent failures (toast/banner). */
