@@ -50,6 +50,12 @@ export interface NonAdminStartOptions {
   readonly onError: (messageOrError: string | Error | unknown) => void;
   /** Hard timeout (ms) on reaching "ready to accept connections". */
   readonly startTimeoutMs: number;
+  /**
+   * Real readiness probe: resolves true only when the server accepts queries
+   * (e.g. a short-timeout `SELECT 1`). The caller owns the SQL client so this
+   * module stays decoupled from the postgres client library.
+   */
+  readonly probeReady: () => Promise<boolean>;
 }
 
 let elevatedCache: boolean | null = null;
@@ -177,15 +183,6 @@ function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string):
   grantTraverseChain(user, nativeRoot);
 }
 
-function readPostgresPid(dataDir: string): number | null {
-  try {
-    const lines = readFileSync(join(dataDir, "postmaster.pid"), "utf-8").split("\n");
-    const pid = parseInt((lines[0] ?? "").trim(), 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
-}
 
 function readTail(file: string, max: number): string {
   try {
@@ -351,71 +348,45 @@ export async function startServerAsNonAdminUser(
       `waiting for port ${opts.port}`,
   );
 
-  // Poll for readiness until the server accepts connections or the timeout hits.
+  // FNXC:WindowsDesktopPackaging 2026-07-14-23:20:
+  // Poll readiness with a real short-timeout SQL probe. Do NOT read the
+  // redirected postgres log in the hot loop — postgres holds it locked, so a
+  // readFileSync blocks for tens of seconds (observed ~57s on windows-2025),
+  // which blows the test budget. A SQL SELECT 1 is the true readiness signal:
+  // postgres rejects the startup handshake with "the database system is
+  // starting up" until it is actually accepting queries, so unlike a bare TCP
+  // connect it cannot fire prematurely during crash recovery.
   const deadline = Date.now() + Math.max(opts.startTimeoutMs, 1000);
   let ready = false;
-  let lastSnapshot = "";
   while (Date.now() < deadline) {
-    // FNXC:WindowsDesktopPackaging 2026-07-14-23:05:
-    // Lightweight poll: readFileSync only. Do NOT spawn tasklist/probePort in
-    // the hot loop — a synchronous tasklist per iteration blocked ~16s between
-    // polls on windows-2025, blowing the test's 15s budget before postgres's
-    // "ready" marker was observed (and orphaning servers when start() never
-    // returned). Readiness = the postgres log "ready to accept connections"
-    // marker (the same one embedded-postgres watches). Exit = the wrapper bat's
-    // "exit=" line (written only once postgres returns). Errors = a FATAL in
-    // the postgres log. Logs are emitted only on change to avoid per-poll spam.
-    const tail = readTail(logFile, 3000);
-    const wrapperTail = readTail(wrapperLog, 1500);
-    const snapshot = `${wrapperTail}\u0000${tail.slice(-400)}`;
-    if (snapshot !== lastSnapshot) {
-      lastSnapshot = snapshot;
-      opts.onLog(`non-admin poll wrapper={${wrapperTail}} pg={${tail.slice(-400)}}`);
-    }
-    if (/database system is ready to accept connections/.test(tail)) {
+    if (await opts.probeReady()) {
       ready = true;
       break;
     }
-    if (/\bFATAL\b|\bPANIC\b|could not (bind|start|create|access|connect|load)|not permitted|Permission denied|is not the owner/i.test(tail)) {
-      throw new Error(
-        `embedded postgres: non-admin postgres reported a startup error before opening the port.\n${tail}`,
-      );
-    }
-    if (/^exit=/m.test(wrapperTail)) {
-      throw new Error(
-        `embedded postgres: non-admin postgres exited before becoming ready.\nwrapper={${wrapperTail}}\npg={${tail}}`,
-      );
-    }
     const { promise: sleep, resolve: wake } = Promise.withResolvers<void>();
-    setTimeout(wake, 200);
+    setTimeout(wake, 300);
     await sleep;
   }
 
   if (!ready) {
-    const tail = readTail(logFile, 1500);
-    // Best-effort cleanup of the dead/hung process.
+    // Kill the wrapper tree first (cmd.exe + its postgres child); only then
+    // are the redirected log files unlocked and safe to read for diagnostics.
     spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
-    const pgPid = readPostgresPid(opts.dataDir);
-    if (pgPid) spawnSync("taskkill", ["/pid", String(pgPid), "/f", "/t"], { encoding: "utf8" });
+    const tail = readTail(logFile, 2000);
+    const wrapperTail = readTail(wrapperLog, 1000);
     throw new Error(
-      `embedded postgres: non-admin postgres did not become ready within ${opts.startTimeoutMs}ms.\n${tail}`,
+      `embedded postgres: non-admin postgres did not become ready within ${opts.startTimeoutMs}ms.\n` +
+        `wrapper={${wrapperTail}}\npg={${tail}}`,
     );
   }
 
-  const postgresPid = readPostgresPid(opts.dataDir);
-  if (!postgresPid) {
-    opts.onError("embedded postgres: started but could not read postmaster.pid");
-  }
-
   let stopped = false;
-  const resolvedPid = postgresPid ?? wrapperPid;
   return {
-    postgresPid: resolvedPid,
+    postgresPid: wrapperPid,
     async stop() {
       if (stopped) return;
       stopped = true;
-      const pid = readPostgresPid(opts.dataDir) ?? resolvedPid;
-      spawnSync("taskkill", ["/pid", String(pid), "/f", "/t"], { encoding: "utf8" });
+      // /t kills the whole tree: the cmd.exe wrapper + its postgres child.
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
     },
   };

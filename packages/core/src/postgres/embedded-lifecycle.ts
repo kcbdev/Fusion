@@ -671,6 +671,26 @@ export class EmbeddedPostgresLifecycle {
         onLog: this.options.onLog,
         onError: this.options.onError,
         startTimeoutMs: this.options.startTimeoutMs,
+        // FNXC:WindowsDesktopPackaging 2026-07-14-23:20:
+        // Real readiness probe for the non-admin path: a short-timeout SELECT 1.
+        // During crash recovery postgres rejects the startup handshake fast
+        // ("the database system is starting up"), so this resolves true only
+        // once the server is actually accepting queries — unlike a bare TCP
+        // connect, which succeeds the moment the port is bound.
+        probeReady: async () => {
+          const pg = this.pg;
+          if (!pg) return false;
+          const client = pg.getPgClient("postgres", "localhost");
+          try {
+            await client.connect();
+            await client.query("SELECT 1");
+            return true;
+          } catch {
+            return false;
+          } finally {
+            await client.end().catch(() => {});
+          }
+        },
       });
     } else {
       await this.pg.start();
