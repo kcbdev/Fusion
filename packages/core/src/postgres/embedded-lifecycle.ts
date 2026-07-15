@@ -67,6 +67,19 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 import { createLogger } from "../logger.js";
 import { redactConnectionString } from "./credential-redact.js";
 import type { ResolvedBackend } from "./backend-resolver.js";
+import {
+  isWindowsElevatedAdmin,
+  startServerAsNonAdminUser,
+  type NonAdminServerHandle,
+} from "./embedded-windows-admin.js";
+// FNXC:WindowsDesktopPackaging 2026-07-14-22:53:
+// Static import so tsup/esbuild bundles postgres.js into packages/cli/dist/bin.js.
+// A runtime require("postgres") resolved via the CLI createRequire banner against
+// packages/cli/dist and failed boot-smoke with "Cannot find module 'postgres'"
+// because @runfusion/fusion does not list postgres as a direct dependency.
+import postgres from "postgres";
+
+export { isWindowsElevatedAdmin } from "./embedded-windows-admin.js";
 
 const require = createRequire(import.meta.url);
 
@@ -442,10 +455,18 @@ export type EmbeddedPostgresCtor = new (opts: Record<string, unknown>) => {
 /** Instance type produced by the embedded-postgres constructor. */
 type EmbeddedPostgresInstance = InstanceType<EmbeddedPostgresCtor>;
 let embeddedPostgresCtorCache: EmbeddedPostgresCtor | null = null;
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-22:53:
+ * True while tests inject a mock EmbeddedPostgres ctor. Elevated Windows CI
+ * would otherwise take the real non-admin boot path and ignore the mock's
+ * delayed start() used by cancellation coverage.
+ */
+let embeddedPostgresCtorIsTestOverride = false;
 
 /** Test-only constructor seam for deterministic lifecycle cancellation coverage. */
 export function __setEmbeddedPostgresCtorForTests(ctor: EmbeddedPostgresCtor | null): void {
   embeddedPostgresCtorCache = ctor;
+  embeddedPostgresCtorIsTestOverride = ctor !== null;
 }
 
 function getEmbeddedPostgresCtor(): EmbeddedPostgresCtor {
@@ -674,6 +695,29 @@ function resolveMacosEmbeddedPostgresNativeRoot(): string | null {
   return resolveGenericEmbeddedPostgresNativeRoot();
 }
 
+/**
+ * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+ * Resolve the bundled @embedded-postgres/windows-x64 native root (.../native).
+ * Used to stage binaries for the non-admin server boot path under elevation.
+ * Prefer the host-local materialization when available so elevated Windows
+ * desktop launches never spawn postgres.exe from app.asar.
+ */
+function resolveWindowsEmbeddedPostgresNativeRoot(): string | null {
+  if (process.platform !== "win32") return null;
+  const nativeRoot = resolveGenericEmbeddedPostgresNativeRoot();
+  if (!nativeRoot) return null;
+  if (nativeRoot.includes(`${sep}app.asar`)) {
+    try {
+      return materializeEmbeddedPostgresRuntimeBinaries(
+        resolveElectronAsarUnpackedPath(nativeRoot),
+      );
+    } catch {
+      return resolveElectronAsarUnpackedPath(nativeRoot);
+    }
+  }
+  return nativeRoot;
+}
+
 function normalizeBundledMacosDylibs(onLog: (message: string) => void): void {
   const nativeRoot = resolveMacosEmbeddedPostgresNativeRoot();
   if (!nativeRoot) return;
@@ -812,6 +856,13 @@ export class EmbeddedPostgresLifecycle {
   private ownsProcess = true;
   private shutdownHookInstalled = false;
   /**
+   * FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+   * When the process is an elevated Windows admin, the server is booted under a
+   * dedicated non-admin user (see embedded-windows-admin.ts) and this holds the
+   * stop handle. Null for normal (non-elevated / non-Windows) launches.
+   */
+  private nonAdminHandle: NonAdminServerHandle | null = null;
+  /**
    * FNXC:PostgresEmbedded 2026-06-26-16:20 (fix migration-review P1 #24):
    * Active start() timeout timer, retained so it can be cleared on success or
    * on a failure that is handled before the timeout fires.
@@ -874,7 +925,13 @@ export class EmbeddedPostgresLifecycle {
   }
 
   private buildUrl(port: number, database: string): string {
-    return `postgresql://${encodeURIComponent(this.options.user)}:${encodeURIComponent(this.options.password)}@localhost:${port}/${encodeURIComponent(database)}`;
+    // FNXC:WindowsDesktopPackaging 2026-07-15-05:00:
+    // Prefer 127.0.0.1 on Windows. `localhost` can resolve to ::1 first; the
+    // non-admin postmaster path and some Windows loopback policies made IPv6
+    // connects hang while IPv4 was fine, which blocked ensureDatabase after the
+    // cluster was already ready.
+    const host = process.platform === "win32" ? "127.0.0.1" : "localhost";
+    return `postgresql://${encodeURIComponent(this.options.user)}:${encodeURIComponent(this.options.password)}@${host}:${port}/${encodeURIComponent(database)}`;
   }
 
   /**
@@ -1016,7 +1073,48 @@ export class EmbeddedPostgresLifecycle {
       throw new EmbeddedStartCancelledError(this.options.dataDir);
     }
 
-    await pg.start();
+    // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+    // Under an elevated Windows admin token, postgres refuses to inherit the
+    // process token ("Execution of PostgreSQL by a user with administrative
+    // permissions is not permitted"). initdb + the pg client above ran as the
+    // launching (admin) process and work unchanged; only the SERVER start is
+    // re-homed under a dedicated non-admin local user. Normal (non-elevated /
+    // non-Windows) launches use the inherited-token path as before.
+    // FNXC:WindowsDesktopPackaging 2026-07-15-05:20:
+    // Pass AbortSignal so outer start() timeout can cancel a still-polling
+    // non-admin launch and kill the wrapper before readiness assigns a handle.
+    // FNXC:WindowsDesktopPackaging 2026-07-14-22:53:
+    // Skip the real non-admin path when tests inject a mock ctor so delayed
+    // start/cancellation coverage exercises pg.start() even on elevated CI.
+    if (isWindowsElevatedAdmin() && !embeddedPostgresCtorIsTestOverride) {
+      const nativeRoot = resolveWindowsEmbeddedPostgresNativeRoot();
+      if (!nativeRoot) {
+        throw new Error(
+          "embedded postgres: the process is running elevated on Windows, where " +
+            "PostgreSQL refuses to start under an administrative token, and the " +
+            "non-admin boot path could not locate the bundled " +
+            "@embedded-postgres/windows-x64 native binaries to stage. Run Fusion " +
+            "non-elevated, or ensure the embedded-postgres platform package is installed.",
+        );
+      }
+      this.nonAdminHandle = await startServerAsNonAdminUser({
+        nativeRoot,
+        dataDir: this.options.dataDir,
+        port,
+        postgresFlags: this.options.postgresFlags,
+        onLog: this.options.onLog,
+        onError: this.options.onError,
+        startTimeoutMs: this.options.startTimeoutMs,
+        signal,
+        // Assign handle as soon as the wrapper PID is known so outer start()
+        // timeout cleanup can taskkill orphans mid-readiness poll.
+        onLaunched: (handle) => {
+          this.nonAdminHandle = handle;
+        },
+      });
+    } else {
+      await pg.start();
+    }
     /*
     FNXC:PostgresResourceLifecycle 2026-07-14-18:42:
     Promise.race does not cancel the losing embedded-postgres startup. Check the cooperative cancellation signal after every delayed phase and stop the exact late instance before it can publish running state, registry ownership, or process hooks. A timeout may already have attempted stop while pg.start() was pending, so the post-resolution stop is intentionally repeated to catch a postmaster that appeared after that first cleanup.
@@ -1065,6 +1163,20 @@ export class EmbeddedPostgresLifecycle {
   }
 
   private async settleCancelledStart(pg: EmbeddedPostgresInstance): Promise<void> {
+    // FNXC:WindowsDesktopPackaging 2026-07-15-05:20:
+    // Prefer stopping a non-admin handle (if already assigned) before asking
+    // embedded-postgres to stop a process it never started.
+    if (this.nonAdminHandle) {
+      try {
+        await this.nonAdminHandle.stop();
+      } catch (error) {
+        this.options.onError(
+          `embedded postgres: cancelled non-admin cleanup failed: ${String(error)}`,
+        );
+      } finally {
+        this.nonAdminHandle = null;
+      }
+    }
     try {
       await pg.stop();
     } catch (error) {
@@ -1083,33 +1195,70 @@ export class EmbeddedPostgresLifecycle {
    * Idempotent: queries `pg_database` first and only issues `CREATE DATABASE`
    * when the database is missing. `embedded-postgres.createDatabase()` throws on
    * an existing database, so this guard is required for safe re-starts.
+   *
+   * FNXC:WindowsDesktopPackaging 2026-07-15-05:00:
+   * Do not call embedded-postgres.createDatabase() when the server was started
+   * under the elevated-Windows non-admin path: that library requires
+   * `this.process` (set only by its own .start()), so createDatabase throws
+   * "cluster must be running" even though postgres is healthy. Use a direct
+   * SQL connection with a bounded connect timeout instead.
    */
   async ensureDatabase(): Promise<void> {
-    if (!this.pg || !this.running) {
+    if (!this.running || this.getPort() === undefined) {
       throw new Error(
         "Cannot ensure database: the embedded cluster is not running. Call start() first.",
       );
     }
     const exists = await this.databaseExists(this.options.database);
     if (exists) return;
-    await this.pg.createDatabase(this.options.database);
+    const sql = this.openMaintenanceSql();
+    try {
+      const safeName = this.options.database.replace(/"/g, '""');
+      await sql.unsafe(`CREATE DATABASE "${safeName}"`);
+    } finally {
+      await sql.end({ timeout: 5 }).catch(() => {});
+    }
   }
 
   /** Check whether a database with the given name exists on the cluster. */
   private async databaseExists(name: string): Promise<boolean> {
-    if (!this.pg) return false;
-    // Use the maintenance client (connects to the default "postgres" db).
-    const client = this.pg.getPgClient("postgres", "localhost");
+    if (!this.running || this.getPort() === undefined) return false;
+    const sql = this.openMaintenanceSql();
     try {
-      await client.connect();
-      const result = await client.query(
-        "SELECT 1 FROM pg_database WHERE datname = $1",
-        [name],
-      );
-      return (result.rowCount ?? 0) > 0;
+      const rows = await sql`SELECT 1 AS one FROM pg_database WHERE datname = ${name}`;
+      return rows.length > 0;
+    } catch {
+      return false;
     } finally {
-      await client.end().catch(() => {});
+      await sql.end({ timeout: 5 }).catch(() => {});
     }
+  }
+
+  /**
+   * Open a short-lived maintenance connection to the embedded cluster's
+   * built-in `postgres` database (for CREATE DATABASE / existence checks).
+   *
+   * FNXC:WindowsDesktopPackaging 2026-07-14-22:53:
+   * Uses the statically imported postgres.js client (bundled into CLI) rather
+   * than embedded-postgres getPgClient, which requires this.process set by
+   * library start() — unavailable on the elevated Windows non-admin path.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private openMaintenanceSql(): any {
+    const port = this.getPort();
+    if (port === undefined) {
+      throw new Error("openMaintenanceSql: no port assigned");
+    }
+    const host = process.platform === "win32" ? "127.0.0.1" : "localhost";
+    return postgres({
+      host,
+      port,
+      user: this.options.user,
+      password: this.options.password,
+      database: "postgres",
+      max: 1,
+      connect_timeout: 10,
+    });
   }
 
   /**
@@ -1125,6 +1274,24 @@ export class EmbeddedPostgresLifecycle {
     // don't stop it — the owning instance handles shutdown.
     if (!this.ownsProcess) {
       this.running = false;
+      return;
+    }
+
+    // FNXC:WindowsDesktopPackaging 2026-07-14-21:40:
+    // Elevated Windows path: the postmaster was started under a dedicated
+    // non-admin user; stop it via the handle instead of embedded-postgres
+    // (which never called .start() and has no process handle).
+    if (this.nonAdminHandle) {
+      try {
+        await this.nonAdminHandle.stop();
+      } catch (err) {
+        this.options.onError(`embedded postgres: error during non-admin stop: ${String(err)}`);
+      } finally {
+        this.nonAdminHandle = null;
+        this.pg = null;
+        this.running = false;
+        runningInstances.delete(this.options.dataDir);
+      }
       return;
     }
 

@@ -34,6 +34,7 @@ import {
   EmbeddedStartTimeoutError,
   DEFAULT_START_TIMEOUT_MS,
   isDataDirInitialized,
+  isWindowsElevatedAdmin,
   normalizeMacosEmbeddedPostgresDylibSymlinks,
   readPortFromPostmasterPid,
   __setEmbeddedPostgresCtorForTests,
@@ -104,6 +105,18 @@ describe("embedded-lifecycle: isDataDirInitialized (PG_VERSION marker)", () => {
       expect(isDataDirInitialized(dir)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("embedded-lifecycle: Windows elevation probe (no process)", () => {
+  it("isWindowsElevatedAdmin is false on non-Windows platforms", () => {
+    // FNXC:WindowsDesktopPackaging 2026-07-15-04:55:
+    // The non-admin boot path is Windows-only; other OSes must never claim elevation.
+    if (process.platform !== "win32") {
+      expect(isWindowsElevatedAdmin()).toBe(false);
+    } else {
+      expect(typeof isWindowsElevatedAdmin()).toBe("boolean");
     }
   });
 });
@@ -510,134 +523,172 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
   });
 });
 
+/*
+ * FNXC:WindowsDesktopPackaging 2026-07-15-04:55:
+ * Package default testTimeout is 15s (packages/core/vitest.config.ts). On
+ * elevated Windows (GitHub windows-latest = runneradmin) the non-admin boot
+ * path + initdb regularly takes 60–90s before "ready to accept connections".
+ * The lifecycle startTimeout is 120s; the vitest wrapper must not kill earlier
+ * or CI reports false timeouts while postgres is still healthy (and orphans the
+ * non-admin postmaster). Use a per-test budget that covers elevated CI.
+ *
+ * FNXC:WindowsDesktopPackaging 2026-07-14-23:10:
+ * Double-start tests (VAL-CONN-006 reuse, already-initialized log) need room
+ * for two elevated boots. A 180s wall was tight: first start ~90s left the
+ * second start racing the vitest budget, which timed out mid-readiness and
+ * left EBUSY orphans on the data dir. 6 minutes covers 2×120s startTimeout
+ * plus stop/teardown margin under loaded windows-latest runners.
+ */
+const REAL_PROCESS_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 60_000;
+
 embeddedDescribe("embedded-lifecycle: real process (VAL-CONN-001, VAL-CONN-006, VAL-CONN-007)", () => {
-  it("first start runs initdb, ensures DB exists, and serves traffic (VAL-CONN-001)", async () => {
-    const dataDir = makeDataDir();
-    const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
-    tracked.push({ lifecycle, dataDir });
+  it(
+    "first start runs initdb, ensures DB exists, and serves traffic (VAL-CONN-001)",
+    async () => {
+      const dataDir = makeDataDir();
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+      tracked.push({ lifecycle, dataDir });
 
-    // Before start, the dir is not initialized.
-    expect(isDataDirInitialized(dataDir)).toBe(false);
+      // Before start, the dir is not initialized.
+      expect(isDataDirInitialized(dataDir)).toBe(false);
 
-    const backend = await lifecycle.start();
+      const backend = await lifecycle.start();
 
-    // After start, PG_VERSION exists (initdb ran).
-    expect(isDataDirInitialized(dataDir)).toBe(true);
+      // After start, PG_VERSION exists (initdb ran).
+      expect(isDataDirInitialized(dataDir)).toBe(true);
 
-    // Backend is embedded mode with a resolved runtime URL.
-    expect(backend.mode).toBe("embedded");
-    expect(backend.runtimeUrl).not.toBeNull();
-    expect(backend.runtimeUrl).toContain("/fusion");
+      // Backend is embedded mode with a resolved runtime URL.
+      expect(backend.mode).toBe("embedded");
+      expect(backend.runtimeUrl).not.toBeNull();
+      expect(backend.runtimeUrl).toContain("/fusion");
 
-    // The port was assigned (free-port discovery).
-    expect(lifecycle.getPort()).toBeGreaterThan(0);
+      // The port was assigned (free-port discovery).
+      expect(lifecycle.getPort()).toBeGreaterThan(0);
 
-    // Traffic is served: connect via postgres.js and query.
-    const sql = postgres(lifecycle.getConnectionUrl(), { max: 1 });
-    try {
-      const rows = await sql`SELECT current_database() AS db`;
-      expect(rows[0].db).toBe("fusion");
-    } finally {
-      await sql.end({ timeout: 5 });
-    }
-  });
+      // Traffic is served: connect via postgres.js and query.
+      const sql = postgres(lifecycle.getConnectionUrl(), { max: 1 });
+      try {
+        const rows = await sql`SELECT current_database() AS db`;
+        expect(rows[0].db).toBe("fusion");
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+    },
+    REAL_PROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("second start reuses the existing data directory without re-initdb (VAL-CONN-006)", async () => {
-    const dataDir = makeDataDir();
+  it(
+    "second start reuses the existing data directory without re-initdb (VAL-CONN-006)",
+    async () => {
+      const dataDir = makeDataDir();
 
-    // First lifecycle: start, write a marker row, stop.
-    const first = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
-    await first.start();
-    const sql1 = postgres(first.getConnectionUrl(), { max: 1 });
-    try {
-      await sql1`CREATE TABLE persistence_marker (id int PRIMARY KEY, note text)`;
-      await sql1`INSERT INTO persistence_marker (id, note) VALUES (1, 'persisted')`;
-    } finally {
-      await sql1.end({ timeout: 5 });
-    }
-    await first.stop();
+      // First lifecycle: start, write a marker row, stop.
+      const first = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+      await first.start();
+      const sql1 = postgres(first.getConnectionUrl(), { max: 1 });
+      try {
+        await sql1`CREATE TABLE persistence_marker (id int PRIMARY KEY, note text)`;
+        await sql1`INSERT INTO persistence_marker (id, note) VALUES (1, 'persisted')`;
+      } finally {
+        await sql1.end({ timeout: 5 });
+      }
+      await first.stop();
 
-    // The data dir is still initialized after stop (persistent).
-    expect(isDataDirInitialized(dataDir)).toBe(true);
+      // The data dir is still initialized after stop (persistent).
+      expect(isDataDirInitialized(dataDir)).toBe(true);
 
-    // Second lifecycle: start against the SAME dir.
-    const second = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
-    tracked.push({ lifecycle: second, dataDir });
+      // Second lifecycle: start against the SAME dir.
+      const second = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+      tracked.push({ lifecycle: second, dataDir });
 
-    await second.start();
-    const sql2 = postgres(second.getConnectionUrl(), { max: 1 });
-    try {
-      const rows = await sql2`SELECT note FROM persistence_marker WHERE id = 1`;
-      expect(rows[0].note).toBe("persisted");
-    } finally {
-      await sql2.end({ timeout: 5 });
-    }
-  });
+      await second.start();
+      const sql2 = postgres(second.getConnectionUrl(), { max: 1 });
+      try {
+        const rows = await sql2`SELECT note FROM persistence_marker WHERE id = 1`;
+        expect(rows[0].note).toBe("persisted");
+      } finally {
+        await sql2.end({ timeout: 5 });
+      }
+    },
+    REAL_PROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("ensureDatabase is idempotent: re-starting and ensuring the same DB does not error", async () => {
-    const dataDir = makeDataDir();
-    const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
-    tracked.push({ lifecycle, dataDir });
+  it(
+    "ensureDatabase is idempotent: re-starting and ensuring the same DB does not error",
+    async () => {
+      const dataDir = makeDataDir();
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+      tracked.push({ lifecycle, dataDir });
 
-    await lifecycle.start();
-    // Calling ensureDatabase again on the already-created DB should not throw.
-    await lifecycle.ensureDatabase();
-    await lifecycle.ensureDatabase();
-  });
+      await lifecycle.start();
+      // Calling ensureDatabase again on the already-created DB should not throw.
+      await lifecycle.ensureDatabase();
+      await lifecycle.ensureDatabase();
+    },
+    REAL_PROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("graceful shutdown stops the Postgres process; no orphan remains (VAL-CONN-007)", async () => {
-    const dataDir = makeDataDir();
-    const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
-    tracked.push({ lifecycle, dataDir });
+  it(
+    "graceful shutdown stops the Postgres process; no orphan remains (VAL-CONN-007)",
+    async () => {
+      const dataDir = makeDataDir();
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+      tracked.push({ lifecycle, dataDir });
 
-    await lifecycle.start();
-    const port = lifecycle.getPort()!;
-    expect(port).toBeGreaterThan(0);
+      await lifecycle.start();
+      const port = lifecycle.getPort()!;
+      expect(port).toBeGreaterThan(0);
 
-    // Confirm the port is accepting connections before shutdown.
-    const probeBefore = postgres(
-      `postgresql://postgres:password@localhost:${port}/fusion`,
-      { max: 1, connect_timeout: 5 },
-    );
-    await probeBefore`SELECT 1`;
-    await probeBefore.end({ timeout: 5 });
+      // Confirm the port is accepting connections before shutdown.
+      const probeBefore = postgres(
+        `postgresql://postgres:password@localhost:${port}/fusion`,
+        { max: 1, connect_timeout: 5 },
+      );
+      await probeBefore`SELECT 1`;
+      await probeBefore.end({ timeout: 5 });
 
-    await lifecycle.stop();
-    expect(lifecycle.isRunning()).toBe(false);
+      await lifecycle.stop();
+      expect(lifecycle.isRunning()).toBe(false);
 
-    // After shutdown, the port should refuse new connections.
-    const probeAfter = postgres(
-      `postgresql://postgres:password@localhost:${port}/fusion`,
-      { max: 1, connect_timeout: 3 },
-    );
-    await expect(probeAfter`SELECT 1`).rejects.toThrow();
-    await probeAfter.end({ timeout: 5 }).catch(() => {});
+      // After shutdown, the port should refuse new connections.
+      const probeAfter = postgres(
+        `postgresql://postgres:password@localhost:${port}/fusion`,
+        { max: 1, connect_timeout: 3 },
+      );
+      await expect(probeAfter`SELECT 1`).rejects.toThrow();
+      await probeAfter.end({ timeout: 5 }).catch(() => {});
 
-    // Remove from tracked cleanup since we already stopped.
-    const idx = tracked.findIndex((t) => t.lifecycle === lifecycle);
-    if (idx >= 0) tracked.splice(idx, 1);
-  });
+      // Remove from tracked cleanup since we already stopped.
+      const idx = tracked.findIndex((t) => t.lifecycle === lifecycle);
+      if (idx >= 0) tracked.splice(idx, 1);
+    },
+    REAL_PROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("start reports already-initialized reuse via the log when the dir exists", async () => {
-    const dataDir = makeDataDir();
-    const reuseLogLines: string[] = [];
-    const opts: EmbeddedLifecycleOptions = {
-      ...baseOptions(dataDir),
-      onLog: (msg) => reuseLogLines.push(msg),
-    };
+  it(
+    "start reports already-initialized reuse via the log when the dir exists",
+    async () => {
+      const dataDir = makeDataDir();
+      const reuseLogLines: string[] = [];
+      const opts: EmbeddedLifecycleOptions = {
+        ...baseOptions(dataDir),
+        onLog: (msg) => reuseLogLines.push(msg),
+      };
 
-    const first = new EmbeddedPostgresLifecycle(opts);
-    await first.start();
-    await first.stop();
+      const first = new EmbeddedPostgresLifecycle(opts);
+      await first.start();
+      await first.stop();
 
-    reuseLogLines.length = 0;
-    const second = new EmbeddedPostgresLifecycle(opts);
-    tracked.push({ lifecycle: second, dataDir });
-    await second.start();
-    expect(
-      reuseLogLines.some((l) => /existing data directory/i.test(l)),
-    ).toBe(true);
-  });
+      reuseLogLines.length = 0;
+      const second = new EmbeddedPostgresLifecycle(opts);
+      tracked.push({ lifecycle: second, dataDir });
+      await second.start();
+      expect(
+        reuseLogLines.some((l) => /existing data directory/i.test(l)),
+      ).toBe(true);
+    },
+    REAL_PROCESS_TEST_TIMEOUT_MS,
+  );
 });
 
 describe("embedded-lifecycle: startup timeout (P1 #24)", () => {
