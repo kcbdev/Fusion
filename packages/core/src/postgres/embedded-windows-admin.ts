@@ -28,6 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 /** Handle returned by {@link startServerAsNonAdminUser}; call stop() to kill it. */
 export interface NonAdminServerHandle {
@@ -125,44 +126,74 @@ function ensureNonAdminUser(): { user: string; password: string } {
   return { user: DEDICATED_USER, password };
 }
 
+let grantScriptPath: string | null = null;
 /**
- * FNXC:WindowsDesktopPackaging 2026-07-14-23:50:
- * Native binary roots already granted RX to the non-admin user this process.
- * Cached so the (slow) icacls /T recursive grant runs once, not per start —
- * profiling showed per-start grants took ~37s on windows-2025.
+ * FNXC:WindowsDesktopPackaging 2026-07-14-23:55:
+ * Lazily write the ACL grant script once. It performs ALL grants — dataDir
+ * FullControl, nativeRoot ReadAndExecute, and ReadAndExecute (traverse) on each
+ * ancestor of both — in a single PowerShell process via .NET Get-Acl/Set-Acl.
+ * This matters: icacls has ~1.85s fixed spawn overhead per invocation, and the
+ * per-ancestor traverse walk (~18 dirs) took ~37s on windows-2025; one
+ * PowerShell process does the same work in ~2-3s. Traverse ancestors ARE
+ * required: "Bypass traverse checking" does not let the non-admin user reach a
+ * data dir under the launching user's profile (confirmed — removing the walk
+ * broke the Start-Process launch with access errors).
  */
-const grantedNativeRoots = new Set<string>();
+function ensureGrantScript(): string {
+  if (grantScriptPath) return grantScriptPath;
+  const dir = join(tmpdir(), "fusion-pg-grant");
+  mkdirSync(dir, { recursive: true });
+  const script = join(dir, "grant.ps1");
+  writeFileSync(
+    script,
+    [
+      "param([string]$User,[string]$DataDir,[string]$NativeRoot)",
+      "$ErrorActionPreference='Stop'",
+      "function Add-Rule([string]$Path,[string]$Rights,[string]$Inheritance,[switch]$Mandatory){",
+      "  if(-not(Test-Path -LiteralPath $Path)){ if($Mandatory){throw \"missing: $Path\"}; return }",
+      "  try{",
+      "    $acl=Get-Acl -LiteralPath $Path",
+      "    $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($User,$Rights,$Inheritance,'None','Allow')",
+      "    $acl.AddAccessRule($rule)",
+      "    Set-Acl -LiteralPath $Path -AclObject $acl",
+      "  }catch{ if($Mandatory){throw} else { Write-Warning \"grant failed: $Path\" } }",
+      "}",
+      "# Required: postgres must write the data dir and read the native binaries.",
+      "Add-Rule $DataDir 'FullControl' 'ContainerInherit,ObjectInherit' -Mandatory",
+      "Add-Rule $NativeRoot 'ReadAndExecute' 'ContainerInherit,ObjectInherit' -Mandatory",
+      "# Best-effort: traverse ancestors (a blocked ancestor surfaces later via Start-Process).",
+      "foreach($leaf in @($DataDir,$NativeRoot)){",
+      "  $d=Split-Path $leaf -Parent",
+      "  for($i=0;$i -lt 16;$i++){",
+      "    $p=Split-Path $d -Parent",
+      "    if($p -eq $d){break}",
+      "    Add-Rule $d 'ReadAndExecute' 'None'",
+      "    $d=$p",
+      "  }",
+      "}",
+      "",
+    ].join("\r\n"),
+    "ascii",
+  );
+  grantScriptPath = script;
+  return script;
+}
 
 /**
- * Grant the non-admin user full control on the data dir (postgres writes
- * there) and read+execute on the native binary root. We do NOT walk ancestor
- * dirs granting traverse: icacls is ~1.8s per invocation (~37s for the full
- * chain, measured on windows-2025), and Windows grants "Bypass traverse
- * checking" (SeChangeNotifyPrivilege) to Everyone by default, so the non-admin
- * user can reach a target it has been granted access to without traverse
- * rights on the intermediates. /T applies the grant to existing children; /C
- * keeps going on non-fatal errors (e.g. unreadable sibling files). The
- * native-root grant is cached; the data dir is fresh every start.
+ * Grant the non-admin user FullControl on the data dir, ReadAndExecute on the
+ * native binary root, and ReadAndExecute (traverse) on each ancestor of both,
+ * via a single PowerShell process (see ensureGrantScript). Throws on failure.
  */
 function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
-  for (const [target, perm, cacheable] of [
-    [dataDir, "(OI)(CI)F", false],
-    [nativeRoot, "(OI)(CI)RX", true],
-  ] as const) {
-    if (cacheable && grantedNativeRoots.has(target)) continue;
-    if (!existsSync(target)) {
-      throw new Error(`embedded postgres: non-admin grant target does not exist: ${target}`);
-    }
-    const r = spawnSync("icacls", [target, "/grant", `${user}:${perm}`, "/T", "/C"], {
-      encoding: "utf8",
-    });
-    if (r.status !== 0) {
-      throw new Error(
-        `embedded postgres: failed to grant '${user}' ${perm} on ${target} ` +
-          `(icacls status=${r.status}): ${(r.stderr || "").trim().slice(0, 400)}`,
-      );
-    }
-    if (cacheable) grantedNativeRoots.add(target);
+  const script = ensureGrantScript();
+  const r = spawnSync(resolvePowerShell(), [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+    "-User", user, "-DataDir", dataDir, "-NativeRoot", nativeRoot,
+  ], { encoding: "utf8" });
+  if (r.status !== 0) {
+    throw new Error(
+      `embedded postgres: non-admin ACL grant failed (powershell status=${r.status}): ${(r.stderr || "").trim().slice(0, 500)}`,
+    );
   }
 }
 
