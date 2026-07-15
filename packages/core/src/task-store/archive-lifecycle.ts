@@ -6,12 +6,49 @@
  * behavior-preserving refactor. Each function receives the TaskStore
  * instance as its first parameter and performs byte-identical work.
  */
-import {TaskStore} from "../store.js";
+import {TaskStore, storeLog} from "../store.js";
 import {MissionStore} from "../mission-store.js";
 import {TaskHasDependentsError, TaskHasLineageChildrenError, TaskSelfDeleteError} from "./errors.js";
 import type {Task, Column, GithubIssueAction} from "../types.js";
 import "../builtin-traits.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
+import {toJson} from "../db-helpers.js";
+import {getErrorMessage} from "../error-message.js";
+
+function scheduleDeleteBranchCleanup(store: TaskStore, task: Task): void {
+    /*
+    FNXC:TaskDeletion 2026-07-15-09:45:
+    Soft-delete latency must be bounded by the database mutation, audit, and event emission; branch cleanup can spawn serialized git subprocesses and must not hold withTaskLock or the returned deleteTask Promise. Schedule the cleanup after the task is already soft-deleted, but keep the existing cleanup guarantees by still clearing stale execution-start branch references and persisting the cleaned-branch log entry on the deleted row.
+    */
+    void (async () => {
+      try {
+        const cleanedBranches = await store.cleanupBranchForTask(task);
+        if (cleanedBranches.length === 0) {
+          return;
+        }
+
+        const deletedTask = store.readTaskFromDb(task.id, { includeDeleted: true });
+        if (!deletedTask) {
+          return;
+        }
+        const updatedAt = new Date().toISOString();
+        const nextLog = [
+          ...(deletedTask.log ?? []),
+          {
+            timestamp: updatedAt,
+            action: `Cleaned up branch: ${cleanedBranches.join(", ")}`,
+          },
+        ];
+        store.db.prepare("UPDATE tasks SET log = ?, updatedAt = ? WHERE id = ?").run(toJson(nextLog), updatedAt, task.id);
+        store.db.bumpLastModified();
+      } catch (error) {
+        storeLog.warn("Deferred task-delete branch cleanup failed", {
+          taskId: task.id,
+          error: getErrorMessage(error),
+        });
+      }
+    })();
+  }
 
 export async function deleteTaskImpl(store: TaskStore, id: string, options?: { removeDependencyReferences?: boolean; removeLineageReferences?: boolean; allowResurrection?: boolean; githubIssueAction?: GithubIssueAction; auditContext?: { agentId: string; runId: string; sessionId?: string; taskId?: string }; },): Promise<Task> {
     // FNXC:RuntimeLifecycleAsync 2026-06-24-12:00:
@@ -59,24 +96,15 @@ export async function deleteTaskImpl(store: TaskStore, id: string, options?: { r
         throw new TaskHasLineageChildrenError(id, lineageChildIds);
       }
 
-      // Clean up the task's branch before deleting from DB
-      const cleanedBranches = await store.cleanupBranchForTask(task);
-      if (cleanedBranches.length > 0) {
-        if (!task.log) task.log = [];
-        task.log.push({
-          timestamp: new Date().toISOString(),
-          action: `Cleaned up branch: ${cleanedBranches.join(", ")}`,
-        });
-      }
-
       let rewrittenDependents: Task[] = [];
       let rewrittenBlockedByResidueDependents: Task[] = [];
       let rewrittenLineageChildren: Task[] = [];
+      let deletedAt = "";
       store.db.transaction(() => {
         rewrittenDependents = store.rewriteDependentsForRemoval(id, dependentIds);
         rewrittenBlockedByResidueDependents = store.rewriteBlockedByResidueDependentsForRemoval(id, new Set(dependentIds));
         rewrittenLineageChildren = store.rewriteLineageChildrenForRemoval(id, lineageChildIds);
-        const deletedAt = new Date().toISOString();
+        deletedAt = new Date().toISOString();
         const allowResurrection = options?.allowResurrection === true ? 1 : 0;
         store.db.prepare("UPDATE tasks SET \"column\" = 'archived', deletedAt = ?, allowResurrection = ?, updatedAt = ? WHERE id = ?").run(deletedAt, allowResurrection, deletedAt, id);
         void store.recordRunAuditEvent({
@@ -103,6 +131,11 @@ export async function deleteTaskImpl(store: TaskStore, id: string, options?: { r
         // remains on disk for forensic analysis; only the read API hides it.
         store.db.bumpLastModified();
       });
+
+      task.column = "archived";
+      task.deletedAt = deletedAt;
+      task.updatedAt = deletedAt;
+      scheduleDeleteBranchCleanup(store, task);
 
       // FN-5143 defense-in-depth: drop any in-memory buffer entries for this
       // task. flushAgentLogBuffer() above already ran inside the lock, but a

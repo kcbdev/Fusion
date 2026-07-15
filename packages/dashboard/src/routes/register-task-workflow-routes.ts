@@ -489,6 +489,23 @@ async function releaseExecutionAgentBindings(
   }
 }
 
+function scheduleReleaseExecutionAgentBindings(
+  engine: Parameters<typeof releaseExecutionAgentBindings>[0],
+  taskId: string,
+  runtimeLogger: { warn: (message: string, data?: Record<string, unknown>) => void },
+): void {
+  /*
+  FNXC:TaskDeletion 2026-07-15-09:52:
+  The DELETE /tasks/:id response must not wait for an includeEphemeral agent-store scan or per-agent unlink/delete calls after the DB soft-delete has committed. Keep releaseExecutionAgentBindings as the reliable cleanup implementation, but run it off the HTTP critical path and log failures so agent-binding cleanup remains observable instead of silently dropped.
+  */
+  void releaseExecutionAgentBindings(engine, taskId).catch((error: unknown) => {
+    runtimeLogger.warn("Deferred task-delete agent binding release failed", {
+      taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 function buildDuplicateQuery(title: string | undefined, description: string): string {
   const tokens = `${title ?? ""} ${description}`
     .toLowerCase()
@@ -5324,7 +5341,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           runId: `synthetic-dashboard-delete-${req.params.id}-${Date.now()}`,
         },
       });
-      await releaseExecutionAgentBindings(engine, req.params.id);
+      scheduleReleaseExecutionAgentBindings(engine, req.params.id, runtimeLogger);
       res.json(task);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
