@@ -302,7 +302,7 @@ Use Import Tasks on desktop/tablet:
 2. Choose or enter a repository (`owner/repo`). If Git remotes are detected, use the remote selector.
    Expected outcome: Fusion loads import candidates for the selected repository and shows repository/load state feedback.
 3. Stay on **Issues** or switch to **Pull Requests**, then optionally enter issue label filters before loading results.
-   Expected outcome: the list pane shows matching open issues or pull requests and marks entries that already exist on the board.
+   Expected outcome: the list pane shows matching open issues or pull requests and marks entries that already exist on the board. After a successful GitHub or GitLab import, the source row is marked **Imported** and made unavailable immediately, without waiting for the board list to refresh.
 4. Select an issue or pull request row.
    Expected outcome: the preview pane shows its title, source link, body excerpt/content, labels or PR metadata, and import availability. When the selected title/body appear to be in a language other than the current dashboard language, the preview offers **Translate** (into the dashboard language), **Show original** / **Show translation** after a successful translation, and **Dismiss**. Translation is display-only in the preview; imported task text stays the original source language.
 5. Select the import action.

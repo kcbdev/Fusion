@@ -485,6 +485,14 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   // state, so the FIRST commit's still-default state is never written over a real persisted value.
   const [readyToPersistImportState, setReadyToPersistImportState] = useState(false);
 
+  /*
+  FNXC:GitHubImport 2026-07-15-15:30:
+  A just-imported source must immediately display as imported without waiting for the parent `tasks` prop round-trip.
+  Keep local optimistic URLs unioned with, never replacing, the tasks-derived URLs; reset and import-source effects clear
+  the local set when its source context is no longer valid.
+  */
+  const [optimisticImportedUrls, setOptimisticImportedUrls] = useState<Set<string>>(new Set());
+
   // Build set of already imported URLs from existing tasks
   const importedUrls = new Set<string>();
   for (const task of tasks) {
@@ -503,6 +511,11 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       importedUrls.add(gitlabMatch[1]);
     }
   }
+
+  const isUrlImported = useCallback((url?: string | null) => {
+    if (!url) return false;
+    return importedUrls.has(url) || optimisticImportedUrls.has(url);
+  }, [importedUrls, optimisticImportedUrls]);
 
   /*
   FNXC:GitHubImport 2026-07-07-00:00:
@@ -541,6 +554,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       setGitlabGroup(persisted?.gitlabGroup ?? "");
       setGitlabItems([]);
       setSelectedGitlabKey(null);
+      setOptimisticImportedUrls(new Set());
       setIssues([]);
       setSelectedIssueNumber(null);
       setPulls([]);
@@ -637,6 +651,16 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       };
     }
   }, [isOpen, projectId]);
+
+  /*
+  FNXC:GitHubImport 2026-07-15-15:30:
+  Optimistic URLs are meaningful only for their current import source. Changing provider, GitHub owner/repo, or a GitLab
+  project/group/resource re-scopes the list, so discard them; omit activeTab so same-source Issues/Pull Requests switches
+  retain an optimistic mark.
+  */
+  useEffect(() => {
+    setOptimisticImportedUrls(new Set());
+  }, [provider, owner, repo, gitlabProject, gitlabGroup, gitlabResource]);
 
   // Handle remote selection change
   const handleRemoteChange = useCallback((remoteName: string) => {
@@ -809,6 +833,9 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
           ? await apiImportGitLabGroupIssue(selectedGitlabItem, gitlabGroup.trim(), projectId)
           : await apiImportGitLabMergeRequest(gitlabProject.trim(), selectedGitlabItem.iid, projectId);
       onImport(task);
+      if (selectedGitlabItem.webUrl) {
+        setOptimisticImportedUrls((previous) => new Set(previous).add(selectedGitlabItem.webUrl));
+      }
       setSelectedGitlabKey(null);
       if (isMobile && mobileView === "preview") setMobileView("list");
     } catch (err) {
@@ -1098,6 +1125,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const handleImport = useCallback(async () => {
     if (activeTab === "issues") {
       if (selectedIssueNumber === null) return;
+      const importedIssueUrl = issues.find((issue) => issue.number === selectedIssueNumber)?.html_url;
 
       setImporting(true);
       setError(null);
@@ -1115,6 +1143,9 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
           translateTargetLocale,
         );
         onImport(task);
+        if (importedIssueUrl) {
+          setOptimisticImportedUrls((previous) => new Set(previous).add(importedIssueUrl));
+        }
         returnToIssueListAfterSuccess();
       } catch (err) {
         const msg = getErrorMessage(err);
@@ -1128,6 +1159,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       }
     } else {
       if (selectedPullNumber === null) return;
+      const importedPullUrl = pulls.find((pull) => pull.number === selectedPullNumber)?.html_url;
 
       setImporting(true);
       setError(null);
@@ -1135,6 +1167,9 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       try {
         const task = await apiImportGitHubPull(owner.trim(), repo.trim(), selectedPullNumber, projectId);
         onImport(task);
+        if (importedPullUrl) {
+          setOptimisticImportedUrls((previous) => new Set(previous).add(importedPullUrl));
+        }
         setSelectedPullNumber(null);
         if (isMobile && mobileView === "preview") {
           setMobileView("list");
@@ -1150,7 +1185,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
         setImporting(false);
       }
     }
-  }, [activeTab, selectedIssueNumber, selectedPullNumber, owner, repo, projectId, onImport, isMobile, mobileView, returnToIssueListAfterSuccess]);
+  }, [activeTab, selectedIssueNumber, selectedPullNumber, issues, pulls, owner, repo, projectId, onImport, isMobile, mobileView, returnToIssueListAfterSuccess]);
 
   /*
   FNXC:GitHubImport 2026-06-23-01:00:
@@ -1338,8 +1373,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const singleRemote = remotes.length === 1;
 
   // Tab-specific counts
-  const importedIssueCount = issues.filter((issue) => importedUrls.has(issue.html_url)).length;
-  const importedPullCount = pulls.filter((pull) => importedUrls.has(pull.html_url)).length;
+  const importedIssueCount = issues.filter((issue) => isUrlImported(issue.html_url)).length;
+  const importedPullCount = pulls.filter((pull) => isUrlImported(pull.html_url)).length;
 
   // Empty states
   const isIssuesEmpty = isIssuesEmptyState;
@@ -1605,7 +1640,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                 {activeTab === "issues" && issues.length > 0 && (
                   <div className="issues-list" aria-live="polite">
                     {issues.map((issue) => {
-                      const isImported = importedUrls.has(issue.html_url);
+                      const isImported = isUrlImported(issue.html_url);
                       return (
                         <div
                           key={issue.number}
@@ -1656,7 +1691,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                 {activeTab === "pulls" && pulls.length > 0 && (
                   <div className="issues-list" aria-live="polite">
                     {pulls.map((pull) => {
-                      const isImported = importedUrls.has(pull.html_url);
+                      const isImported = isUrlImported(pull.html_url);
                       return (
                         <div
                           key={pull.number}
@@ -1751,7 +1786,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                   data-testid="github-import-action-top"
                   onClick={handleImport}
                   disabled={
-                    (activeTab === "issues" ? selectedIssueNumber === null : selectedPullNumber === null) || importing
+                    (activeTab === "issues" ? selectedIssueNumber === null || isUrlImported(selectedIssue?.html_url) : selectedPullNumber === null || isUrlImported(selectedPull?.html_url)) || importing
                   }
                 >
                   {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
@@ -1977,9 +2012,9 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                 <div className="issues-list" aria-live="polite">
                   {gitlabItems.map((item) => {
                     const key = `${item.resourceKind}:${item.projectId ?? item.projectPath ?? ""}:${item.iid}`;
-                    const imported = importedUrls.has(item.webUrl);
+                    const imported = isUrlImported(item.webUrl);
                     return (
-                      <button key={key} type="button" className={`issue-item ${selectedGitlabKey === key ? "selected" : ""} ${imported ? "imported" : ""}`} onClick={() => { setSelectedGitlabKey(key); if (isMobile) setMobileView("preview"); }}>
+                      <button key={key} type="button" className={`issue-item ${selectedGitlabKey === key ? "selected" : ""} ${imported ? "imported" : ""}`} onClick={() => { if (!imported) { setSelectedGitlabKey(key); if (isMobile) setMobileView("preview"); } }} disabled={imported}>
                         <div className="issue-title">{item.resourceKind === "merge_request" ? "!" : "#"}{item.iid} {item.title}</div>
                         <div className="issue-meta"><span>{item.projectPath ?? item.projectId}</span><span>{item.state}</span>{imported && <span>{t("git.alreadyImported", "Imported")}</span>}</div>
                       </button>
@@ -1994,7 +2029,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                       {/* FNXC:GitHubImportTranslate 2026-07-14-12:00: GitLab import preview reuses the same language-detect + translate controls as GitHub. */}
                       {importTranslation.controls}
                       <MailboxMessageContent className="preview-body preview-body--markdown" content={importTranslation.display.body?.trim() || t("git.noDescription", "(no description)")} testId="gitlab-import-preview-body" />
-                      <button type="button" className="btn btn-primary" onClick={handleImportGitLab} disabled={!gitlabEnabled || importing || importedUrls.has(selectedGitlabItem.webUrl)}>{importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}</button>
+                      <button type="button" className="btn btn-primary" onClick={handleImportGitLab} disabled={!gitlabEnabled || importing || isUrlImported(selectedGitlabItem.webUrl)}>{importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}</button>
                     </div>
                   ) : <div className="github-import-state github-import-state--idle" data-testid="gitlab-import-preview-empty"><strong>{t("git.gitlabNoSelection", "No GitLab resource selected")}</strong><span>{t("git.gitlabNoSelectionHint", "Choose a resource from the list to preview it.")}</span></div>}
                 </div>
@@ -2018,8 +2053,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
               onClick={provider === "gitlab" ? handleImportGitLab : handleImport}
               disabled={
                 provider === "gitlab"
-                  ? !gitlabEnabled || selectedGitlabItem === null || importing || (selectedGitlabItem ? importedUrls.has(selectedGitlabItem.webUrl) : false)
-                  : (activeTab === "issues" ? selectedIssueNumber === null : selectedPullNumber === null) || importing
+                  ? !gitlabEnabled || selectedGitlabItem === null || importing || (selectedGitlabItem ? isUrlImported(selectedGitlabItem.webUrl) : false)
+                  : (activeTab === "issues" ? selectedIssueNumber === null || isUrlImported(selectedIssue?.html_url) : selectedPullNumber === null || isUrlImported(selectedPull?.html_url)) || importing
               }
             >
               {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}

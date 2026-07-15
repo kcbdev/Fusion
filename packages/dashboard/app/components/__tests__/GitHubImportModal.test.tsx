@@ -266,11 +266,14 @@ describe("GitHubImportModal", () => {
 
     await waitFor(() => expect(apiImportGitLabProjectIssue).toHaveBeenCalledWith("group/project", 2, undefined));
     expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-099" }));
+    const row = screen.getByText(/#2 GitLab bug/).closest("button") as HTMLButtonElement;
+    expect(row).toHaveClass("imported");
+    expect(row.disabled).toBe(true);
   });
 
   it("hides the GitLab import provider and keeps GitHub active when GitLab is off", async () => {
     vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
-    vi.mocked(fetchSettings).mockResolvedValueOnce({ gitlabEnabled: false } as never);
+    vi.mocked(fetchSettings).mockResolvedValue({ gitlabEnabled: false } as never);
 
     render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
 
@@ -304,7 +307,7 @@ describe("GitHubImportModal", () => {
 
   it("coerces a persisted GitLab provider to GitHub without auto-loading when GitLab is off", async () => {
     vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
-    vi.mocked(fetchSettings).mockResolvedValueOnce({ gitlabEnabled: false } as never);
+    vi.mocked(fetchSettings).mockResolvedValue({ gitlabEnabled: false } as never);
     window.localStorage.setItem(`kb:project-1:${GITHUB_IMPORT_STATE_KEY}`, JSON.stringify({
       provider: "gitlab",
       activeTab: "issues",
@@ -898,11 +901,42 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
-        expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1");
+        expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1", "en");
         expect(onImport).toHaveBeenCalledWith(mockTask);
         expect(onClose).not.toHaveBeenCalled();
         expect(screen.getByText("Import from GitHub")).toBeTruthy();
+        const row = screen.getByText("First Issue").closest(".issue-item") as HTMLElement;
+        expect(row).toHaveClass("imported");
+        expect(within(row).getByText("Imported")).toBeTruthy();
+        expect(screen.getByRole("radio", { name: /Select issue #1/i })).toBeDisabled();
+        expect(screen.getByText("1 imported")).toBeTruthy();
       });
+    });
+
+    it("preserves optimistic imports across GitHub tabs and clears them after a provider switch", async () => {
+      const issues = [
+        { number: 1, title: "Context Issue", body: "Body", html_url: "https://github.com/owner/repo/issues/1", labels: [] },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([{ name: "origin", owner: "owner", repo: "repo", url: "" }]);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues).mockResolvedValueOnce(issues);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(mockPulls);
+      vi.mocked(apiImportGitHubIssue).mockResolvedValueOnce(mockTask);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+      await screen.findByText("Context Issue");
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
+      await waitFor(() => expect(screen.getByText("Context Issue").closest(".issue-item")).toHaveClass("imported"));
+
+      fireEvent.click(screen.getByRole("tab", { name: /Pull Requests/i }));
+      await screen.findByText("Test PR");
+      fireEvent.click(screen.getByRole("tab", { name: /Issues/i }));
+      await screen.findByText("Context Issue");
+      expect(screen.getByText("Context Issue").closest(".issue-item")).toHaveClass("imported");
+
+      fireEvent.click(await screen.findByRole("button", { name: "GitLab" }));
+      fireEvent.click(screen.getByRole("button", { name: "GitHub" }));
+      await waitFor(() => expect(screen.getByText("Context Issue").closest(".issue-item")).not.toHaveClass("imported"));
     });
 
     it("stays open and returns desktop issue imports to the no-selection list state", async () => {
@@ -930,7 +964,7 @@ describe("GitHubImportModal", () => {
       fireEvent.click(importButton);
 
       await waitFor(() => {
-        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1");
+        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1", "en");
         expect(onClose).not.toHaveBeenCalled();
         expect(radio.checked).toBe(false);
         expect(screen.queryByTestId("github-import-preview-card")).toBeNull();
@@ -966,7 +1000,7 @@ describe("GitHubImportModal", () => {
       fireEvent.click(bottomImportButton);
 
       await waitFor(() => {
-        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 2, "project-1");
+        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 2, "project-1", "en");
         expect(onClose).not.toHaveBeenCalled();
         expect(screen.queryByTestId("github-import-preview-card")).toBeNull();
         expect(screen.getByTestId("github-import-preview-empty")).toHaveTextContent("No issue selected");
@@ -1239,11 +1273,14 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
-        expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, undefined);
+        expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, undefined, "en");
         expect(previewPane.classList.contains("active")).toBe(false);
         expect(listPane.classList.contains("active")).toBe(true);
         expect(screen.queryByTestId("github-import-preview-card")).toBeNull();
         expect(screen.getByTestId("github-import-preview-empty")).toHaveTextContent("No issue selected");
+        const row = screen.getByText("Mobile Import Issue").closest(".issue-item") as HTMLElement;
+        expect(row).toHaveClass("imported");
+        expect(screen.getByRole("radio", { name: /Select issue #1/i })).toBeDisabled();
       });
     });
 
@@ -1812,7 +1849,7 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
-        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1");
+        expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1", "en");
       });
 
       expect(previewPane.classList.contains("active")).toBe(false);
@@ -2246,6 +2283,11 @@ describe("GitHubImportModal", () => {
         expect(onImport).toHaveBeenCalledWith(mockPRTask);
         expect(onClose).not.toHaveBeenCalled();
         expect(screen.getByText("Import from GitHub")).toBeTruthy();
+        const row = screen.getByText("Test PR").closest(".issue-item") as HTMLElement;
+        expect(row).toHaveClass("imported");
+        expect(within(row).getByText("Imported")).toBeTruthy();
+        expect(screen.getByRole("radio", { name: /Select pull request #1/i })).toBeDisabled();
+        expect(screen.getByText("1 imported")).toBeTruthy();
       });
     });
 
