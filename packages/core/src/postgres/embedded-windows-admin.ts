@@ -406,23 +406,29 @@ export async function startServerAsNonAdminUser(
       // logon session. Best-effort (nonzero if none running) — status ignored.
       spawnSync("taskkill", ["/im", "postgres.exe", "/f", "/t"], { encoding: "utf8" });
       spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
-      // FNXC:WindowsDesktopPackaging 2026-07-15-01:40:
-      // Wait for the OS to terminate postgres + release its file locks, THEN
-      // remove postmaster.pid. Without this, a later start() on the SAME data
-      // dir (the reuse/idempotent tests) reads the stale postmaster.pid via
-      // isAlreadyRunning and skips booting — connecting to a dead server and
-      // timing out.
-      const wait1 = Promise.withResolvers<void>();
-      setTimeout(wait1.resolve, 400);
-      await wait1.promise;
-      try {
-        rmSync(join(opts.dataDir, "postmaster.pid"), { force: true });
-      } catch {
-        // best-effort; a lingering lock surfaces via the caller's rmSync retries
+      // FNXC:WindowsDesktopPackaging 2026-07-15-02:00:
+      // Poll until postmaster.pid is deletable. The file is held open by the
+      // postmaster, so rmSync only succeeds once postgres is fully dead AND its
+      // file handles are released — a deterministic signal that the data dir is
+      // free. This is what makes a subsequent start() on the SAME data dir (the
+      // reuse tests) and the caller's cleanup rmSync reliable on Windows, where
+      // file-lock teardown after kill is otherwise racy.
+      const pidFile = join(opts.dataDir, "postmaster.pid");
+      for (let i = 0; i < 60; i += 1) {
+        try {
+          rmSync(pidFile, { force: true });
+          break;
+        } catch {
+          const w = Promise.withResolvers<void>();
+          setTimeout(w.resolve, 100);
+          await w.promise;
+        }
       }
-      const wait2 = Promise.withResolvers<void>();
-      setTimeout(wait2.resolve, 200);
-      await wait2.promise;
+      // Small extra wait for residual data-file handle release after the pid
+      // file is gone.
+      const tail = Promise.withResolvers<void>();
+      setTimeout(tail.resolve, 200);
+      await tail.promise;
     },
   };
 }
