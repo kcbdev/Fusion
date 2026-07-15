@@ -95,6 +95,7 @@ const mocks = vi.hoisted(() => {
   const pluginLoaderInstances: any[] = [];
   const projectEngineInstances: any[] = [];
   const listenCalls: ListenCall[] = [];
+  const backendShutdowns: Array<ReturnType<typeof vi.fn>> = [];
   const globalSettingsGetSettings = vi.fn().mockResolvedValue({});
 
   function createTaskStoreMock(projectId = "") {
@@ -155,6 +156,23 @@ const mocks = vi.hoisted(() => {
     const store = createTaskStoreMock();
     taskStores.push(store);
     return store;
+  });
+
+  /*
+   * FNXC:PostgresServeLifecycle 2026-07-14-22:20:
+   * Serve's authoritative TaskStore is initialized by createTaskStoreForBackend and then injected into ProjectEngineManager. The test factory must model that single owner instead of leaving the engine mock to construct and initialize a second store.
+   */
+  const createTaskStoreForBackendMock = vi.fn(async ({ rootDir }: { rootDir: string }) => {
+    const taskStore = taskStoreCtor(rootDir);
+    await taskStore.init();
+    const shutdown = vi.fn().mockResolvedValue(undefined);
+    backendShutdowns.push(shutdown);
+    return {
+      taskStore,
+      asyncLayer: {},
+      backend: { mode: "embedded" },
+      shutdown,
+    };
   });
 
   const automationStoreCtor = vi.fn().mockImplementation(function () {
@@ -423,8 +441,13 @@ const mocks = vi.hoisted(() => {
     pruning: { applied: false },
   });
 
-  const projectEngineCtor = vi.fn().mockImplementation(function (runtimeConfig: { workingDirectory: string }, _centralCore: unknown, options: { onInsightRunProcessed?: unknown }) {
-    const store = taskStoreCtor(runtimeConfig.workingDirectory);
+  const projectEngineCtor = vi.fn().mockImplementation(function (
+    runtimeConfig: { workingDirectory: string },
+    _centralCore: unknown,
+    options: { onInsightRunProcessed?: unknown; externalTaskStore?: ReturnType<typeof createTaskStoreMock> },
+  ) {
+    const store = options.externalTaskStore ?? taskStoreCtor(runtimeConfig.workingDirectory);
+    const ownsStoreInitialization = options.externalTaskStore === undefined;
     const automationStore = automationStoreCtor(runtimeConfig.workingDirectory);
     const agentStore = agentStoreCtor();
     const semaphore = agentSemaphoreCtor();
@@ -454,7 +477,7 @@ const mocks = vi.hoisted(() => {
 
     const engine = {
       start: vi.fn(async () => {
-        await store.init();
+        if (ownsStoreInitialization) await store.init();
         await automationStore.init();
         await agentStore.init();
         const settings = await store.getSettings();
@@ -538,7 +561,9 @@ const mocks = vi.hoisted(() => {
     pluginLoaderInstances,
     projectEngineInstances,
     listenCalls,
+    backendShutdowns,
     taskStoreCtor,
+    createTaskStoreForBackendMock,
     automationStoreCtor,
     agentStoreCtor,
     centralCoreCtor,
@@ -584,6 +609,7 @@ const mocks = vi.hoisted(() => {
       pluginLoaderInstances.length = 0;
       projectEngineInstances.length = 0;
       listenCalls.length = 0;
+      backendShutdowns.length = 0;
       syncInsightExtractionAutomationMock.mockReset();
       syncInsightExtractionAutomationMock.mockResolvedValue(undefined);
       processAndAuditInsightExtractionMock.mockClear();
@@ -603,6 +629,7 @@ vi.mock("@fusion/core", async (importOriginal) => {
   const { createCliCoreMock } = await import("../../test/mockCoreEngine");
   return createCliCoreMock(() => importOriginal<typeof import("@fusion/core")>(), {
   TaskStore: mocks.taskStoreCtor,
+  createTaskStoreForBackend: mocks.createTaskStoreForBackendMock,
   AutomationStore: mocks.automationStoreCtor,
   AgentStore: mocks.agentStoreCtor,
   CentralCore: mocks.centralCoreCtor,
@@ -903,7 +930,8 @@ describe("runServe", () => {
   it("initializes stores, starts engine services, and creates a headless server", async () => {
     await runServe(4040, {});
 
-    expect(mocks.taskStoreCtor).toHaveBeenCalledWith("/repo");
+    expect(mocks.createTaskStoreForBackendMock).toHaveBeenCalledWith({ rootDir: "/repo" });
+    expect(mocks.taskStoreCtor).toHaveBeenCalledTimes(1);
     expect(mocks.taskStores[0].init).toHaveBeenCalledTimes(1);
     expect(mocks.taskStores[0].watch).toHaveBeenCalledTimes(1);
     expect(mocks.automationStoreCtor).toHaveBeenCalledWith("/repo");
@@ -1020,7 +1048,8 @@ describe("runServe", () => {
     expect(mocks.cronRunnerInstances[0].stop).toHaveBeenCalledTimes(1);
     expect(mocks.notifierInstances[0].stop).toHaveBeenCalledTimes(1);
     expect(listenCall.server.close).toHaveBeenCalledTimes(1);
-    expect(mocks.taskStores[0].close).toHaveBeenCalledTimes(1);
+    expect(mocks.taskStores[0].close).not.toHaveBeenCalled();
+    expect(mocks.backendShutdowns[0]).toHaveBeenCalledTimes(1);
   });
 
   it("enables HybridExecutor when env override is set and shuts it down before engine stop", async () => {
@@ -1152,6 +1181,15 @@ describe("runServe — Plugin wiring", () => {
     expect(PluginStore).toHaveBeenCalled();
 
     await triggerSignal("SIGINT");
+  });
+
+  it("shuts down the single shared PostgreSQL boot on graceful serve shutdown", async () => {
+    await runServe(4040, {});
+    expect(mocks.backendShutdowns).toHaveLength(1);
+
+    await triggerSignal("SIGINT");
+
+    expect(mocks.backendShutdowns[0]).toHaveBeenCalledTimes(1);
   });
 
   it("passes pluginStore, pluginLoader, and pluginRunner to createServer", async () => {

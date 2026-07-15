@@ -13,6 +13,7 @@ import {
   detectProjectFromCwd,
   formatProjectLine,
   getStoreForProject,
+  closeProjectStore,
   clearStoreCache,
 } from "../project-context.js";
 import { CentralCore, GlobalSettingsStore, type RegisteredProject } from "@fusion/core";
@@ -54,7 +55,7 @@ describe("project-context", () => {
     } catch {
       // Ignore close errors
     }
-    clearStoreCache();
+    await clearStoreCache();
 
     // Filesystem cleanup last
     try {
@@ -95,6 +96,19 @@ describe("project-context", () => {
       expect(found).toBeDefined();
       expect(found?.path).toBe(resolve(projectPath));
       expect(found?.name).toBe("legacy-project");
+    });
+
+    it("detects an unregistered project.json marker without fusion.db", async () => {
+      const projectPath = join(tempDir, "postgres-project");
+      mkdirSync(join(projectPath, ".fusion"), { recursive: true });
+      writeFileSync(join(projectPath, ".fusion", "project.json"), JSON.stringify({
+        id: "proj_1234567890abcdef",
+        createdAt: "2026-07-14T00:00:00.000Z",
+      }));
+
+      const found = await detectProjectFromCwd(projectPath, central);
+
+      expect(found).toMatchObject({ path: resolve(projectPath), name: "postgres-project" });
     });
 
     it("should not inherit an unregistered parent project from a nested cwd", async () => {
@@ -224,7 +238,7 @@ pgDescribe("project-context (PostgreSQL-backed CentralCore)", () => {
     } catch {
       // Ignore close errors
     }
-    clearStoreCache();
+    await clearStoreCache();
     try {
       rmSync(tempDir, { recursive: true, force: true });
       rmSync(homeDir, { recursive: true, force: true });
@@ -285,7 +299,11 @@ pgDescribe("project-context (PostgreSQL-backed CentralCore)", () => {
       expect(context.projectPath).toBe(resolve(projectPath));
       expect(context.projectName).toBe("legacy-project");
       expect(context.isRegistered).toBe(false);
-      await context.store.close();
+      /*
+      FNXC:PostgresCliLifecycle 2026-07-14-22:25:
+      A resolved ProjectContext owns both its factory-backed TaskStore and the CentralCore retained during resolution. Tests and commands must close that aggregate through closeProjectStore so the central PostgreSQL pool cannot outlive the context and block database teardown.
+      */
+      await closeProjectStore(context);
     } finally {
       if (prevDatabaseUrl === undefined) {
         delete process.env.DATABASE_URL;
