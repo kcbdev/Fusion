@@ -102,6 +102,14 @@ describe("worktree-hooks", () => {
     expect(hook).not.toMatch(/s\/\^A\.B\+C-\/\/i/);
   });
 
+  // FNXC:WorktreeHooks 2026-07-14-19:40: `/` must be escaped too so `/`-delimited sed `s/.../.../` stays valid (greptile P1 3583850800 on PR #1930).
+  it("escapes slash in the fallback taskPrefix so sed delimiters stay intact", () => {
+    const hook = buildCommitMsgTrailerHook("not-a-numeric-id", { taskPrefix: "TEAM/API" });
+    expect(hook).toContain('PREFIX="TEAM/API"');
+    expect(hook).toContain("s/^TEAM\\/API-//i");
+    expect(hook).not.toContain("s/^TEAM/API-//i");
+  });
+
   it("quotes the case pattern for derived alphanumeric prefixes too", () => {
     const hook = buildCommitMsgTrailerHook("FN-42");
     expect(hook).toContain('"$PREFIX"-*) ;;');

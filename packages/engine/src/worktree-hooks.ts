@@ -200,9 +200,12 @@ fi
 /*
 FNXC:WorktreeHooks 2026-07-14-12:00:
 options.taskPrefix is a fallback when taskId is not a well-formed "<PREFIX>-<n>" id. It is interpolated into the generated commit-msg hook's case arm and sed -E strip. Escape ERE metacharacters for sed and quote the case pattern via "$PREFIX" so a misconfigured prefix cannot break the hook or strip the wrong id (greptile P2 on PR #1930). Valid UI prefixes remain letter-led alphanumeric; escaping is defense-in-depth for the fallback path.
+
+FNXC:WorktreeHooks 2026-07-14-19:40:
+Also escape `/` so a fallback prefix like `TEAM/API` cannot break the `/`-delimited sed substitution (`s/^TEAM/API-//i` is invalid; greptile P1 databaseId 3583850800 on PR #1930).
 */
 function escapeSedEre(value: string): string {
-  return value.replace(/[\\.^$*+?()[\]{}|]/g, "\\$&");
+  return value.replace(/[\\/.^$*+?()[\]{}|]/g, "\\$&");
 }
 
 export function buildCommitMsgTrailerHook(
