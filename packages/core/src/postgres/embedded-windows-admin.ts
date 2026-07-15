@@ -269,14 +269,35 @@ export async function startServerAsNonAdminUser(
   const runDir = join(opts.dataDir, ".pgrunner");
   mkdirSync(runDir, { recursive: true });
   const logFile = join(runDir, "postgres.log");
+  // FNXC:WindowsDesktopPackaging 2026-07-14-22:50:
+  // Separate wrapper log: the bat echoes whoami / cwd / the exact postgres
+  // command / the exit code here (cmd's own output), while postgres's output
+  // goes to logFile. This distinguishes "bat never ran", "postgres exited",
+  // and "postgres running but not listening" — postgres.log alone can be empty
+  // when the bat never reaches the postgres command.
+  const wrapperLog = join(runDir, "wrapper.log");
   const bat = join(runDir, "launch.bat");
   const args = ["-D", opts.dataDir, "-p", String(opts.port), ...opts.postgresFlags];
   // Set TMP/TEMP inside the granted data dir so the non-admin postgres process
-  // never writes outside an accessible location; capture all output to the log.
+  // never writes outside an accessible location.
   const argStr = args.map((a) => `"${a}"`).join(" ");
   writeFileSync(
     bat,
-    `@echo off\r\nset "TMP=${runDir}"\r\nset "TEMP=${runDir}"\r\n"${pgExe}" ${argStr} > "${logFile}" 2>&1\r\n`,
+    [
+      "@echo off",
+      `set "TMP=${runDir}"`,
+      `set "TEMP=${runDir}"`,
+      `call :main >> "${wrapperLog}" 2>&1`,
+      "exit /b",
+      ":main",
+      "echo launch-start",
+      "whoami",
+      "cd",
+      `echo cmd: "${pgExe}" ${argStr}`,
+      `"${pgExe}" ${argStr} > "${logFile}" 2>&1`,
+      "echo exit=%ERRORLEVEL%",
+      "",
+    ].join("\r\n"),
     "ascii",
   );
 
@@ -358,6 +379,12 @@ export async function startServerAsNonAdminUser(
     // the port is visible. "ready to accept connections" is the same marker
     // embedded-postgres watches stderr for.
     const tail = readTail(logFile, 3000);
+    const wrapperTail = readTail(wrapperLog, 1500);
+    // Emit both logs each poll so they are captured even when Vitest's test
+    // timeout preempts the launcher's own error — otherwise the postgres
+    // output hides behind "Test timed out in 15000ms" and we cannot tell
+    // whether the bat ran, postgres exited, or postgres is hung.
+    opts.onLog(`non-admin poll wrapper={${wrapperTail}} pg={${tail.slice(-400)}}`);
     if (/database system is ready to accept connections/.test(tail)) {
       ready = true;
       break;
