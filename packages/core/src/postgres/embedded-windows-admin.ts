@@ -186,13 +186,16 @@ function ensureGrantScript(): string {
  */
 function grantNonAdminAccess(user: string, nativeRoot: string, dataDir: string): void {
   const script = ensureGrantScript();
-  const r = spawnSync(resolvePowerShell(), [
+  const powerShell = resolvePowerShell();
+  const r = spawnSync(powerShell, [
     "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
     "-User", user, "-DataDir", dataDir, "-NativeRoot", nativeRoot,
   ], { encoding: "utf8" });
   if (r.status !== 0) {
     throw new Error(
-      `embedded postgres: non-admin ACL grant failed (powershell status=${r.status}): ${(r.stderr || "").trim().slice(0, 500)}`,
+      `embedded postgres: non-admin ACL grant failed (${powerShell} status=${r.status} ` +
+        `signal=${r.signal} error=${r.error ? String(r.error) : "none"} ` +
+        `stdout=${(r.stdout || "").trim().slice(0, 300)} stderr=${(r.stderr || "").trim().slice(0, 500)}).`,
     );
   }
 }
