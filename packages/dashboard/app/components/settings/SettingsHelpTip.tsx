@@ -31,12 +31,39 @@ export interface SettingsHelpTipProps {
   settingKey?: string;
 }
 
+/*
+FNXC:SettingsHelp 2026-07-15-22:25:
+At most one tip is open at a time, enforced by a broadcast rather than by the outside-pointerdown handler alone.
+Outside-pointerdown covers tapping, but it is not the only way a tip opens: pressing Enter/Space on a focused trigger fires `click` with NO pointer event, so a keyboard operator moving between two tips would leave the first bubble open underneath the second. Observed as two overlapping bubbles on a 390px viewport.
+A document-level event keeps the tips decoupled — they never need to know about each other or share a context — and costs one listener per tip.
+*/
+const SETTINGS_HELP_OPEN_EVENT = "fusion:settings-help-open";
+
 export function SettingsHelpTip({ children, settingKey }: SettingsHelpTipProps) {
   const { t } = useTranslation("app");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const reactId = useId();
   const helpId = `settings-help-${settingKey ?? reactId}`;
+
+  // Close when any other tip announces that it opened.
+  useEffect(() => {
+    const onOtherOpened = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== helpId) setOpen(false);
+    };
+    document.addEventListener(SETTINGS_HELP_OPEN_EVENT, onOtherOpened);
+    return () => document.removeEventListener(SETTINGS_HELP_OPEN_EVENT, onOtherOpened);
+  }, [helpId]);
+
+  const toggle = () => {
+    setOpen((wasOpen) => {
+      const next = !wasOpen;
+      if (next) {
+        document.dispatchEvent(new CustomEvent(SETTINGS_HELP_OPEN_EVENT, { detail: helpId }));
+      }
+      return next;
+    });
+  };
 
   /*
   FNXC:SettingsHelp 2026-07-15-21:10:
@@ -71,7 +98,7 @@ export function SettingsHelpTip({ children, settingKey }: SettingsHelpTipProps) 
         aria-expanded={open}
         aria-describedby={helpId}
         data-testid={settingKey ? `settings-help-${settingKey}` : undefined}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <HelpCircle size={13} aria-hidden />
       </button>

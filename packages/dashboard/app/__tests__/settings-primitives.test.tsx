@@ -109,6 +109,35 @@ describe("SettingsFieldRow", () => {
     expect(trigger.closest(".settings-help")).toHaveAttribute("data-open", "false");
   });
 
+  /*
+  FNXC:SettingsHelp 2026-07-15-22:25:
+  Only one tip may be open. The outside-pointerdown handler is not sufficient on its own: `click` fires with NO pointer event when a keyboard operator presses Enter/Space on a focused trigger, so opening a second tip that way used to leave the first bubble open underneath it — observed as two overlapping bubbles on a phone-sized viewport.
+  Asserted with a bare `click()` precisely because that is the no-pointerdown path.
+  */
+  it("closes any other open tip when one opens, including without a pointer event", () => {
+    render(
+      <>
+        <SettingsFieldRow htmlFor="alpha" label="Alpha" help="Alpha help">
+          <input aria-label="a" />
+        </SettingsFieldRow>
+        <SettingsFieldRow htmlFor="beta" label="Beta" help="Beta help">
+          <input aria-label="b" />
+        </SettingsFieldRow>
+      </>,
+    );
+    const [alphaBtn, betaBtn] = screen.getAllByRole("button", { name: "Show help" });
+    const alpha = alphaBtn.closest(".settings-help")!;
+    const beta = betaBtn.closest(".settings-help")!;
+
+    fireEvent.click(alphaBtn);
+    expect(alpha).toHaveAttribute("data-open", "true");
+
+    // No pointerdown — the keyboard path.
+    fireEvent.click(betaBtn);
+    expect(beta).toHaveAttribute("data-open", "true");
+    expect(alpha).toHaveAttribute("data-open", "false");
+  });
+
   it("renders no help trigger when a row has no help", () => {
     render(
       <SettingsFieldRow htmlFor="theme" label="Theme">
