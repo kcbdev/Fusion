@@ -2038,7 +2038,6 @@ export class TriageProcessor {
       // core task lock; current TaskStore implementations always take the atomic path.
       const liveTask = await Promise.resolve(this.store.getTask(task.id)).catch(() => task) ?? task;
       if (!isTaskStillInPlanningStage(liveTask)) {
-        planLog.warn(`${task.id}: ignored stale triage recovery after task advanced to ${liveTask.column}`);
         return false;
       }
       await this.store.updateTask(task.id, patch);
@@ -2053,8 +2052,11 @@ export class TriageProcessor {
          * FN-7977: a provider or validation failure must never overwrite an
          * advanced task with planning/failed/retry state. Evaluate this predicate
          * under the task lock so scheduler advancement cannot race the recovery write.
+         *
+         * FNXC:Triage 2026-07-15-17:20:
+         * FN-8024: skipping a stale recovery write is the expected outcome of a normal
+         * scheduler advancement, not an anomaly — do not log it.
          */
-        planLog.warn(`${task.id}: ignored stale triage recovery after task advanced to ${liveTask.column}`);
         return null;
       }
       persisted = true;
