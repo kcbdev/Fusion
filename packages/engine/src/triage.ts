@@ -1012,7 +1012,20 @@ export class TriageProcessor {
       const agentWork = async () => {
         // Set status only after the semaphore slot has been acquired, so
         // tasks waiting in the queue don't appear as "planning".
+        /*
+        FNXC:Triage 2026-07-16-05:35:
+        A skip on this PRIMARY claim path is an anomaly, not a benign scheduler race: poll()
+        already proved the card is an eligible planner candidate, so failing the guard here
+        means it is re-claimed every poll, never planned, and holds a maxTriageConcurrent slot
+        against healthy cards. Recovery-write skips stay silent by design (see
+        updatePlanningStateIfStillCurrent); this one must be visible — the FN-7977 steps>0
+        wedge stalled the whole planner for hours precisely because it logged nothing.
+        */
         if (!await this.updatePlanningStateIfStillCurrent(task, { status: "planning" })) {
+          planLog.warn(
+            `${task.id}: planning claim skipped — live row is no longer in the planning stage; `
+            + "it will be re-claimed on the next poll",
+          );
           return;
         }
 
