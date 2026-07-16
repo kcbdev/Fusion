@@ -674,7 +674,7 @@ GitLab configuration examples: leave both URL fields blank for GitLab.com (`http
 | `memoryBackupRetention` | `number` | `14` | Number of memory backups to retain. |
 | `memoryBackupDir` | `string` | `".fusion/backups/memory"` | Relative memory backup directory path. |
 | `memoryBackupScope` | `"project" \| "agents" \| "all"` | `"all"` | Backup scope: project memory, agent memory, or both. |
-| `autoSummarizeTitles` | `boolean` | `false` | Auto-generate titles for long untitled descriptions across dashboard/API task creation. Agent-created tasks from `fn_task_create` and `fn_delegate_task` always request summarization for untitled tasks, regardless of this setting. |
+| `autoSummarizeTitles` | `boolean` | `false` | Auto-generate titles for long untitled descriptions across dashboard/API task creation. Generated titles match the operator's input language from the task description. Agent-created tasks from `fn_task_create` and `fn_delegate_task` always request summarization for untitled tasks, regardless of this setting. |
 | `useAiMergeCommitSummary` | `boolean` | `true` | Use AI-generated merge commit summaries (subject + bullet body + diff-stat) instead of raw step-commit subject lists. |
 | `titleSummarizerProvider` | `string` | `undefined` | Provider for title summarization. |
 | `titleSummarizerModelId` | `string` | `undefined` | Model ID for title summarization. |
