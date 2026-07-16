@@ -24,7 +24,7 @@ import { RoomMessageDeliveredButReplyFailedError, useChatRooms } from "../hooks/
 import { useChatUnread } from "../hooks/useChatUnread";
 import { useViewportMode } from "./Header";
 import { fetchSettings, updateGlobalSettings, type DiscoveredSkill } from "../api";
-import { THINKING_LEVELS, type Agent, type Settings, type ThinkingLevel } from "@fusion/core";
+import { type Agent, type Settings } from "@fusion/core";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ChatThinkingLevelControl } from "./ChatThinkingLevelControl";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -2809,11 +2809,10 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
           <Paperclip size={16} />
         </button>
         {/*
-        FNXC:Chat-ThinkingLevel 2026-07-12-19:30:
-        FN-7898: change the active session's thinking level mid-conversation from the composer.
-        Model-loop (non-CLI) direct sessions only — CLI-backed sessions broker to a live PTY and
-        never receive defaultThinkingLevel (FN-7775), and chat rooms have no thinkingLevel field
-        at all. Gate with the existing cliChatActive boolean already in scope here.
+        FNXC:Chat-ThinkingLevel 2026-07-16-00:34:
+        FN-8030: direct sessions retain model/agent targeting here, while room composers reuse
+        this control in level-only mode. CLI-backed sessions broker to a live PTY and never receive
+        defaultThinkingLevel (FN-7775), so this direct-chat control stays gated by cliChatActive.
         */}
         {!cliChatActive && (
           <ChatThinkingLevelControl
@@ -3546,33 +3545,6 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                     </div>
                   )}
                 </div>
-                <div className="chat-room-thinking-level-field">
-                  {/* FNXC:Chat-ThinkingLevel 2026-07-12-00:00: Room thinking effort is a header-level room setting, not a composer control, because it acts as the default reasoning effort for every responder in the conversation. */}
-                  <label className="sr-only" htmlFor="chat-room-thinking-level">
-                    {t("chat.roomThinkingLevel", "Room thinking effort")}
-                  </label>
-                  <select
-                    id="chat-room-thinking-level"
-                    className="input chat-room-thinking-level-select"
-                    data-testid="chat-room-thinking-level"
-                    aria-label={t("chat.roomThinkingLevel", "Room thinking effort")}
-                    value={rooms.activeRoom.thinkingLevel ?? ""}
-                    onChange={(event) => {
-                      const selectedLevel = event.target.value;
-                      const thinkingLevel = THINKING_LEVELS.includes(selectedLevel as ThinkingLevel) ? selectedLevel : null;
-                      void rooms.updateRoomSettings(rooms.activeRoom!.id, { thinkingLevel }).catch(() => {
-                        addToast(t("chat.failedToUpdateRoomThinkingLevel", "Failed to update room thinking effort"), "error");
-                      });
-                    }}
-                  >
-                    <option value="">{t("models.useDefault", "Use default")}</option>
-                    {THINKING_LEVELS.map((level) => (
-                      <option key={level} value={level}>
-                        {t(`models.options.${level}`, level === "xhigh" ? "Very High" : level.charAt(0).toUpperCase() + level.slice(1))}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="chat-room-thread-members">
                   {rooms.activeRoomMembers.map((member) => (
                     <AgentAvatar
@@ -3697,6 +3669,22 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                 >
                   <Paperclip size={16} />
                 </button>
+                {/*
+                FNXC:Chat-ThinkingLevel 2026-07-16-00:34:
+                FN-8030 moves room thinking effort from the crowded thread header to this Brain-icon
+                popover beside attach, matching direct chat while keeping it reachable on narrow layouts.
+                It persists one responder-wide room default and intentionally exposes no model/agent target.
+                */}
+                <ChatThinkingLevelControl
+                  level={rooms.activeRoom.thinkingLevel}
+                  defaultThinkingLevel={resolvedDefaultThinkingLevel}
+                  showTargetSection={false}
+                  onChange={(level) => {
+                    void rooms.updateRoomSettings(rooms.activeRoom!.id, { thinkingLevel: level || null }).catch(() => {
+                      addToast(t("chat.failedToUpdateRoomThinkingLevel", "Failed to update room thinking effort"), "error");
+                    });
+                  }}
+                />
                 <div
                   className={`chat-input-wrapper${isDragOver ? " chat-input-wrapper--dragover" : ""}`}
                   onDragOver={(event) => {
