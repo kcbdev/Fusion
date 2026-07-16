@@ -93,10 +93,15 @@ function mapPlan(row: PlanRow): TestPlan {
   };
 }
 
+/*
+FNXC:QualityPostgres 2026-07-16-09:03:
+In-memory SQLite QualityStore remains for unit tests only. Runtime QA routes use
+AsyncQualityStore (PostgreSQL) exclusively — never wire this class into routes.
+*/
 export class QualityStore {
   constructor(private readonly db: Database) {}
 
-  createRun(input: CreateTestRunInput): TestRun {
+  async createRun(input: CreateTestRunInput): Promise<TestRun> {
     const now = new Date().toISOString();
     const id = `qrun_${randomUUID()}`;
     this.db
@@ -121,17 +126,17 @@ export class QualityStore {
         now,
         now,
       );
-    return this.getRun(input.projectId, id)!;
+    return (await this.getRun(input.projectId, id))!;
   }
 
-  getRun(projectId: string, id: string): TestRun | null {
+  async getRun(projectId: string, id: string): Promise<TestRun | null> {
     const row = this.db
       .prepare(`SELECT * FROM quality_test_runs WHERE id = ? AND project_id = ?`)
       .get(id, projectId) as RunRow | undefined;
     return row ? mapRun(row) : null;
   }
 
-  listRuns(projectId: string, opts?: { taskId?: string; limit?: number }): TestRun[] {
+  async listRuns(projectId: string, opts?: { taskId?: string; limit?: number }): Promise<TestRun[]> {
     const limit = opts?.limit && opts.limit > 0 ? Math.min(opts.limit, 200) : 50;
     if (opts?.taskId) {
       const rows = this.db
@@ -153,7 +158,7 @@ export class QualityStore {
     return rows.map(mapRun);
   }
 
-  updateRun(
+  async updateRun(
     projectId: string,
     id: string,
     patch: Partial<{
@@ -166,8 +171,8 @@ export class QualityStore {
       stdout: string;
       stderr: string;
     }>,
-  ): TestRun | null {
-    const existing = this.getRun(projectId, id);
+  ): Promise<TestRun | null> {
+    const existing = await this.getRun(projectId, id);
     if (!existing) return null;
     const now = new Date().toISOString();
     this.db
@@ -200,7 +205,7 @@ export class QualityStore {
     return this.getRun(projectId, id);
   }
 
-  pruneRuns(projectId: string, retention: number): number {
+  async pruneRuns(projectId: string, retention: number): Promise<number> {
     if (retention <= 0) return 0;
     const result = this.db
       .prepare(
@@ -218,7 +223,7 @@ export class QualityStore {
     return Number(result.changes ?? 0);
   }
 
-  findActiveRun(projectId: string, taskId?: string): TestRun | null {
+  async findActiveRun(projectId: string, taskId?: string): Promise<TestRun | null> {
     if (taskId) {
       const row = this.db
         .prepare(
@@ -239,7 +244,7 @@ export class QualityStore {
     return row ? mapRun(row) : null;
   }
 
-  createPlan(input: CreateTestPlanInput): TestPlan {
+  async createPlan(input: CreateTestPlanInput): Promise<TestPlan> {
     const now = new Date().toISOString();
     const id = `qplan_${randomUUID()}`;
     this.db
@@ -256,17 +261,17 @@ export class QualityStore {
         now,
         now,
       );
-    return this.getPlan(input.projectId, id)!;
+    return (await this.getPlan(input.projectId, id))!;
   }
 
-  getPlan(projectId: string, id: string): TestPlan | null {
+  async getPlan(projectId: string, id: string): Promise<TestPlan | null> {
     const row = this.db
       .prepare(`SELECT * FROM quality_test_plans WHERE id = ? AND project_id = ?`)
       .get(id, projectId) as PlanRow | undefined;
     return row ? mapPlan(row) : null;
   }
 
-  listPlans(projectId: string, opts?: { includeArchived?: boolean }): TestPlan[] {
+  async listPlans(projectId: string, opts?: { includeArchived?: boolean }): Promise<TestPlan[]> {
     if (opts?.includeArchived) {
       const rows = this.db
         .prepare(
@@ -286,12 +291,12 @@ export class QualityStore {
     return rows.map(mapPlan);
   }
 
-  updatePlan(
+  async updatePlan(
     projectId: string,
     id: string,
     patch: Partial<{ name: string; status: TestPlanStatus; steps: QualityPresetId[] }>,
-  ): TestPlan | null {
-    const existing = this.getPlan(projectId, id);
+  ): Promise<TestPlan | null> {
+    const existing = await this.getPlan(projectId, id);
     if (!existing) return null;
     const now = new Date().toISOString();
     this.db
@@ -310,7 +315,7 @@ export class QualityStore {
     return this.getPlan(projectId, id);
   }
 
-  getSuggestedCases(projectId: string, taskId: string): SuggestedCasesSnapshot | null {
+  async getSuggestedCases(projectId: string, taskId: string): Promise<SuggestedCasesSnapshot | null> {
     const row = this.db
       .prepare(
         `SELECT project_id, task_id, cases_json, generated_at, method
@@ -342,7 +347,7 @@ export class QualityStore {
     };
   }
 
-  saveSuggestedCases(snapshot: SuggestedCasesSnapshot): SuggestedCasesSnapshot {
+  async saveSuggestedCases(snapshot: SuggestedCasesSnapshot): Promise<SuggestedCasesSnapshot> {
     this.db
       .prepare(
         `INSERT INTO quality_suggested_cases (project_id, task_id, cases_json, generated_at, method)

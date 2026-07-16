@@ -18,12 +18,12 @@ describe("cancelQualityRun", () => {
     vi.restoreAllMocks();
   });
 
-  it("kills the supervised child and marks queued/running runs cancelled", () => {
+  it("kills the supervised child and marks queued/running runs cancelled", async () => {
     __clearActiveQualityRunsForTests();
     const db = new DatabaseSync(":memory:");
     ensureQualitySchema(db as never);
     const store = new QualityStore(db as never);
-    const run = store.createRun({
+    const run = await store.createRun({
       projectId: "p1",
       source: "hub",
       command: "echo hi",
@@ -32,15 +32,15 @@ describe("cancelQualityRun", () => {
       timeoutMs: 1000,
       triggeredBy: "test",
     });
-    store.updateRun("p1", run.id, { status: "running", startedAt: new Date().toISOString() });
+    await store.updateRun("p1", run.id, { status: "running", startedAt: new Date().toISOString() });
     const kill = vi.fn();
     __registerActiveQualityRunForTests("p1", run.id, { kill });
-    const cancelled = cancelQualityRun(store, "p1", run.id);
+    const cancelled = await cancelQualityRun(store, "p1", run.id);
     expect(kill).toHaveBeenCalledWith("SIGTERM");
     expect(cancelled?.status).toBe("cancelled");
     expect(cancelled?.errorMessage).toMatch(/Cancelled/);
 
-    const again = cancelQualityRun(store, "p1", run.id);
+    const again = await cancelQualityRun(store, "p1", run.id);
     expect(again?.status).toBe("cancelled");
   });
 
@@ -48,7 +48,7 @@ describe("cancelQualityRun", () => {
     const db = new DatabaseSync(":memory:");
     ensureQualitySchema(db as never);
     const store = new QualityStore(db as never);
-    const run = store.createRun({
+    const run = await store.createRun({
       projectId: "p1",
       source: "hub",
       command: "safe-command",
@@ -70,7 +70,7 @@ describe("cancelQualityRun", () => {
       timeoutMs: 1_000,
       logTruncateKb: 1,
     });
-    cancelQualityRun(store, "p1", run.id);
+    void cancelQualityRun(store, "p1", run.id);
 
     await expect(execution).resolves.toMatchObject({ status: "cancelled", errorMessage: "Cancelled by operator" });
     expect(kill).toHaveBeenCalledWith("SIGTERM");
