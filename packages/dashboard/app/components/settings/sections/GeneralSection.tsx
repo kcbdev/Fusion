@@ -523,7 +523,12 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
           scope: "project",
         }}
         value={form.githubImportAutoTranslate === true}
-        onChange={(v) => setForm((f) => ({ ...f, githubImportAutoTranslate: v ?? undefined }))}
+        /*
+        FNXC:GitHubImportTranslate 2026-07-15-19:10:
+        Switching OFF must store `undefined`, not `false`, so the key stays absent from the settings blob and keeps inheriting rather than persisting an explicit opt-out (PR #2147's contract, pinned by GeneralSection.importTranslate.test.tsx).
+        `v ?? undefined` does not do that — the toggle emits `false`, and `false ?? undefined` is `false`. Only a cleared row emits null.
+        */
+        onChange={(v) => setForm((f) => ({ ...f, githubImportAutoTranslate: v === true ? true : undefined }))}
       />
       <SettingsSelectRow
         descriptor={{
