@@ -1746,3 +1746,13 @@ Hard cap → pause with `pausedReason: "token_budget_exceeded"`. Soft cap → on
 ## Model presets
 
 Standardize executor/validator pairs; auto-selectable by task size (Small → Budget, Medium → Normal, Large → Complex).
+
+### Executor consecutive tool-failure retry
+
+| Setting | Type/default | Behavior |
+| --- | --- | --- |
+| `executorToolFailureRetryCount` | integer, `2` | Same-model retries before terminal executor parking; `0` disables this policy entirely. |
+| `executorToolFailureRetryBackoffMs` | integer, `2000` | Unref'd delay before the rerun. |
+| `executorToolFailureThreshold` | integer, `3` | Consecutive terminal tool failures required to qualify. |
+
+Values are project-scoped and finite values are floored; count/backoff must be at least `0`, and threshold at least `1`, otherwise their defaults apply. The executor evaluates this bounded policy before its terminal graph-failure park: it counts `tool_error` completion entries, resets only on `tool_result`, and ignores `tool` invocation markers. The detector is scoped to the current executor-run agent-log cursor. Its project-scoped atomic claim prevents concurrent retries and classifies cursor mismatch before an exhausted cap so stale handlers do not park newer work. The exhausted audit is compare-and-set deduplicated while the terminal park remains idempotent. FN-7998 may extend this same-model foundation with escalation.

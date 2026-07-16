@@ -464,6 +464,12 @@ function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetr
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 3;
 }
 
+/** FNXC:ExecutorToolFailureRetry 2026-07-16-12:00: zero is an intentional project setting that disables retries/backoff, so do not use a truthy fallback when normalizing the form. */
+function resolveNonNegativeExecutorToolFailureSetting(value: unknown, fallback: number): number {
+  const configured = Number(value);
+  return Number.isFinite(configured) && configured >= 0 ? Math.floor(configured) : fallback;
+}
+
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "__preferences_header", label: "Preferences", labelKey: "settings.nav.preferencesHeader", scope: undefined, isGroupHeader: true },
   { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global", searchableText: ["theme", "color", "sidebar", "dock", "task popup", "task popups", "board list popups", "popup view attachment", "open tasks as popups", "quick chat"] },
@@ -1127,6 +1133,9 @@ export function SettingsModal({
     planApprovalMode: "auto-approve-all",
     mergeStrategy: "direct",
     maxAutoMergeRetries: 3,
+    executorToolFailureRetryCount: 2,
+    executorToolFailureRetryBackoffMs: 2000,
+    executorToolFailureThreshold: 3,
     mergeIntegrationWorktree: "reuse-task-worktree",
     mergeAdvanceAutoSync: "stash-and-ff",
     merger: { mode: "ai", maxReviewPasses: 3, allowDirtyLocalCheckoutSync: true },
@@ -1708,6 +1717,9 @@ export function SettingsModal({
           mergeIntegrationWorktree: normalizeMergeIntegrationWorktreeMode(s.mergeIntegrationWorktree),
           mergeAdvanceAutoSync: normalizeMergeAdvanceAutoSyncMode(s.mergeAdvanceAutoSync),
           maxAutoMergeRetries: resolveMaxAutoMergeRetriesForSettingsForm(s),
+          executorToolFailureRetryCount: resolveNonNegativeExecutorToolFailureSetting(s.executorToolFailureRetryCount, 2),
+          executorToolFailureRetryBackoffMs: resolveNonNegativeExecutorToolFailureSetting(s.executorToolFailureRetryBackoffMs, 2000),
+          executorToolFailureThreshold: Math.max(1, Math.floor(Number(s.executorToolFailureThreshold ?? 3) || 3)),
           worktreeCopyFiles: Array.isArray(s.worktreeCopyFiles) ? s.worktreeCopyFiles : [],
         };
         setForm(normalizedSettings);
@@ -3321,6 +3333,9 @@ export function SettingsModal({
           onFailure: form.worktrunk?.onFailure ?? "fail",
         },
         maxAutoMergeRetries: resolveMaxAutoMergeRetriesForSettingsForm(form),
+        executorToolFailureRetryCount: resolveNonNegativeExecutorToolFailureSetting(form.executorToolFailureRetryCount, 2),
+        executorToolFailureRetryBackoffMs: resolveNonNegativeExecutorToolFailureSetting(form.executorToolFailureRetryBackoffMs, 2000),
+        executorToolFailureThreshold: Math.max(1, Math.floor(Number(form.executorToolFailureThreshold ?? 3) || 3)),
         taskPrefix: form.taskPrefix?.trim() || undefined,
         githubTrackingDefaultRepo: form.githubTrackingDefaultRepo?.trim() || undefined,
         /*
