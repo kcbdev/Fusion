@@ -55,6 +55,10 @@ const canRun = hasGit && hasPg;
     await (fx.manager as any).runMaintenance();
 
     await expect(fx.store.getTask(duplicate.id)).rejects.toThrow(`Task ${duplicate.id} not found`);
+    const softDeletedDuplicate = await fx.store.getTask(duplicate.id, { includeDeleted: true });
+    expect(softDeletedDuplicate.deletedAt).toEqual(expect.any(String));
+    const liveTasks = await fx.store.listTasks({ includeArchived: false });
+    expect(liveTasks.map((task) => task.id)).not.toContain(duplicate.id);
     expect((await fx.store.getTask(canonical.id)).column).toBe("todo");
     const activity = await fx.store.getActivityLog({ type: "task:auto-archived-duplicate", limit: 20 });
     expect(activity.find((entry) => entry.taskId === duplicate.id)).toEqual(
