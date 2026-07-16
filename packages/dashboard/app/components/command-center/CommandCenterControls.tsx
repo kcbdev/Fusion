@@ -70,12 +70,12 @@ function getConcurrencySliderMax(key: keyof ConcurrencyValues, value: number) {
 }
 
 /*
-FNXC:GlobalConcurrencyControls 2026-06-27-00:00:
-FN-7160 requires the current-use marker to show absolute utilization on a 0..cap scale. Do not reuse slider value coordinates here: the slider floor is 1, and subtracting it makes one active agent render as 0% utilization.
+FNXC:GlobalConcurrencyControls 2026-07-15-17:30:
+FN-8007 supersedes FN-7160's 0-based utilization ratio: the current-use dot must share the native range thumb's min-relative coordinates so it lines up with the running-count value. With sliderMin 1, one running agent maps to the visible track start; over-cap use pins to the cap thumb rather than the expanded sliderMax endpoint.
 */
-function getUseMarkerRatio(current: number, max: number) {
-  if (max <= 0) return 0;
-  return clamp(current / max, 0, 1);
+function getUseMarkerRatio(currentRunning: number, capValue: number, sliderMin: number, sliderMax: number) {
+  if (sliderMax <= sliderMin) return 0;
+  return clamp((Math.min(currentRunning, capValue) - sliderMin) / (sliderMax - sliderMin), 0, 1);
 }
 
 function getUseMarkerStyle(ratio: number): CSSProperties {
@@ -293,8 +293,13 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
   const globalSliderValue = pendingGlobalConcurrencyValue ?? gc.value;
   const globalSliderMax = Math.max(gc.sliderMax, globalSliderValue);
   const maxConcurrentSliderMax = getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent);
-  const globalUseMarkerRatio = getUseMarkerRatio(gc.currentlyActive, globalSliderMax);
-  const projectUseMarkerRatio = getUseMarkerRatio(projectActive, maxConcurrentSliderMax);
+  const globalUseMarkerRatio = getUseMarkerRatio(gc.currentlyActive, globalSliderValue, gc.min, globalSliderMax);
+  const projectUseMarkerRatio = getUseMarkerRatio(
+    projectActive,
+    concurrencyValues.maxConcurrent,
+    CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min,
+    maxConcurrentSliderMax,
+  );
   // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Mirror the per-project slider save-state labels for the shared global cap.
   // FNXC:GlobalConcurrencyControls 2026-06-26-06:05: Explicit load-error branch — a failed initial load leaves saveState "idle", so the label otherwise fell through to "Ready" while the slider was disabled and an error alert shown.
   const globalSaveLabel = gc.status === "loading" || gc.status === "idle"

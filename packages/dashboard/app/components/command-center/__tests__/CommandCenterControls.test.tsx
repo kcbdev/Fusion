@@ -1,0 +1,164 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { CommandCenterControls } from "../CommandCenterControls";
+import { ConfirmDialogProvider } from "../../../hooks/useConfirm";
+
+const commandCenterControlsCss = readFileSync(
+  join(process.cwd(), "app/components/command-center/CommandCenterControls.css"),
+  "utf8",
+);
+
+const legacyMocks = vi.hoisted(() => ({
+  fetchConfig: vi.fn(),
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
+  fetchGlobalConcurrency: vi.fn(),
+  updateGlobalConcurrency: vi.fn(),
+}));
+
+vi.mock("../../../api/legacy", () => legacyMocks);
+vi.mock("../../../hooks/useAppSettings", () => ({
+  useAppSettings: () => ({
+    globalPaused: false,
+    toggleGlobalPause: vi.fn(),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+const defaultSettings = {
+  maxConcurrent: 12,
+  maxTriageConcurrent: 1,
+  maxWorktrees: 4,
+};
+
+function renderControls(projectId = "proj_123") {
+  render(
+    <ConfirmDialogProvider>
+      <CommandCenterControls
+        projectId={projectId}
+        colorTheme="default"
+        themeMode="dark"
+        onColorThemeChange={vi.fn()}
+        onThemeModeChange={vi.fn()}
+      />
+    </ConfirmDialogProvider>,
+  );
+}
+
+function mockGlobalConcurrency(overrides: Partial<{
+  globalMaxConcurrent: number;
+  currentlyActive: number;
+  projectsActive: Record<string, number>;
+}> = {}) {
+  legacyMocks.fetchGlobalConcurrency.mockResolvedValue({
+    globalMaxConcurrent: 10,
+    currentlyActive: 10,
+    queuedCount: 0,
+    projectsActive: { proj_123: 10 },
+    ...overrides,
+  });
+}
+
+function expectUseMarkerPct(testId: string, pct: string) {
+  expect(screen.getByTestId(testId).style.getPropertyValue("--use-pct")).toBe(pct);
+}
+
+function expectCommandCenterUseOffset(testId: string, ratio: number) {
+  expect(screen.getByTestId(testId).style.getPropertyValue("--use-offset")).toBe(
+    `calc((var(--cc-controls-range-thumb-size) / 2) + ((100% - var(--cc-controls-range-thumb-size)) * ${ratio}))`,
+  );
+}
+
+describe("CommandCenterControls concurrency markers", () => {
+  beforeEach(() => {
+    legacyMocks.fetchConfig.mockResolvedValue({ maxConcurrent: 12, rootDir: "/workspace/project" });
+    legacyMocks.fetchSettings.mockResolvedValue({ ...defaultSettings });
+    legacyMocks.updateSettings.mockResolvedValue({ ...defaultSettings });
+    legacyMocks.updateGlobalConcurrency.mockResolvedValue({});
+    mockGlobalConcurrency();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  // FNXC:GlobalConcurrencyControls 2026-07-15-12:00: FN-8007 requires dashboard markers to use the exact native-thumb coordinate system when the expanded range max exceeds the persisted cap.
+  it("aligns dashboard global and project markers with their native thumbs", async () => {
+    renderControls();
+
+    await screen.findByTestId("cc-global-use-marker");
+    expectUseMarkerPct("cc-global-use-marker", `${((10 - 1) / (32 - 1)) * 100}%`);
+    expectUseMarkerPct("cc-project-use-marker", `${((10 - 1) / (50 - 1)) * 100}%`);
+    expectCommandCenterUseOffset("cc-global-use-marker", (10 - 1) / (32 - 1));
+    expectCommandCenterUseOffset("cc-project-use-marker", (10 - 1) / (50 - 1));
+  });
+
+  it("pins dashboard over-cap markers at the cap thumb instead of the track end", async () => {
+    mockGlobalConcurrency({ currentlyActive: 40, projectsActive: { proj_123: 40 } });
+    renderControls();
+
+    await screen.findByTestId("cc-global-use-marker");
+    expectUseMarkerPct("cc-global-use-marker", `${((10 - 1) / (32 - 1)) * 100}%`);
+    expectUseMarkerPct("cc-project-use-marker", `${((12 - 1) / (50 - 1)) * 100}%`);
+    expect(screen.getByTestId("cc-global-use-marker").style.getPropertyValue("--use-pct")).not.toBe("100%");
+    expect(screen.getByTestId("cc-project-use-marker").style.getPropertyValue("--use-pct")).not.toBe("100%");
+  });
+
+  it("maps one running agent to the visible dashboard slider start", async () => {
+    mockGlobalConcurrency({ currentlyActive: 1, projectsActive: { proj_123: 1 } });
+    renderControls();
+
+    await screen.findByTestId("cc-global-use-marker");
+    expectUseMarkerPct("cc-global-use-marker", "0%");
+    expectUseMarkerPct("cc-project-use-marker", "0%");
+    expectCommandCenterUseOffset("cc-global-use-marker", 0);
+    expectCommandCenterUseOffset("cc-project-use-marker", 0);
+  });
+
+  it("suppresses dashboard marker shells while global concurrency is loading or unavailable", async () => {
+    let resolveGlobalConcurrency!: (value: {
+      globalMaxConcurrent: number;
+      currentlyActive: number;
+      queuedCount: number;
+      projectsActive: Record<string, number>;
+    }) => void;
+    legacyMocks.fetchGlobalConcurrency.mockReturnValue(new Promise((resolve) => {
+      resolveGlobalConcurrency = resolve;
+    }));
+    renderControls();
+
+    expect(screen.queryByTestId("cc-global-use-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cc-project-use-marker")).not.toBeInTheDocument();
+
+    resolveGlobalConcurrency({ globalMaxConcurrent: 10, currentlyActive: 0, queuedCount: 0, projectsActive: {} });
+    await screen.findByTestId("cc-global-use-marker");
+    cleanup();
+
+    legacyMocks.fetchGlobalConcurrency.mockRejectedValue(new Error("global concurrency unavailable"));
+    renderControls();
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    expect(screen.queryByTestId("cc-global-use-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cc-project-use-marker")).not.toBeInTheDocument();
+  });
+
+  it("matches the desktop and mobile native thumb-size CSS contract", () => {
+    expect(commandCenterControlsCss).toContain(
+      "--cc-controls-range-thumb-size: calc(var(--space-lg) + var(--space-xs) / 2);",
+    );
+    // FNXC:GlobalConcurrencyControls 2026-07-15-18:10: FN-8007 keeps desktop browser thumb travel deterministic by sizing both pseudo-thumb implementations from the marker inset token.
+    for (const selector of [
+      ".cc-controls-slider input[type=\"range\"]::-webkit-slider-thumb,\n.cc-controls-touch-slider::-webkit-slider-thumb",
+      ".cc-controls-slider input[type=\"range\"]::-moz-range-thumb,\n.cc-controls-touch-slider::-moz-range-thumb",
+    ]) {
+      expect(commandCenterControlsCss).toContain(selector);
+    }
+    expect(commandCenterControlsCss).toContain("width: var(--cc-controls-range-thumb-size);");
+    expect(commandCenterControlsCss).toContain("height: var(--cc-controls-range-thumb-size);");
+    expect(commandCenterControlsCss).toContain("@media (max-width: 768px)");
+    expect(commandCenterControlsCss).toContain("--cc-controls-range-thumb-size: var(--space-xl);");
+  });
+});
