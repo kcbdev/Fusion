@@ -1,0 +1,28 @@
+/*
+FNXC:SettingsScope 2026-07-16-08:10:
+The per-screen scope indicator sits above a section's fields and reads as a
+header for everything below it. A subtle bottom divider separates it from the
+first heading so it groups the whole screen rather than looking like a stray
+pill. Colors mirror the row-level badge (project = muted, global = accent) so
+the screen indicator and any per-row exception badge share one visual language.
+*/
+.settings-scope-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-muted, color-mix(in srgb, #ffffff 4%, transparent));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  margin-bottom: var(--space-md);
+}
+
+.settings-scope-indicator--global {
+  color: var(--accent, #7c5cbf);
+  border-color: var(--accent, #7c5cbf);
+}

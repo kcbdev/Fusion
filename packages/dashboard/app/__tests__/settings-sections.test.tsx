@@ -13,7 +13,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor, act, within } from "@testing-library/react";
 import * as jestDomMatchers from "@testing-library/jest-dom/matchers";
 
-import { AppearanceSection } from "../components/settings/sections/AppearanceSection";
+import { AppearanceProjectSection } from "../components/settings/sections/AppearanceProjectSection";
 import { GeneralSection } from "../components/settings/sections/GeneralSection";
 import { NotificationsSection } from "../components/settings/sections/NotificationsSection";
 import { ExperimentalSection } from "../components/settings/sections/ExperimentalSection";
@@ -88,16 +88,14 @@ afterEach(() => cleanup());
 
 const emptyForm = {} as SettingsFormState;
 
-describe("AppearanceSection", () => {
+// FNXC:SettingsScope 2026-07-16-08:10: The session-banner toggle moved with the other task-presentation controls to AppearanceProjectSection when Appearance was split into global (theme/language) and project screens.
+describe("AppearanceProjectSection", () => {
   function AppearanceHost() {
     const [hidden, setHidden] = useState(false);
     return (
-      <AppearanceSection
+      <AppearanceProjectSection
         form={emptyForm}
         setForm={vi.fn()}
-        themeMode="dark"
-        colorTheme="default"
-        dashboardFontScalePct={100}
         sessionBannersHidden={hidden}
         setSessionBannersHidden={setHidden}
       />

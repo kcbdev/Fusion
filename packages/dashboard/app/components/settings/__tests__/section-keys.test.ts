@@ -30,6 +30,8 @@ const EXPECTED_KEY_OWNING_SECTIONS: Record<string, "global" | "project"> = {
   */
   "source-control-global": "global",
   // project sections (new for FN-7506)
+  // FNXC:SettingsScope 2026-07-16-08:10: Appearance's project half, split from the global theme screen so neither mixes scope; it owns the task-presentation toggle keys that were previously reset-orphaned.
+  "appearance-project": "project",
   general: "project",
   "source-control": "project",
   commands: "project",

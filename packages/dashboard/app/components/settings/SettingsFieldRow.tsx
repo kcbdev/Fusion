@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 import { useIsSettingHighlighted } from "./SettingsSearchHighlightContext";
+import { useSettingsScreenScope } from "./SettingsScopeContext";
 import { SettingsHelpTip } from "./SettingsHelpTip";
 import "./SettingsFieldRow.css";
 
@@ -67,6 +68,17 @@ export function SettingsFieldRow({
   children,
 }: SettingsFieldRowProps) {
   const { t } = useTranslation("app");
+  const screenScope = useSettingsScreenScope();
+  /*
+  FNXC:SettingsScope 2026-07-16-08:10:
+  Scope is stated ONCE per screen by SettingsScopeIndicator; a row only restates
+  it when it DIFFERS from the screen (the Appearance case: project task-popup
+  toggles on a globally-scoped theme screen). On a single-scope screen every row
+  matches the screen, so no row draws a badge — which is what removes the ragged
+  "some rows badged, some not" the per-row scheme produced on screens whose
+  bespoke widget rows never carried a badge at all.
+  */
+  const showRowScopeBadge = scope !== undefined && scope !== screenScope;
   /*
   FNXC:SettingsSearch 2026-07-15-17:35:
   `data-settings-key` is the anchor a search result scrolls to. It lives on the row rather than the control because the row is what the operator needs to read — its label, help text, and scope badge — and scrolling to the bare input would put the label above the fold.
@@ -103,7 +115,7 @@ export function SettingsFieldRow({
       <label className="settings-field-row-label" htmlFor={htmlFor}>
         {label}
       </label>
-      {scope && (
+      {showRowScopeBadge && (
         <span
           className={`settings-field-row-scope settings-field-row-scope--${scope}`}
           data-testid="settings-field-row-scope"

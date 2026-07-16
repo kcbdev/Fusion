@@ -7,7 +7,7 @@
  * Sections absent from this list render no descriptor rows — dynamic flag lists, bespoke editors, CRUD managers, and controls the primitives cannot express safely (a password field would be rendered unmasked by SettingsTextRow, so token rows stay bespoke by design). They are still findable: the nav matches them on their `searchableText` keywords in SettingsModal.tsx. Only sections with addressable controls can offer jump-to-field.
  */
 import type { SettingsSearchEntry } from "./types";
-import { appearanceSearchEntries } from "../sections/AppearanceSection.search";
+import { appearanceProjectSearchEntries } from "../sections/AppearanceProjectSection.search";
 import { backupsSearchEntries } from "../sections/BackupsSection.search";
 import { commandsSearchEntries } from "../sections/CommandsSection.search";
 import { generalSearchEntries } from "../sections/GeneralSection.search";
@@ -34,7 +34,7 @@ import { worktreesSearchEntries } from "../sections/WorktreesSection.search";
  * are ranked and tie-broken alphabetically at query time.
  */
 export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
-  ...appearanceSearchEntries,
+  ...appearanceProjectSearchEntries,
   ...backupsSearchEntries,
   ...commandsSearchEntries,
   ...generalSearchEntries,

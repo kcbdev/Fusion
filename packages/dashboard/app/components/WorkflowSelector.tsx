@@ -1,5 +1,6 @@
 import "./WorkflowSelector.css";
 import { useCallback, useEffect, useId, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow as WorkflowIcon } from "lucide-react";
 import type { WorkflowDefinition } from "@fusion/core";
@@ -7,6 +8,7 @@ import { getErrorMessage } from "@fusion/core";
 import { fetchWorkflow, fetchWorkflows, fetchProjectDefaultWorkflow, setProjectDefaultWorkflow } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
+import { SettingsHelpTip } from "./settings/SettingsHelpTip";
 
 /*
 FNXC:i18n-Localize 2026-06-20-00:00:
@@ -22,6 +24,13 @@ interface WorkflowSelectorProps {
   addToast?: (message: string, type?: ToastType) => void;
   disabled?: boolean;
   label?: string;
+  /**
+   * FNXC:SettingsScope 2026-07-16-08:10:
+   * Optional help copy rendered behind a "?" on the label line (after the title),
+   * so the settings default-workflow picker matches every other settings row:
+   * help hangs off the header, not as a paragraph under the dropdown.
+   */
+  help?: ReactNode;
   /** Optional affordance to open the graph editor. */
   onManage?: () => void;
   /**
@@ -40,6 +49,7 @@ export function WorkflowSelector({
   addToast,
   disabled,
   label = "Workflow",
+  help,
   onManage,
   hasActiveSession,
 }: WorkflowSelectorProps) {
@@ -113,6 +123,8 @@ export function WorkflowSelector({
           <label htmlFor={selectId} className="workflow-selector-title">
             <WorkflowIcon size={14} aria-hidden /> {label}
           </label>
+          {/* Sibling of the label, never a child: a nested help button would swallow the label's click-to-focus and be invalid markup. */}
+          {help && <SettingsHelpTip settingKey={selectId}>{help}</SettingsHelpTip>}
         </div>
         <select
           id={selectId}
@@ -180,6 +192,10 @@ export function ProjectDefaultWorkflowField({ projectId, addToast, onManage }: P
       projectId={projectId}
       addToast={addToast}
       label={t("workflowSelector.defaultWorkflowLabel", "Default workflow for new tasks")}
+      help={t(
+        "settings.general.newTasksInheritThisCustomWorkflowsStepsOverridable",
+        "New tasks inherit this custom workflow's steps (overridable per task). No default — unset (built-in default workflow).",
+      )}
       onManage={onManage}
     />
   );

@@ -160,16 +160,21 @@ describe("SettingsModal Node Routing section", () => {
   });
 
   /*
-  FNXC:SettingsScope 2026-07-15-18:52:
-  Was "shows project scope banner". The section-level banner is removed — it asserted one scope for a whole section, which was false wherever a section mixed them — so scope now rides on each row's badge.
-  The requirement is unchanged (an operator can tell these settings are project-scoped); only the element carrying it moved.
+  FNXC:SettingsScope 2026-07-16-08:10:
+  Scope moved again: from a per-row badge on every setting to a single per-screen
+  indicator (operator request — the per-row badges were ragged, present on shared
+  rows and absent on bespoke widget rows). Node Routing is a single-scope project
+  screen, so no row draws its own badge; the screen indicator carries the scope.
+  The requirement is unchanged (an operator can tell these settings are
+  project-scoped); only the element carrying it moved.
   */
   it("marks its settings as project-scoped", async () => {
     renderModal();
     await openNodeRouting();
-    const badges = screen.getAllByTestId("settings-field-row-scope");
-    expect(badges.length).toBeGreaterThan(0);
-    expect(badges.map((b) => b.textContent)).toContain("project");
+    const indicator = screen.getByTestId("settings-scope-indicator");
+    expect(indicator).toHaveAttribute("data-scope", "project");
+    // No per-row badge on a single-scope screen — scope is stated once at the top.
+    expect(screen.queryByTestId("settings-field-row-scope")).toBeNull();
   });
 
   it("shows local execution selected when no default node is set", async () => {

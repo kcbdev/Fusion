@@ -24,7 +24,10 @@ import {
 } from "../utils/keyboardShortcuts";
 import type { DashboardKeyboardShortcutMap } from "../utils/keyboardShortcuts";
 import type { SectionSaveHandler } from "./settings/sections/context";
+import { SettingsScopeProvider, SettingsScopeIndicator } from "./settings/SettingsScopeContext";
+import type { SettingsScope } from "./settings/SettingsFieldRow";
 import { AppearanceSection } from "./settings/sections/AppearanceSection";
+import { AppearanceProjectSection } from "./settings/sections/AppearanceProjectSection";
 import { ExperimentalSection } from "./settings/sections/ExperimentalSection";
 import { NodeSyncSection } from "./settings/sections/NodeSyncSection";
 import { NotificationsSection } from "./settings/sections/NotificationsSection";
@@ -433,6 +436,22 @@ function resolveSettingsSectionOptionLabel(section: SettingsSection, label: stri
   return label;
 }
 
+/*
+FNXC:SettingsScope 2026-07-16-08:10:
+The scope shown by the per-screen SettingsScopeIndicator, resolved from the same
+source as the mobile "· Global/· Project" label so the two never disagree:
+`section.scope`, with Authentication and the other storage-less-but-global-in-
+effect screens folded to "global" via STORAGE_LESS_GLOBAL_SECTION_IDS. A screen
+with no scope (group headers, undecided CRUD screens) resolves to undefined and
+shows no indicator rather than a misleading one.
+*/
+function resolveSettingsScreenScope(section: SettingsSection | undefined): SettingsScope | undefined {
+  if (!section) return undefined;
+  if (section.scope === "global" || STORAGE_LESS_GLOBAL_SECTION_IDS.has(section.id)) return "global";
+  if (section.scope === "project") return "project";
+  return undefined;
+}
+
 function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetries?: unknown } | null): number {
   const configured = Number(settings?.maxAutoMergeRetries);
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 3;
@@ -440,7 +459,7 @@ function resolveMaxAutoMergeRetriesForSettingsForm(settings?: { maxAutoMergeRetr
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "__preferences_header", label: "Preferences", labelKey: "settings.nav.preferencesHeader", scope: undefined, isGroupHeader: true },
-  { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global", searchableText: ["theme", "color", "sidebar", "dock", "task popup", "task popups", "board list popups", "popup view attachment", "open tasks as popups", "quick chat"] },
+  { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global", searchableText: ["theme", "color", "dark mode", "light mode", "font", "font scale", "language", "locale", "quick chat"] },
   { id: "keyboard-shortcuts", label: "Keyboard Shortcuts", labelKey: "settings.nav.keyboardShortcuts", scope: "global", searchableText: ["keyboard shortcuts", "hotkeys", "quick chat shortcut", "terminal shortcut", "open files", "open settings", "command center", "new task shortcut", "record shortcut"] },
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global", searchableText: ["ntfy", "webhook", "events", "failure notifications", "sticky", "toast"] },
   { id: "global-general", label: "General · Global", labelKey: "settings.nav.globalGeneral", scope: "global", searchableText: ["global defaults", "modal outside dismiss", "agent logs", "persist tool output", "thinking logs"] },
@@ -452,6 +471,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   FNXC:SettingsSearch 2026-07-15-19:10: the per-setting index now matches these controls on their own label and help text, so the terms that merely restate the copy are no longer load-bearing. The list is kept for the genuine vocabulary gaps — "localize", "localization", "foreign language issues" — which appear nowhere in the copy, and because unmigrated siblings in this section still rely on section-level keywords.
   */
   { id: "general", label: "General · Project", labelKey: "settings.nav.projectGeneral", scope: "project", searchableText: ["project general", "Completion Documentation Automation", "Quick Chat launcher", "ephemeral task-worker agents", "chat rooms", "auto-cleanup old chats", "translate", "translation", "auto translate", "auto-translate", "autotranslate", "auto translate issues", "translate issues", "translate imported issues", "githubImportAutoTranslate", "importTranslateTargetLocale", "target language", "translation target language", "translation language", "language", "foreign language issues", "import language", "localize", "localization"], searchableKeys: ["settings.general.autoTranslateImportedIssues", "settings.general.autoTranslateImportedIssuesHelp", "settings.general.translationTargetLanguage", "settings.general.translationTargetLanguageHelp", "settings.general.followDashboardLanguage"] },
+  /*
+  FNXC:SettingsScope 2026-07-16-08:10:
+  The project half of Appearance (task-presentation toggles). Split from the global Appearance
+  screen so neither mixes scope; carries the task-popup / sidebar / dock search terms that moved
+  off the global entry, since those controls now live here.
+  */
+  { id: "appearance-project", label: "Appearance · Project", labelKey: "settings.nav.appearanceProject", scope: "project", searchableText: ["appearance", "task popup", "task popups", "board list popups", "popup view attachment", "open tasks as popups", "right sidebar", "dock", "cost badge", "chat first", "task presentation"] },
   { id: "commands", label: "Commands & Scripts", labelKey: "settings.nav.commands", scope: "project", searchableText: ["test command", "build command", "verification command", "workflow scripts", "commands"] },
   { id: "worktrees", label: "Worktrees", labelKey: "settings.nav.worktrees", scope: "project", searchableText: ["worktree directory", "copy files", "recycle worktrees", "branch naming", "sibling branch rename"] },
   { id: "merge", label: "Merge", labelKey: "settings.nav.merge", scope: "project", searchableText: ["auto merge", "AI merge", "merge strategy", "plan approval", "direct merge", "integration branch", "push after merge"] },
@@ -1174,6 +1200,11 @@ export function SettingsModal({
     }
     return initialSection ?? DEFAULT_SETTINGS_SECTION;
   });
+  /*
+  FNXC:SettingsScope 2026-07-16-08:10:
+  The active screen's default scope, shown once by SettingsScopeIndicator and fed to SettingsFieldRow via context so a row only badges itself when it differs.
+  */
+  const activeScreenScope = resolveSettingsScreenScope(SETTINGS_SECTIONS.find((section) => section.id === activeSection));
   /*
   FNXC:WindowsTerminalStartup 2026-07-04-06:30:
   Do NOT auto-probe worktrunk status on a plain Settings/dashboard mount — on Windows the
@@ -3795,6 +3826,13 @@ export function SettingsModal({
             onColorThemeChange={onColorThemeChange}
             onDashboardFontScaleChange={onDashboardFontScaleChange}
             onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+          />
+        );
+      case "appearance-project":
+        return (
+          <AppearanceProjectSection
+            form={form}
+            setForm={setForm}
             sessionBannersHidden={sessionBannersHidden}
             setSessionBannersHidden={setSessionBannersHidden}
           />
@@ -4377,7 +4415,14 @@ export function SettingsModal({
               */}
               {hasSettingsSearchResults ? (
                 <SettingsSearchHighlightProvider highlightedKey={highlightedSettingKey}>
-                  {renderSectionFields()}
+                  {/*
+                  FNXC:SettingsScope 2026-07-16-08:10:
+                  One provider + indicator at the single section render site is what makes scope consistent across every screen without touching each section's markup: the indicator states the screen's scope once at the top, and SettingsFieldRow reads the same scope from context to decide whether a row differs enough to restate it.
+                  */}
+                  <SettingsScopeProvider scope={activeScreenScope}>
+                    <SettingsScopeIndicator scope={activeScreenScope} />
+                    {renderSectionFields()}
+                  </SettingsScopeProvider>
                 </SettingsSearchHighlightProvider>
               ) : (
                 <div className="settings-empty-state settings-search-content-empty" role="status">

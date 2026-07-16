@@ -55,6 +55,22 @@ export interface SectionKeyEntry {
  * them.
  */
 const PROJECT_SECTION_KEYS: Record<string, readonly string[]> = {
+  /*
+  FNXC:SettingsScope 2026-07-16-08:10:
+  The project half of Appearance (task-presentation toggles), split from the global Appearance
+  theme screen so neither mixes scope. These keys were previously reset-orphaned — the mixed
+  Appearance section only owned the global theme keys (GLOBAL_SECTION_KEYS.appearance), so
+  "Reset this menu" never cleared the project toggles. Owning them here closes that gap.
+  `sessionBannersHidden` is intentionally absent: it is a browser-local preference, not a
+  DEFAULT_PROJECT_SETTINGS key, so it is neither reset-eligible nor a member of PROJECT_SETTINGS_KEYS.
+  */
+  "appearance-project": [
+    "openTasksInRightSidebar",
+    "openMobileTasksInPopup",
+    "taskPopupsBoardListOnly",
+    "showCostBadgeOnCards",
+    "taskDetailChatFirst",
+  ],
   general: [
     "allowAbsoluteFileBrowserPaths",
     "capacityRiskBannerEnabled",

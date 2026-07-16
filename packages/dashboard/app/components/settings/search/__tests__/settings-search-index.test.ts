@@ -37,7 +37,8 @@ function sectionFiles(): string[] {
  * register its id fails rather than being skipped silently.
  */
 const SECTION_FILE_TO_ID: Record<string, string> = {
-  "AppearanceSection.tsx": "appearance",
+  // FNXC:SettingsScope 2026-07-16-08:10: Appearance split into a global theme screen (AppearanceSection, now zero descriptor rows — ThemeSelector/LanguageSelector are bespoke) and a project task-presentation screen (AppearanceProjectSection). Only the latter renders descriptor rows, so it is the one that must be indexed.
+  "AppearanceProjectSection.tsx": "appearance-project",
   "BackupsSection.tsx": "backups",
   "CommandsSection.tsx": "commands",
   "GeneralSection.tsx": "general",

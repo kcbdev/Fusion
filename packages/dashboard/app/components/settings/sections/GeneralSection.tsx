@@ -154,9 +154,12 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
         }}
         error={prefixError ?? undefined}
       />
+      {/*
+        FNXC:SettingsScope 2026-07-16-08:10:
+        The default-workflow help now hangs off a "?" on the field's own label (via ProjectDefaultWorkflowField's `help`), not as a `<small>` under the dropdown \u2014 the operator asked for the help icon after the header text, matching every other settings row. Scope is stated once by the screen indicator (this screen is Project), so no per-field badge is drawn here.
+      */}
       <div className="form-group">
         <ProjectDefaultWorkflowField projectId={projectId} addToast={addToast}/>
-        <small>{t("settings.general.newTasksInheritThisCustomWorkflowsStepsOverridable", "New tasks inherit this custom workflow's steps (overridable per task). No default \u2014 unset (built-in default workflow).")}</small>
       </div>
       {builtinWorkflows.length > 0 && (<div className="form-group">
           <label>{t("settings.general.fusionWorkflows", "Fusion workflows")}</label>

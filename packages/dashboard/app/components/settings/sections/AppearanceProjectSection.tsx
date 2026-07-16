@@ -1,0 +1,96 @@
+import { useTranslation } from "react-i18next";
+import { SettingsToggleRow } from "../SettingsToggleRow";
+import type { SectionBaseProps } from "./context";
+export interface AppearanceProjectSectionProps extends SectionBaseProps {
+    sessionBannersHidden: boolean;
+    setSessionBannersHidden: (hidden: boolean) => void;
+}
+/*
+FNXC:SettingsScope 2026-07-16-08:10:
+The project half of the former mixed Appearance screen. These task-presentation toggles are all
+`DEFAULT_PROJECT_SETTINGS` (they travel with a project, not the machine), so this is a pure
+project screen and the per-screen indicator ("Project") is honest for every row. Split out from
+AppearanceSection — which kept the global theme/language controls — so that neither Appearance
+screen mixes scope and the one-badge-per-screen model holds without a per-row exception.
+`sessionBannersHidden` is the one exception: it is a browser-local display preference held OUTSIDE
+the settings blob (dedicated prop, not `form`), so it is neither global nor project state. It draws
+no per-row badge (its descriptor carries no scope) even though the screen indicator says Project.
+*/
+export function AppearanceProjectSection({ form, setForm, sessionBannersHidden, setSessionBannersHidden, }: AppearanceProjectSectionProps) {
+    const { t } = useTranslation("app");
+    return (<>
+      <h4 className="settings-section-heading">{t("settings.appearance.title", "Appearance")}</h4>
+      <SettingsToggleRow
+        descriptor={{
+          key: "openTasksInRightSidebar",
+          label: t("settings.appearance.openTasksInRightSidebar", "Open tasks in the right sidebar"),
+          help: t("settings.appearance.openTasksInRightSidebarHelp", "When enabled, board task cards open detail in the right sidebar when it is available; mobile and hidden-sidebar states keep the full task panel. Default: disabled."),
+          scope: "project",
+        }}
+        value={form.openTasksInRightSidebar === true}
+        onChange={(v) => setForm((f) => ({ ...f, openTasksInRightSidebar: v === true }))}
+      />
+      {/* FNXC:MobileTaskPopups 2026-07-13-00:00 (FN-7945): Keep the stored openMobileTasksInPopup key for compatibility, but present the setting as all-viewport ordinary task popup routing because desktop operators also need the board, List view, or right-dock Tasks list visible behind task detail. */}
+      <SettingsToggleRow
+        descriptor={{
+          key: "openMobileTasksInPopup",
+          label: t("settings.appearance.openMobileTasksInPopup", "Open tasks as popups"),
+          help: t("settings.appearance.openMobileTasksInPopupHelp", "When enabled, ordinary board task-card, List row/card, and right-dock Tasks-list clicks open the existing movable task popup so the board or list remains visible. Deep-tab and other task opens keep their current behavior. Default: disabled."),
+          scope: "project",
+        }}
+        value={form.openMobileTasksInPopup === true}
+        onChange={(v) => setForm((f) => ({ ...f, openMobileTasksInPopup: v === true }))}
+      />
+      {/* FNXC:TaskPopupViewGating 2026-07-15-15:20: FN-8016 scopes task popups to their opening dashboard view by default. Operators may explicitly disable it for legacy globally shared popups; hidden scoped entries retain geometry and reopen on return. */}
+      <SettingsToggleRow
+        descriptor={{
+          key: "taskPopupsBoardListOnly",
+          label: t("settings.appearance.taskPopupsBoardListOnly", "Keep task popups on the view where they were opened"),
+          help: t("settings.appearance.taskPopupsBoardListOnlyHelp", "When enabled, each open task-detail popup appears only on the view where it was opened. Switching views hides it without closing; returning restores it in the same position. Default: enabled."),
+          scope: "project",
+        }}
+        value={form.taskPopupsBoardListOnly === true}
+        onChange={(v) => setForm((f) => ({ ...f, taskPopupsBoardListOnly: v === true }))}
+      />
+      {/* FNXC:TaskCardCostBadge 2026-07-11-12:15: This project setting is opt-in because board cards are already dense; when enabled, only tasks with recorded positive token usage render a read-time derived spend badge. */}
+      <SettingsToggleRow
+        descriptor={{
+          key: "showCostBadgeOnCards",
+          label: t("settings.appearance.showCostBadgeOnCards", "Show cost badges on task cards"),
+          help: t("settings.appearance.showCostBadgeOnCardsHelp", "Default: disabled. When enabled, board cards show derived model cost next to execution time; unavailable pricing displays — and tasks without token usage show no badge."),
+          scope: "project",
+        }}
+        value={form.showCostBadgeOnCards === true}
+        onChange={(v) => setForm((f) => ({ ...f, showCostBadgeOnCards: v === true }))}
+      />
+      {/* FNXC:TaskDetailActivityFirst 2026-06-30-23:59: The project setting is opt-in because task details now default to Activity-first; explicit Activity/Chat/Logs links keep their destination regardless of this checkbox. */}
+      <SettingsToggleRow
+        descriptor={{
+          key: "taskDetailChatFirst",
+          label: t("settings.appearance.taskDetailChatFirst", "Open task details with Chat first"),
+          help: t("settings.appearance.taskDetailChatFirstHelp", "Off by default: task details list Activity first and omitted non-done opens land on Activity. Turn on to restore Chat-first order/default; explicit Chat links still work either way."),
+          scope: "project",
+        }}
+        value={form.taskDetailChatFirst === true}
+        onChange={(v) => setForm((f) => ({ ...f, taskDetailChatFirst: v === true }))}
+      />
+      {/*
+      FNXC:SettingsScope 2026-07-15-17:35:
+      This one carries no scope badge on purpose: it is a browser-local display preference held outside the settings blob (hence the dedicated prop rather than `form`), so it is neither global nor project state and must not claim to travel with either.
+      */}
+      <SettingsToggleRow
+        descriptor={{
+          key: "sessionBannersHidden",
+          label: t("settings.appearance.hideAISessionNotificationBanners", "Hide AI session notification banners"),
+          /*
+          FNXC:SettingsCopy 2026-07-15-17:35:
+          Real typographic quotes, not `&ldquo;`/`&rdquo;`: React renders this string as text, so the HTML entities printed verbatim on screen. The i18n key name still spells out the old entities — renaming it would churn key parity across six locales for no user-visible gain.
+          */
+          help: t("settings.appearance.suppressTheLdquoNeedsYourInputRdquoBanner", "Suppress the “needs your input” banner that appears when AI sessions are awaiting input or have failed."),
+        }}
+        value={sessionBannersHidden}
+        onChange={(v) => setSessionBannersHidden(v === true)}
+      />
+    </>);
+}
+export default AppearanceProjectSection;

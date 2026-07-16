@@ -1,15 +1,20 @@
 /**
- * Search entries for the Appearance section.
+ * Search entries for the Appearance · Project section.
+ *
+ * FNXC:SettingsScope 2026-07-16-08:10:
+ * These entries moved off the global Appearance section when its task-presentation toggles were
+ * split into a dedicated project screen (AppearanceProjectSection). `settings-search-index.test.ts`
+ * ties each entry's `sectionId` to the section file that renders its descriptor key, so the
+ * `sectionId` here MUST stay "appearance-project" — the section the controls now live in.
  *
  * FNXC:SettingsSearch 2026-07-15-17:35:
- * One entry per control the section renders, co-located so a setting and its index entry change in the same edit. `settings-search-index.test.ts` fails the build if a descriptor `key` here and in AppearanceSection.tsx ever diverge, which is what keeps the index honest without anyone maintaining a keyword list by hand.
- * Labels and help mirror the section's `t()` calls verbatim: the index matches on the copy operators actually read, so a paraphrase here would make search miss the words on screen.
+ * One entry per control the section renders, co-located so a setting and its index entry change in the same edit. Labels and help mirror the section's `t()` calls verbatim: the index matches on the copy operators actually read, so a paraphrase here would make search miss the words on screen.
  */
 import type { SettingsSearchEntry } from "../search/types";
 
-export const appearanceSearchEntries: SettingsSearchEntry[] = [
+export const appearanceProjectSearchEntries: SettingsSearchEntry[] = [
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "openTasksInRightSidebar",
     labelKey: "settings.appearance.openTasksInRightSidebar",
     labelFallback: "Open tasks in the right sidebar",
@@ -19,7 +24,7 @@ export const appearanceSearchEntries: SettingsSearchEntry[] = [
     keywords: ["dock", "right dock", "side panel"],
   },
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "openMobileTasksInPopup",
     labelKey: "settings.appearance.openMobileTasksInPopup",
     labelFallback: "Open tasks as popups",
@@ -33,7 +38,7 @@ export const appearanceSearchEntries: SettingsSearchEntry[] = [
     keywords: ["mobile", "floating window", "modal"],
   },
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "taskPopupsBoardListOnly",
     labelKey: "settings.appearance.taskPopupsBoardListOnly",
     labelFallback: "Keep task popups on the view where they were opened",
@@ -43,7 +48,7 @@ export const appearanceSearchEntries: SettingsSearchEntry[] = [
     keywords: ["popup view attachment", "pin popup"],
   },
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "showCostBadgeOnCards",
     labelKey: "settings.appearance.showCostBadgeOnCards",
     labelFallback: "Show cost badges on task cards",
@@ -53,7 +58,7 @@ export const appearanceSearchEntries: SettingsSearchEntry[] = [
     keywords: ["spend", "price", "tokens", "usage"],
   },
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "taskDetailChatFirst",
     labelKey: "settings.appearance.taskDetailChatFirst",
     labelFallback: "Open task details with Chat first",
@@ -63,7 +68,7 @@ export const appearanceSearchEntries: SettingsSearchEntry[] = [
     keywords: ["activity first", "default tab"],
   },
   {
-    sectionId: "appearance",
+    sectionId: "appearance-project",
     key: "sessionBannersHidden",
     labelKey: "settings.appearance.hideAISessionNotificationBanners",
     labelFallback: "Hide AI session notification banners",

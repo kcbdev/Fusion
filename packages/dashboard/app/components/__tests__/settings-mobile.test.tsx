@@ -578,11 +578,15 @@ describe("SettingsModal mobile adaptations", () => {
   });
 
   /*
-  FNXC:SettingsScope 2026-07-15-18:52:
-  Scope is communicated per ROW, not by a section banner. The banner claimed one scope for a whole section, which was frequently false — Appearance is a "global" nav entry whose task-presentation toggles are all project-scoped — so it is removed and each row states its own scope.
-  This test kept the surviving requirement (an operator can tell what a setting's scope is) and re-pointed it at the mechanism that now carries it: the nav scope icons plus the per-row badges. The old assertions on `.settings-scope-project` / `.settings-scope-global` banner elements went with the banner.
+  FNXC:SettingsScope 2026-07-16-08:10:
+  Scope is stated ONCE per screen by SettingsScopeIndicator, not by a per-row badge on every
+  control. The old section banner (asserted a single scope for a whole section, false on the
+  then-mixed Appearance screen) is still gone; Appearance itself is no longer mixed — its global
+  theme/language controls and its project task-presentation toggles were split into two
+  single-scope screens (Appearance and Appearance · Project). So each Appearance screen shows one
+  scope indicator and no per-row badge.
   */
-  it("shows scope on nav items and per-row badges rather than a section banner", async () => {
+  it("shows one scope indicator per screen rather than a section banner", async () => {
     const user = userEvent.setup();
     const { container, getByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
@@ -592,16 +596,22 @@ describe("SettingsModal mobile adaptations", () => {
     await user.click(getByText("Appearance"));
 
     // The banner is gone for good — it asserted a single scope for a section
-    // that genuinely mixes them.
+    // that used to mix them.
     expect(container.querySelector(".settings-scope-banner")).toBeNull();
     expect(container.querySelector(".settings-scope-project")).toBeNull();
     expect(container.querySelector(".settings-scope-global")).toBeNull();
 
-    // Appearance is exactly the mixed case: global theme controls above,
-    // project-scoped task-presentation toggles below, each badged for itself.
-    const badges = container.querySelectorAll('[data-testid="settings-field-row-scope"]');
-    expect(badges.length).toBeGreaterThan(0);
-    expect(Array.from(badges).map((b) => b.textContent)).toContain("project");
+    // Appearance is now a pure global screen: one "global" indicator, no per-row badges.
+    const globalIndicator = container.querySelector('[data-testid="settings-scope-indicator"]');
+    expect(globalIndicator).not.toBeNull();
+    expect(globalIndicator).toHaveAttribute("data-scope", "global");
+    expect(container.querySelector('[data-testid="settings-field-row-scope"]')).toBeNull();
+
+    // Its project half is the sibling screen, which shows a single "project" indicator.
+    await user.click(getByText("Appearance · Project"));
+    const projectIndicator = container.querySelector('[data-testid="settings-scope-indicator"]');
+    expect(projectIndicator).toHaveAttribute("data-scope", "project");
+    expect(container.querySelector('[data-testid="settings-field-row-scope"]')).toBeNull();
   });
 
   it("renders separate Anthropic Authentication controls on mobile", async () => {
