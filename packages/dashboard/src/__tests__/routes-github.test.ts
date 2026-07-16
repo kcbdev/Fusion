@@ -2645,7 +2645,7 @@ describe("GET /tasks/:id/diff", () => {
 
       const localStore = createMockStore({
         getRootDir: vi.fn().mockReturnValue(root),
-        getRunAuditEvents: vi.fn().mockReturnValue([{ mutationType: "commit:create", target: mergeSha }]),
+        getRunAuditEventsAsync: vi.fn().mockResolvedValue([{ mutationType: "commit:create", target: mergeSha }]),
         getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
       });
       (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -2684,7 +2684,7 @@ describe("GET /tasks/:id/diff", () => {
 
       const localStore = createMockStore({
         getRootDir: vi.fn().mockReturnValue(root),
-        getRunAuditEvents: vi.fn().mockReturnValue([]),
+        getRunAuditEventsAsync: vi.fn().mockResolvedValue([]),
         getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([{ commitSha: lineageSha, authoredAt: new Date().toISOString() }]),
       });
       (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -2711,7 +2711,7 @@ describe("GET /tasks/:id/diff", () => {
 
   it("returns zero stats when no done-task commit sha can be resolved", async () => {
     const localStore = createMockStore({
-      getRunAuditEvents: vi.fn().mockReturnValue([{ mutationType: "commit:create", target: "HEAD" }]),
+      getRunAuditEventsAsync: vi.fn().mockResolvedValue([{ mutationType: "commit:create", target: "HEAD" }]),
       getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
     });
     (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -2787,6 +2787,45 @@ describe("GET /tasks/:id/file-diffs", () => {
   }
 
   describe("done tasks without commit SHA", () => {
+    /*
+     * FNXC:DoneTaskDiffAudit 2026-07-15-18:00:
+     * Done-task diff endpoints must resolve audit commit SHAs through the asynchronous
+     * PostgreSQL-authoritative reader. Cover file-diffs as well as the sibling diff route.
+     */
+    it("returns changed files when the async audit commit SHA is available", async () => {
+      const root = mkdtempSync(join(tmpdir(), "kb-dashboard-file-diffs-audit-"));
+      try {
+        execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "pipe" });
+        execFileSync("git", ["-C", root, "config", "user.email", "kb-tests@example.com"], { stdio: "pipe" });
+        execFileSync("git", ["-C", root, "config", "user.name", "KB Tests"], { stdio: "pipe" });
+        writeFileSync(join(root, "tracked.ts"), "export const value = 1;\n");
+        execFileSync("git", ["-C", root, "add", "tracked.ts"], { stdio: "pipe" });
+        execFileSync("git", ["-C", root, "commit", "-m", "initial"], { stdio: "pipe" });
+        writeFileSync(join(root, "tracked.ts"), "export const value = 2;\n");
+        execFileSync("git", ["-C", root, "commit", "-am", "update"], { stdio: "pipe" });
+        const mergeSha = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf-8", stdio: "pipe" }).trim();
+
+        store = createMockStore({
+          getRootDir: vi.fn().mockReturnValue(root),
+          getRunAuditEventsAsync: vi.fn().mockResolvedValue([{ mutationType: "commit:create", target: mergeSha }]),
+          getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
+        });
+        (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+          ...FAKE_TASK_DETAIL,
+          id: "FN-001",
+          column: "done",
+          mergeDetails: { filesChanged: 1, insertions: 1, deletions: 1 },
+        });
+
+        const res = await GET(buildApp(), "/api/tasks/FN-001/file-diffs");
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual(expect.arrayContaining([expect.objectContaining({ path: "tracked.ts" })]));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("returns empty array instead of scanning repository", async () => {
       const doneTask = {
         ...FAKE_TASK_DETAIL,
@@ -3135,6 +3174,7 @@ describe("PR conflict refresh + reclaim routes", () => {
 
     const reclaimSpy = vi.fn().mockResolvedValue({ outcome: "reclaimed" });
     const engine = {
+      getProjectId: () => "test-project",
       getTaskStore: () => store,
       getSelfHealingManager: () => ({ reclaimPrConflictForTask: reclaimSpy }),
     };
@@ -3313,6 +3353,7 @@ describe("PR conflict refresh + reclaim routes", () => {
     };
     const reclaimSpy = vi.fn().mockResolvedValue({ outcome: "reclaimed" });
     const engine = {
+      getProjectId: () => "test-project",
       getTaskStore: () => store,
       getSelfHealingManager: () => ({ reclaimPrConflictForTask: reclaimSpy }),
     };
