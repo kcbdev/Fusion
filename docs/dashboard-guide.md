@@ -6,7 +6,7 @@ The Fusion dashboard is the main control plane for tasks, agents, missions, sett
 
 ## Dashboard Updates
 
-When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, restart Fusion to apply the new version because the already-running dashboard server is unchanged until restart.
+When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, the dashboard update banner offers a one-click **Restart Fusion** action because the already-running dashboard server is unchanged until restart. When Fusion is unsupervised (for example, started with `--no-supervise`), that banner action is disabled and explains that Fusion must be restarted manually.
 
 ## Settings discovery
 
