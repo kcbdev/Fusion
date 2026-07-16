@@ -5904,7 +5904,12 @@
       "gitLabEnabledHint": "",
       "allowEphemeralAgentsToCreateTasksHint": "",
       "quickChatCloseOnOutsideClickHint": "",
-      "disabledFusionWorkflowsAreHiddenFromWorkflow": ""
+      "disabledFusionWorkflowsAreHiddenFromWorkflow": "",
+      "autoTranslateImportedIssues": "",
+      "autoTranslateImportedIssuesHelp": "",
+      "translationTargetLanguage": "",
+      "translationTargetLanguageHelp": "",
+      "followDashboardLanguage": ""
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -5940,7 +5945,9 @@
       "gitLabApiBaseUrlHint": "",
       "gitLabTokenTypeHint": "",
       "gitLabAuthTokenHint": "",
-      "dismissModalsByClickingOutsideHint": ""
+      "dismissModalsByClickingOutsideHint": "",
+      "skipConfirmationDialogs": "",
+      "skipConfirmationDialogsHint": ""
     },
     "globalModels": {
       "allow": "",
@@ -6363,6 +6370,8 @@
       "automaticallyCompactContextWhenApproachingThisTokenCount": "",
       "autoSelectPresetBasedOnTaskSize": "",
       "autoSummarizeLongDescriptionsAsTitles": "",
+      "taskDefinitionInInputLanguage": "",
+      "taskDefinitionInInputLanguageHelp": "",
       "configuredPresets": "",
       "configuresTheModelUsedForTwoShortSummary": "",
       "defaultWorkflowModelLaneActions": "",
@@ -6638,10 +6647,6 @@
       "maxConcurrentVerificationsHint": "",
       "pollIntervalMsHint": ""
     },
-    "scope": {
-      "globalBanner": "Estos ajustes se comparten entre todos tus proyectos de Fusion.",
-      "projectBanner": "Estos ajustes solo afectan a este proyecto."
-    },
     "title": "Configuración",
     "worktrees": {
       "allowSilentSiblingBranchRenameDuringExecutorConflicts": "",
@@ -6723,8 +6728,10 @@
       "noMobileOptions": "",
       "noResults": "",
       "placeholder": "",
-      "resultCount": "",
-      "settingResultCount": ""
+      "resultCount_one": "",
+      "resultCount_other": "",
+      "settingResultCount_one": "",
+      "settingResultCount_other": ""
     },
     "prompts": {
       "surfaceExplanation": ""
@@ -7671,7 +7678,11 @@
       "rejected": "Plan rechazado — {{id}} devuelto a Planificación para replanificar",
       "rejectMessage": "¿Rechazar este plan? La especificación será descartada y regenerada.",
       "rejectTitle": "Rechazar plan",
-      "replanning": "Replanificando {{id}}…"
+      "replanning": "Replanificando {{id}}…",
+      "approvalCopy": "",
+      "approvalHeadline": "",
+      "replanCapCopy": "",
+      "replanCapHeadline": ""
     },
     "pr": {
       "awaitingChecks": "Esperando verificaciones del PR",
@@ -8340,11 +8351,16 @@
     "revertNeedsHumanDefault": "",
     "reverted": "",
     "revertTask": "",
+    "revertedBadge": "",
+    "revertedBadgeTitle": "",
     "undoOf": "",
     "undoOfTitle": "",
     "undoTask": "",
     "costBadgeTitle": "",
-    "costBadgeAriaLabel": ""
+    "costBadgeAriaLabel": "",
+    "awaitingApprovalPlanReviewReplanCapTitle": "",
+    "reviewBudgetExhausted": "",
+    "awaitingApprovalTitle": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

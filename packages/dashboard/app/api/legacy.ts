@@ -4,9 +4,7 @@ import type {
   TaskReviewData,
   TaskAttachment,
   TaskComment,
-  TaskCreateInput,
   AgentLogEntry,
-  ColumnId,
   MergeResult,
   Settings,
   GlobalSettings,
@@ -67,9 +65,6 @@ import type {
   EvalTaskResult,
   ResearchRunStatus,
   TaskPriority,
-  TaskSourceIssue,
-  TaskGitLabTracking,
-  TaskGitLabTrackedItem,
   PrConflictDiagnostics,
   PrInfo,
   ManagedDockerNodeInput,
@@ -81,7 +76,6 @@ import type {
   DockerNodeStatus,
   ProjectNodePathMapping,
   ApprovalRequestStatus,
-  TaskIdIntegrityReport,
   BranchGroup,
   BranchGroupPrState,
   WorkflowFieldDefinition,
@@ -95,11 +89,12 @@ import type {
   WorkflowSettingRejection,
   CommitAssociationDiffBackfillReport,
 } from "@fusion/core";
+// Consumers import backfill report types from the legacy API barrel.
+export type { CommitAssociationDiffBackfillReport };
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { PlannerOverseerRuntimeSnapshot } from "@fusion/core";
 import type { PlannerInterventionEntry } from "@fusion/core";
-import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
-import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent } from "@fusion/dashboard";
+import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
 import type { MilestoneValidationTelemetry, MissionInterviewDraftSummary } from "../components/mission-types";
 import type {
   ResearchAvailability,
@@ -109,564 +104,105 @@ import type {
   ResearchProviderOption,
 } from "../research-types";
 import { appendTokenQuery, getAuthToken, withTokenHeader } from "../auth";
-import { dedupe, type DedupeOptions } from "./dedupe";
+import { dedupe } from "./dedupe";
 
-/** Options accepted by deduped fetchers. Pass `{ forceFresh: true }` after a
- *  mutation to bypass any in-flight pre-mutation request and force a new one. */
-export type FetchOptions = DedupeOptions;
-
-// Re-export skills types for use by hooks and components
-export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent };
-export type { CommitAssociationDiffBackfillReport };
-
-export class ApiRequestError extends Error {
-  readonly status: number;
-  readonly details?: Record<string, unknown>;
-
-  constructor(message: string, status: number, details?: Record<string, unknown>) {
-    super(message);
-    this.name = "ApiRequestError";
-    this.status = status;
-    this.details = details;
-  }
-}
-
-/** Options that shape the soft-delete request payload/query, not hard-delete behavior. */
-export interface DeleteTaskOptions {
-  removeDependencyReferences?: boolean;
-  removeLineageReferences?: boolean;
-  githubIssueAction?: GithubIssueAction;
-  allowResurrection?: boolean;
-}
-
-export interface ArchiveTaskOptions {
-  removeLineageReferences?: boolean;
-}
-
-function looksLikeHtml(body: string): boolean {
-  const trimmed = body.trim();
-  return trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML");
-}
-
-function buildApiUrl(path: string): string {
-  return `/api${path}`;
-}
-
-export async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T> {
-  const url = buildApiUrl(path);
-  const token = getAuthToken();
-  const headers = (() => {
-    if (token) {
-      const authenticatedHeaders = new Headers(opts.headers ?? {});
-      if (!authenticatedHeaders.has("Content-Type")) {
-        authenticatedHeaders.set("Content-Type", "application/json");
-      }
-      return withTokenHeader(authenticatedHeaders);
-    }
-
-    if (!opts.headers) {
-      return { "Content-Type": "application/json" };
-    }
-
-    const defaultHeaders = new Headers(opts.headers);
-    if (!defaultHeaders.has("Content-Type")) {
-      defaultHeaders.set("Content-Type", "application/json");
-    }
-    return Object.fromEntries(defaultHeaders.entries());
-  })();
-
-  const res = await fetch(url, {
-    ...opts,
-    headers,
-  });
-
-  // Handle successful 204 No Content responses (e.g., DELETE, reorder)
-  // These return no body and no JSON content-type — return undefined for void endpoints
-  if (res.status === 204) {
-    if (!res.ok) {
-      // 204 is always ok by definition, but guard anyway
-      throw new Error(`Request failed for ${url}: ${res.status} ${res.statusText}`);
-    }
-    return undefined as T;
-  }
-
-  const contentType = res.headers.get("content-type") ?? "";
-  const bodyText = await res.text();
-  const isJson = contentType.includes("application/json");
-  const isHtml = contentType.includes("text/html") || looksLikeHtml(bodyText);
-
-  if (isHtml) {
-    throw new Error(
-      `API returned HTML instead of JSON for ${url}. ` +
-      `The endpoint may not be properly configured. (${res.status} ${res.statusText})`
-    );
-  }
-
-  if (!isJson) {
-    const preview = bodyText.length > 160 ? `${bodyText.slice(0, 160)}...` : bodyText;
-    throw new Error(
-      `API returned ${contentType || "an unknown content type"} instead of JSON for ${url}. ` +
-      `(${res.status} ${res.statusText})${preview ? ` Response: ${preview}` : ""}`
-    );
-  }
-
-  let data: unknown;
-  try {
-    data = bodyText ? JSON.parse(bodyText) : null;
-  } catch {
-    throw new Error(
-      `API returned invalid JSON for ${url}. (${res.status} ${res.statusText})`
-    );
-  }
-
-  if (!res.ok) {
-    const payload = data as { error?: string; details?: Record<string, unknown> } | null;
-    throw new ApiRequestError(
-      payload?.error || `Request failed for ${url}: ${res.status} ${res.statusText}`,
-      res.status,
-      payload?.details,
-    );
-  }
-
-  return data as T;
-}
-
-export interface DashboardHealthResponse {
-  status: string;
-  version: string;
-  uptime: number;
-  engine?: {
-    available: boolean;
-  };
-  database: {
-    healthy: boolean;
-    corruptionDetected: boolean;
-    corruptionErrors: string[];
-    lastCheckedAt: string | null;
-    isRunning: boolean;
-  };
-  /*
-  FNXC:PostgresHealth 2026-07-14-23:45:
-  Health cannot label an unavailable PostgreSQL integrity detector as "ok". Preserve the existing report fields while exposing a distinct error state and diagnostic for the dashboard response contract.
-  */
-  taskIdIntegrity:
-    | (TaskIdIntegrityReport & { recommendedAction: string | null })
-    | {
-        status: "error";
-        checkedAt: string;
-        anomalies: [];
-        error: string;
-        recommendedAction: string | null;
-      };
-}
-
-export function fetchDashboardHealth(): Promise<DashboardHealthResponse> {
-  return api<DashboardHealthResponse>("/health");
-}
-
-export function refreshDashboardHealth(): Promise<DashboardHealthResponse> {
-  return api<DashboardHealthResponse>("/health/refresh", { method: "POST" });
-}
-
-export interface EngineStatusResponse {
-  connected: boolean;
-  starting: boolean;
-  canStart: boolean;
-  reason?: "dashboard-only" | "no-project" | string;
-  projectId?: string;
-}
-
-/*
- * FNXC:EngineStatusBanner 2026-06-22-00:00:
- * Engine status is project-scoped because a multi-project dashboard can have one running engine while the current project is paused, failed, or not yet started. Thread `projectId` through the existing query helper so the server resolves the same project context as task and settings routes.
- */
-export function fetchEngineStatus(projectId?: string): Promise<EngineStatusResponse> {
-  return api<EngineStatusResponse>(withProjectId("/engine/status", projectId));
-}
-
-export function startEngine(projectId?: string): Promise<EngineStatusResponse> {
-  return api<EngineStatusResponse>(withProjectId("/engine/start", projectId), { method: "POST" });
-}
-
-export function checkForUpdates(): Promise<UpdateCheckResponse> {
-  return api<UpdateCheckResponse>("/updates/check");
-}
-
-export function fetchTasks(
-  limit?: number,
-  offset?: number,
-  projectId?: string,
-  q?: string,
-  includeArchived?: boolean,
-): Promise<Task[]> {
-  const search = new URLSearchParams();
-  if (limit !== undefined) search.set("limit", String(limit));
-  if (offset !== undefined) search.set("offset", String(offset));
-  if (projectId) search.set("projectId", projectId);
-  if (q) search.set("q", q);
-  if (includeArchived) search.set("includeArchived", "1");
-  const suffix = search.size > 0 ? `?${search.toString()}` : "";
-  return api<Task[]>(`/tasks${suffix}`);
-}
-
-/**
- * FNXC:ArchivePagination 2026-07-08-00:00:
- * Dedicated paged read for the Archived board column (FN-7659). Returns
- * one bounded page (default 100) ordered `archivedAt DESC` plus `total`/
- * `hasMore` so the caller can drive a "Show more" affordance without ever
- * fetching the whole archive in one request.
- */
-export function fetchArchivedTasks(
-  projectId?: string,
-  limit?: number,
-  offset?: number,
-): Promise<{ tasks: Task[]; total: number; hasMore: boolean }> {
-  const search = new URLSearchParams();
-  if (limit !== undefined) search.set("limit", String(limit));
-  if (offset !== undefined) search.set("offset", String(offset));
-  const suffix = search.size > 0 ? `?${search.toString()}` : "";
-  return api<{ tasks: Task[]; total: number; hasMore: boolean }>(withProjectId(`/tasks/archived${suffix}`, projectId));
-}
-
-export async function fetchTaskDetail(id: string, projectId?: string): Promise<TaskDetail> {
-  const maxAttempts = 2; // 1 initial + 1 retry
-  const url = buildApiUrl(withProjectId(`/tasks/${id}`, projectId));
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await fetch(url, {
-      headers: withTokenHeader({ "Content-Type": "application/json" }),
-    });
-    const data = await res.json();
-    if (res.ok) return data as TaskDetail;
-    if (attempt === maxAttempts) {
-      throw new Error((data as { error?: string }).error || "Request failed");
-    }
-  }
-  // unreachable
-  throw new Error("Request failed");
-}
-
-export interface TaskRuntimeFallbackResponse {
-  taskId: string;
-  hasEvent: boolean;
-  wasConfigured: boolean | null;
-  runtimeHint: string | null;
-  reason: string | null;
-  eventId: string | null;
-  timestamp: string | null;
-  showFallbackBadge: boolean;
-}
-
-/**
- * Fetch the most recent session:runtime-resolved audit event for a task,
- * normalized for the runtime-fallback badge/toast affordance. Used by
- * useRuntimeFallbackStatus.
- */
-export async function fetchTaskRuntimeFallback(
-  taskId: string,
-  projectId?: string,
-): Promise<TaskRuntimeFallbackResponse> {
-  return api<TaskRuntimeFallbackResponse>(withProjectId(`/tasks/${taskId}/runtime-fallback`, projectId));
-}
-
-export interface UpdateTaskReviewRequest {
-  reviewState: TaskDetail["reviewState"] | null;
-}
-
-export interface TaskReviewResponse {
-  reviewState: NonNullable<TaskDetail["reviewState"]>;
-  automationStatus: string | null;
-  emptyMessage?: string | null;
-  prInfo?: TaskDetail["prInfo"];
-}
-
-export interface RefreshTaskReviewResponse {
-  reviewState: NonNullable<TaskDetail["reviewState"]>;
-  automationStatus: string | null;
-  prInfo?: TaskDetail["prInfo"];
-}
-
-export interface SelectedReviewItem {
-  id: string;
-  source: "pr-review" | "reviewer-agent";
-  threadId?: string;
-  filePath?: string;
-  lineNumber?: number;
-  author?: string;
-  summary: string;
-  body: string;
-  url?: string;
-}
-
-export interface ReviseTaskReviewResponse {
-  task: Task;
-  reviewState: NonNullable<TaskDetail["reviewState"]>;
-}
-
-export interface AddressPrFeedbackResponse {
-  task: Task;
-}
-
-export interface DuplicateMatch {
-  id: string;
-  title: string;
-  description: string;
-  column: string;
-  score: number;
-}
-
-export class DuplicateCandidatesError extends Error {
-  readonly matches: DuplicateMatch[];
-
-  constructor(matches: DuplicateMatch[]) {
-    super("duplicate_candidates");
-    this.name = "DuplicateCandidatesError";
-    this.matches = matches;
-  }
-}
-
-export interface CreateTaskRequestOptions {
-  transportNodeId?: string;
-  localNodeId?: string;
-}
-
-export type BranchSelectionInput = {
-  mode: "project-default" | "auto-new" | "existing" | "custom-new";
-  branchName?: string;
-  baseBranch?: string;
+/* FNXC:DashboardApi 2026-07-15-13:25: Preserve the legacy API barrel while consumers migrate to focused modules. */
+export {
+  api,
+  ApiRequestError,
+  buildApiUrl,
+  withNodeId,
+  proxyApi,
+} from "./client.js";
+export type { FetchOptions } from "./client.js";
+export {
+  fetchDashboardHealth,
+  refreshDashboardHealth,
+  fetchEngineStatus,
+  startEngine,
+  checkForUpdates,
+  withProjectId,
+} from "./health.js";
+import type {
+  DashboardHealthResponse,
+  EngineStatusResponse,
+  UpdateCheckResponse,
+} from "./health.js";
+export type {
+  DashboardHealthResponse,
+  EngineStatusResponse,
+  UpdateCheckResponse,
 };
 
-export type CreateTaskInput = TaskCreateInput & {
-  branchSelection?: BranchSelectionInput;
-  acknowledgedDuplicates?: string[];
-  bypassDuplicateCheck?: boolean;
+export {
+  fetchTasks,
+  fetchArchivedTasks,
+  fetchTaskDetail,
+  fetchTaskRuntimeFallback,
+  checkDuplicateTasks,
+  createTask,
+  repairOverlapBlocker,
+  updateTask,
+  batchUpdateTaskModels,
+  moveTask,
+  DuplicateCandidatesError,
+} from "./tasks.js";
+import type {
+  DeleteTaskOptions,
+  ArchiveTaskOptions,
+  TaskRuntimeFallbackResponse,
+  UpdateTaskReviewRequest,
+  TaskReviewResponse,
+  RefreshTaskReviewResponse,
+  SelectedReviewItem,
+  ReviseTaskReviewResponse,
+  AddressPrFeedbackResponse,
+  DuplicateMatch,
+  CreateTaskRequestOptions,
+  BranchSelectionInput,
+  CreateTaskInput,
+  RepairOverlapBlockerResult,
+} from "./tasks.js";
+export type {
+  DeleteTaskOptions,
+  ArchiveTaskOptions,
+  TaskRuntimeFallbackResponse,
+  UpdateTaskReviewRequest,
+  TaskReviewResponse,
+  RefreshTaskReviewResponse,
+  SelectedReviewItem,
+  ReviseTaskReviewResponse,
+  AddressPrFeedbackResponse,
+  DuplicateMatch,
+  CreateTaskRequestOptions,
+  BranchSelectionInput,
+  CreateTaskInput,
+  RepairOverlapBlockerResult,
 };
+import { api, ApiRequestError, buildApiUrl, looksLikeHtml, proxyApi } from "./client.js";
+import type { FetchOptions } from "./client.js";
+import { withProjectId } from "./health.js";
 
-export async function checkDuplicateTasks(
-  input: { title?: string; description: string },
-  projectId?: string,
-): Promise<DuplicateMatch[]> {
-  const response = await api<{ matches?: DuplicateMatch[] }>(withProjectId("/tasks/duplicate-check", projectId), {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-  return response.matches ?? [];
-}
-
-export async function createTask(
-  input: CreateTaskInput,
-  projectId?: string,
-  options?: CreateTaskRequestOptions,
-): Promise<Task> {
-  const {
-    title,
-    description,
-    column,
-    dependencies,
-    breakIntoSubtasks,
-    enabledWorkflowSteps,
-    workflowId,
-    assignedAgentId,
-    modelPresetId,
-    modelProvider,
-    modelId,
-    validatorModelProvider,
-    validatorModelId,
-    planningModelProvider,
-    planningModelId,
-    thinkingLevel,
-    plannerOversightLevel,
-    summarize,
-    reviewLevel,
-    executionMode,
-    autoMerge,
-    priority,
-    source,
-    nodeId,
-    branch,
-    baseBranch,
-    branchSelection,
-    githubTracking,
-    sessionAdvisorEnabled,
-    acknowledgedDuplicates,
-    bypassDuplicateCheck,
-  } = input;
-
-  try {
-    return await proxyApi<Task>(withProjectId("/tasks", projectId), {
-    method: "POST",
-    nodeId: options?.transportNodeId,
-    localNodeId: options?.localNodeId,
-    body: JSON.stringify({
-      title,
-      description,
-      column,
-      dependencies,
-      breakIntoSubtasks,
-      enabledWorkflowSteps,
-      workflowId,
-      assignedAgentId,
-      modelPresetId,
-      modelProvider,
-      modelId,
-      validatorModelProvider,
-      validatorModelId,
-      planningModelProvider,
-      planningModelId,
-      thinkingLevel,
-      plannerOversightLevel,
-      summarize,
-      reviewLevel,
-      executionMode,
-      autoMerge,
-      priority,
-      source,
-      nodeId,
-      branch,
-      baseBranch,
-      branchSelection,
-      githubTracking,
-      sessionAdvisorEnabled,
-      acknowledgedDuplicates,
-      bypassDuplicateCheck,
-    }),
-  });
-  } catch (error) {
-    if (error instanceof ApiRequestError && error.status === 409 && error.message === "duplicate_candidates") {
-      const matches = Array.isArray(error.details?.matches)
-        ? (error.details?.matches as DuplicateMatch[])
-        : [];
-      throw new DuplicateCandidatesError(matches);
-    }
-    throw error;
-  }
-}
-
-export interface RepairOverlapBlockerResult {
-  taskId: string;
-  dryRun: boolean;
-  repaired: boolean;
-  statusCleared: boolean;
-  previousOverlapBlockedBy?: string;
-  currentOverlapBlockedBy?: string;
-  reason: string;
-  message: string;
-  task?: Task;
-}
-
-export function repairOverlapBlocker(
-  id: string,
-  options: { dryRun?: boolean; reason?: string } = {},
-  projectId?: string,
-): Promise<RepairOverlapBlockerResult> {
-  return api<RepairOverlapBlockerResult>(withProjectId(`/tasks/${id}/repair-overlap-blocker`, projectId), {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-}
-
-export function updateTask(
-  id: string,
-  updates: {
-    title?: string;
-    description?: string;
-    prompt?: string;
-    dependencies?: string[];
-    enabledWorkflowSteps?: string[];
-    overlapBlockedBy?: string | null;
-    status?: null;
-    modelProvider?: string | null;
-    modelId?: string | null;
-    validatorModelProvider?: string | null;
-    validatorModelId?: string | null;
-    planningModelProvider?: string | null;
-    planningModelId?: string | null;
-    thinkingLevel?: string | null;
-    validatorThinkingLevel?: string | null;
-    planningThinkingLevel?: string | null;
-    plannerOversightLevel?: "off" | "observe" | "steer" | "autonomous" | null;
-    /** FNXC:PlannerOversight 2026-07-14-18:11: boolean override or null to inherit project default. */
-    sessionAdvisorEnabled?: boolean | null;
-    reviewLevel?: number | null;
-    executionMode?: "standard" | "fast" | null;
-    noCommitsExpected?: boolean;
-    autoMerge?: boolean | null;
-    priority?: TaskPriority | null;
-    sourceIssue?: TaskSourceIssue | null;
-    nodeId?: string | null;
-    branch?: string | null;
-    baseBranch?: string | null;
-    githubTracking?: {
-      enabled?: boolean;
-      repoOverride?: string | null;
-      issue?: null;
-    } | null;
-    gitlabTracking?: (Omit<TaskGitLabTracking, "item"> & { item?: TaskGitLabTrackedItem | null }) | null;
-    dismissNearDuplicate?: boolean;
-  },
-  projectId?: string,
-): Promise<Task> {
-  return api<Task>(withProjectId(`/tasks/${id}`, projectId), {
-    method: "PATCH",
-    body: JSON.stringify(updates),
-  });
-}
-
-/**
- * Batch update AI model configuration for multiple tasks.
- * @param taskIds - Array of task IDs to update
- * @param modelProvider - Executor model provider (optional, null to clear)
- * @param modelId - Executor model ID (optional, null to clear)
- * @param validatorModelProvider - Validator model provider (optional, null to clear)
- * @param validatorModelId - Validator model ID (optional, null to clear)
- * @param thinkingLevel - Executor thinking level (optional, null to clear)
- * @returns Promise with updated tasks and count
- */
-export function batchUpdateTaskModels(
-  taskIds: string[],
-  modelProvider?: string | null,
-  modelId?: string | null,
-  validatorModelProvider?: string | null,
-  validatorModelId?: string | null,
-  planningModelProvider?: string | null,
-  planningModelId?: string | null,
-  nodeId?: string | null,
-  thinkingLevel?: string | null,
-  projectId?: string,
-): Promise<{ updated: Task[]; count: number }> {
-  return api<{ updated: Task[]; count: number }>(withProjectId("/tasks/batch-update-models", projectId), {
-    method: "POST",
-    body: JSON.stringify({
-      taskIds,
-      modelProvider,
-      modelId,
-      validatorModelProvider,
-      validatorModelId,
-      planningModelProvider,
-      planningModelId,
-      nodeId,
-      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-    }),
-  });
-}
-
-export function moveTask(
-  id: string,
-  column: ColumnId,
-  projectId?: string,
-  optionsOrPosition?: { preserveProgress?: boolean } | number,
-): Promise<Task> {
-  return api<Task>(withProjectId(`/tasks/${id}/move`, projectId), {
-    method: "POST",
-    body: JSON.stringify({
-      column,
-      ...(
-        typeof optionsOrPosition === "object" && optionsOrPosition?.preserveProgress
-          ? { preserveProgress: true }
-          : {}
-      ),
-    }),
-  });
-}
+// Import + re-export skills types so legacy monofile bodies can reference them
+// while hooks/components keep stable import paths via this barrel.
+import type {
+  DiscoveredSkill,
+  CatalogEntry,
+  CatalogFetchResult,
+  ToggleSkillResult,
+  SkillContent,
+  SkillFileEntry,
+  SkillFileContent,
+} from "@fusion/dashboard";
+export type {
+  DiscoveredSkill,
+  CatalogEntry,
+  CatalogFetchResult,
+  ToggleSkillResult,
+  SkillContent,
+  SkillFileEntry,
+  SkillFileContent,
+};
 
 /** Resolved trait flags for a board column (subset the client cares about). */
 export interface BoardWorkflowColumnFlags {
@@ -1037,15 +573,6 @@ export function updateSettings(settings: Partial<Settings>, projectId?: string):
     method: "PUT",
     body: JSON.stringify(settings),
   });
-}
-
-export interface UpdateCheckResponse {
-  currentVersion: string;
-  latestVersion: string | null;
-  updateAvailable: boolean;
-  lastChecked?: number;
-  disabled?: boolean;
-  error?: string;
 }
 
 export function checkForUpdate(projectId?: string): Promise<UpdateCheckResponse> {
@@ -6487,11 +6014,6 @@ export interface AgentPromptSizePoint {
   totalChars: number;
 }
 
-export function withProjectId(path: string, projectId?: string): string {
-  if (!projectId) return path;
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`;
-}
 
 /** Append repoPath query param for workspace-mode sub-repo targeting */
 function withRepoPath(path: string, repoPath?: string): string {
@@ -6503,33 +6025,6 @@ function withRepoPath(path: string, repoPath?: string): string {
 /** Fetch workspace sub-repos for a project */
 export function fetchWorkspaceRepos(projectId?: string): Promise<{ repos: string[] }> {
   return api<{ repos: string[] }>(withProjectId("/git/workspace-repos", projectId));
-}
-
-/**
- * Rewrite a path to route through the node proxy when viewing a remote node.
- * When nodeId is provided and differs from localNodeId (i.e., it's a remote node),
- * rewrites the path from `/tasks` to `/proxy/${encodeURIComponent(nodeId)}/tasks`.
- * When nodeId is undefined or matches localNodeId, returns the path unchanged.
- */
-export function withNodeId(path: string, nodeId?: string, localNodeId?: string): string {
-  if (!nodeId || nodeId === localNodeId) return path;
-  // Rewrite path to proxy endpoint: /tasks -> /proxy/:nodeId/tasks
-  // Strip leading /api prefix if present since proxyApi adds it
-  const apiPrefix = "/api";
-  const pathWithoutPrefix = path.startsWith(apiPrefix) ? path.slice(apiPrefix.length) : path;
-  return `/proxy/${encodeURIComponent(nodeId)}${pathWithoutPrefix}`;
-}
-
-/**
- * Make an API request, optionally routing through the node proxy for remote nodes.
- * When nodeId is provided and differs from localNodeId, the request is routed
- * through /api/proxy/:nodeId/... instead of directly.
- */
-export function proxyApi<T>(path: string, opts?: RequestInit & { nodeId?: string; localNodeId?: string }): Promise<T> {
-  // Extract nodeId/localNodeId from opts before passing to api()
-  const { nodeId, localNodeId, ...fetchOpts } = opts ?? {};
-  const resolvedPath = withNodeId(path, nodeId, localNodeId);
-  return api<T>(resolvedPath, fetchOpts);
 }
 
 /** Fetch all agents, optionally filtered by state or role */
@@ -10492,6 +9987,7 @@ export function updateChatSession(
     modelId?: string | null;
     agentId?: string;
     thinkingLevel?: string | null;
+    pinned?: boolean;
   },
   projectId?: string,
 ): Promise<ChatSessionResponse> {

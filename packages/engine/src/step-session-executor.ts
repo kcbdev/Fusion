@@ -19,7 +19,7 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentHeartbeatRun, AgentStore, MessageStore, PermanentAgentGatingContext, ResolvedMcpServerDefinition, TaskDetail, Settings, SteeringComment, TaskStore } from "@fusion/core";
-import { resolvePersistAgentThinkingLog } from "@fusion/core";
+import { resolvePersistAgentThinkingLog, resolveExecutorFallbackModel } from "@fusion/core";
 
 import {
   createResolvedAgentSession,
@@ -27,6 +27,7 @@ import {
   promptWithAutoRetry,
   resolveExecutorSessionModel,
   resolveExecutorThinkingLevel,
+  resolveExecutorFallbackThinkingLevel,
 } from "./agent-session-helpers.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
@@ -52,6 +53,7 @@ import {
   createTaskDocumentReadTool,
   createTaskDocumentWriteTool,
   createTaskLogTool,
+  createTaskLogsReadTool,
 } from "./agent-tools.js";
 import { RemovalReason, removeWorktree } from "./worktree-backend.js";
 import { pruneWorktreeAdminEntries } from "./worktree-prune.js";
@@ -1298,7 +1300,10 @@ export class StepSessionExecutor {
 
           // Task log and create tools — task context for step sessions.
           const taskLogTool = this.options.store
-            ? [createTaskLogTool(this.options.store, taskDetail.id)]
+            ? [
+                createTaskLogTool(this.options.store, taskDetail.id),
+                createTaskLogsReadTool(this.options.store, taskDetail.id),
+              ]
             : [];
           const taskCreateTool = this.options.store
             ? [createTaskCreateTool(this.options.store, undefined, { rootDir: this.options.rootDir })]
@@ -1355,8 +1360,9 @@ Your role:
 Follow instructions precisely and avoid unrelated changes.`,
               defaultProvider: executorProvider,
               defaultModelId: executorModelId,
-              fallbackProvider: settings.fallbackProvider,
-              fallbackModelId: settings.fallbackModelId,
+              fallbackProvider: resolveExecutorFallbackModel(settings).provider,
+              fallbackModelId: resolveExecutorFallbackModel(settings).modelId,
+              fallbackThinkingLevel: resolveExecutorFallbackThinkingLevel(taskDetail.thinkingLevel, settings),
               defaultThinkingLevel: effectiveThinkingLevel,
               runAuditor: createRunAuditor(this.store, {
                 runId: generateSyntheticRunId("workflow-step", taskDetail.id),

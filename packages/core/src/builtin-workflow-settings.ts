@@ -229,6 +229,30 @@ export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     options: THINKING_LEVELS.map((level) => ({ value: level, label: level })),
     description: "Thinking effort for the execution phase. Empty inherits from the task or default thinking level.",
   },
+  /*
+   * FNXC:Settings-ExecutorModel 2026-07-16-00:00:
+   * FN-8098 makes executor recovery workflow-configurable; unset values deliberately
+   * inherit the shared fallback pair so existing configurations continue to work.
+   */
+  {
+    id: "executionFallbackProvider",
+    name: "Executor fallback provider",
+    type: "string",
+    description: "Fallback provider for the execution phase.",
+  },
+  {
+    id: "executionFallbackModelId",
+    name: "Executor fallback model",
+    type: "string",
+    description: "Fallback model id for the execution phase.",
+  },
+  {
+    id: "executionFallbackThinkingLevel",
+    name: "Executor fallback thinking level",
+    type: "enum",
+    options: THINKING_LEVELS.map((level) => ({ value: level, label: level })),
+    description: "Thinking effort for the executor fallback model. Empty inherits from shared fallback or executor thinking.",
+  },
   {
     id: "planningProvider",
     name: "Planning provider",
@@ -468,6 +492,23 @@ export const BUILTIN_REVIEW_REVISION_SETTINGS: WorkflowSettingDefinition[] = [
      */
     description:
       "Maximum automatic Code Review remediation attempts for this workflow. Leave unset for unbounded; set 0 to disable automatic revision.",
+  },
+  {
+    id: "planReviewReplanCap",
+    name: "Plan Review replan cap",
+    type: "number",
+    minimum: 0,
+    integer: true,
+    /*
+     * FNXC:WorkflowRevisionBudget 2026-07-15-12:00:
+     * FN-7985 makes the triage Plan Review replan ceiling operator-configurable per workflow.
+     * The write boundary rejects fractional and negative values so operators never save a
+     * value triage would discard. Leave this declaration without a default so an unset value falls back to
+     * PLAN_REVIEW_GATE_REPLAN_CAP; that preserves the source default while allowing its
+     * coordinated value to change without baking a second default into workflow settings.
+     */
+    description:
+      "Maximum automatic plan → REVISE → replan iterations before manual approval. Leave unset to use the built-in default; set 0 to require approval after the first REVISE.",
   },
 ];
 

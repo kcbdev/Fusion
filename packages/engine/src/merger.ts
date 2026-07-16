@@ -104,6 +104,7 @@ import {
   type AutostashOrphanRecord,
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
+  resolveMergerFallbackModel,
 } from "@fusion/core";
 import { evaluateAutoMergeFactProviders } from "./auto-merge-fact-providers.js";
 import { resolveMergePolicy } from "./merge-trait.js";
@@ -165,6 +166,61 @@ import {
 } from "./merger-file-scope.js";
 import type { DiffScopeResult } from "./merger-file-scope.js";
 
+export {
+  VerificationError,
+  MergeAbortedError,
+  OutOfScopeVerificationError,
+  throwIfAborted,
+} from "./merger-errors.js";
+import {
+  VerificationError,
+  OutOfScopeVerificationError,
+  throwIfAborted,
+} from "./merger-errors.js";
+
+export {
+  FUSION_TASK_ID_TRAILER_KEY,
+  toTaskToken,
+  classifyOwnedLandedEvidence,
+} from "./merger-owned-landed.js";
+export type { OwnedLandedClassification } from "./merger-owned-landed.js";
+import {
+  FUSION_TASK_ID_TRAILER_KEY,
+  classifyOwnedLandedEvidence,
+} from "./merger-owned-landed.js";
+
+export {
+  getConflictedFiles,
+  isTrivialWhitespaceConflict,
+  classifyConflict,
+  resolveWithOurs,
+  resolveWithTheirs,
+  resolveTrivialWhitespace,
+  detectResolvableConflicts,
+  autoResolveFile,
+  resolveConflicts,
+} from "./merger-conflict-resolution.js";
+export type { ConflictResolution, ConflictCategory } from "./merger-conflict-resolution.js";
+import {
+  getConflictedFiles,
+  classifyConflict,
+  resolveWithOurs,
+  resolveWithTheirs,
+  resolveTrivialWhitespace,
+} from "./merger-conflict-resolution.js";
+
+export {
+  parseFailingFilesFromOutput,
+  parsePorcelainZ,
+  parseShortstatSummary,
+} from "./merger-git-parse.js";
+import {
+  parseFailingFilesFromOutput,
+  parsePorcelainZ,
+  parseShortstatSummary,
+} from "./merger-git-parse.js";
+
+
 import { regenerateBareMergeSubject } from "./merger-bare-subject.js";
 export { regenerateBareMergeSubject, BARE_MERGE_SUBJECT_RE } from "./merger-bare-subject.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
@@ -205,6 +261,17 @@ import { appendAutoWidenedScopeToPrompt, evaluateScopeAutoWiden } from "./merger
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 export { IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
+
+/*
+FNXC:MergeReliability 2026-07-15-14:55:
+`smartConflictResolution` was introduced as an alias, not a second enablement gate. Preserve an operator's legacy `autoResolveConflicts: false` choice even when stored defaults include the newer alias.
+*/
+function isSmartConflictResolutionEnabled(settings: {
+  autoResolveConflicts?: boolean;
+  smartConflictResolution?: boolean;
+}): boolean {
+  return settings.autoResolveConflicts !== false && settings.smartConflictResolution !== false;
+}
 
 async function resolveMergerMcpServers(store?: TaskStore, agentId?: string | null) {
   // FNXC:McpConfig 2026-06-25-22:27:
@@ -534,400 +601,6 @@ async function syncDependenciesForMerge(
   });
 }
 
-
-interface OwnedLandedCommit {
-  sha: string;
-  subject?: string;
-  filesChanged?: number;
-  insertions?: number;
-  deletions?: number;
-}
-
-export type OwnedLandedClassification =
-  | { kind: "owned-commit"; commit: OwnedLandedCommit }
-  | { kind: "proven-no-op"; baseRef: string; ownDiffEmpty: true }
-  | {
-    kind: "no-changes-finalized";
-    baseRef: string;
-    details: {
-      branchExists: boolean;
-      aheadCount: number | null;
-      baseReachableFromTarget: boolean;
-    };
-  }
-  | {
-    kind: "unproven";
-    reason: "foreign-start-point" | "no-owned-commit-foreign-deltas" | "missing-evidence";
-    details: Record<string, unknown>;
-  };
-
-function escapeRegexForOwnership(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Decide whether a git commit belongs to a given task. Line-anchored trailers
- * and subject-anchored conventional commits only — prose mentions never count.
- * Mirrors `commitOwnedByTask` in self-healing.ts (FN-5441/FN-5446 regression).
- */
-function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
-  if (new RegExp(`(?:^|\\n)${escapeRegexForOwnership(FUSION_TASK_ID_TRAILER_KEY)}: ${escapeRegexForOwnership(taskId)}\\s*(?:\\n|$)`).test(body)) {
-    return true;
-  }
-  const subjectAnchor = new RegExp(
-    `^(?:[A-Za-z]+(?:\\([^)]*\\b${escapeRegexForOwnership(taskId)}\\b[^)]*\\))?:|${escapeRegexForOwnership(taskId)}:)`,
-  );
-  return subjectAnchor.test(subject);
-}
-
-async function findOwnedLandedCommitForTask(rootDir: string, task: Task): Promise<OwnedLandedCommit | null> {
-  const tryHydrate = async (sha: string): Promise<OwnedLandedCommit | null> => {
-    try {
-      await execFileAsync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: rootDir });
-      const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%H%x1f%s%x1f%b", sha], {
-        cwd: rootDir,
-        encoding: "utf-8",
-      });
-      const [resolvedSha, subject = "", body = ""] = stdout.trim().split("\x1f");
-      if (!resolvedSha || !commitOwnedByTask(task.id, subject, body)) return null;
-      const owned: OwnedLandedCommit = { sha: resolvedSha, subject };
-      try {
-        const { stdout: statsOut } = await execFileAsync("git", ["show", "--shortstat", "--format=", resolvedSha], {
-          cwd: rootDir,
-          encoding: "utf-8",
-        });
-        Object.assign(owned, parseDiffStat(statsOut));
-      } catch {
-        // stats optional
-      }
-      return owned;
-    } catch {
-      return null;
-    }
-  };
-
-  if (task.mergeDetails?.commitSha) {
-    const ownedStored = await tryHydrate(task.mergeDetails.commitSha);
-    if (ownedStored) return ownedStored;
-  }
-
-  const trailer = `${FUSION_TASK_ID_TRAILER_KEY}: ${task.id}`;
-  const searches: string[][] = [
-    ["log", "--format=%H%x1f%s", "--max-count=20", "--fixed-strings", `--grep=${trailer}`, "HEAD"],
-    ["log", "--format=%H%x1f%s", "--max-count=20", "--fixed-strings", `--grep=${task.id}`, "HEAD"],
-  ];
-
-  for (const args of searches) {
-    try {
-      const { stdout } = await execFileAsync("git", args, { cwd: rootDir, encoding: "utf-8" });
-      const first = stdout.trim().split("\n").find(Boolean);
-      if (!first) continue;
-      const [sha] = first.split("\x1f");
-      if (!sha) continue;
-      const owned = await tryHydrate(sha);
-      if (owned) return owned;
-    } catch {
-      // continue
-    }
-  }
-
-  return null;
-}
-
-export function toTaskToken(value: string): string {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-export async function classifyOwnedLandedEvidence(
-  rootDir: string,
-  task: Task,
-  opts: { mergeTargetBranch: string },
-): Promise<OwnedLandedClassification> {
-  const branch = resolveTaskWorkingBranch(task);
-  const mergeTargetBranch = opts.mergeTargetBranch;
-
-  const ownedCommit = await findOwnedLandedCommitForTask(rootDir, task);
-  if (ownedCommit) {
-    try {
-      await execFileAsync("git", ["merge-base", "--is-ancestor", ownedCommit.sha, mergeTargetBranch], { cwd: rootDir });
-      return { kind: "owned-commit", commit: ownedCommit };
-    } catch {
-      // fall through
-    }
-  }
-
-  let aheadCount: number | null = null;
-  try {
-    const { stdout } = await execFileAsync("git", ["rev-list", "--count", `${mergeTargetBranch}..${branch}`], {
-      cwd: rootDir,
-      encoding: "utf-8",
-    });
-    aheadCount = Number.parseInt(stdout.trim(), 10);
-    if (!Number.isFinite(aheadCount)) aheadCount = null;
-  } catch {
-    aheadCount = null;
-  }
-
-  let baseReachableFromTarget = false;
-  if (task.baseCommitSha) {
-    try {
-      await execFileAsync("git", ["merge-base", "--is-ancestor", task.baseCommitSha, mergeTargetBranch], { cwd: rootDir });
-      baseReachableFromTarget = true;
-    } catch {
-      baseReachableFromTarget = false;
-    }
-  }
-
-  if (aheadCount === 0 && (baseReachableFromTarget || !task.baseCommitSha)) {
-    return { kind: "proven-no-op", baseRef: mergeTargetBranch, ownDiffEmpty: true };
-  }
-
-  // FN-5345/FN-5377: empty-own-diff detection.
-  //
-  // A branch with one or more own commits whose net tree change vs its own
-  // merge-base with the integration branch is empty (e.g. a verification-only
-  // task that produced a `git commit --allow-empty` handoff commit) is
-  // logically equivalent to `proven-no-op` — there is nothing to land.
-  //
-  // We require the merge-base to be reachable from the integration target so
-  // we never claim no-op for a branch rooted off some other ref. This pairs
-  // with the FN-5345/FN-5377 pre-commit empty-commit refusal hook (which
-  // prevents the bad state from being created going forward) and recovers
-  // any tasks already wedged in this state.
-  if (aheadCount !== null && aheadCount > 0) {
-    try {
-      const { stdout: mergeBaseOut } = await execFileAsync(
-        "git",
-        ["merge-base", mergeTargetBranch, branch],
-        { cwd: rootDir, encoding: "utf-8" },
-      );
-      const mergeBase = mergeBaseOut.trim();
-      if (mergeBase) {
-        let ownDiffEmpty = false;
-        try {
-          await execFileAsync(
-            "git",
-            ["diff", "--quiet", `${mergeBase}..${branch}`],
-            { cwd: rootDir },
-          );
-          ownDiffEmpty = true;
-        } catch {
-          // exit non-zero — net diff exists, NOT empty-own-diff
-          ownDiffEmpty = false;
-        }
-        if (ownDiffEmpty) {
-          let mergeBaseReachable = baseReachableFromTarget;
-          if (!mergeBaseReachable) {
-            try {
-              await execFileAsync(
-                "git",
-                ["merge-base", "--is-ancestor", mergeBase, mergeTargetBranch],
-                { cwd: rootDir },
-              );
-              mergeBaseReachable = true;
-            } catch {
-              mergeBaseReachable = false;
-            }
-          }
-          if (mergeBaseReachable) {
-            return { kind: "proven-no-op", baseRef: mergeTargetBranch, ownDiffEmpty: true };
-          }
-        }
-      }
-    } catch {
-      // merge-base lookup failed — fall through to existing classifications
-    }
-  }
-
-  let branchExists = false;
-  try {
-    await execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: rootDir });
-    branchExists = true;
-  } catch {
-    branchExists = false;
-  }
-
-  if (!ownedCommit && !branchExists && aheadCount === null && (baseReachableFromTarget || !task.baseCommitSha)) {
-    return {
-      kind: "no-changes-finalized",
-      baseRef: mergeTargetBranch,
-      details: {
-        branchExists,
-        aheadCount,
-        baseReachableFromTarget,
-      },
-    };
-  }
-
-  if (task.baseCommitSha && !baseReachableFromTarget) {
-    try {
-      const { stdout } = await execFileAsync("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads/fusion"], {
-        cwd: rootDir,
-        encoding: "utf-8",
-      });
-      const refs = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
-      for (const ref of refs) {
-        if (ref === branch) continue;
-        try {
-          await execFileAsync("git", ["merge-base", "--is-ancestor", task.baseCommitSha, ref], { cwd: rootDir });
-          return {
-            kind: "unproven",
-            reason: "foreign-start-point",
-            details: { branch, mergeTargetBranch, baseCommitSha: task.baseCommitSha, foreignRef: ref, aheadCount },
-          };
-        } catch {
-          // continue
-        }
-      }
-    } catch {
-      // continue to missing evidence
-    }
-  }
-
-  if (aheadCount !== null && aheadCount > 0) {
-    try {
-      const { stdout } = await execFileAsync("git", ["log", "--format=%s%x1f%b", `${mergeTargetBranch}..${branch}`], {
-        cwd: rootDir,
-        encoding: "utf-8",
-      });
-      const currentToken = toTaskToken(task.id);
-      const lines = stdout.split("\n").filter(Boolean);
-      let foreignCount = 0;
-      for (const line of lines) {
-        const [subject = "", body = ""] = line.split("\x1f");
-        const trailerMatch = body.match(/Fusion-Task-Id:\s*([^\n\r]+)/i);
-        const trailerToken = trailerMatch ? toTaskToken(trailerMatch[1] || "") : "";
-        const subjectTokenMatch = subject.match(/\((FN-[^)]+)\)/i);
-        const subjectToken = subjectTokenMatch ? toTaskToken(subjectTokenMatch[1] || "") : "";
-        if ((trailerToken && trailerToken !== currentToken) || (subjectToken && subjectToken !== currentToken)) {
-          foreignCount += 1;
-        }
-      }
-      if (foreignCount > 0) {
-        return {
-          kind: "unproven",
-          reason: "no-owned-commit-foreign-deltas",
-          details: { branch, mergeTargetBranch, aheadCount, foreignCommitCount: foreignCount },
-        };
-      }
-    } catch {
-      // continue
-    }
-  }
-
-  return {
-    kind: "unproven",
-    reason: "missing-evidence",
-    details: {
-      branch,
-      mergeTargetBranch,
-      aheadCount,
-      branchExists,
-      baseCommitShaPresent: Boolean(task.baseCommitSha),
-      baseReachableFromTarget,
-      hasOwnedCommit: Boolean(ownedCommit),
-    },
-  };
-}
-
-
-// ── Deterministic merge verification ──────────────────────────────────
-
-/**
- * Run verification commands deterministically in the engine.
- * Executes testCommand first, then buildCommand (when both are configured).
- * Returns structured results so failures are logged with actionable detail.
- * Throws VerificationError on failure with command details.
- */
-export class VerificationError extends Error {
-  constructor(
-    message: string,
-    public readonly verificationResult: VerificationResult,
-  ) {
-    super(message);
-    this.name = "VerificationError";
-  }
-}
-
-/** Raised when a merge is explicitly cancelled (for example engine shutdown). */
-export class MergeAbortedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "MergeAbortedError";
-  }
-}
-
-/**
- * Raised when fix agent made no changes and the failing test files are all
- * outside the branch's diff. This signals that the failure is pre-existing on
- * the base branch (e.g. a flaky engine test) and retrying cannot help.
- *
- * The merger catches this and marks the task `failed` with a clear error
- * message, bypassing limbo recovery so the user sees an actionable status.
- */
-export class OutOfScopeVerificationError extends Error {
-  constructor(
-    message: string,
-    public readonly failingFiles: string[],
-    public readonly branchFiles: string[],
-  ) {
-    super(message);
-    this.name = "OutOfScopeVerificationError";
-  }
-}
-
-export class SquashAuditError extends Error {
-  constructor(
-    taskId: string,
-    public readonly squashSha: string,
-    public readonly findings: SquashAuditFindings,
-  ) {
-    super(buildPostMergeAuditBlockingMessage(taskId, findings));
-    this.name = "SquashAuditError";
-  }
-}
-
-export function throwIfAborted(signal: AbortSignal | undefined, taskId: string): void {
-  if (!signal?.aborted) return;
-  throw new MergeAbortedError(`Merge aborted for ${taskId}: engine shutdown requested`);
-}
-
-/**
- * Parse failing test file paths from vitest/jest output.
- *
- * Looks for lines matching:
- *   - `FAIL <path>` (jest/vitest)
- *   - ` × <path>` / ` ✕ <path>` (vitest unicode markers)
- *   - `● <test suite> › <test name>` is NOT a file path — skip those
- *
- * Returns an array of unique relative file paths. Returns an empty array when
- * no file paths can be parsed (callers treat this as "unknown", not "in-scope").
- *
- * @internal Exported for testing only.
- */
-export function parseFailingFilesFromOutput(output: string): string[] {
-  const paths = new Set<string>();
-  for (const line of output.split("\n")) {
-    // jest/vitest: "FAIL packages/engine/src/__tests__/foo.test.ts"
-    const failMatch = line.match(/^FAIL\s+(\S+)/);
-    if (failMatch && failMatch[1]) {
-      paths.add(failMatch[1]);
-      continue;
-    }
-    // vitest summary: " ❯ packages/engine/src/__tests__/foo.test.ts (2 tests | 1 failed)"
-    const vitestSummaryMatch = line.match(/^\s*[❯>]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
-    if (vitestSummaryMatch && vitestSummaryMatch[1]) {
-      paths.add(vitestSummaryMatch[1]);
-      continue;
-    }
-    // vitest: " × src/__tests__/foo.test.ts > some test name"
-    const crossMatch = line.match(/^\s*[×✕✗]\s+(\S+\.(?:test|spec)\.[jt]sx?)\s/);
-    if (crossMatch && crossMatch[1]) {
-      paths.add(crossMatch[1]);
-    }
-  }
-  return Array.from(paths);
-}
 
 /**
  * Get the set of files changed in the branch relative to the base branch.
@@ -1440,7 +1113,11 @@ async function attemptInMergeVerificationFix(
       : null;
     const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
     const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
-    // FN-5279: verification-fix sessions run in the resolved integration root,
+
+    // FNXC:Settings-MergerModel 2026-07-16-00:00: merger retries use the dedicated project fallback lane before the shared global fallback pair.
+
+    const mergerFallbackModel = resolveMergerFallbackModel(settings);
+      // FN-5279: verification-fix sessions run in the resolved integration root,
     // which is the reused task worktree in handoff mode.
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "merger",
@@ -1470,8 +1147,8 @@ Do not refactor, rename broadly, or make opportunistic improvements.
       onToolEnd: logger.onToolEnd,
       defaultProvider: mergerSessionModel.provider,
       defaultModelId: mergerSessionModel.modelId,
-      fallbackProvider: settings.fallbackProvider,
-      fallbackModelId: settings.fallbackModelId,
+      fallbackProvider: mergerFallbackModel.provider,
+      fallbackModelId: mergerFallbackModel.modelId,
       fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
       defaultThinkingLevel: resolveMergerThinkingLevel(settings),
       runAuditor: createRunAuditor(store, {
@@ -1954,34 +1631,6 @@ function runObservedDestructiveSyncOp(
       `${taskId}: destructive op "${label}" cleared ${lost.length} dirty path(s) that were present before — possible silent wipe of unrelated dev edits: ${sample}${ellipsis}`,
     );
   }
-}
-
-/** Parse `git status -z --porcelain` into a Set of paths.
- *
- *  Format per entry: `XY <space> <path>\0` where X = staged status, Y =
- *  unstaged status. Renames and copies are special: they emit TWO
- *  NUL-separated entries, `R  <new>\0<old>\0` (or `C  <new>\0<old>\0`).
- *  We must consume the trailing `<old>` entry without treating it as a
- *  separate path, otherwise observability code over-reports "cleared
- *  paths" with the historical names of renames. */
-export function parsePorcelainZ(raw: string): Set<string> {
-  const paths = new Set<string>();
-  const entries = raw.split("\0");
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (!entry) continue;
-    if (entry.length < 4) continue;
-    const status = entry.slice(0, 2);
-    const path = entry.slice(3);
-    if (!path) continue;
-    paths.add(path);
-    // Rename/copy: the very next entry is the old path — skip it so it
-    // isn't mistaken for an independent dirty path.
-    if (status.charAt(0) === "R" || status.charAt(0) === "C") {
-      i++;
-    }
-  }
-  return paths;
 }
 
 /** Find autostashes from PRIOR runs that are still sitting in the stash list.
@@ -2747,6 +2396,10 @@ async function runAiAgentForAutostashConflict(params: {
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
   const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
+  // FNXC:Settings-MergerModel 2026-07-16-00:00: merger retries use the dedicated project fallback lane before the shared global fallback pair.
+
+  const mergerFallbackModel = resolveMergerFallbackModel(settings);
+
   const systemPrompt = `You are an autostash-conflict resolution agent running after a Fusion merge has already committed on the main branch.
 
 Before the merge ran, the developer had uncommitted local changes in their working tree. The merger snapshotted those changes into a git stash, ran the merge cleanly, and is now reapplying the stash on top of the merged HEAD. The reapply hit conflicts because the merge committed changes that overlap the developer's stashed edits.
@@ -2791,8 +2444,8 @@ ${fileList}
     onToolEnd: agentLogger.onToolEnd,
     defaultProvider: mergerSessionModel.provider,
     defaultModelId: mergerSessionModel.modelId,
-    fallbackProvider: settings.fallbackProvider,
-    fallbackModelId: settings.fallbackModelId,
+    fallbackProvider: mergerFallbackModel.provider,
+    fallbackModelId: mergerFallbackModel.modelId,
     fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
     defaultThinkingLevel: resolveMergerThinkingLevel(settings),
     runAuditor: createRunAuditor(store, {
@@ -2918,8 +2571,7 @@ async function tryRecoverHardFailApply(params: {
 }): Promise<AutostashOutcome> {
   const { rootDir, taskId, sha, applyErrorMsg, applyStderr, ctx } = params;
   const stashFiles = [...await listStashChangedPaths(rootDir, sha)];
-  const smartConflictResolution =
-    (ctx.settings.smartConflictResolution ?? ctx.settings.autoResolveConflicts) !== false;
+  const smartConflictResolution = isSmartConflictResolutionEnabled(ctx.settings);
 
   // Step 1: try `git apply --3way`. This pulls the diff out of the stash and
   // applies it as a regular patch with three-way merging, which behaves
@@ -3157,6 +2809,10 @@ async function runAiAgentForAutostashHardFail(params: {
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
   const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
+  // FNXC:Settings-MergerModel 2026-07-16-00:00: merger retries use the dedicated project fallback lane before the shared global fallback pair.
+
+  const mergerFallbackModel = resolveMergerFallbackModel(settings);
+
   const systemPrompt = `You are an autostash hard-failure recovery agent for the Fusion merger.
 
 Before the merge ran, the developer had uncommitted local changes. We snapshotted them into a git stash, ran the merge cleanly on top, and tried to re-apply the stash. Both \`git stash apply\` and \`git apply --3way\` failed without producing conflict markers — meaning git refused to attempt the apply at all (typical causes: untracked-file overwrite, a path in the stash no longer exists at HEAD, or an index conflict that produced no in-tree markers).
@@ -3211,8 +2867,8 @@ ${fileList}
     onToolEnd: agentLogger.onToolEnd,
     defaultProvider: mergerSessionModel.provider,
     defaultModelId: mergerSessionModel.modelId,
-    fallbackProvider: settings.fallbackProvider,
-    fallbackModelId: settings.fallbackModelId,
+    fallbackProvider: mergerFallbackModel.provider,
+    fallbackModelId: mergerFallbackModel.modelId,
     fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
     defaultThinkingLevel: resolveMergerThinkingLevel(settings),
     runAuditor: createRunAuditor(store, {
@@ -3435,8 +3091,7 @@ export async function restoreUnrelatedRootDirChanges(
   });
   const aiConflictedFiles = partitioned.inScopeConflicts;
 
-  const smartConflictResolution =
-    (ctx.settings.smartConflictResolution ?? ctx.settings.autoResolveConflicts) !== false;
+  const smartConflictResolution = isSmartConflictResolutionEnabled(ctx.settings);
 
   if (!smartConflictResolution) {
     const message = `Autostash apply conflicted in ${aiConflictedFiles.length} file(s) and smartConflictResolution is disabled. Stash ${sha.slice(0, 7)} left intact; resolve manually with: cd ${rootDir} && # edit files, then git stash drop <ref>`;
@@ -4809,204 +4464,6 @@ export async function resolveTaskDiffBaseRef({
  * Get list of conflicted files from git.
  * Runs `git diff --name-only --diff-filter=U` and returns array of file paths.
  */
-export async function getConflictedFiles(cwd: string): Promise<string[]> {
-  try {
-    const { stdout } = await execAsync("git diff --name-only --diff-filter=U", {
-      cwd,
-      encoding: "utf-8",
-    });
-    const output = stdout.trim();
-
-    if (!output) return [];
-    return output.split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Check if a file has only trivial whitespace conflicts using git.
- * Compares ours (:2) and theirs (:3) versions with whitespace ignored.
- */
-export async function isTrivialWhitespaceConflict(filePath: string, cwd: string): Promise<boolean> {
-  try {
-    // Use git diff-tree to compare index entries with whitespace ignored
-    // :2 = ours (current branch), :3 = theirs (incoming branch)
-    // -w flag ignores whitespace
-    const { stdout } = await execAsync(
-      `git diff-tree -p -w -- :2:"${filePath}" :3:"${filePath}"`,
-      { cwd, encoding: "utf-8" }
-    );
-
-    // If the diff output is empty or contains no actual changes, it's trivial
-    // The diff output will have headers but no +/- content lines for whitespace-only changes
-    const lines = stdout.split("\n");
-    const contentChanges = lines.filter(
-      (line: string) => (line.startsWith("+") || line.startsWith("-")) &&
-                !line.startsWith("+++") && !line.startsWith("---")
-    );
-    return contentChanges.length === 0;
-  } catch (error: any) {
-    // git diff-tree may exit with code 1 when there are differences
-    // Check if the error output indicates substantive changes
-    if (error.stdout && typeof error.stdout === "string") {
-      const lines = error.stdout.split("\n");
-      const contentChanges = lines.filter(
-        (line: string) => (line.startsWith("+") || line.startsWith("-")) &&
-                  !line.startsWith("+++") && !line.startsWith("---")
-      );
-      return contentChanges.length === 0;
-    }
-    // On other errors, assume complex conflict (don't fallback to isTrivialConflict
-    // which reads working directory files with conflict markers)
-    return false;
-  }
-}
-
-/**
- * Classify a single conflicted file for auto-resolution.
- * Returns one of: 'lockfile-ours', 'generated-theirs', 'trivial-whitespace', 'complex'
- */
-export async function classifyConflict(filePath: string, cwd: string): Promise<ConflictType> {
-  // Check for lock files - always take "ours" (current branch's version)
-  if (LOCKFILE_PATTERNS.some((pattern) => matchGlob(filePath, pattern))) {
-    return "lockfile-ours";
-  }
-
-  // Check for generated files - take "theirs" (keep branch's fresh generation)
-  if (GENERATED_PATTERNS.some((pattern) => matchGlob(filePath, pattern))) {
-    return "generated-theirs";
-  }
-
-  // Check for trivial conflicts (whitespace-only)
-  if (await isTrivialWhitespaceConflict(filePath, cwd)) {
-    return "trivial-whitespace";
-  }
-
-  // Complex conflicts require AI intervention
-  return "complex";
-}
-
-/**
- * Resolve a conflicted file using "ours" (current branch's version).
- * Runs `git checkout --ours` and `git add`.
- */
-export async function resolveWithOurs(filePath: string, cwd: string): Promise<void> {
-  try {
-    await execFileAsync("git", ["checkout", "--ours", "--", filePath], { cwd });
-    await execFileAsync("git", ["add", "--", filePath], { cwd });
-    mergerLog.log(`Auto-resolved ${filePath} using --ours`);
-  } catch (error) {
-    throw new Error(`Failed to auto-resolve ${filePath} with ours: ${error}`);
-  }
-}
-
-/**
- * Resolve a conflicted file using "theirs" (incoming branch's version).
- * Runs `git checkout --theirs` and `git add`.
- */
-export async function resolveWithTheirs(filePath: string, cwd: string): Promise<void> {
-  try {
-    await execFileAsync("git", ["checkout", "--theirs", "--", filePath], { cwd });
-    await execFileAsync("git", ["add", "--", filePath], { cwd });
-    mergerLog.log(`Auto-resolved ${filePath} using --theirs`);
-  } catch (error) {
-    throw new Error(`Failed to auto-resolve ${filePath} with theirs: ${error}`);
-  }
-}
-
-/**
- * Resolve a trivial whitespace conflict.
- * For trivial conflicts, we can just stage the file (git considers it resolved).
- */
-export async function resolveTrivialWhitespace(filePath: string, cwd: string): Promise<void> {
-  try {
-    await execFileAsync("git", ["add", "--", filePath], { cwd });
-    mergerLog.log(`Auto-resolved ${filePath} (trivial whitespace)`);
-  } catch (error) {
-    throw new Error(`Failed to auto-resolve ${filePath} trivial conflict: ${error}`);
-  }
-}
-
-// Legacy types re-exported for backward compatibility (tests may reference them)
-/** @deprecated Use ConflictType instead */
-export type ConflictResolution = "ours" | "theirs";
-
-/** @deprecated Use classifyConflict + getConflictedFiles instead */
-export interface ConflictCategory {
-  filePath: string;
-  autoResolvable: boolean;
-  strategy?: ConflictResolution;
-  reason: "lock-file" | "generated-file" | "trivial" | "complex";
-}
-
-/**
- * Detect and categorize merge conflicts. Delegates to the new classifyConflict API.
- * @deprecated Use getConflictedFiles() + classifyConflict() instead.
- */
-export async function detectResolvableConflicts(rootDir: string): Promise<ConflictCategory[]> {
-  const files = await getConflictedFiles(rootDir);
-  const results: ConflictCategory[] = [];
-  for (const filePath of files) {
-    const type = await classifyConflict(filePath, rootDir);
-    switch (type) {
-      case "lockfile-ours":
-        results.push({ filePath, autoResolvable: true, strategy: "ours", reason: "lock-file" });
-        break;
-      case "generated-theirs":
-        results.push({ filePath, autoResolvable: true, strategy: "theirs", reason: "generated-file" });
-        break;
-      case "trivial-whitespace":
-        results.push({ filePath, autoResolvable: true, strategy: "ours", reason: "trivial" });
-        break;
-      case "complex":
-        results.push({ filePath, autoResolvable: false, reason: "complex" });
-        break;
-    }
-  }
-  return results;
-}
-
-/**
- * Auto-resolve a single file using git checkout --ours or --theirs.
- * @deprecated Use resolveWithOurs() or resolveWithTheirs() instead.
- */
-export async function autoResolveFile(
-  filePath: string,
-  resolution: ConflictResolution,
-  rootDir: string,
-): Promise<void> {
-  if (resolution === "ours") {
-    await resolveWithOurs(filePath, rootDir);
-  } else {
-    await resolveWithTheirs(filePath, rootDir);
-  }
-}
-
-/**
- * Auto-resolve all resolvable conflicts from the categorization.
- * @deprecated Use classifyConflict + resolveWithOurs/resolveWithTheirs instead.
- */
-export async function resolveConflicts(
-  categories: ConflictCategory[],
-  rootDir: string,
-): Promise<string[]> {
-  const remainingComplex: string[] = [];
-  for (const category of categories) {
-    if (category.autoResolvable && category.strategy) {
-      await autoResolveFile(category.filePath, category.strategy, rootDir);
-    } else {
-      remainingComplex.push(category.filePath);
-    }
-  }
-  return remainingComplex;
-}
-
-/** Trailer key written into every Fusion-managed merge commit body. Used by
- *  recovery (findLandedTaskCommit) to identify a task's commit even when the
- *  configured commit subject doesn't include the task ID
- *  (`includeTaskIdInCommit: false`). */
-export const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
 
 /** Build the `-m "Fusion-Task-Id: <id>"` arg fragment used in fallback commit
  *  invocations. Returns a leading space + quoted -m arg. */
@@ -5538,18 +4995,6 @@ function quoteArg(value: string): string {
   return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
-export function parseShortstatSummary(statsOutput: string): { filesChanged: number; insertions: number; deletions: number } {
-  const normalized = statsOutput.trim().replace(/\n/g, " ");
-  const filesMatch = normalized.match(/(\d+) files? changed/);
-  const insertionsMatch = normalized.match(/(\d+) insertions?\(\+\)/);
-  const deletionsMatch = normalized.match(/(\d+) deletions?\(-\)/);
-  return {
-    filesChanged: filesMatch ? Number.parseInt(filesMatch[1], 10) : 0,
-    insertions: insertionsMatch ? Number.parseInt(insertionsMatch[1], 10) : 0,
-    deletions: deletionsMatch ? Number.parseInt(deletionsMatch[1], 10) : 0,
-  };
-}
-
 export async function captureSingleCommitLandedMetadata(
   rootDir: string,
   sha: string,
@@ -6079,6 +5524,17 @@ function buildPostMergeAuditBlockingMessage(taskId: string, findings: SquashAudi
   return `${taskId}: ${label} blocked auto-completion for ${findings.auditTargetLabel.slice(0, 8)} (${summary})`;
 }
 
+export class SquashAuditError extends Error {
+  constructor(
+    taskId: string,
+    public readonly squashSha: string,
+    public readonly findings: SquashAuditFindings,
+  ) {
+    super(buildPostMergeAuditBlockingMessage(taskId, findings));
+    this.name = "SquashAuditError";
+  }
+}
+
 function formatSquashAuditAgentLog(findings: SquashAuditFindings): string {
   const lines: string[] = [];
   if (findings.duplicateSubjects.length > 0) {
@@ -6417,6 +5873,10 @@ You are assisting with a paused \`git pull --rebase\`.
 
   throwIfAborted(options?.signal, taskId);
   const mergerSessionModel = resolveMergerSessionModel(settings, options?.assignedAgentRuntimeConfig);
+
+  // FNXC:Settings-MergerModel 2026-07-16-00:00: merger retries use the dedicated project fallback lane before the shared global fallback pair.
+
+  const mergerFallbackModel = resolveMergerFallbackModel(settings);
   const { session } = await createResolvedAgentSession({
     sessionPurpose: "merger",
     runtimeHint: options?.runtimeHint,
@@ -6430,8 +5890,8 @@ You are assisting with a paused \`git pull --rebase\`.
     onToolEnd: agentLogger.onToolEnd,
     defaultProvider: mergerSessionModel.provider,
     defaultModelId: mergerSessionModel.modelId,
-    fallbackProvider: settings.fallbackProvider,
-    fallbackModelId: settings.fallbackModelId,
+    fallbackProvider: mergerFallbackModel.provider,
+    fallbackModelId: mergerFallbackModel.modelId,
     fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
     defaultThinkingLevel: resolveMergerThinkingLevel(settings),
     runAuditor: createRunAuditor(store, {
@@ -8162,8 +7622,7 @@ export async function aiMergeTask(
 
   // 2. Read settings
   const includeTaskId = settings.includeTaskIdInCommit !== false;
-  // Support both setting names: smartConflictResolution (new) and autoResolveConflicts (legacy)
-  const smartConflictResolution = (settings.smartConflictResolution ?? settings.autoResolveConflicts) !== false;
+  const smartConflictResolution = isSmartConflictResolutionEnabled(settings);
   const mergeConflictStrategy: CanonicalMergeConflictStrategy = normalizeMergeConflictStrategy(
     settings.mergeConflictStrategy,
   );
@@ -11380,6 +10839,10 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
   const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
+  // FNXC:Settings-MergerModel 2026-07-16-00:00: merger retries use the dedicated project fallback lane before the shared global fallback pair.
+
+  const mergerFallbackModel = resolveMergerFallbackModel(settings);
+
   // FN-5279: Layer 3 / merge-authoring AI runs in the resolved integration
   // root so arbiter edits land in the reused task worktree when handoff mode
   // is active.
@@ -11397,8 +10860,8 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     onToolEnd: agentLogger.onToolEnd,
     defaultProvider: mergerSessionModel.provider,
     defaultModelId: mergerSessionModel.modelId,
-    fallbackProvider: settings.fallbackProvider,
-    fallbackModelId: settings.fallbackModelId,
+    fallbackProvider: mergerFallbackModel.provider,
+    fallbackModelId: mergerFallbackModel.modelId,
     fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
     defaultThinkingLevel: resolveMergerThinkingLevel(settings),
     runAuditor: createRunAuditor(store, {

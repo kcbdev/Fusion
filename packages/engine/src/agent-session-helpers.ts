@@ -16,6 +16,7 @@ import {
   isGrokApiKeyFusionVisible,
   isTestModeActive,
   resolveExecutionSettingsModel,
+  resolveExecutorFallbackModel,
   resolveMergerSettingsModel,
   resolvePhaseThinkingLevel,
   resolveProjectDefaultModel,
@@ -285,6 +286,7 @@ export function resolveExecutorFallbackThinkingLevel(
   settings: Partial<Settings> | undefined,
 ): string | undefined {
   return firstThinkingLevel(
+    settings?.executionFallbackThinkingLevel,
     settings?.fallbackThinkingLevel,
     resolveExecutorThinkingLevel(taskThinkingLevel, settings),
   );
@@ -320,8 +322,16 @@ export function resolveTitleSummarizerFallbackThinkingLevel(settings: Partial<Se
   );
 }
 
+/*
+FNXC:Settings-MergerModel 2026-07-16-00:00:
+Merger recovery sessions use a lane-specific thinking level when configured, then preserve the former global-fallback and merger-primary inheritance order.
+*/
 export function resolveMergerFallbackThinkingLevel(settings: Partial<Settings> | undefined): string | undefined {
-  return firstThinkingLevel(settings?.fallbackThinkingLevel, resolveMergerThinkingLevel(settings));
+  return firstThinkingLevel(
+    settings?.mergerFallbackThinkingLevel,
+    settings?.fallbackThinkingLevel,
+    resolveMergerThinkingLevel(settings),
+  );
 }
 
 function hasCompleteRuntimeModel(
@@ -559,6 +569,7 @@ export function resolveHeartbeatSessionModels(
   }
 
   const executionSettingsModel = resolveExecutionSettingsModel(settings);
+  const executorFallbackModel = resolveExecutorFallbackModel(settings);
   const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
   /*
   FNXC:AgentHeartbeat 2026-07-14-16:13:
@@ -571,8 +582,8 @@ export function resolveHeartbeatSessionModels(
   return {
     defaultProvider: resolvedModel.provider,
     defaultModelId: resolvedModel.modelId,
-    fallbackProvider: undefined,
-    fallbackModelId: undefined,
+    fallbackProvider: executorFallbackModel.provider,
+    fallbackModelId: executorFallbackModel.modelId,
   };
 }
 

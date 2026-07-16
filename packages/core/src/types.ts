@@ -278,144 +278,35 @@ export type {
   WorkflowStepTemplate,
 };
 
-export type PrConflictState = "clean" | "conflicting" | "behind" | "blocked" | "unknown";
 
-export interface PrConflictDiagnostics {
-  conflictingFiles: string[];
-  suggestedCommands: string[];
-  capturedAt: string;
-}
-
-export interface PrInfo {
-  url: string;
-  number: number;
-  status: PrStatus;
-  title: string;
-  headBranch: string;
-  baseBranch: string;
-  commentCount: number;
-  isDraft?: boolean;
-  draft?: boolean;
-  /**
-   * FNXC:PrAutoMergeGate 2026-06-28-00:33:
-   * FN-7182: `true` means this PR was created or linked by the dashboard Create PR action as an explicit human handoff.
-   * Pipeline PR-merge-strategy PRs leave this unset so automatic PR-mode merging keeps working. PrInfo is persisted as JSON, so this provenance flag needs no SQLite migration.
-   */
-  manual?: boolean;
-  autoMergeOnGreen?: boolean;
-  autoMergeStrategy?: "merge" | "squash" | "rebase";
-  lastMergeError?: string;
-  lastMergeErrorAt?: string;
-  checkRollup?: "success" | "failure" | "pending" | "none";
-  mergeable?: PrConflictState;
-  conflictDiagnostics?: PrConflictDiagnostics;
-  lastCommentAt?: string;
-  lastCheckedAt?: string;
-  lastReviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
-}
-
-export type IssueState = "open" | "closed";
-
-export interface IssueInfo {
-  url: string;
-  number: number;
-  state: IssueState;
-  title: string;
-  stateReason?: "completed" | "not_planned" | "reopened";
-  lastCheckedAt?: string;
-}
-
-export interface TaskGithubTrackedIssue {
-  owner: string;
-  repo: string;
-  number: number;
-  url: string;
-  nodeId?: string;
-  createdAt: string;
-  lastSyncedAt?: string;
-}
-
-export type GithubIssueAction = "close" | "delete" | "leave" | "auto";
-
-export type GitLabTrackedItemKind = "project_issue" | "group_issue" | "merge_request";
-
-/*
-FNXC:GitLabTracking 2026-07-02-00:00:
-GitLab tracking is a first-class task contract instead of overloading GitHub tracking because GitLab items can come from GitLab.com or self-managed instances and may be project issues, group issues, or merge requests. Store only public metadata and stale/link timestamps; never persist GitLab tokens here.
-*/
-export interface TaskGitLabTrackedItem {
-  /** GitLab work item kind imported or linked to this task. */
-  kind: GitLabTrackedItemKind;
-  /** Canonical browser URL for GitLab.com or a self-managed GitLab instance. */
-  url: string;
-  /** GitLab web instance/base URL, for example https://gitlab.com or a self-managed host. */
-  instanceUrl: string;
-  /** Parsed host for compact display/dedup diagnostics. */
-  host: string;
-  /** GitLab IID visible inside a project or group namespace. */
-  iid: number;
-  /** Optional global GitLab database id when import APIs supplied it. */
-  id?: number;
-  /** Project numeric id when the item belongs to a concrete project. */
-  projectId?: number;
-  /** Project path with namespace, when available from import or URL parsing. */
-  projectPath?: string;
-  /** Group id/path for group-issue searches where GitLab returns a group-scoped source. */
-  groupId?: number | string;
-  groupPath?: string;
-  /** Optional display title and live state snapshot; these are staleable metadata, not auth state. */
-  title?: string;
-  state?: string;
-  createdAt: string;
-  linkedAt?: string;
-  lastSyncedAt?: string;
-  staleAt?: string;
-  staleReason?: string;
-}
-
-export interface TaskGitLabTracking {
-  /** Per-task linked GitLab metadata. Separate from GitHub tracking because GitLab supports GitLab.com plus self-managed project/group/MR URLs without GitHub issue semantics. */
-  item?: TaskGitLabTrackedItem;
-  /** ISO-8601 of the most recent manual unlink, retained for audit. */
-  unlinkedAt?: string;
-}
-
-export interface TaskGithubTracking {
-  /** Per-task enabled override. When undefined, project/global default applies. */
-  enabled?: boolean;
-  /** "owner/repo" override; when undefined, project/global default repo applies. */
-  repoOverride?: string;
-  /** Linked GitHub issue. Set after issue creation succeeds. Cleared via unlinkGithubIssue(). */
-  issue?: TaskGithubTrackedIssue;
-  /** ISO-8601 of the most recent manual unlink, retained for audit. */
-  unlinkedAt?: string;
-}
-
-/**
- * Durable provenance metadata for tasks imported from external issue trackers.
- *
- * Distinct from {@link IssueInfo}, which captures live issue status snapshots.
- * This contract stores source identity so the originating issue can be
- * re-associated even when live status is unavailable.
- */
-export interface TaskSourceIssue {
-  /** Issue provider key (for example: "github", "gitlab", "jira"). */
-  provider: string;
-  /** Repository/project identifier in provider-specific canonical form. */
-  repository: string;
-  /** Stable provider-specific external issue identifier (string to support non-numeric IDs). */
-  externalIssueId: string;
-  /** Human-visible issue number in the source tracker. */
-  issueNumber: number;
-  /** Optional canonical URL to the source issue. */
-  url?: string;
-  /**
-   * FNXC:GithubSourceIssueAnalytics 2026-06-18-17:56:
-   * Command Center "Fixed by Fusion" analytics need the real source-issue closure time when Fusion closed or observed the issue, replacing the prior `updatedAt` completion approximation when exact data is available.
-   * ISO-8601 timestamp for when the source issue was closed; absent when the issue has never been observed closed.
-   */
-  closedAt?: string;
-}
+import type {
+  PrConflictState,
+  PrConflictDiagnostics,
+  PrInfo,
+  IssueState,
+  IssueInfo,
+  TaskGithubTrackedIssue,
+  GithubIssueAction,
+  GitLabTrackedItemKind,
+  TaskGitLabTrackedItem,
+  TaskGitLabTracking,
+  TaskGithubTracking,
+  TaskSourceIssue,
+} from "./types/task-tracking.js";
+export type {
+  PrConflictState,
+  PrConflictDiagnostics,
+  PrInfo,
+  IssueState,
+  IssueInfo,
+  TaskGithubTrackedIssue,
+  GithubIssueAction,
+  GitLabTrackedItemKind,
+  TaskGitLabTrackedItem,
+  TaskGitLabTracking,
+  TaskGithubTracking,
+  TaskSourceIssue,
+};
 
 export interface BatchStatusRequest {
   taskIds: string[];
@@ -1220,9 +1111,9 @@ export interface TaskTokenUsage {
 }
 
 export interface TaskTokenBudget {
-  /** Total-token soft cap. When reached, emits one notification and continues. */
+  /** Input, output, and cache-write token soft cap (cache reads excluded). When reached, emits one notification and continues. */
   soft?: number;
-  /** Total-token hard cap. When reached, pauses the task with pausedReason="token_budget_exceeded". */
+  /** Input, output, and cache-write token hard cap (cache reads excluded). When reached, pauses the task with pausedReason="token_budget_exceeded". */
   hard?: number;
   /** Optional per-size overrides keyed by Task.size (S/M/L). Falls back to soft/hard when absent. */
   perSize?: { S?: { soft?: number; hard?: number }; M?: { soft?: number; hard?: number }; L?: { soft?: number; hard?: number } };
@@ -2476,6 +2367,11 @@ export interface GlobalSettings {
    * Modal backdrop dismissal is a global operator preference, not project policy. Default false keeps fixed modal overlays from closing on accidental outside clicks unless the operator opts in.
    */
   dismissModalsOnOutsideClick?: boolean;
+  /**
+   * FNXC:Settings 2026-07-16-05:30:
+   * This global operator preference defaults to false. When enabled, the dashboard skips centralized critical-action confirmations and proceeds with their primary/default choice. It must never be project-scoped so shared projects cannot force destructive actions without a prompt.
+   */
+  skipConfirmationDialogs?: boolean;
   /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
    *  When unset, each surface resolves the locale at runtime (browser/env
    *  detection) and falls back to `DEFAULT_LOCALE` ("en"). */
@@ -3481,6 +3377,17 @@ export interface ProjectSettings {
   executionModelId?: string;
   /** Workflow-declared execution-lane thinking override. Inherits through task/default thinking when unset. */
   executionThinkingLevel?: ThinkingLevel;
+  /*
+   * FNXC:Settings-ExecutorModel 2026-07-16-00:00:
+   * FN-8098 lets execution sessions select their own recovery model before the shared
+   * fallback pair, so reviewer, merger, planning, and executor lanes can recover independently.
+   */
+  /** Workflow fallback provider for executor sessions. Must pair with `executionFallbackModelId`; resolves before the shared global fallback pair. */
+  executionFallbackProvider?: string;
+  /** Workflow fallback model ID for executor sessions. Must pair with `executionFallbackProvider`; resolves before the shared global fallback pair. */
+  executionFallbackModelId?: string;
+  /** Workflow executor-fallback thinking override. Inherits shared fallback thinking, then executor primary thinking. */
+  executionFallbackThinkingLevel?: ThinkingLevel;
   /** Workflow-declared planning-lane thinking override. Inherits through task/default thinking when unset. */
   planningThinkingLevel?: ThinkingLevel;
   /** AI model provider for validator/reviewer agent.
@@ -4001,6 +3908,16 @@ export interface ProjectSettings {
    *  characters will automatically receive an AI-generated title (max 60 chars).
    *  Default: false. */
   autoSummarizeTitles?: boolean;
+  /*
+  FNXC:TaskDefinitionInputLanguage 2026-07-16-05:00:
+  This opt-in localizes only planner-authored task-definition prose for supported detectable
+  locales (en/es/fr/ko/zh-CN). Chinese always resolves to zh-CN because Traditional Chinese
+  is not variant-detected; headings, markers, code, and unsupported input such as Japanese
+  remain canonical English so deterministic PROMPT.md gates keep parsing safely.
+  */
+  /** When true, writes generated task-definition prose in the operator's detected supported
+   *  input language. Default: false; uncertain or unsupported input falls back to English. */
+  taskDefinitionInInputLanguage?: boolean;
   /** When true, merge commit messages include an AI-generated summary of the
    *  changes instead of just listing step commit subjects. Body composition
    *  includes a narrative line, bullet summary, and `git diff --stat` when
@@ -4029,6 +3946,19 @@ export interface ProjectSettings {
   mergerModelId?: string;
   /** Optional project merger-lane thinking override. Inherits through global merger thinking then default thinking when unset. */
   mergerThinkingLevel?: ThinkingLevel;
+  /*
+  FNXC:Settings-MergerModel 2026-07-16-00:00:
+  Merger session retries need a project-scoped fallback lane so operators can pin a merge-capable recovery model without changing the shared global fallback. Both provider and model id must be set; partial pairs fall through to the shared global fallback pair.
+  */
+  /** Project fallback AI model provider for merger agent sessions.
+   *  Must be set together with `mergerFallbackModelId`. Resolves before the global
+   *  `fallbackProvider`/`fallbackModelId` pair. */
+  mergerFallbackProvider?: string;
+  /** Project fallback AI model ID for merger agent sessions.
+   *  Must be set together with `mergerFallbackProvider`. */
+  mergerFallbackModelId?: string;
+  /** Optional project merger-fallback thinking override. Falls through to global fallback thinking, then merger thinking. */
+  mergerFallbackThinkingLevel?: ThinkingLevel;
   /*
   FNXC:GitHubImportTranslate 2026-07-15-09:30:
   Import Tasks auto-translation is a dedicated one-off AI helper lane, kept separate from the summarization lane so operators can pin a cheap/fast translation model without dragging title summarization onto it.
@@ -5730,6 +5660,17 @@ export interface PlanningQuestion {
   question: string;
   description?: string;
   options?: Array<{ id: string; label: string; description?: string }>;
+  /**
+   * FNXC:PlanningMode 2026-07-16-00:00:
+   * FN-8065 / GitHub #2150 requires the deepening checkpoint to carry a read-only preview
+   * of its withheld pendingSummary. Keeping this optional preserves legacy persisted
+   * currentQuestion rows and leaves ordinary interview questions unchanged.
+   */
+  planPreview?: {
+    title: string;
+    description: string;
+    keyDeliverables: string[];
+  };
 }
 
 /** The final summary generated after planning conversation completes */
@@ -6258,6 +6199,7 @@ export const AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES: readonly string[] = [
   "fn_post_room_message",
   "fn_read_messages",
   "fn_task_log",
+  "fn_task_logs_read",
   "fn_task_done",
   "fn_heartbeat_done",
   "fn_task_document_write",
