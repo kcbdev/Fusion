@@ -2077,8 +2077,12 @@ FN-7934: The brain popup must fit the containing chat surface, not only the brow
   border-bottom: 1px solid var(--border);
 }
 
+/*
+FNXC:ChatViewTokens 2026-07-15-18:03:
+Thinking-section text uses the defined muted text token across all themes. The mobile token guard enforces this migration invariant for ChatView source files.
+*/
 .chat-thinking-section-title {
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 0.75rem;
   font-weight: var(--font-weight-semibold);
   letter-spacing: 0.04em;
@@ -2099,7 +2103,7 @@ FN-7934: The brain popup must fit the containing chat surface, not only the brow
   flex: 1;
   border: none;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -2167,7 +2171,7 @@ FN-7934: The brain popup must fit the containing chat surface, not only the brow
 .chat-thinking-agent-role,
 .chat-thinking-current-target,
 .chat-thinking-empty {
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 0.75rem;
 }
 
