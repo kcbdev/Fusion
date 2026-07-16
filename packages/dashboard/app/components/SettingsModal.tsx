@@ -297,6 +297,9 @@ const SETTINGS_NAV_MAX_WIDTH = 420;
 /*
 FNXC:SettingsSimplification 2026-07-10-23:24:
 Settings opens in a focused mode that omits specialist integration, runtime, diagnostics, and infrastructure sections. The Advanced settings switch restores every section, applies consistently to desktop navigation, mobile navigation, and search, and persists only as a browser-local display preference so it never changes or exports project settings.
+
+FNXC:SettingsNavigation 2026-07-16-12:00:
+FN-8128 returns CLI Binary to the default Settings view. It is deliberately absent from this Advanced-only set so desktop navigation, the mobile picker, and search expose binary install and diagnostic controls without requiring the browser-local Advanced preference.
 */
 const ADVANCED_SETTINGS_SECTION_IDS = new Set([
   "node-sync",
@@ -318,7 +321,6 @@ const ADVANCED_SETTINGS_SECTION_IDS = new Set([
   "mcp",
   "prompts",
   "plugins",
-  "cli-binary",
 ]);
 
 function readAdvancedSettingsPreference(): boolean {
@@ -468,6 +470,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "keyboard-shortcuts", label: "Keyboard Shortcuts", labelKey: "settings.nav.keyboardShortcuts", scope: "global", searchableText: ["keyboard shortcuts", "hotkeys", "quick chat shortcut", "terminal shortcut", "open files", "open settings", "command center", "new task shortcut", "record shortcut"] },
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global", searchableText: ["ntfy", "webhook", "events", "failure notifications", "sticky", "toast"] },
   { id: "global-general", label: "General · Global", labelKey: "settings.nav.globalGeneral", scope: "global", searchableText: ["global defaults", "modal outside dismiss", "agent logs", "persist tool output", "thinking logs"] },
+  /*
+  FNXC:SettingsNavigation 2026-07-16-12:00:
+  FN-8128 keeps the `fn` binary panel as a dedicated section rather than re-inlining machine plumbing at the top of General · Global, while restoring it to the default-visible Global group. Operators need installation, version, path, and diagnostic controls in Basic mode when setup or repair is needed.
+  */
+  { id: "cli-binary", label: "CLI Binary", labelKey: "settings.nav.cliBinary", scope: "global", searchableText: ["fn binary", "cli", "install", "version", "path", "upgrade", "homebrew", "binary check"] },
 
   { id: "__project_header", label: "Project", labelKey: "settings.nav.projectHeader", scope: undefined, isGroupHeader: true },
   /*
@@ -636,11 +643,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 
   { id: "__advanced_header", label: "Advanced", labelKey: "settings.nav.advancedHeader", scope: undefined, isGroupHeader: true },
   { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global", searchableText: ["feature flags", "experiments", "research view", "evals view", "sandbox", "subtask breakdown"] },
-  /*
-  FNXC:SettingsNavigation 2026-07-16-01:00:
-  Last entry in the nav, and advanced-only. The `fn` binary panel used to render at the TOP of "General · Global", so machine plumbing was the first thing an operator saw on opening Settings. It is install/version/path maintenance touched once or when something breaks — the definition of what the Advanced switch hides.
-  */
-  { id: "cli-binary", label: "CLI Binary", labelKey: "settings.nav.cliBinary", scope: "global", searchableText: ["fn binary", "cli", "install", "version", "path", "upgrade", "homebrew", "binary check"] },
 ];
 
 // FNXC:SettingsNavigation 2026-07-04-00:00: sectionId -> owning group label ("Global"/"Runtimes"/"Project"),

@@ -402,6 +402,21 @@ describe("SettingsModal mobile adaptations", () => {
     expect(queryByText("Settings Section", { selector: "label" })).toBeNull();
   });
 
+  it("keeps CLI Binary reachable from the Basic-mode mobile picker", async () => {
+    localStorage.removeItem("fusion:settings:show-advanced");
+    mockSettingsViewport(true);
+    const user = userEvent.setup();
+    const { container, getByLabelText, findByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const picker = getByLabelText("Settings Section") as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value)).toContain("cli-binary");
+
+    await user.selectOptions(picker, "cli-binary");
+    expect(await findByText(/Installing the global CLI lets you run fn and fusion/)).toBeTruthy();
+    expect(container.querySelector(".cli-binary-panel")).toBeTruthy();
+  });
+
   it("excludes research sections from mobile picker when researchView is disabled", async () => {
     mockSettingsViewport(true);
     const user = userEvent.setup();
