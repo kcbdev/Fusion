@@ -1544,7 +1544,18 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
             {(selectedIssue || selectedPull) && (
             <FloatingWindow
               windowKey="github-import-detail"
-              title={selectedIssue ? `#${selectedIssue.number} — ${selectedIssue.title}` : selectedPull ? `#${selectedPull.number} — ${selectedPull.title}` : t("git.importFromGitHub", "Import from GitHub")}
+              /*
+              FNXC:GitHubImport 2026-07-15-18:40:
+              Window title tracks importTranslation.display.title, so a translated issue/PR reads in the dashboard locale in the title bar exactly as it already does in the preview card below — previously the bar kept the raw upstream title while the card showed the translation, so one item displayed two different titles at once. display.title falls back to the original when nothing is translated.
+              Gating mirrors translateSelection (activeTab AND selection) rather than checking selectedIssue first: display.title follows the active tab, so an issue-first check would pair the issue's number with the pull's translated title whenever both tabs hold a selection.
+              */
+              title={
+                activeTab === "issues" && selectedIssue
+                  ? `#${selectedIssue.number} — ${importTranslation.display.title}`
+                  : activeTab === "pulls" && selectedPull
+                    ? `#${selectedPull.number} — ${importTranslation.display.title}`
+                    : t("git.importFromGitHub", "Import from GitHub")
+              }
               onClose={() => { setSelectedIssueNumber(null); setSelectedPullNumber(null); }}
               defaultSize={{ width: 760, height: 680 }}
               minSize={{ width: 420, height: 360 }}
@@ -1826,7 +1837,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                 {selectedGitlabItem && (
                   <FloatingWindow
                     windowKey="github-import-detail"
-                    title={`${selectedGitlabItem.resourceKind === "merge_request" ? "!" : "#"}${selectedGitlabItem.iid} — ${selectedGitlabItem.title}`}
+                    /* FNXC:GitHubImport 2026-07-15-18:40: Mirrors the GitHub detail window — the title bar shows the same translated title as the card below rather than the raw upstream one. */
+                    title={`${selectedGitlabItem.resourceKind === "merge_request" ? "!" : "#"}${selectedGitlabItem.iid} — ${importTranslation.display.title}`}
                     onClose={() => setSelectedGitlabKey(null)}
                     defaultSize={{ width: 760, height: 680 }}
                     minSize={{ width: 420, height: 360 }}

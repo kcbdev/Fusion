@@ -429,6 +429,9 @@ describe("GitHubImportModal", () => {
   /*
   FNXC:GitHubImportTranslate 2026-07-14-12:00:
   When selected issue prose is not the dashboard language, the preview must offer Translate / Dismiss and swap title+body after a successful AI translation without changing import provenance.
+
+  FNXC:GitHubImportTranslate 2026-07-15-18:40:
+  The swap must cover EVERY surface showing the title, not just the preview card: the detail window's title bar reads from the same translated source, so one item can never display the translated title in the card and the raw upstream title in the bar at the same time. Both surfaces are asserted in both directions (translated, then toggled back).
   */
   it("offers translation when selected issue content is not the dashboard language", async () => {
     const frenchBody =
@@ -468,10 +471,17 @@ describe("GitHubImportModal", () => {
       expect(screen.getByText("Import preview problem")).toBeTruthy();
     });
 
+    // The detail window's title bar swaps with the card, keeping the issue number paired with the title it belongs to.
+    const titleBar = screen.getByTestId("floating-window-drag-handle-github-import-detail");
+    expect(titleBar.textContent).toContain("#7 — Import preview problem");
+    expect(titleBar.textContent).not.toContain("Problème d'aperçu d'importation");
+
     expect(screen.getByTestId("github-import-translate-toggle")).toBeTruthy();
     fireEvent.click(screen.getByTestId("github-import-translate-toggle"));
     const previewCard = screen.getByTestId("github-import-preview-card");
     expect(within(previewCard).getByText(/Problème d'aperçu d'importation/)).toBeTruthy();
+    // Toggling back to the original must revert the bar too, not strand it on the translation.
+    expect(titleBar.textContent).toContain("#7 — Problème d'aperçu d'importation");
   });
 
   it("does not show translate controls for English content when dashboard language is English", async () => {

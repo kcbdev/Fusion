@@ -178,11 +178,15 @@ On mobile/narrow app viewports, opening Quick Chat should present the full Chat 
   }
 }
 
+/*
+FNXC:FloatingWindow 2026-07-15-18:20:
+Long titles (e.g. the GitHub import detail's "#2159 — <issue title>") must truncate with an ellipsis rather than hard-cut mid-word against the close button.
+display MUST stay block, not flex: every caller passes a plain string, so under flex the text became an anonymous flex item, which text-overflow cannot act on — the ellipsis declared here silently never rendered. A block box makes the existing overflow/text-overflow/white-space trio work as written.
+Reintroducing flex here (e.g. to lay out an element title) re-breaks truncation for all callers; give the title an inner element instead.
+*/
 .floating-window__title {
-  display: flex;
+  display: block;
   flex: 1;
-  align-items: center;
-  gap: var(--space-sm);
   min-width: 0;
   overflow: hidden;
   font-weight: 600;
