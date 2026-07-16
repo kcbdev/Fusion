@@ -34,7 +34,7 @@ import { getFreshBatchData } from "../hooks/useBatchBadgeFetch";
 import { useTaskDiffStats } from "../hooks/useTaskDiffStats";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { isTaskStuck } from "../utils/taskStuck";
-import { getRevertOfId } from "../utils/taskRevert";
+import { getRevertOfId, isTaskReverted } from "../utils/taskRevert";
 import { getStalledReviewSignal } from "../utils/taskStalledReview";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
@@ -1382,6 +1382,14 @@ function TaskCardComponent({
    */
   const revertOfId = getRevertOfId(task.sourceMetadata, task.sourceParentTaskId, task.sourceType);
   const showUndoOfChip = Boolean(revertOfId);
+  /*
+   * FNXC:TaskRevert 2026-07-16-00:00:
+   * FN-8066 makes the source-task revert marker visible only in its completed
+   * surfaces. TaskCard serves both board and list views, so this one predicate
+   * preserves the done/archived invariant without adding a view-specific badge.
+   */
+  const showRevertedChip = isTaskReverted(task.sourceMetadata)
+    && (task.column === "done" || task.column === "archived");
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
   const isAgentCreated = isAgentCreatedTask(task);
@@ -2780,6 +2788,7 @@ function TaskCardComponent({
     || timeIndicator
     || showNearDuplicateChip
     || showUndoOfChip
+    || showRevertedChip
     || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue)
     || (task.retrySummary?.total ?? 0) > 0);
   /*
@@ -2799,6 +2808,15 @@ function TaskCardComponent({
           aria-label={t("tasks.undoOfTitle", "Created to undo {{id}}", { id: String(revertOfId) })}
         >
           <span>{t("tasks.undoOf", "Undo of {{id}}", { id: String(revertOfId) })}</span>
+        </span>
+      )}
+      {showRevertedChip && (
+        <span
+          className="card-reverted-chip"
+          title={t("tasks.revertedBadgeTitle", "This task's changes were reverted")}
+          aria-label={t("tasks.revertedBadgeTitle", "This task's changes were reverted")}
+        >
+          <span>{t("tasks.revertedBadge", "Reverted")}</span>
         </span>
       )}
       {showNearDuplicateChip && (

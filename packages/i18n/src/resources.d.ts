@@ -8381,6 +8381,8 @@ export default interface Resources {
       "revertNeedsHumanDefault": "human review required",
       "revertTask": "Revert this task's changes",
       "reverted": "Reverted {{taskId}} in commit {{sha}}",
+      "revertedBadge": "Reverted",
+      "revertedBadgeTitle": "This task's changes were reverted",
       "reviewBudgetExhausted": "Review budget exhausted",
       "reviewerModel": "Reviewer Model",
       "save": "Save",

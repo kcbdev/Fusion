@@ -8334,6 +8334,8 @@
     "revertNeedsHuman": "Cannot auto-revert {{taskId}}: {{reason}}",
     "revertNeedsHumanDefault": "human review required",
     "reverted": "Reverted {{taskId}} in commit {{sha}}",
+    "revertedBadge": "Reverted",
+    "revertedBadgeTitle": "This task's changes were reverted",
     "revertTask": "Revert this task's changes",
     "reviewerModel": "Reviewer Model",
     "save": "Save",
