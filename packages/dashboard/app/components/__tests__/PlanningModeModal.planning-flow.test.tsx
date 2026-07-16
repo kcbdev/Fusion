@@ -2254,6 +2254,15 @@ describe("PlanningModeModal", () => {
     });
 
     it("auto-retries when resuming an errored session", async () => {
+      /*
+       * FNXC:PlanningRetry 2026-07-15-00:00:
+       * FN-8025 requires the stream to remain in the retry loading window while this test observes the transient status.
+       * Do not use the suite default here: its delayed question event clears the auto-retry state before the assertion can run.
+       */
+      mockConnectPlanningStream.mockImplementation(() => ({
+        close: vi.fn(),
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
       mockFetchAiSession.mockResolvedValueOnce({
         id: "session-error-1",
         type: "planning",
@@ -2285,12 +2294,16 @@ describe("PlanningModeModal", () => {
       await waitFor(() => {
         expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-error-1", undefined);
       });
-      expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined();
+      await waitFor(() => expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined());
       expect(screen.queryByRole("alert")).toBeNull();
       expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
     });
 
     it("auto-retries when selecting an errored session from the sidebar", async () => {
+      mockConnectPlanningStream.mockImplementation(() => ({
+        close: vi.fn(),
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
       mockFetchAiSessions.mockResolvedValueOnce([
         {
           id: "session-sidebar-error",
@@ -2339,7 +2352,7 @@ describe("PlanningModeModal", () => {
         expect(mockFetchAiSession).toHaveBeenCalledWith("session-sidebar-error");
         expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-sidebar-error", undefined);
       });
-      expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined();
+      await waitFor(() => expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined());
       expect(screen.queryByRole("alert")).toBeNull();
       expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
     });
