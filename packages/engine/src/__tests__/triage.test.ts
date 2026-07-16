@@ -1655,9 +1655,12 @@ Planner rewrote mission without the raw request.
     );
 
     expect(store.moveTask).not.toHaveBeenCalled();
+    // FNXC:PlanReview 2026-07-15-21:30: the park now carries the bounded attempt/delay and the
+    // underlying reviewer error, replacing the old fixed-30s "retrying from triage." copy.
     expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-UNAVAILABLE", expect.objectContaining({
       status: "plan-review-unavailable",
-      error: "Plan Review did not produce a verdict; retrying from triage.",
+      error: expect.stringContaining("retry 1/3 in"),
+      recoveryRetryCount: 1,
       nextRecoveryAt: expect.any(String),
     }));
     expect(store.updateTask).toHaveBeenCalledWith("FN-PLAN-UNAVAILABLE", expect.objectContaining({
@@ -1996,9 +1999,11 @@ Planner rewrote mission without the raw request.
       );
       expect(readFileSync(promptPath, "utf-8")).toBe(prompt);
       expect(retryStore.moveTask).not.toHaveBeenCalled();
+      // FNXC:PlanReview 2026-07-15-21:30: bounded backoff copy replaces the old fixed-30s park text.
       expect(retryStore.updateTask).toHaveBeenCalledWith(taskId, expect.objectContaining({
         status: "plan-review-unavailable",
-        error: "Plan Review did not produce a verdict; retrying from triage.",
+        error: expect.stringContaining("retry 1/3 in"),
+        recoveryRetryCount: 1,
         nextRecoveryAt: expect.any(String),
       }));
       const finalStatusUpdate = (retryStore.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(

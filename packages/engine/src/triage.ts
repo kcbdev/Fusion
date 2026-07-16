@@ -2400,6 +2400,7 @@ export class TriageProcessor {
       await this.store.updateTask(task.id, {
         status: "failed",
         error: terminalError,
+        recoveryRetryCount: null,
         nextRecoveryAt: null,
       });
       return "blocked";
@@ -2422,6 +2423,7 @@ export class TriageProcessor {
       if ((task.planReviewReplanCount ?? 0) > 0) {
         await this.store.updateTask(task.id, { planReviewReplanCount: null });
       }
+      await this.clearPlanReviewRecoveryBudget(task);
       await this.store.logEntry(task.id, "[pre-merge] Workflow step completed: Plan Review", review.summary);
       return "approved";
     }
@@ -2439,6 +2441,7 @@ export class TriageProcessor {
         completedAt,
       });
       await this.store.logEntry(task.id, "[pre-merge] Workflow step failed: Plan Review", review.review);
+      await this.clearPlanReviewRecoveryBudget(task);
       const reviseFeedback = review.review || review.summary || "(no feedback captured)";
       await this.store.logEntry(
         task.id,
@@ -2452,9 +2455,19 @@ export class TriageProcessor {
     /*
     FNXC:PlanReview 2026-06-29-02:40:
     UNAVAILABLE means the reviewer session did not produce a usable verdict. Keep the task in triage and retry with backoff; do not fabricate a REVISE or send the planner through another full rewrite loop when no reviewer actually rejected the plan.
+
+    FNXC:PlanReview 2026-07-15-21:30:
+    Reviewer PROVIDER failures (429/`overloaded_error`, dropped sockets) also land here, because the `reviewStep` catch above converts every throw — including `ReviewerProviderError` — into an UNAVAILABLE verdict. That laundering used to strand the task on a FIXED 30s re-park with no attempt counter, so a sustained provider outage re-ran Plan Review every 30s for hours (~1,900 requests/5h observed), which is the request volume that trips a provider's low-interactivity throttle and thereby prolongs the very outage being retried. Two rules prevent the storm:
+
+      1. A usage-limit failure must reach `UsageLimitPauser` so EVERY lane pauses, not just this task. The inline catch swallows the throw before triage's own usage-limit handler in `specifyTask` can see it, so this path fires the pauser itself. Without this, `reviewer.ts`'s escalation promise ("escalate so UsageLimitPauser pauses every lane") held only on the executor path.
+      2. Every re-park goes through the bounded `computeRecoveryDecision` backoff (60s → 120s → 240s, ±10% jitter) and terminalizes when the budget is spent. A reviewer that never yields a verdict is a real failure and must surface, not spin — the old park had neither backoff nor cap.
+
+    `recoveryRetryCount` is the shared transient-triage budget this gate borrows; `clearPlanReviewRecoveryBudget` clears it on any real verdict so a task that survived a reviewer outage does not carry a spent budget into execution.
     */
-    const retryAt = new Date(Date.now() + 30_000).toISOString();
     const unavailableOutput = review.review || review.summary || "Plan Review was unavailable before producing a verdict.";
+    const unavailableError = reviewFailure instanceof Error
+      ? reviewFailure.message
+      : (reviewFailure === undefined ? "" : String(reviewFailure));
     await this.recordPlanReviewWorkflowResult(task, {
       workflowStepId: PLAN_REVIEW_GROUP_ID,
       workflowStepName: "Plan Review",
@@ -2466,12 +2479,66 @@ export class TriageProcessor {
       completedAt,
     });
     await this.store.logEntry(task.id, "[pre-merge] Workflow step unavailable: Plan Review", unavailableOutput);
+
+    if (this.options.usageLimitPauser && unavailableError && isUsageLimitError(unavailableError)) {
+      planLog.warn(`${task.id}: Plan Review hit a provider usage limit — pausing all lanes: ${unavailableError}`);
+      await this.options.usageLimitPauser.onUsageLimitHit("triage", task.id, unavailableError).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        planLog.warn(`${task.id}: failed to signal Plan Review usage limit to the pauser: ${msg}`);
+      });
+    }
+
+    const decision = computeRecoveryDecision({
+      recoveryRetryCount: task.recoveryRetryCount,
+      nextRecoveryAt: task.nextRecoveryAt,
+    });
+    const errorSuffix = unavailableError ? `: ${unavailableError}` : "";
+
+    if (!decision.shouldRetry) {
+      const terminalError =
+        `Plan Review did not produce a verdict after ${MAX_RECOVERY_RETRIES} retries${errorSuffix}`;
+      planLog.error(`✗ ${task.id} Plan Review retry budget exhausted${errorSuffix}`);
+      await this.store.logEntry(task.id, terminalError).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        planLog.warn(`${task.id}: failed to log Plan Review retry exhaustion: ${msg}`);
+      });
+      await this.store.updateTask(task.id, {
+        status: "failed",
+        error: terminalError,
+        recoveryRetryCount: null,
+        nextRecoveryAt: null,
+      });
+      return "blocked";
+    }
+
+    const attempt = decision.nextState.recoveryRetryCount ?? 1;
+    const delay = formatDelay(decision.delayMs);
+    planLog.warn(`⚡ ${task.id} Plan Review unavailable — retry ${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}${errorSuffix}`);
     await this.store.updateTask(task.id, {
       status: "plan-review-unavailable",
-      error: "Plan Review did not produce a verdict; retrying from triage.",
-      nextRecoveryAt: retryAt,
+      error: `Plan Review did not produce a verdict; retry ${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}${errorSuffix}`,
+      recoveryRetryCount: decision.nextState.recoveryRetryCount,
+      nextRecoveryAt: decision.nextState.nextRecoveryAt,
     });
     return "blocked";
+  }
+
+  /*
+  FNXC:PlanReview 2026-07-15-21:30:
+  A real Plan Review verdict proves the reviewer is reachable, so the borrowed transient-triage
+  recovery budget must go back to full. Leaving a spent `recoveryRetryCount` behind would shorten
+  — or immediately exhaust — the executor's own transient budget for a task whose only sin was
+  surviving a reviewer outage.
+  */
+  private async clearPlanReviewRecoveryBudget(task: Task): Promise<void> {
+    if ((task.recoveryRetryCount ?? 0) === 0 && !task.nextRecoveryAt) return;
+    await this.store.updateTask(task.id, {
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
+    }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      planLog.warn(`${task.id}: failed to clear Plan Review recovery budget: ${msg}`);
+    });
   }
 
   private async tryFinalizeExplicitDuplicateMarker(

@@ -695,6 +695,7 @@ export async function reviewStep(
           category: "reviewerFallback",
           role: "reviewer",
           agentId: options.agentId,
+          cause: err,
         });
       }
       try {
@@ -721,6 +722,7 @@ export async function reviewStep(
         category: "reviewerFallback",
         role: "reviewer",
         agentId: options.agentId,
+        cause: err,
       });
     }
     try {

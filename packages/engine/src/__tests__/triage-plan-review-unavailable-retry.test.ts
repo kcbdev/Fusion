@@ -97,10 +97,21 @@ async function writePrompt(rootDir: string, taskId: string, prompt: string): Pro
   return promptPath;
 }
 
-async function retryTask(rootDir: string, task: Task, store = createStore(task)): Promise<TaskStore> {
-  const processor = new TriageProcessor(store, rootDir);
+async function retryTask(
+  rootDir: string,
+  task: Task,
+  store = createStore(task),
+  options: ConstructorParameters<typeof TriageProcessor>[2] = {},
+): Promise<TaskStore> {
+  const processor = new TriageProcessor(store, rootDir, options);
   await processor.specifyTask(task);
   return store;
+}
+
+function findUpdate(store: TaskStore, taskId: string, predicate: (update: Record<string, unknown>) => boolean) {
+  return (store.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
+    ([id, update]) => id === taskId && update && predicate(update as Record<string, unknown>),
+  )?.[1] as Record<string, unknown> | undefined;
 }
 
 describe("Plan Review unavailable retry", () => {
@@ -207,6 +218,108 @@ describe("Plan Review unavailable retry", () => {
       "[pre-merge] Workflow step unavailable: Plan Review",
       expect.stringContaining(expectedOutput),
     );
+  });
+
+  /**
+   * FNXC:PlanReview 2026-07-15-21:30:
+   * A sustained provider outage used to re-run Plan Review on a FIXED 30s timer with no attempt
+   * counter — ~1,900 requests/5h, which is what trips a provider's low-interactivity throttle.
+   * These regressions pin the two rules that bound it: the backoff grows and terminalizes, and a
+   * usage limit pauses every lane rather than only re-parking this task.
+   *
+   * Surface enumeration — the loop is driven by (a) a thrown provider error, (b) a thrown generic
+   * error, and (c) a plain UNAVAILABLE verdict with no throw at all. All three enter the same park,
+   * so all three are asserted; a repro that only covered the reported 429 would leave (b) and (c)
+   * spinning on the old fixed timer.
+   */
+  it.each([
+    { name: "thrown 429 overloaded_error", setup: () => mockReviewStep.mockRejectedValue(new Error("429 overloaded_error")) },
+    { name: "thrown generic reviewer error", setup: () => mockReviewStep.mockRejectedValue(new Error("review process crashed")) },
+    { name: "plain unavailable verdict", setup: () => mockReviewStep.mockResolvedValue({ verdict: "UNAVAILABLE", review: "No verdict.", summary: "Unavailable." }) },
+  ])("backs off exponentially rather than on a fixed 30s timer for $name", async ({ setup }) => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    // Second attempt: 60s base × 2^1 = 120s ±10% — provably past the old fixed 30s park.
+    const task = createRetryTask({ id: "FN-PLAN-BACKOFF", recoveryRetryCount: 1 });
+    await writePrompt(rootDir, task.id, `# Task: ${task.id}\n\n## Mission\n\nKeep me.\n`);
+    const store = createStore(task);
+    setup();
+
+    const before = Date.now();
+    await retryTask(rootDir, task, store);
+
+    const park = findUpdate(store, task.id, (u) => u.status === "plan-review-unavailable");
+    expect(park?.recoveryRetryCount).toBe(2);
+    const delayMs = new Date(park?.nextRecoveryAt as string).getTime() - before;
+    expect(delayMs).toBeGreaterThan(60_000);
+    expect(delayMs).toBeLessThanOrEqual(133_000);
+  });
+
+  it("pauses every lane when Plan Review hits a provider usage limit", async () => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    const task = createRetryTask({ id: "FN-PLAN-429" });
+    await writePrompt(rootDir, task.id, `# Task: ${task.id}\n\n## Mission\n\nKeep me.\n`);
+    const store = createStore(task);
+    const onUsageLimitHit = vi.fn().mockResolvedValue(undefined);
+    mockReviewStep.mockRejectedValue(new Error("429 overloaded_error"));
+
+    await retryTask(rootDir, task, store, { usageLimitPauser: { onUsageLimitHit } as never });
+
+    expect(onUsageLimitHit).toHaveBeenCalledWith("triage", task.id, expect.stringContaining("429"));
+  });
+
+  it("does not pause lanes for a reviewer failure that is not a usage limit", async () => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    const task = createRetryTask({ id: "FN-PLAN-NO-PAUSE" });
+    await writePrompt(rootDir, task.id, `# Task: ${task.id}\n\n## Mission\n\nKeep me.\n`);
+    const store = createStore(task);
+    const onUsageLimitHit = vi.fn().mockResolvedValue(undefined);
+    mockReviewStep.mockRejectedValue(new Error("review process crashed"));
+
+    await retryTask(rootDir, task, store, { usageLimitPauser: { onUsageLimitHit } as never });
+
+    expect(onUsageLimitHit).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes instead of re-parking once the unavailable retry budget is spent", async () => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    // MAX_RECOVERY_RETRIES is 3, so a 3rd spent attempt exhausts on this pass.
+    const task = createRetryTask({ id: "FN-PLAN-EXHAUSTED", recoveryRetryCount: 3 });
+    await writePrompt(rootDir, task.id, `# Task: ${task.id}\n\n## Mission\n\nKeep me.\n`);
+    const store = createStore(task);
+    mockReviewStep.mockRejectedValue(new Error("429 overloaded_error"));
+
+    await retryTask(rootDir, task, store);
+
+    expect(store.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+      status: "failed",
+      // The real error must survive to task.error — "budget exhausted" alone hides the cause.
+      error: expect.stringContaining("429 overloaded_error"),
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
+    }));
+    expect(store.updateTask).not.toHaveBeenCalledWith(task.id, expect.objectContaining({
+      status: "plan-review-unavailable",
+    }));
+  });
+
+  it("returns the borrowed recovery budget once Plan Review produces a real verdict", async () => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    const task = createRetryTask({ id: "FN-PLAN-BUDGET-CLEAR", recoveryRetryCount: 2 });
+    await writePrompt(rootDir, task.id, `# Task: ${task.id}\n\n## Mission\n\nKeep me.\n`);
+    const store = createStore(task);
+    mockReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "Approved.", summary: "Ready." });
+
+    await retryTask(rootDir, task, store);
+
+    expect(store.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+      recoveryRetryCount: null,
+      nextRecoveryAt: null,
+    }));
   });
 
   it("terminalizes a reviewer retry storm instead of scheduling another unavailable retry", async () => {

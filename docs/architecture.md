@@ -2176,7 +2176,16 @@ UI contract boundary:
 
 Fusion derives a per-task `retrySummary` at read time by aggregating retry counters (stuck-kill, recovery, task_done, workflow-step, verification, post-review-fix, merge-conflict bounce, branch-conflict recovery, reviewer context retry, reviewer fallback retry). The engine emits a structured `retry-burned` log channel with `{ taskId, agentId, role, category, attempt, total, breakdown }` so token-cost telemetry can correlate retry burn with spend.
 
-Project settings expose per-category caps (`maxBranchConflictRecoveries`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`) plus a master cap (`maxTotalRetriesBeforeFail`). When a cap is exceeded, engine code throws `RetryStormError`; executor and triage Plan Review terminal failure handling serialize this into `task.error` so dashboard surfaces can render structured failure details. Plan Review must terminalize this guard rather than re-queue `plan-review-unavailable`, which would otherwise continue burning the reviewer-fallback budget.
+Project settings expose per-category caps (`maxBranchConflictRecoveries`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`) plus a master cap (`maxTotalRetriesBeforeFail`). When a cap is exceeded, engine code throws `RetryStormError`; executor and triage Plan Review terminal failure handling serialize this into `task.error` so dashboard surfaces can render structured failure details. Plan Review must terminalize this guard rather than re-queue `plan-review-unavailable`, which would otherwise continue burning the reviewer-fallback budget. Callers that hold the failure which burned the final retry pass it to `recordRetry({ cause })`; it surfaces as `underlyingError` in `serializeRetryStormError` so a cap never masks the real error (e.g. `429: overloaded_error`).
+
+### Plan Review provider failures must back off and pause (FN-8006)
+
+`reviewStep` throws `ReviewerProviderError` for usage-limit/transient provider failures so they never launder into an `UNAVAILABLE` verdict, but `runPlanReviewBeforeExecution` catches every throw inline to keep triage alive — which means provider failures still arrive at the `plan-review-unavailable` park. Two rules bound that park; both are load-bearing and neither is optional:
+
+1. **Usage limits pause every lane.** The inline catch hides the error from triage's own `isUsageLimitError` handler in `specifyTask`, so the Plan Review path fires `usageLimitPauser.onUsageLimitHit` itself. Without this, `reviewer.ts`'s escalation contract ("escalate so `UsageLimitPauser` pauses every lane") holds only on the executor path.
+2. **Every re-park uses bounded backoff.** Parks go through `computeRecoveryDecision` (60s → 120s → 240s, ±10% jitter) and terminalize at `MAX_RECOVERY_RETRIES`. The park previously used a fixed 30s `nextRecoveryAt` with no attempt counter, so a sustained outage re-ran Plan Review every 30s for hours (~1,900 requests/5h observed) — the volume that trips a provider's low-interactivity throttle and prolongs the outage being retried.
+
+Plan Review borrows the shared `recoveryRetryCount` transient-triage budget for this backoff and clears it on any real verdict (APPROVE/REVISE/RETHINK); a stale count would otherwise shorten the executor's later transient budget for a task whose only fault was surviving a reviewer outage.
 
 ## Lifecycle invariants
 
