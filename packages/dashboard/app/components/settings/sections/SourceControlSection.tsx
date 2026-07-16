@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { TrackingRepoSelect, type TrackingRepoOption } from "../../TrackingRepoSelect";
 import { SettingsToggleRow } from "../SettingsToggleRow";
+import { SettingsHelpTip } from "../SettingsHelpTip";
 import { SettingsSelectRow } from "../SettingsSelectRow";
 import { SettingsTextRow } from "../SettingsTextRow";
 import type { SectionBaseProps } from "./context";
@@ -21,14 +22,40 @@ Rows on `gitlabEnabled`, `gitlabInstanceUrl`, `gitlabApiBaseUrl`, `gitlabAuthTok
 
 FNXC:SettingsStyling 2026-07-15-20:30:
 Plain label+control+help rows render through the shared settings primitives. `githubAuthToken`/`gitlabAuthToken` use the primitive's `type: "password"` (which defaults `autocomplete="off"`) — previously these rows had to stay hand-rolled to avoid SettingsTextRow's hardcoded `type="text"` rendering a stored token in plain sight.
-Rows that stay bespoke: the tracking-mode select (its help is TWO `<small>` blocks, the second conditional on unrelated model settings — a descriptor `help` is one string), the tracking-repo select (custom widget), and the disclosure chrome itself.
+Rows that stay bespoke: the tracking-mode select (its help is TWO blocks, the second conditional on unrelated model settings — a descriptor `help` is one string), the tracking-repo select (custom widget), and the disclosure chrome itself.
+
+FNXC:SettingsHelp 2026-07-15-22:40:
+Staying off the primitive does NOT mean falling back to inline help. Both bespoke rows above render their copy through the same `SettingsHelpTip` as every migrated row, so the section shows one help idiom rather than a "?" on some rows and a paragraph on others. The tip hangs off the label line, so a custom control (or conditional, multi-part copy) is no obstacle — that is what its `ReactNode` children are for.
 */
 export function SourceControlSection({ form, setForm, projectTrackingRepoOptions, projectTrackingRepoLoading, projectTrackingRepoError, }: SourceControlSectionProps) {
     const { t } = useTranslation("app");
     return (<>
       <h4 className="settings-section-heading">{t("settings.general.gitHubTracking", "GitHub Tracking")}</h4>
+      {/*
+      FNXC:SettingsHelp 2026-07-15-22:40:
+      Both help strings ride in ONE tip rather than two inline `<small>`s. They are the same row's help — what the mode does, and how the issue title is derived — and the descriptor-based rows beside this one already carry a "?", so leaving these inline made the section render two idioms side by side.
+      Two strings in one bubble (not two triggers) because an operator asking "what does this control do?" wants both answers at once; the second is a caveat on the first, not a separate topic.
+      This is what `SettingsHelpTip`'s `ReactNode` children buy: the trailing fragment stays CONDITIONAL on the summarization settings, which a single-string descriptor `help` could not express — the reason this row is still hand-rolled.
+      */}
       <div className="form-group">
-        <label htmlFor="githubTrackingMode">{t("settings.general.defaultTrackingModeForNewTasks", "Default tracking mode for new tasks")}</label>
+        <div className="settings-field-label-row">
+          <label htmlFor="githubTrackingMode">{t("settings.general.defaultTrackingModeForNewTasks", "Default tracking mode for new tasks")}</label>
+          <SettingsHelpTip settingKey="githubTrackingMode">
+            {t("settings.general.controlsWhetherNewlyCreatedTasksHaveGitHubIssue", " Controls whether newly created tasks have GitHub issue tracking enabled by default. Individual tasks can still override this from the task detail modal. ")}
+            {/*
+              FNXC:SettingsGeneral 2026-06-22-03:20:
+              Tracking-issue helper copy. The FN-6771 JSX→t() extraction left a raw HTML
+              entity ("&apos;") in this default string. As a t() argument the string is a
+              plain JS value (not JSX-decoded), so the entity rendered verbatim as the
+              literal "&apos;" instead of an apostrophe. Use a real apostrophe so the copy
+              reads correctly in both modal and embedded presentations.
+            */}
+            {t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task's title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}
+            {!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
+              ? t("settings.general.enableSummarizationInProjectModelsToConfigureThatModel", " Enable summarization in Project Models to configure that model.")
+              : ""}
+          </SettingsHelpTip>
+        </div>
         <select id="githubTrackingMode" className="select" value={form.githubTrackingEnabledByDefault ? "new-tasks" : "off"} onChange={(e) => setForm((f) => ({
             ...f,
             githubTrackingEnabledByDefault: e.target.value === "new-tasks",
@@ -36,19 +63,6 @@ export function SourceControlSection({ form, setForm, projectTrackingRepoOptions
           <option value="off">{t("settings.general.offDefault", "Off (default)")}</option>
           <option value="new-tasks">{t("settings.general.onForNewTasks", "On for new tasks")}</option>
         </select>
-        <small>{t("settings.general.controlsWhetherNewlyCreatedTasksHaveGitHubIssue", " Controls whether newly created tasks have GitHub issue tracking enabled by default. Individual tasks can still override this from the task detail modal. ")}</small>
-        {/*
-          FNXC:SettingsGeneral 2026-06-22-03:20:
-          Tracking-issue helper copy. The FN-6771 JSX→t() extraction left a raw HTML
-          entity ("&apos;") in this default string. As a t() argument the string is a
-          plain JS value (not JSX-decoded), so the entity rendered verbatim as the
-          literal "&apos;" instead of an apostrophe. Use a real apostrophe so the copy
-          reads correctly in both modal and embedded presentations.
-        */}
-        <small>{t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task's title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}{!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
-            ? t("settings.general.enableSummarizationInProjectModelsToConfigureThatModel", " Enable summarization in Project Models to configure that model.")
-            : ""}
-        </small>
       </div>
       {/*
         FNXC:GithubImportTracking 2026-07-01-00:00:
@@ -64,10 +78,15 @@ export function SourceControlSection({ form, setForm, projectTrackingRepoOptions
         value={form.githubLinkImportedIssuesToTracking === true}
         onChange={(v) => setForm((f) => ({ ...f, githubLinkImportedIssuesToTracking: v === true }))}
       />
+      {/* FNXC:SettingsHelp 2026-07-15-22:40: The row keeps its bespoke `TrackingRepoSelect` widget, but its help still reads like every neighbour's — the affordance belongs to the label line, not to the control, so a custom widget is no reason to fall back to an inline paragraph. */}
       <div className="form-group">
-        <label htmlFor="projectGithubTrackingDefaultRepoGeneral">{t("settings.general.projectDefaultTrackingRepo", "Project default tracking repo")}</label>
+        <div className="settings-field-label-row">
+          <label htmlFor="projectGithubTrackingDefaultRepoGeneral">{t("settings.general.projectDefaultTrackingRepo", "Project default tracking repo")}</label>
+          <SettingsHelpTip settingKey="projectGithubTrackingDefaultRepoGeneral">
+            {t("settings.general.defaultRepoUsedWhenCreatingGitHubIssuesFor", "Default repo used when creating GitHub issues for tracked tasks. Falls back to the global default if blank.")}
+          </SettingsHelpTip>
+        </div>
         <TrackingRepoSelect id="projectGithubTrackingDefaultRepoGeneral" ariaLabel="Project default tracking repo" value={form.githubTrackingDefaultRepo ?? ""} options={projectTrackingRepoOptions} loading={projectTrackingRepoLoading} error={projectTrackingRepoError ?? undefined} placeholder={t("settings.general.ownerRepo", "owner/repo")} onChange={(nextValue) => setForm((f) => ({ ...f, githubTrackingDefaultRepo: nextValue || undefined }))}/>
-        <small>{t("settings.general.defaultRepoUsedWhenCreatingGitHubIssuesFor", "Default repo used when creating GitHub issues for tracked tasks. Falls back to the global default if blank.")}</small>
       </div>
       <SettingsToggleRow
         descriptor={{
