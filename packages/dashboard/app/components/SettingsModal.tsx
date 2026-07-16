@@ -1353,10 +1353,20 @@ export function SettingsModal({
     const row = container.querySelector<HTMLElement>(`[data-settings-key="${CSS.escape(highlightedSettingKey)}"]`);
     /*
     FNXC:SettingsSearch 2026-07-15-17:35:
-    A result can point at a control the active section does not render right now — a row behind a disclosure, or a conditional field whose dependency is off. Scrolling is skipped rather than guessed at; the section still opens, which is strictly better than the pre-rewrite behavior of only ever opening the section.
+    A result can point at a control the active section does not render at all right now — a conditional field whose dependency is off. Scrolling is skipped rather than guessed at; the section still opens, which is strictly better than the pre-rewrite behavior of only ever opening the section.
     `CSS.escape` because setting keys reach this selector unsanitized; a key with a dot or colon would otherwise build a selector that throws and take the modal down.
     */
     if (!row) return;
+
+    /*
+    FNXC:SettingsSearch 2026-07-15-18:52:
+    Reveal every `<details>` ancestor before scrolling. Rows inside a collapsed disclosure are in the DOM but not visible, so the jump would scroll to — and highlight — a control the operator cannot see, which reads as search doing nothing.
+    This is not a rare edge: the settings most worth searching for are the ones tucked behind "Advanced" (the ntfy access token, the Cloudflare named-tunnel trio, the Merge option details).
+    Walks ancestors rather than just the nearest one, since disclosures can nest.
+    */
+    for (let node = row.parentElement; node; node = node.parentElement) {
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    }
 
     row.scrollIntoView({ block: "center", behavior: settingsSearchScrollBehavior() });
 
