@@ -691,6 +691,52 @@ embeddedDescribe("embedded-lifecycle: real process (VAL-CONN-001, VAL-CONN-006, 
   );
 });
 
+/*
+FNXC:PostgresStartupRace 2026-07-15-17:05:
+The cross-process startup-race coverage uses a mocked EmbeddedPostgres ctor (no real
+Postgres), so it must live OUTSIDE the real-process `embeddedDescribe` block. Nesting it
+there made it skip under FUSION_EMBEDDED_TEST_SKIP=1 (the gate/CI default), silently
+leaving the join-the-competing-postmaster fix unprotected. A regular `describe` keeps it
+fast (~6ms) and always-on.
+*/
+describe("embedded-lifecycle: startup race (cross-process)", () => {
+  it("joins the competing postmaster when startup loses a cross-process race", async () => {
+    const dataDir = makeDataDir();
+    writeFileSync(join(dataDir, "PG_VERSION"), "15\n");
+    const logLines: string[] = [];
+
+    class RacingEmbeddedPostgres {
+      initialise = vi.fn(async () => {});
+      async start() {
+        writeFileSync(
+          join(dataDir, "postmaster.pid"),
+          ["12345", dataDir, "/tmp", "localhost", "55440", "5432101", String(Date.now())].join("\n") + "\n",
+        );
+        throw new Error('lock file "postmaster.pid" already exists');
+      }
+      stop = vi.fn(async () => {});
+    }
+
+    __setEmbeddedPostgresCtorForTests(RacingEmbeddedPostgres as never);
+    try {
+      const lifecycle = new EmbeddedPostgresLifecycle({
+        ...baseOptions(dataDir),
+        port: 55439,
+        onLog: (message) => logLines.push(message),
+      });
+
+      await expect(lifecycle.start()).resolves.toMatchObject({
+        mode: "embedded",
+        runtimeUrl: expect.stringContaining(":55440/"),
+      });
+      expect(lifecycle.isRunning()).toBe(false);
+      expect(logLines.some((line) => /startup raced with an existing instance/i.test(line))).toBe(true);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("embedded-lifecycle: startup timeout (P1 #24)", () => {
   it("EmbeddedStartTimeoutError carries the timeout and data dir", () => {
     const err = new EmbeddedStartTimeoutError(5000, "/tmp/data");

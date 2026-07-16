@@ -1086,34 +1086,58 @@ export class EmbeddedPostgresLifecycle {
     // FNXC:WindowsDesktopPackaging 2026-07-14-22:53:
     // Skip the real non-admin path when tests inject a mock ctor so delayed
     // start/cancellation coverage exercises pg.start() even on elevated CI.
-    if (isWindowsElevatedAdmin() && !embeddedPostgresCtorIsTestOverride) {
-      const nativeRoot = resolveWindowsEmbeddedPostgresNativeRoot();
-      if (!nativeRoot) {
-        throw new Error(
-          "embedded postgres: the process is running elevated on Windows, where " +
-            "PostgreSQL refuses to start under an administrative token, and the " +
-            "non-admin boot path could not locate the bundled " +
-            "@embedded-postgres/windows-x64 native binaries to stage. Run Fusion " +
-            "non-elevated, or ensure the embedded-postgres platform package is installed.",
-        );
+    try {
+      if (isWindowsElevatedAdmin() && !embeddedPostgresCtorIsTestOverride) {
+        const nativeRoot = resolveWindowsEmbeddedPostgresNativeRoot();
+        if (!nativeRoot) {
+          throw new Error(
+            "embedded postgres: the process is running elevated on Windows, where " +
+              "PostgreSQL refuses to start under an administrative token, and the " +
+              "non-admin boot path could not locate the bundled " +
+              "@embedded-postgres/windows-x64 native binaries to stage. Run Fusion " +
+              "non-elevated, or ensure the embedded-postgres platform package is installed.",
+          );
+        }
+        this.nonAdminHandle = await startServerAsNonAdminUser({
+          nativeRoot,
+          dataDir: this.options.dataDir,
+          port,
+          postgresFlags: this.options.postgresFlags,
+          onLog: this.options.onLog,
+          onError: this.options.onError,
+          startTimeoutMs: this.options.startTimeoutMs,
+          signal,
+          // Assign handle as soon as the wrapper PID is known so outer start()
+          // timeout cleanup can taskkill orphans mid-readiness poll.
+          onLaunched: (handle) => {
+            this.nonAdminHandle = handle;
+          },
+        });
+      } else {
+        await pg.start();
       }
-      this.nonAdminHandle = await startServerAsNonAdminUser({
-        nativeRoot,
-        dataDir: this.options.dataDir,
-        port,
-        postgresFlags: this.options.postgresFlags,
-        onLog: this.options.onLog,
-        onError: this.options.onError,
-        startTimeoutMs: this.options.startTimeoutMs,
-        signal,
-        // Assign handle as soon as the wrapper PID is known so outer start()
-        // timeout cleanup can taskkill orphans mid-readiness poll.
-        onLaunched: (handle) => {
-          this.nonAdminHandle = handle;
-        },
-      });
-    } else {
-      await pg.start();
+    } catch (error) {
+      // FNXC:PostgresStartupRace 2026-07-15-15:00: Another Fusion process can
+      // create postmaster.pid after the preflight singleton check but before
+      // this process starts Postgres. Re-read that lock and join its instance
+      // rather than surfacing the expected lock-file collision to the TUI.
+      const existing = isAlreadyRunning(this.options.dataDir);
+      if (!existing) throw error;
+
+      this.pg = null;
+      this.nonAdminHandle = null;
+      this.resolvedPort = existing.port;
+      this.ownsProcess = false;
+      this.options.onLog(
+        `embedded postgres: startup raced with an existing instance on port ${existing.port} (data dir ${this.options.dataDir}), connecting without starting a new instance`,
+      );
+      const runtimeUrl = this.buildUrl(existing.port, this.options.database);
+      return {
+        mode: "embedded",
+        runtimeUrl,
+        migrationUrl: runtimeUrl,
+        migrationUrlOverridden: false,
+      };
     }
     /*
     FNXC:PostgresResourceLifecycle 2026-07-14-18:42:
