@@ -753,8 +753,12 @@ describe("POST /github/issues/import", () => {
     }
   });
 
+  /*
+   * FNXC:GithubImportTracking 2026-07-16-10:59: Single-import translation reads settings before
+   * tracking resolution. Use persistent mocks so both reads mirror production's consistent settings.
+   */
   it("marks a single imported issue as tracked when tracking defaults are on", async () => {
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ githubTrackingEnabledByDefault: true });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ githubTrackingEnabledByDefault: true });
     getIssueSpy.mockResolvedValueOnce(mockGitHubIssue);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
@@ -769,7 +773,7 @@ describe("POST /github/issues/import", () => {
   });
 
   it("marks a single imported issue as tracked when import linking is on and new-task defaults are off", async () => {
-    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       githubTrackingEnabledByDefault: false,
       githubLinkImportedIssuesToTracking: true,
     });
