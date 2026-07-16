@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { RunMutationContext, Settings, Task, TaskStore, SecretsStore } from "@fusion/core";
+import {acquireWorktreePathReservation, canonicalizeWorktreePath, type RunMutationContext, type Settings, type Task, type TaskStore, type SecretsStore} from "@fusion/core";
 import { generateWorktreeName, resolveTaskWorkingBranch, slugify } from "./worktree-names.js";
-import { resolveTaskWorktreePathForBackend } from "./worktree-paths.js";
+import { resolveTaskWorktreePathForBackend, resolveWorktreesDir } from "./worktree-paths.js";
 import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
 import { formatError } from "./logger.js";
 import { classifyBootstrapMisbinding, isBranchConflictError, reanchorBranchToBase } from "./branch-conflicts.js";
@@ -283,6 +283,27 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
   const createWorktreeImpl = createWorktree
     ? createWorktree
     : async (createBranch: string, createPath: string, createTaskId: string, startPoint?: string, allowRename?: boolean) => {
+      const reservation = await acquireWorktreePathReservation({
+        canonicalPath: await canonicalizeWorktreePath(createPath),
+        worktreesDir: resolveWorktreesDir(rootDir, settings),
+        rootDir,
+        /*
+        FNXC:WorkflowLifecycle 2026-07-16-10:00:
+        A failed archive removal leaves a durable quarantine record. The next
+        owner must reconcile that old pinned path while it exclusively holds
+        the reservation, rather than colliding with it during creation.
+        */
+        reconcileQuarantined: async () => {
+          await removeWorktree({
+            worktreePath: createPath,
+            rootDir,
+            settings,
+            taskId: createTaskId,
+            reason: RemovalReason.ExecutorDispose,
+            force: true,
+          });
+        },
+      });
       try {
         const created = await backend.create({
           rootDir,
@@ -315,6 +336,8 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
           return await handleWorktrunkFailure("create", error, fallback) as { path: string; branch: string };
         }
         throw error;
+      } finally {
+        if (reservation.state === "held") await reservation.release();
       }
     };
 
