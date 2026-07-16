@@ -496,9 +496,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "__ai_header", label: "AI & Models", labelKey: "settings.nav.aiHeader", scope: undefined, isGroupHeader: true },
   /*
   FNXC:SettingsNavigation 2026-07-16-01:30:
-  Authentication leads the AI & Models group, and Settings still opens on it.
-  It is a provider-credentials screen, so it belongs with the model settings it gates rather than under Integrations (where it sat among MCP/Plugins/runtimes) or floating above the groups as a special case — connecting a provider and choosing its models are one task, done in that order.
+  Authentication leads the AI & Models group. It is a provider-credentials screen, so it belongs with the model settings it gates rather than under Integrations (where it sat among MCP/Plugins/runtimes) or floating above the groups as a special case — connecting a provider and choosing its models are one task, done in that order.
   First within the group because nothing else in AI & Models can be configured until it is done: with no provider connected there are no models to pick.
+
+  FNXC:SettingsNavigation 2026-07-16-13:40:
+  FN-8130 changes the Settings landing surface from Authentication to Appearance. Authentication remains first within its own AI & Models group, but the always-visible global Preferences section is the default instead.
   */
   { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe, searchableText: ["login", "OAuth", "API key", "custom providers", "Anthropic", "OpenAI", "provider credentials"] },
   { id: "global-models", label: "Models · Global", labelKey: "settings.nav.globalModels", scope: "global", searchableText: ["global models", "model presets", "favorite providers", "model pricing overrides", "LiteLLM pricing", "token pricing", "translate", "translation model", "import translation model", "import auto-translation model"] },
@@ -781,10 +783,12 @@ export type SectionId = SettingsSection["id"] | LegacySectionId;
 
 /*
 FNXC:SettingsNavigation 2026-07-16-01:00:
-Settings opens on Authentication. It is the section an operator actually needs first — nothing else in the product works until a provider is connected, and the dashboard's own empty state points here ("Set one up in Settings → AI Setup"). The previous landing section was "General · Global", a page of app preferences (and, until this change, the `fn` binary panel) that nobody opens Settings to find.
-It is also always visible: Authentication is not behind the Advanced switch, so the default landing section cannot be one the operator has hidden.
+Authentication was the previous Settings landing section because a provider connection gates model configuration. It remains first within AI & Models, but no longer determines the modal default.
+
+FNXC:SettingsNavigation 2026-07-16-13:40:
+FN-8130 requires Settings to open on Appearance, the global Preferences section, when no explicit initialSection is supplied. Appearance is always visible — it is not behind the Advanced switch — so the default can never land on a section hidden from the operator's navigation.
 */
-const DEFAULT_SETTINGS_SECTION: SectionId = "authentication";
+const DEFAULT_SETTINGS_SECTION: SectionId = "appearance";
 
 type PluginsSubsectionId = "fusion-plugins" | "pi-extensions";
 
@@ -796,7 +800,7 @@ interface SettingsModalProps {
   onClose: () => void;
   addToast: (message: string, type?: ToastType) => void;
   projectId?: string;
-  /** Optional section to show when the modal first opens. Defaults to the global General section. */
+  /** Optional section to show when the modal first opens. Defaults to the global Appearance section. */
   initialSection?: SectionId;
   /** Current theme mode */
   themeMode?: ThemeMode;

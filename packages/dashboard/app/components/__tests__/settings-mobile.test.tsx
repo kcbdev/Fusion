@@ -402,6 +402,19 @@ describe("SettingsModal mobile adaptations", () => {
     expect(queryByText("Settings Section", { selector: "label" })).toBeNull();
   });
 
+  /*
+  FNXC:SettingsNavigation 2026-07-16-13:40:
+  FN-8130 requires the mobile section picker and rendered content to start on Appearance when no explicit initialSection is supplied. Appearance is global and not Advanced-gated, so it remains selectable in the default visibility state.
+  */
+  it("defaults the mobile section picker to Appearance", async () => {
+    mockSettingsViewport(true);
+    const { getByLabelText, getByRole } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    expect(getByLabelText("Settings Section")).toHaveValue("appearance");
+    expect(getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+  });
+
   it("keeps CLI Binary reachable from the Basic-mode mobile picker", async () => {
     localStorage.removeItem("fusion:settings:show-advanced");
     mockSettingsViewport(true);
@@ -590,10 +603,10 @@ describe("SettingsModal mobile adaptations", () => {
 
     /*
     FNXC:SettingsNavigation 2026-07-16-01:10:
-    Settings opens on Authentication, which renders provider cards rather than form
-    controls, so this navigates to a section that has some. The nav label is
-    "General · Project" now that the Global/Project pair is disambiguated — plain
-    "General" no longer matches any element.
+    Authentication was the previous default and renders provider cards rather than form controls. FN-8130 defaults Settings to Appearance, but this test deliberately navigates to a section with generic form controls.
+
+    FNXC:SettingsNavigation 2026-07-16-13:40:
+    The nav label is "General · Project" now that the Global/Project pair is disambiguated — plain "General" no longer matches any element.
     */
     const generalTabs = await findAllByText("General · Project");
     await user.click(generalTabs[0]);
@@ -609,12 +622,12 @@ describe("SettingsModal mobile adaptations", () => {
   */
   it("shows scope on nav items and per-row badges rather than a section banner", async () => {
     const user = userEvent.setup();
-    const { container, getByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    const { container, getByRole } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     expect(container.querySelectorAll(".settings-scope-icon").length).toBeGreaterThan(0);
 
-    await user.click(getByText("Appearance"));
+    await user.click(getByRole("button", { name: /Appearance$/ }));
 
     // The banner is gone for good — it asserted a single scope for a section
     // that genuinely mixes them.
