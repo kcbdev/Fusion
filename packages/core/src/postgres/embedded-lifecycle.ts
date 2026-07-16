@@ -984,7 +984,12 @@ export class EmbeddedPostgresLifecycle {
       this.running = false; // We didn't start it, so we won't stop it
       this.ownsProcess = false;
 
-      // Ensure the database exists on the running instance
+      /*
+      FNXC:PostgresCutover 2026-07-15-20:14:
+      This path deliberately does NOT create the database, despite what this comment claimed for the preceding months — there has never been an `ensureDatabase()` call here. The process that owns the postmaster creates it after its own start(); a joiner has no cluster of its own to ensure. `ensureDatabase()` would throw here regardless: it requires `this.running`, which the join path leaves false by design so `stop()` never reaps an instance we did not start.
+
+      Assumption worth knowing: the owner publishes `runningInstances` / writes `postmaster.pid` BEFORE its `ensureDatabase()` resolves, so a joiner that wins that narrow window connects to a not-yet-created database and fails at the connection layer rather than here. Callers see a connect error, not a silent empty DB.
+      */
       const url = this.buildUrl(existing.port, this.options.database);
       return {
         mode: "embedded",
