@@ -1,6 +1,12 @@
 import type { TaskStore } from "@fusion/core";
 import { GitHubClient } from "./github.js";
-import { getCliPackageVersion, isUnresolvedCliPackageVersion } from "./cli-package-version.js";
+import { getCliPackageVersion } from "./cli-package-version.js";
+import {
+  FUSION_SELF_REPO,
+  computeNextMinorVersion,
+  formatReleaseVersionLines,
+  isFusionSelfRepo,
+} from "./fusion-release-version.js";
 
 interface TaskMovedEvent {
   task: {
@@ -18,51 +24,13 @@ interface TaskMovedEvent {
 const DEFAULT_COMMENT_TEMPLATE = "✅ Task {taskId} ({taskTitle}) has been completed and resolved.";
 
 /*
- * FNXC:GitHubIssueComment 2026-07-05-01:30:
- * Requirement: when a Fusion task's linked source GitHub issue lives in the
- * Fusion self-repo (`runfusion/fusion`, case-insensitive), the completion
- * comment posted on `done` must ALSO include both a "Current version:" line
- * and a "Target release:" line (the next-minor bump of the currently
- * published `@runfusion/fusion` version), so readers know which Fusion
- * release ships the fix. Every other linked repository's completion comment
- * must remain byte-for-byte identical to the pre-FN-7575 template output.
- * If the resolved version is unparseable/unresolved (the `0.0.0` sentinel),
- * fall back silently to the base comment with no version lines — never throw.
+ * FNXC:GitHubIssueComment 2026-07-15-09:40:
+ * The self-repo detection and next-minor computation moved to `fusion-release-version.ts` so the
+ * GitHubTrackingCommentService done comment — the surface that actually posts on linked issues —
+ * shares one implementation. See that module for the full requirement and the FN-7575 miss.
+ * NOTE: this service is gated on `settings.githubCommentOnDone`, which defaults to false and has
+ * no Settings UI, so it rarely fires; do not treat it as the primary done-comment surface.
  */
-const FUSION_SELF_REPO = "runfusion/fusion";
-
-/** Case-insensitive, trimmed `owner/repo` slug comparison against the Fusion self-repo. */
-function isFusionSelfRepo(repository: string): boolean {
-  return repository.trim().toLowerCase() === FUSION_SELF_REPO;
-}
-
-/** `major.minor.patch` leading numeric semver shape; ignores any trailing prerelease/build metadata. */
-const SEMVER_PREFIX_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)/;
-
-/**
- * Compute the next-minor release version (patch reset to 0) from a semver string,
- * e.g. `"0.55.0"` -> `"0.56.0"`, `"1.2.9"` -> `"1.3.0"`, `"v0.55.0"` -> `"0.56.0"`.
- * Returns `null` for the unresolved `"0.0.0"` sentinel or any unparseable input so
- * callers can skip appending version lines rather than emit garbage.
- */
-function computeNextMinorVersion(current: string): string | null {
-  if (isUnresolvedCliPackageVersion(current)) {
-    return null;
-  }
-
-  const match = SEMVER_PREFIX_PATTERN.exec(current.trim());
-  if (!match) {
-    return null;
-  }
-
-  const major = Number.parseInt(match[1] ?? "", 10);
-  const minor = Number.parseInt(match[2] ?? "", 10);
-  if (!Number.isFinite(major) || !Number.isFinite(minor)) {
-    return null;
-  }
-
-  return `${major}.${minor + 1}.0`;
-}
 
 export class GitHubIssueCommentService {
   private readonly store: TaskStore;
@@ -126,13 +94,9 @@ export class GitHubIssueCommentService {
       .replaceAll("{taskId}", task.id)
       .replaceAll("{taskTitle}", task.title ?? "");
 
-    if (isFusionSelfRepo(sourceIssue.repository)) {
-      const currentVersion = this.getCurrentVersion();
-      const nextMinorVersion = computeNextMinorVersion(currentVersion);
-      if (nextMinorVersion) {
-        const currentLine = currentVersion.startsWith("v") ? currentVersion : `v${currentVersion}`;
-        commentBody += `\n\nCurrent version: ${currentLine}\nTarget release: v${nextMinorVersion}`;
-      }
+    const versionLines = formatReleaseVersionLines(sourceIssue.repository, () => this.getCurrentVersion());
+    if (versionLines.length > 0) {
+      commentBody += `\n\n${versionLines.join("\n")}`;
     }
 
     try {
@@ -154,4 +118,6 @@ export class GitHubIssueCommentService {
   }
 }
 
-export { DEFAULT_COMMENT_TEMPLATE, FUSION_SELF_REPO, isFusionSelfRepo, computeNextMinorVersion };
+export { DEFAULT_COMMENT_TEMPLATE };
+// Re-exported from ./fusion-release-version.js for back-compat with existing importers/tests.
+export { FUSION_SELF_REPO, isFusionSelfRepo, computeNextMinorVersion };
