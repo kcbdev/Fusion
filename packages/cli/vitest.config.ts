@@ -44,23 +44,30 @@ const quarantinedCliTests: string[] = [
   /*
   FNXC:CliTests 2026-06-25-14:00:
   The SQLite-to-PostgreSQL cutover (feature quarantine-sqlite-internals-tests, retry session)
-  quarantines pre-existing CLI test failures observed during verify:workspace. Root causes vary:
+  recorded pre-existing CLI test failures observed during verify:workspace. Root causes varied:
   - extension-fn-secret-get.test.ts: store.getAsyncLayer mock drift (async-satellite dual-path).
   - chat.test.ts: MessageStore.getInbox returns non-array under Node 26 node:sqlite (SQLite-path).
   - skill-sync.test.ts: undocumented engine tools (fn_acquire_repo_worktree, fn_artifact_*).
   - version.test.ts: changeset script assertion drift (project now uses scripts/release.mjs).
   - dashboard.test.ts: mesh lifecycle mock assertion drift.
   - bundled-plugin-freshness.test.ts: bundled plugin build freshness drift.
-  Quarantined on sight per AGENTS.md flaky-test rule so verify:workspace goes green.
+  The entries were quarantined on sight per AGENTS.md; FN-8219 deleted the five
+  in-scope expired entries on 2026-07-17 rather than rescuing or re-recording them.
 
   FNXC:CliTests 2026-07-17-09:45:
   FN-8210 restores package-config.test.ts to the package lane after the direct green run proved its failures were stale tsup plugin-external and verify:workspace expectations, not flaky behavior. Its old exclusion had no matching ledger entry; do not re-quarantine without new root-cause evidence and a lockstep ledger entry.
   */
-  "src/__tests__/extension-fn-secret-get.test.ts",
-  "src/__tests__/skill-sync.test.ts",
-  "src/__tests__/version.test.ts",
-  "src/commands/__tests__/dashboard.test.ts",
-  "src/plugins/__tests__/bundled-plugin-freshness.test.ts",
+  /*
+  FNXC:CliTests 2026-07-17-10:00:
+  FN-8219 reconciled the five 2026-06-25 config-only quarantines after their
+  2026-07-09 deletion deadline. Per docs/testing.md, expired quarantines are
+  deleted rather than rescued or re-recorded: extension-fn-secret-get
+  (async-layer mock drift), skill-sync (undocumented engine tools), version
+  (release-script assertion drift), dashboard (mesh lifecycle mock drift), and
+  bundled-plugin-freshness (build freshness drift) are now git-history-only.
+  The quarantine ledger has no packages/cli rows. FN-8210 owns the separate
+  package-config.test.ts resolution; future lockstep coverage must include it.
+  */
   /*
   FNXC:CliTests 2026-06-25-16:30:
   The SQLite-to-PostgreSQL cutover (feature delete-sqlite-runtime-final, PHASE A)
