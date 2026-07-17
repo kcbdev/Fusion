@@ -3897,27 +3897,39 @@ describe("TaskCard", () => {
       const { container } = render(
         <TaskCard task={makeTask({ size })} onOpenDetail={noop} addToast={noop} />,
       );
+      const header = container.querySelector(".card-header");
+      const cardId = container.querySelector(".card-id");
       const badge = container.querySelector(".card-size-badge");
       expect(badge).not.toBeNull();
       expect(badge?.classList.contains(expectedClasses[index])).toBe(true);
+      expect(container.querySelectorAll(".card-size-badge")).toHaveLength(1);
+      expect(badge?.parentElement).toBe(header);
+      expect(cardId?.nextElementSibling).toBe(badge);
       // Clean up for next iteration
       container.remove();
     });
   });
 
-  it("places size badge inside card-header-actions container", () => {
+  it("places size badge directly after the task id outside header badge and action groups", () => {
     const { container } = render(
       <TaskCard task={makeTask({ size: "M" })} onOpenDetail={noop} addToast={noop} />,
     );
+    const header = container.querySelector(".card-header");
+    const cardId = container.querySelector(".card-id");
+    const headerBadges = container.querySelector(".card-header-badges");
     const actionsContainer = container.querySelector(".card-header-actions");
     const sizeBadge = container.querySelector(".card-size-badge");
-    
-    expect(actionsContainer).not.toBeNull();
+
+    expect(header).not.toBeNull();
     expect(sizeBadge).not.toBeNull();
-    expect(actionsContainer?.contains(sizeBadge)).toBe(true);
+    expect(sizeBadge?.parentElement).toBe(header);
+    expect(cardId?.nextElementSibling).toBe(sizeBadge);
+    expect(actionsContainer?.contains(sizeBadge)).toBe(false);
+    expect(headerBadges?.contains(sizeBadge) ?? false).toBe(false);
+    expect(sizeBadge?.closest(".card-header-badges")).toBeNull();
   });
 
-  it("renders size badge as the right-most header action after trailing controls", () => {
+  it("keeps trailing controls in header actions after the id-adjacent size badge", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({ column: "in-progress", status: "executing" as any, size: "M" })}
@@ -3926,6 +3938,9 @@ describe("TaskCard", () => {
         onPauseTask={async () => makeTask({ paused: true })}
       />,
     );
+    const header = container.querySelector(".card-header");
+    const cardId = container.querySelector(".card-id");
+    const headerBadges = container.querySelector(".card-header-badges");
     const actionsContainer = container.querySelector(".card-header-actions") as HTMLElement | null;
     const menuButton = container.querySelector(".card-menu-btn");
     const sizeBadge = container.querySelector(".card-size-badge");
@@ -3933,9 +3948,11 @@ describe("TaskCard", () => {
     expect(actionsContainer).not.toBeNull();
     expect(menuButton).not.toBeNull();
     expect(sizeBadge).not.toBeNull();
+    expect(sizeBadge?.parentElement).toBe(header);
+    expect(cardId?.nextElementSibling).toBe(sizeBadge);
+    expect(sizeBadge?.compareDocumentPosition(headerBadges!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(actionsContainer?.contains(menuButton)).toBe(true);
-    expect(actionsContainer?.lastElementChild).toBe(sizeBadge);
-    expect(sizeBadge?.nextElementSibling).toBeNull();
+    expect(actionsContainer?.contains(sizeBadge)).toBe(false);
   });
 
   it("places card-header-actions as a direct header child after the wrapped badge group", () => {

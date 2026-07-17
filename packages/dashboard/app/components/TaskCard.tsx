@@ -2980,10 +2980,19 @@ function TaskCardComponent({
       )}
       <div className="card-header">
         <span className="card-id">{task.id}</span>
+        {/*
+        FNXC:TaskCardLayout 2026-07-17-13:05 (FN-8234):
+        The size chip reads immediately after the task id and before the wrapping middle badge group, superseding FN-7846's former last-item placement in the right actions cluster. Preserve FN-7837's non-wrapping outer header: extra status and priority badges wrap only in the middle group.
+        */}
+        {task.size && (
+          <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
+            {task.size}
+          </span>
+        )}
         {hasHeaderBadges && (
           /*
           FNXC:TaskCardLayout 2026-07-11-00:00:
-          FN-7837 keeps the task id and right-aligned size/actions cluster in the same non-wrapping header row. Extra header badges (fast-mode, priority, oversight, decision-only, PR/GitHub, and status chips) wrap inside this middle group instead of pushing the size chip onto a misaligned second row on desktop or mobile.
+          FN-7837 keeps the task id, size chip, and right-aligned actions cluster in the same non-wrapping header row. Extra header badges (fast-mode, priority, oversight, decision-only, PR/GitHub, and status chips) wrap inside this middle group instead of pushing header metadata onto a misaligned second row on desktop or mobile.
           */
           <div className="card-header-badges" data-testid="card-header-badges">
         {isPaused && (
@@ -3362,15 +3371,6 @@ function TaskCardComponent({
             >
               <MoreHorizontal size={14} />
             </button>
-          )}
-          {/*
-          FNXC:TaskCardLayout 2026-07-11-00:00 (FN-7846):
-          The size badge must be the last item in the right-aligned header-actions cluster so its right edge uses the card's `--card-padding`, matching the top margin on desktop and mobile while preserving the FN-7837 no-orphaned-second-row grouping.
-          */}
-          {task.size && (
-            <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
-              {task.size}
-            </span>
           )}
         </div>
         )}
