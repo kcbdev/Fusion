@@ -41,7 +41,6 @@ import { TaskComments } from "./TaskComments";
 import { TaskChatTab } from "./TaskChatTab";
 import { TaskPlannerChatTab } from "./TaskPlannerChatTab";
 import { TaskReviewTab } from "./TaskReviewTab";
-import { MergeDetails } from "./MergeDetails";
 import { TaskChangesTab } from "./TaskChangesTab";
 import { TaskSummaryTab } from "./TaskSummaryTab";
 import { TaskCostTab } from "./TaskCostTab";
@@ -5246,8 +5245,7 @@ export function TaskDetailContent({
             </div>
           ) : (
           <>
-          {/* FNXC:TaskDetailSummaryTab 2026-06-27-00:00: The former inline Definition-tab completion summary is intentionally removed to avoid duplicating the new done-only Summary tab; Definition keeps merge/retry/source metadata below. */}
-          <MergeDetails task={task} />
+          {/* FNXC:TaskDetailSummaryTab 2026-07-29-00:00: FN-8197 keeps Definition focused on plan, retry, and source metadata; completed merge metadata renders exclusively in the done-only Summary tab. */}
           {(retrySummary?.total ?? 0) > 0 && (
             <div className="detail-section detail-retries-section">
               <div className="detail-source-header">

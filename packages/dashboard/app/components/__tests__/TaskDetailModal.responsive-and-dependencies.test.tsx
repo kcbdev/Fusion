@@ -1557,23 +1557,24 @@ describe("TaskDetailModal", () => {
       expect(screen.getByRole("link", { name: "#42" })).toHaveAttribute("href", "https://github.com/owner/repo/pull/42");
     });
 
-    it("shows linked PR number in merge details for done tasks", () => {
-      render(
+    it("shows linked PR number in Summary merge details, not Definition, for done tasks", () => {
+      const task = makeTask({
+        column: "done" as Column,
+        prInfo: {
+          url: "https://github.com/owner/repo/pull/42",
+          number: 42,
+          status: "merged",
+          title: "Task",
+          headBranch: "fusion/fn-099",
+          baseBranch: "main",
+          commentCount: 0,
+        },
+        mergeDetails: { prNumber: 42 },
+      });
+      const summary = render(
         <TaskDetailModal
-          initialTab="definition"
-          task={makeTask({
-            column: "done" as Column,
-            prInfo: {
-              url: "https://github.com/owner/repo/pull/42",
-              number: 42,
-              status: "merged",
-              title: "Task",
-              headBranch: "fusion/fn-099",
-              baseBranch: "main",
-              commentCount: 0,
-            },
-            mergeDetails: { prNumber: 42 },
-          })}
+          initialTab="summary"
+          task={task}
           onClose={noop}
           onMoveTask={noopMove}
           onDeleteTask={noopDelete}
@@ -1583,9 +1584,23 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      const links = screen.getAllByRole("link", { name: "#42" });
-      expect(links.length).toBeGreaterThan(0);
-      expect(links[0]).toHaveAttribute("href", "https://github.com/owner/repo/pull/42");
+      expect(summary.container.querySelector(".merge-details-card a")).toHaveAttribute("href", "https://github.com/owner/repo/pull/42");
+      summary.unmount();
+
+      render(
+        <TaskDetailModal
+          initialTab="definition"
+          task={task}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.queryByText("Merge Details")).toBeNull();
     });
 
     it("shows PR automation waiting label instead of Merge & Close when awaiting PR checks", () => {
