@@ -74,7 +74,7 @@ function getRoleLabel(role: AgentLogRole, t: TFunction<"app">): string {
 }
 
 function parseModelMarker(entry: AgentLogEntry): TaskChatModelInfo | null {
-  if (entry.type !== "text") return null;
+  if (entry.type !== "status" && entry.type !== "text") return null;
   const role = entry.agent === "triage" ? "Triage" : entry.agent === "executor" ? "Executor" : entry.agent === "reviewer" ? "Reviewer" : null;
   if (!role) return null;
   return parseRuntimeModelMarker(entry.text, role);
@@ -123,13 +123,13 @@ function getModelForRole(
   effectiveModels?: TaskChatTabProps["effectiveModels"],
 ): TaskChatModelInfo | null {
   /*
-  FNXC:TaskDetailChat 2026-06-23-21:18:
-  Task-detail chat agent headers should identify the AI provider actually backing each role, not a generic/role avatar. Prefer explicit task model overrides because they are stable before logs stream, then fall back to the runtime "using model" log marker emitted by active planner/executor/reviewer sessions. Merger output uses the validator/reviewer lane provider because merge-fix/review flows share that model family in the UI.
+  FNXC:TaskDetailChat 2026-07-16-00:00:
+  FN-8214: Task-detail chat role icons must identify the model that actually ran. Prefer the runtime "using model" marker, then task-detail effective models, and use the explicit task override only before those values are available. Engine lanes emit markers as `status` and historical logs use `text`, so parseModelMarker accepts both. Merger has no marker and continues through its effective validator lane or explicit validator fallback.
 
   FNXC:TaskDetailChat 2026-06-23-00:54:
   Default executor models such as OpenAI Codex GPT-5.5 can resolve through settings rather than task overrides or log markers. Task chat receives the same effective model resolution used by the task-detail model header so role icons match Chat and Agent Log instead of falling back to CPU for default-backed agents.
   */
-  return getExplicitModelForRole(task, role) ?? getRuntimeModelForRole(entries, role) ?? getEffectiveModelForRole(effectiveModels, role);
+  return getRuntimeModelForRole(entries, role) ?? getEffectiveModelForRole(effectiveModels, role) ?? getExplicitModelForRole(task, role);
 }
 
 function TaskChatAgentIcon({ label, modelInfo }: { label: string; modelInfo: TaskChatModelInfo | null }) {

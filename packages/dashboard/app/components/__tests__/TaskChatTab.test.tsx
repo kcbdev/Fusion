@@ -149,6 +149,14 @@ function mockLogs(
   });
 }
 
+function getRoleGroup(label: "Planner" | "Executor" | "Reviewer" | "Merger"): HTMLElement {
+  return screen.getByRole("region", { name: `${label} messages` });
+}
+
+function expectRoleIcon(label: "Planner" | "Executor" | "Reviewer" | "Merger", testId: string) {
+  expect(within(getRoleGroup(label)).getByTestId(testId)).toBeInTheDocument();
+}
+
 function expectComposerSendableAfterDraft(message = "Please continue") {
   expect(screen.queryByText(/No active steerable agent session/)).not.toBeInTheDocument();
   const input = screen.getByLabelText("Message active agent session");
@@ -503,41 +511,89 @@ describe("TaskChatTab", () => {
       />,
     );
 
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
-    expect(document.querySelectorAll(".task-chat-provider-icon [data-provider='anthropic']")).toHaveLength(2);
+    expectRoleIcon("Planner", "gemini-icon");
+    expectRoleIcon("Executor", "openai-icon");
+    expectRoleIcon("Reviewer", "anthropic-icon");
+    expectRoleIcon("Merger", "anthropic-icon");
   });
 
-  it("renders provider icons for task chat roles from legacy and suffixed runtime model markers", () => {
+  it("uses status and text runtime markers before static overrides for reviewer, executor, and planner icons", () => {
     mockLogs([
-      makeEntry({ agent: "triage", text: "Triage using model: google/gemini-pro (thinking effort: low)" }),
-      makeEntry({ agent: "executor", text: "Executor using model: openai/gpt-4o (thinking effort: high)" }),
-      makeEntry({ agent: "reviewer", text: "Reviewer using model: anthropic/claude-sonnet-4-5" }),
-    ]);
-
-    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
-
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='anthropic']")).toBeTruthy();
-  });
-
-  it("renders provider icons for task chat roles from effective default models", () => {
-    mockLogs([
-      makeEntry({ agent: "executor", text: "executor output without model marker" }),
+      makeEntry({ agent: "triage", type: "text", text: "Triage using model: openai/gpt-4o" }),
+      makeEntry({ agent: "executor", type: "status", text: "Executor using model: openai/gpt-4o" }),
+      makeEntry({ agent: "reviewer", type: "status", text: "Reviewer using model: openai-codex/gpt-5.6-terra" }),
     ]);
 
     render(
       <TaskChatTab
-        task={makeTask()}
+        task={makeTask({
+          planningModelProvider: "grok",
+          modelProvider: "grok",
+          validatorModelProvider: "grok",
+        })}
         active
         addToast={vi.fn()}
-        effectiveModels={{ executor: { provider: "openai-codex", modelId: "gpt-5.5" } }}
       />,
     );
 
-    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai-codex']")).toBeTruthy();
-    expect(screen.queryByLabelText("Executor: model provider unknown")).not.toBeInTheDocument();
+    expectRoleIcon("Planner", "openai-icon");
+    expectRoleIcon("Executor", "openai-icon");
+    const reviewerGroup = getRoleGroup("Reviewer");
+    expect(within(reviewerGroup).getByTestId("openai-icon")).toBeInTheDocument();
+    expect(within(reviewerGroup).queryByTestId("xai-icon")).not.toBeInTheDocument();
+  });
+
+  it("uses a runtime marker when no static override is configured", () => {
+    mockLogs([makeEntry({ agent: "reviewer", type: "status", text: "Reviewer using model: openai-codex/gpt-5.6-terra" })]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expectRoleIcon("Reviewer", "openai-icon");
+  });
+
+  it("uses effective models before static overrides when no runtime marker is available", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "planning output" }),
+      makeEntry({ agent: "executor", text: "executor output" }),
+      makeEntry({ agent: "reviewer", text: "reviewer output" }),
+      makeEntry({ agent: "merger", text: "merger output" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({ planningModelProvider: "grok", modelProvider: "grok", validatorModelProvider: "grok" })}
+        active
+        addToast={vi.fn()}
+        effectiveModels={{
+          triage: { provider: "openai", modelId: "gpt-4o" },
+          executor: { provider: "openai", modelId: "gpt-4o" },
+          reviewer: { provider: "openai-codex", modelId: "gpt-5.6-terra" },
+          merger: { provider: "openai-codex", modelId: "gpt-5.6-terra" },
+        }}
+      />,
+    );
+
+    expectRoleIcon("Planner", "openai-icon");
+    expectRoleIcon("Executor", "openai-icon");
+    expectRoleIcon("Reviewer", "openai-icon");
+    expectRoleIcon("Merger", "openai-icon");
+  });
+
+  it("keeps static overrides as the pre-log fallback and retains the CPU fallback when unresolved", () => {
+    mockLogs([makeEntry({ agent: "reviewer", text: "reviewer output" }), makeEntry({ agent: "merger", text: "merger output" })]);
+    const { rerender } = render(
+      <TaskChatTab
+        task={makeTask({ validatorModelProvider: "grok", validatorModelId: "grok-4" })}
+        active
+        addToast={vi.fn()}
+      />,
+    );
+    expectRoleIcon("Reviewer", "xai-icon");
+    expectRoleIcon("Merger", "xai-icon");
+
+    mockLogs([makeEntry({ agent: "executor", text: "executor output" })]);
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(within(getRoleGroup("Executor")).getByLabelText("Executor: model provider unknown")).toBeInTheDocument();
   });
 
   it("keeps List View split chat agent headers before text tool thinking and user output", () => {
