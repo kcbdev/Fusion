@@ -495,6 +495,13 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const [selectedIssueNumber, setSelectedIssueNumber] = useState<number | null>(null);
   // FNXC:GitHubImport 2026-07-16-16:20: 0-based client-side page index for the issues list (reset on every reload/filter change).
   const [issuePage, setIssuePage] = useState(0);
+  /*
+  FNXC:GitHubImportTranslate 2026-07-17-12:50:
+  FN-8230 distinguishes a successful upstream issues reload from client-side paging. The translation
+  hook clears its accumulated page cache only when this monotonic generation advances, preventing
+  stale prose after reload without re-billing prior pages while the operator navigates them.
+  */
+  const [issuesReloadGeneration, setIssuesReloadGeneration] = useState(0);
 
   // Pulls state
   const [pulls, setPulls] = useState<GitHubPull[]>([]);
@@ -823,6 +830,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       */
       const fetchedIssues = await apiFetchGitHubIssues(owner.trim(), repo.trim(), ISSUES_FETCH_CAP, labelArray.length > 0 ? labelArray : undefined);
       setIssues(fetchedIssues);
+      setIssuesReloadGeneration((generation) => generation + 1);
       if (fetchedIssues.length === 0) {
         setIsIssuesEmptyState(true);
       }
@@ -1411,15 +1419,24 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   }, [provider, selectedGitlabItem, selectedGitlabKey, activeTab, selectedIssue, selectedPull]);
 
   /*
-  FNXC:GitHubImportTranslate 2026-07-15-09:30:
-  Requirement (2026-07-15): when auto-translate is on, translate foreign-language issues BEFORE showing them — so the list titles, not just the preview, read in the operator's language.
-  The 50-most-recent-open cap and the setting itself are enforced server-side; this only supplies the visible issue set and consumes the result.
+  FNXC:GitHubImportTranslate 2026-07-17-12:50:
+  Supply the exact paged render window so page 2+ translates on arrival. This calculation must precede
+  the hook (rather than use the whole fetched list) while retaining the shared page values used below.
   */
+  const translationVisibleIssues = hideImported ? issues.filter((issue) => !isUrlImported(issue.html_url)) : issues;
+  const translationIssuePageCount = Math.max(1, Math.ceil(translationVisibleIssues.length / ISSUES_PAGE_SIZE));
+  const translationClampedIssuePage = Math.min(issuePage, translationIssuePageCount - 1);
+  const translationPagedIssues = translationVisibleIssues.slice(
+    translationClampedIssuePage * ISSUES_PAGE_SIZE,
+    (translationClampedIssuePage + 1) * ISSUES_PAGE_SIZE,
+  );
+
   const autoTranslate = useGitHubImportAutoTranslate({
     enabled: autoTranslateEnabled && provider === "github" && activeTab === "issues",
     owner: owner.trim(),
     repo: repo.trim(),
-    items: issues,
+    items: translationPagedIssues,
+    reloadGeneration: issuesReloadGeneration,
     targetLocale: translateTargetLocale,
     projectId,
   });
@@ -1460,7 +1477,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   Hide imported removes imported rows from every provider's render set, while toggle-off preserves the original arrays and
   imported counts always use the full fetched sets. Use `isUrlImported` so optimistic imports also disappear immediately.
   */
-  const visibleIssues = hideImported ? issues.filter((issue) => !isUrlImported(issue.html_url)) : issues;
+  const visibleIssues = translationVisibleIssues;
   /*
   FNXC:GitHubImport 2026-07-16-16:20:
   Client-side page window over the (already label/hide-imported filtered) visible issues. issuePage is
@@ -1468,9 +1485,9 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   an out-of-range page. isIssuesTruncated flags that the repo hit ISSUES_FETCH_CAP so the operator knows
   the list is bounded, not complete.
   */
-  const issuePageCount = Math.max(1, Math.ceil(visibleIssues.length / ISSUES_PAGE_SIZE));
-  const clampedIssuePage = Math.min(issuePage, issuePageCount - 1);
-  const pagedIssues = visibleIssues.slice(clampedIssuePage * ISSUES_PAGE_SIZE, (clampedIssuePage + 1) * ISSUES_PAGE_SIZE);
+  const issuePageCount = translationIssuePageCount;
+  const clampedIssuePage = translationClampedIssuePage;
+  const pagedIssues = translationPagedIssues;
   const isIssuesTruncated = issues.length >= ISSUES_FETCH_CAP;
   const visiblePulls = hideImported ? pulls.filter((pull) => !isUrlImported(pull.html_url)) : pulls;
   const visibleGitlabItems = hideImported ? gitlabItems.filter((item) => !isUrlImported(item.webUrl)) : gitlabItems;

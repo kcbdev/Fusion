@@ -24,6 +24,7 @@ import {
   fetchGitRemotes,
   createTask,
   translateImportContent,
+  autoTranslateImportIssues,
 } from "../../api";
 import type { Task } from "@fusion/core";
 import type { GitRemote } from "../../api";
@@ -54,6 +55,7 @@ vi.mock("../../api", async (importOriginal) => {
     fetchGitRemotes: vi.fn(),
     createTask: vi.fn(),
     translateImportContent: vi.fn(),
+    autoTranslateImportIssues: vi.fn(),
   };
 });
 
@@ -204,8 +206,15 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiImportGitLabMergeRequest).mockReset();
     vi.mocked(fetchSettings).mockReset();
     vi.mocked(createTask).mockReset();
+    vi.mocked(autoTranslateImportIssues).mockReset();
     vi.mocked(createTask).mockResolvedValue(mockTask);
     vi.mocked(fetchSettings).mockResolvedValue({ gitlabEnabled: true } as never);
+    vi.mocked(autoTranslateImportIssues).mockImplementation(async (_owner, _repo, items) => ({
+      enabled: true,
+      targetLocale: "en",
+      capped: false,
+      translations: Object.fromEntries(items.map((item) => [item.number, { title: `Translated ${item.number}`, body: item.body ?? "" }])),
+    }));
     // Set default mock for apiFetchGitHubIssues to return empty array (prevents undefined issues state)
     vi.mocked(apiFetchGitHubIssues).mockResolvedValue([]);
     vi.mocked(apiFetchGitHubPulls).mockResolvedValue([]);
@@ -1257,6 +1266,29 @@ describe("GitHubImportModal", () => {
       expect(screen.queryByText("Issue 1")).toBeNull();
       expect(screen.getByText("Issue 60")).toBeTruthy();
       expect(screen.getByText(/Page 2 of 3/)).toBeTruthy();
+    });
+
+    /*
+    FNXC:GitHubImportTranslate 2026-07-17-12:50:
+    FN-8230 verifies the render surface, not only the hook: page 2 row #55 must receive the
+    accumulated page-scoped translation and expose its data-translated contract.
+    */
+    it("renders translated titles on page 2 beyond the former 50-item cap", async () => {
+      const manyIssues = Array.from({ length: 60 }, (_, i) => ({
+        number: i + 1, title: `Foreign ${i + 1}`, body: `Foreign body ${i + 1}`,
+        html_url: `https://github.com/owner/repo/issues/${i + 1}`, labels: [],
+      }));
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(fetchSettings).mockResolvedValue({ gitlabEnabled: true, githubImportAutoTranslate: true } as never);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(manyIssues);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+      await screen.findByText("Translated 1");
+      fireEvent.click(screen.getByRole("button", { name: /Next/i }));
+
+      await waitFor(() => expect(screen.getByText("Translated 55")).toBeTruthy());
+      const row = screen.getByText("Translated 55").closest(".issue-item") as HTMLElement;
+      expect(row.querySelector('[data-translated="true"]')).toBeTruthy();
     });
 
     it("shows no page controls when the issue list fits on one page", async () => {
