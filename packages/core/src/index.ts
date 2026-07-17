@@ -1479,6 +1479,7 @@ export {
   resolveProjectDefaultModel,
   resolveSettingsLaneThinkingLevel,
   resolveTaskExecutionModel,
+  resolveTaskMergerModel,
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
   resolveTitleSummarizerSettingsModel,

@@ -1094,14 +1094,15 @@ Mission validation sessions use this same validator lane; assigned durable agent
 
 Dedicated model lane for merger agent sessions (conflict resolution, clean-room merge, stash-conflict recovery, PR-response helpers, and related merge-agent runs). Configurable under **Settings → Global Models** and **Settings → Project Models**. Does not inherit the executor, planner, or reviewer lanes.
 
-1. Project `mergerProvider` + `mergerModelId`
-2. Global `mergerGlobalProvider` + `mergerGlobalModelId`
+1. Complete per-task `mergerModelProvider` + `mergerModelId`
+2. Project `mergerProvider` + `mergerModelId`
+3. Global `mergerGlobalProvider` + `mergerGlobalModelId`
 3. Project `defaultProviderOverride` + `defaultModelIdOverride`
 4. Global `defaultProvider` + `defaultModelId`
 5. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set and no merger/default pair is configured
 6. Automatic provider/model resolution
 
-Thinking level for merger sessions: project `mergerThinkingLevel` → global `mergerGlobalThinkingLevel` → project `defaultThinkingLevelOverride` → global `defaultThinkingLevel`.
+Thinking level for merger sessions: per-task `mergerThinkingLevel` → project `mergerThinkingLevel` → global `mergerGlobalThinkingLevel` → project `defaultThinkingLevelOverride` → global `defaultThinkingLevel`.
 
 Session-level fallback on retryable failures resolves project `mergerFallbackProvider` + `mergerFallbackModelId` first, then the shared global `fallbackProvider` + `fallbackModelId` pair. Partial project fallback pairs are ignored. This lane applies to every merger session, including merger-ai mutating and review agents and the PR-response runner.
 

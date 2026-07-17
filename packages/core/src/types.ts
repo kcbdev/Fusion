@@ -1616,6 +1616,13 @@ export interface Task {
    *  Must be set together with `planningModelProvider`. When both planning model
    *  fields are undefined, the triage agent uses global settings defaults. */
   planningModelId?: string;
+  /**
+   * FNXC:Settings-MergerModel 2026-07-16-12:00:
+   * Per-task merger overrides take precedence over the project/global merger lane only when both fields are set; merger sessions otherwise retain their existing settings-based resolution.
+   */
+  mergerModelProvider?: string;
+  /** Must be set together with `mergerModelProvider`. */
+  mergerModelId?: string;
   /** IDs of workflow steps enabled for this task, run after implementation completes */
   enabledWorkflowSteps?: string[];
   /** Results from workflow step executions (populated after task implementation) */
@@ -1807,6 +1814,8 @@ export interface Task {
    */
   validatorThinkingLevel?: ThinkingLevel;
   planningThinkingLevel?: ThinkingLevel;
+  /** Independent per-task merger reasoning-effort override; unset inherits merger settings. */
+  mergerThinkingLevel?: ThinkingLevel;
   /** Execution mode for task implementation.
    *  - "standard": Full execution with complete review workflow (default)
    *  - "fast": Expedited execution with minimal overhead for simple tasks
@@ -2084,6 +2093,9 @@ export interface TaskCreateInput {
    *  Must be set together with `planningModelProvider`. When both planning model
    *  fields are undefined, the triage agent uses global settings defaults. */
   planningModelId?: string;
+  /** Per-task merger override; provider and model id must be supplied together. */
+  mergerModelProvider?: string;
+  mergerModelId?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
   /**
@@ -2092,6 +2104,8 @@ export interface TaskCreateInput {
    */
   validatorThinkingLevel?: ThinkingLevel;
   planningThinkingLevel?: ThinkingLevel;
+  /** Independent per-task merger reasoning-effort override; unset inherits merger settings. */
+  mergerThinkingLevel?: ThinkingLevel;
   /** When true, trigger AI title summarization if description is long and no title provided */
   summarize?: boolean;
   /** Mission ID to link this task to (for mission hierarchy) */
@@ -4629,6 +4643,9 @@ export interface ArchivedTaskEntry {
   /** Optional: planning model override for triage agent */
   planningModelProvider?: string;
   planningModelId?: string;
+  mergerModelProvider?: string;
+  mergerModelId?: string;
+  mergerThinkingLevel?: ThinkingLevel;
   /** Per-task token/cost accounting (input/output/cache) preserved across archival. */
   tokenUsage?: TaskTokenUsage;
   /** Optional: other metadata to preserve */
@@ -7369,6 +7386,7 @@ export {
   resolvePlanningSettingsModel,
   resolveProjectDefaultModel,
   resolveTaskExecutionModel,
+  resolveTaskMergerModel,
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
   resolveTitleSummarizerSettingsModel,

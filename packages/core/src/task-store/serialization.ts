@@ -96,6 +96,8 @@ export function rowToTask(row: TaskRow): Task {
     validatorModelId: row.validatorModelId || undefined,
     planningModelProvider: row.planningModelProvider || undefined,
     planningModelId: row.planningModelId || undefined,
+    mergerModelProvider: row.mergerModelProvider || undefined,
+    mergerModelId: row.mergerModelId || undefined,
     mergeRetries: row.mergeRetries ?? undefined,
     workflowStepRetries: row.workflowStepRetries ?? undefined,
     stuckKillCount: row.stuckKillCount ?? undefined,
@@ -130,6 +132,7 @@ export function rowToTask(row: TaskRow): Task {
     thinkingLevel: (row.thinkingLevel || undefined) as Task["thinkingLevel"],
     validatorThinkingLevel: (row.validatorThinkingLevel || undefined) as Task["validatorThinkingLevel"],
     planningThinkingLevel: (row.planningThinkingLevel || undefined) as Task["planningThinkingLevel"],
+    mergerThinkingLevel: (row.mergerThinkingLevel || undefined) as Task["mergerThinkingLevel"],
     executionMode: (row.executionMode || undefined) as Task["executionMode"],
     // FNXC:PlannerOversight 2026-07-14-18:11: null → undefined (inherit); 0/1 → boolean.
     sessionAdvisorEnabled: row.sessionAdvisorEnabled === null || row.sessionAdvisorEnabled === undefined
@@ -360,6 +363,9 @@ export function archiveEntryToTask(
     validatorModelId: entry.validatorModelId,
     planningModelProvider: entry.planningModelProvider,
     planningModelId: entry.planningModelId,
+    mergerModelProvider: entry.mergerModelProvider,
+    mergerModelId: entry.mergerModelId,
+    mergerThinkingLevel: entry.mergerThinkingLevel,
     breakIntoSubtasks: entry.breakIntoSubtasks,
     noCommitsExpected: entry.noCommitsExpected,
     branchContext: entry.branchContext,

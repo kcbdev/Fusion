@@ -31,7 +31,7 @@ import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type Plugin
 FNXC:MultiProjectIsolation 2026-07-15-23:40:
 Advances to 0012 after the owner_project_id domain/partition split and chat pin timestamp. Per-migration identities above stay fixed; only this latest-version marker moves.
 */
-export const SCHEMA_BASELINE_VERSION = "0016";
+export const SCHEMA_BASELINE_VERSION = "0017";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -84,6 +84,8 @@ export const EXECUTOR_TOOL_FAILURE_RETRY_VERSION = "0013";
 export const EXECUTOR_ESCALATION_ATTEMPT_VERSION = "0014";
 /** FNXC:PostgresSchema 2026-07-16-22:00: central global routines follow main's already-landed 0014 migration. */
 export const GLOBAL_ROUTINES_SCHEMA_VERSION = "0015";
+/** FNXC:Settings-MergerModel 2026-07-16-12:00: per-task merger lane is an additive upgrade. */
+export const TASK_MERGER_MODEL_LANE_VERSION = "0017";
 
 /** Bookkeeping table for the fresh Drizzle migration history. */
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
@@ -170,6 +172,7 @@ const GLOBAL_ROUTINES_MIGRATION_PATH = join(
   "migrations",
   "0015_global_routines.sql",
 );
+const TASK_MERGER_MODEL_LANE_MIGRATION_PATH = join(__dirname, "migrations", "0017_task_merger_model_lane.sql");
 
 /**
  * Ensure the migration bookkeeping table exists. Lives in the public schema so
@@ -255,6 +258,7 @@ export async function applySchemaBaseline(
     const executorToolFailureRetryAlreadyApplied = applied.includes(EXECUTOR_TOOL_FAILURE_RETRY_VERSION);
     const executorEscalationAttemptAlreadyApplied = applied.includes(EXECUTOR_ESCALATION_ATTEMPT_VERSION);
     const globalRoutinesAlreadyApplied = applied.includes(GLOBAL_ROUTINES_SCHEMA_VERSION);
+    const taskMergerModelLaneAlreadyApplied = applied.includes(TASK_MERGER_MODEL_LANE_VERSION);
     let schemaChanged = false;
 
     if (!baselineAlreadyApplied) {
@@ -544,6 +548,14 @@ export async function applySchemaBaseline(
       await tx.execute(sql.raw(migrationSql));
       await tx.execute(
         sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${GLOBAL_ROUTINES_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
+      );
+      schemaChanged = true;
+    }
+    if (!taskMergerModelLaneAlreadyApplied) {
+      const migrationSql = await readFile(TASK_MERGER_MODEL_LANE_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(
+        sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${TASK_MERGER_MODEL_LANE_VERSION}) ON CONFLICT (version) DO NOTHING`,
       );
       schemaChanged = true;
     }

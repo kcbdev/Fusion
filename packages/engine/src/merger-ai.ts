@@ -383,7 +383,8 @@ interface AgentDeps {
 /** Factory for a mutating AI agent bound to a fixed system prompt. */
 function makeMutatingAgent(store: TaskStore, settings: Settings, taskId: string, options: MergerOptions, audit: RunAuditor, systemPrompt: string) {
   return async (cwd: string, prompt: string): Promise<void> => {
-    const model = resolveMergerSessionModel(settings);
+    const task = await store.getTask(taskId).catch(() => undefined);
+    const model = resolveMergerSessionModel(settings, undefined, task);
     // FNXC:Settings-MergerModel 2026-07-16-00:00: mutating merger retries resolve the project merger fallback lane before the shared global fallback.
     const mergerFallbackModel = resolveMergerFallbackModel(settings);
     const logger = new AgentLogger({
@@ -413,8 +414,8 @@ function makeMutatingAgent(store: TaskStore, settings: Settings, taskId: string,
       defaultModelId: model.modelId,
       fallbackProvider: mergerFallbackModel.provider,
       fallbackModelId: mergerFallbackModel.modelId,
-      fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
-      defaultThinkingLevel: resolveMergerThinkingLevel(settings),
+      fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings, task?.mergerThinkingLevel),
+      defaultThinkingLevel: resolveMergerThinkingLevel(settings, task?.mergerThinkingLevel),
       runAuditor: audit,
       settings,
       // FNXC:McpConfig 2026-06-25-22:48: merger-ai is the production merge path, so the mutating agent resolves enabled MCP servers at session creation and relies on the shared runtime guard for unsupported providers.
@@ -440,8 +441,9 @@ function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, o
     // The reviewer uses the project's validator/reviewer model lane (the same
     // one used elsewhere for review), falling back to the merger model only if
     // that lane resolves to nothing.
+    const task = await store.getTask(taskId).catch(() => undefined);
     const validator = resolveValidatorSettingsModel(settings);
-    const model = validator.provider && validator.modelId ? validator : resolveMergerSessionModel(settings);
+    const model = validator.provider && validator.modelId ? validator : resolveMergerSessionModel(settings, undefined, task);
     // FNXC:Settings-MergerModel 2026-07-16-00:00: review merger retries share the dedicated merger fallback provider/model and thinking lane.
     const mergerFallbackModel = resolveMergerFallbackModel(settings);
     // FNXC:Settings-ThinkingLevel 2026-07-10-00:00: The review agent's model falls back
@@ -449,7 +451,7 @@ function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, o
     // must follow the same lane it actually resolved a model from.
     const reviewThinkingLevel = validator.provider && validator.modelId
       ? resolveValidatorThinkingLevel(undefined, settings)
-      : resolveMergerThinkingLevel(settings);
+      : resolveMergerThinkingLevel(settings, task?.mergerThinkingLevel);
     let captured = "";
     const logger = new AgentLogger({
       store,
@@ -481,7 +483,7 @@ function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, o
       defaultModelId: model.modelId,
       fallbackProvider: mergerFallbackModel.provider,
       fallbackModelId: mergerFallbackModel.modelId,
-      fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings),
+      fallbackThinkingLevel: resolveMergerFallbackThinkingLevel(settings, task?.mergerThinkingLevel),
       defaultThinkingLevel: reviewThinkingLevel,
       runAuditor: audit,
       settings,

@@ -1104,7 +1104,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         validatorModelId,
         planningModelProvider,
         planningModelId,
+        mergerModelProvider,
+        mergerModelId,
         thinkingLevel,
+        validatorThinkingLevel,
+        planningThinkingLevel,
+        mergerThinkingLevel,
         reviewLevel,
         executionMode,
         autoMerge,
@@ -1142,11 +1147,15 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const validatedValidatorModelId = validateOptionalModelField(validatorModelId, "validatorModelId");
       const validatedPlanningModelProvider = validateOptionalModelField(planningModelProvider, "planningModelProvider");
       const validatedPlanningModelId = validateOptionalModelField(planningModelId, "planningModelId");
+      const validatedMergerModelProvider = validateOptionalModelField(mergerModelProvider, "mergerModelProvider");
+      const validatedMergerModelId = validateOptionalModelField(mergerModelId, "mergerModelId");
 
       // Validate thinkingLevel if provided
       const validThinkingLevels = [...THINKING_LEVELS];
-      if (thinkingLevel !== undefined && thinkingLevel !== null && !validThinkingLevels.includes(thinkingLevel)) {
-        throw badRequest(`thinkingLevel must be one of: ${validThinkingLevels.join(", ")}`);
+      for (const [name, value] of Object.entries({ thinkingLevel, validatorThinkingLevel, planningThinkingLevel, mergerThinkingLevel })) {
+        if (value !== undefined && value !== null && !validThinkingLevels.includes(value as ThinkingLevel)) {
+          throw badRequest(`${name} must be one of: ${validThinkingLevels.join(", ")}`);
+        }
       }
 
       // Validate reviewLevel if provided (must be integer 0-3)
@@ -1178,6 +1187,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const executorModel = normalizeModelSelectionPair(validatedModelProvider, validatedModelId);
       const validatorModel = normalizeModelSelectionPair(validatedValidatorModelProvider, validatedValidatorModelId);
       const planningModel = normalizeModelSelectionPair(validatedPlanningModelProvider, validatedPlanningModelId);
+      const mergerModel = normalizeModelSelectionPair(validatedMergerModelProvider, validatedMergerModelId);
 
       // Validate enabledWorkflowSteps if provided
       if (enabledWorkflowSteps !== undefined) {
@@ -1486,7 +1496,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         validatorModelId: validatorModel.modelId ?? undefined,
         planningModelProvider: planningModel.provider ?? undefined,
         planningModelId: planningModel.modelId ?? undefined,
+        mergerModelProvider: mergerModel.provider ?? undefined,
+        mergerModelId: mergerModel.modelId ?? undefined,
         thinkingLevel: thinkingLevel || undefined,
+        validatorThinkingLevel: validatorThinkingLevel || undefined,
+        planningThinkingLevel: planningThinkingLevel || undefined,
+        mergerThinkingLevel: mergerThinkingLevel || undefined,
         summarize,
         reviewLevel: reviewLevel ?? undefined,
         executionMode: executionMode || undefined,
@@ -4371,7 +4386,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, validatorThinkingLevel, planningThinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId, branch, baseBranch, githubTracking, gitlabTracking, noCommitsExpected, autoMerge, overlapBlockedBy, status, dismissNearDuplicate, sessionAdvisorEnabled } = req.body;
+      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergerModelProvider, mergerModelId, thinkingLevel, validatorThinkingLevel, planningThinkingLevel, mergerThinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId, branch, baseBranch, githubTracking, gitlabTracking, noCommitsExpected, autoMerge, overlapBlockedBy, status, dismissNearDuplicate, sessionAdvisorEnabled } = req.body;
       const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(req.body, field);
 
       // Validate model fields are strings or undefined/null
@@ -4390,6 +4405,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const validatedValidatorModelId = validateModelField(validatorModelId, "validatorModelId");
       const validatedPlanningModelProvider = validateModelField(planningModelProvider, "planningModelProvider");
       const validatedPlanningModelId = validateModelField(planningModelId, "planningModelId");
+      const validatedMergerModelProvider = validateModelField(mergerModelProvider, "mergerModelProvider");
+      const validatedMergerModelId = validateModelField(mergerModelId, "mergerModelId");
       const validatedAssigneeUserId = validateModelField(assigneeUserId, "assigneeUserId");
 
       // Validate thinking level fields if provided
@@ -4402,6 +4419,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       validateThinkingLevel(thinkingLevel, "thinkingLevel");
       validateThinkingLevel(validatorThinkingLevel, "validatorThinkingLevel");
       validateThinkingLevel(planningThinkingLevel, "planningThinkingLevel");
+      validateThinkingLevel(mergerThinkingLevel, "mergerThinkingLevel");
 
       // Validate reviewLevel if provided (must be integer 0-3)
       if (reviewLevel !== undefined && reviewLevel !== null) {
@@ -4683,9 +4701,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (hasBodyField("validatorModelId")) updates.validatorModelId = validatedValidatorModelId;
       if (hasBodyField("planningModelProvider")) updates.planningModelProvider = validatedPlanningModelProvider;
       if (hasBodyField("planningModelId")) updates.planningModelId = validatedPlanningModelId;
+      if (hasBodyField("mergerModelProvider")) updates.mergerModelProvider = validatedMergerModelProvider;
+      if (hasBodyField("mergerModelId")) updates.mergerModelId = validatedMergerModelId;
       if (hasBodyField("thinkingLevel")) updates.thinkingLevel = thinkingLevel === null ? null : thinkingLevel;
       if (hasBodyField("validatorThinkingLevel")) updates.validatorThinkingLevel = validatorThinkingLevel === null ? null : validatorThinkingLevel;
       if (hasBodyField("planningThinkingLevel")) updates.planningThinkingLevel = planningThinkingLevel === null ? null : planningThinkingLevel;
+      if (hasBodyField("mergerThinkingLevel")) updates.mergerThinkingLevel = mergerThinkingLevel === null ? null : mergerThinkingLevel;
       if (hasBodyField("assigneeUserId")) updates.assigneeUserId = validatedAssigneeUserId;
       if (hasBodyField("reviewLevel")) updates.reviewLevel = reviewLevel;
       if (hasBodyField("executionMode")) updates.executionMode = executionMode === null ? null : executionMode;

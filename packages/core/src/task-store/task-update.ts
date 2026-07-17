@@ -514,6 +514,10 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
       } else if (updates.planningModelId !== undefined) {
         task.planningModelId = updates.planningModelId;
       }
+      if (updates.mergerModelProvider === null) task.mergerModelProvider = undefined;
+      else if (updates.mergerModelProvider !== undefined) task.mergerModelProvider = updates.mergerModelProvider;
+      if (updates.mergerModelId === null) task.mergerModelId = undefined;
+      else if (updates.mergerModelId !== undefined) task.mergerModelId = updates.mergerModelId;
       if (updates.validatorThinkingLevel === null) {
         task.validatorThinkingLevel = undefined;
       } else if (updates.validatorThinkingLevel !== undefined) {
@@ -524,6 +528,8 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
       } else if (updates.planningThinkingLevel !== undefined) {
         task.planningThinkingLevel = updates.planningThinkingLevel as import("../types.js").ThinkingLevel;
       }
+      if (updates.mergerThinkingLevel === null) task.mergerThinkingLevel = undefined;
+      else if (updates.mergerThinkingLevel !== undefined) task.mergerThinkingLevel = updates.mergerThinkingLevel as import("../types.js").ThinkingLevel;
       if (updates.thinkingLevel === null) {
         task.thinkingLevel = undefined;
       } else if (updates.thinkingLevel !== undefined) {

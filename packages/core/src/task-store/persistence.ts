@@ -42,6 +42,8 @@ export interface TaskRow {
   validatorModelId: string | null;
   planningModelProvider: string | null;
   planningModelId: string | null;
+  mergerModelProvider: string | null;
+  mergerModelId: string | null;
   mergeRetries: number | null;
   workflowStepRetries: number | null;
   stuckKillCount: number | null;
@@ -76,6 +78,7 @@ export interface TaskRow {
   thinkingLevel: string | null;
   validatorThinkingLevel: string | null;
   planningThinkingLevel: string | null;
+  mergerThinkingLevel: string | null;
   executionMode: string | null;
   /** FNXC:PlannerOversight 2026-07-14-18:11: null = inherit project; 0 = off; 1 = on (autoMerge pattern). */
   sessionAdvisorEnabled: number | null;
@@ -229,6 +232,8 @@ export const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("validatorModelId", (task) => task.validatorModelId ?? null),
   defineTaskColumn("planningModelProvider", (task) => task.planningModelProvider ?? null),
   defineTaskColumn("planningModelId", (task) => task.planningModelId ?? null),
+  defineTaskColumn("mergerModelProvider", (task) => task.mergerModelProvider ?? null),
+  defineTaskColumn("mergerModelId", (task) => task.mergerModelId ?? null),
   defineTaskColumn("mergeRetries", (task) => task.mergeRetries ?? null),
   defineTaskColumn("workflowStepRetries", (task) => task.workflowStepRetries ?? null),
   defineTaskColumn("stuckKillCount", (task) => task.stuckKillCount ?? 0),
@@ -266,6 +271,7 @@ export const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   // FNXC:Settings-ThinkingLevel 2026-07-13 (merge port): per-task validator/planning reasoning-effort overrides.
   defineTaskColumn("validatorThinkingLevel", (task) => task.validatorThinkingLevel ?? null),
   defineTaskColumn("planningThinkingLevel", (task) => task.planningThinkingLevel ?? null),
+  defineTaskColumn("mergerThinkingLevel", (task) => task.mergerThinkingLevel ?? null),
   defineTaskColumn("executionMode", (task) => task.executionMode ?? null),
   defineTaskColumn("sessionAdvisorEnabled", serializeTaskSessionAdvisorEnabled),
   defineTaskColumn("tokenUsageInputTokens", (task) => task.tokenUsage?.inputTokens ?? null),
