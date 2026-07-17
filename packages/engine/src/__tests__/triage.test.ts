@@ -1698,6 +1698,14 @@ Planner rewrote mission without the raw request.
         expect.objectContaining({ workflowStepId: "plan-review", status: "failed", verdict: "REVISE" }),
       ]),
     }));
+    expect((store.logEntry as ReturnType<typeof vi.fn>).mock.calls.some(
+      ([id, action]) => id === "FN-PLAN-REVISE" && action === "[pre-merge] Workflow step failed: Plan Review",
+    )).toBe(false);
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-PLAN-REVISE",
+      "AI spec revision requested",
+      expect.stringContaining("Missing verification."),
+    );
   });
 
   it("keeps the task in triage with retry backoff when Plan Review is unavailable", async () => {
@@ -2247,6 +2255,9 @@ Planner rewrote mission without the raw request.
         "AI spec revision requested",
         expect.stringContaining(feedback),
       );
+      expect((retryStore.logEntry as ReturnType<typeof vi.fn>).mock.calls.some(
+        ([id, action]) => id === taskId && action === "[pre-merge] Workflow step failed: Plan Review",
+      )).toBe(false);
       expect(retryStore.updateTask).toHaveBeenCalledWith(taskId, expect.objectContaining({
         workflowStepResults: expect.arrayContaining([
           expect.objectContaining({ workflowStepId: "plan-review", status: "failed", verdict: "REVISE" }),
