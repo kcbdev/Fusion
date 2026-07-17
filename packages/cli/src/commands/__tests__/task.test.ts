@@ -2634,8 +2634,17 @@ describe("runTaskRetry", () => {
       baseBranch: null,
       baseCommitSha: null,
       nextRecoveryAt: null,
-      // FNXC:CliTests 2026-07-16-08:55: FN-8102 tracks the current manual
-      // retry reset patch, including the plan-review replan recovery budget.
+      /*
+      FNXC:CliTests 2026-07-17-10:57:
+      The exact manual retry reset contract now clears bulk-completion refusal
+      and executor tool-failure retry/escalation state alongside recovery budgets.
+      Keep both retry-status assertions aligned with buildManualRetryResetPatch.
+      */
+      bulkCompletionRefusalAt: null,
+      consecutiveToolFailureRetryCount: 0,
+      executorEscalationAttempted: false,
+      toolFailureDetectorLogCursor: null,
+      toolFailureRetryExhaustedAuditEmitted: false,
       planReviewReplanCount: 0,
       stuckKillCount: 0,
       recoveryRetryCount: 0,
@@ -2644,7 +2653,6 @@ describe("runTaskRetry", () => {
       workflowStepRetries: 0,
       verificationFailureCount: 0,
       postReviewFixCount: 0,
-      planReviewReplanCount: 0,
       mergeConflictBounceCount: 0,
       branchConflictRecoveryCount: 0,
       reviewerContextRetryCount: 0,
@@ -2715,8 +2723,17 @@ describe("runTaskRetry", () => {
       baseBranch: null,
       baseCommitSha: null,
       nextRecoveryAt: null,
-      // FNXC:CliTests 2026-07-16-08:55: FN-8102 tracks the current manual
-      // retry reset patch, including the plan-review replan recovery budget.
+      /*
+      FNXC:CliTests 2026-07-17-10:57:
+      The exact manual retry reset contract now clears bulk-completion refusal
+      and executor tool-failure retry/escalation state alongside recovery budgets.
+      Keep both retry-status assertions aligned with buildManualRetryResetPatch.
+      */
+      bulkCompletionRefusalAt: null,
+      consecutiveToolFailureRetryCount: 0,
+      executorEscalationAttempted: false,
+      toolFailureDetectorLogCursor: null,
+      toolFailureRetryExhaustedAuditEmitted: false,
       planReviewReplanCount: 0,
       stuckKillCount: 0,
       recoveryRetryCount: 0,
@@ -2725,7 +2742,6 @@ describe("runTaskRetry", () => {
       workflowStepRetries: 0,
       verificationFailureCount: 0,
       postReviewFixCount: 0,
-      planReviewReplanCount: 0,
       mergeConflictBounceCount: 0,
       branchConflictRecoveryCount: 0,
       reviewerContextRetryCount: 0,

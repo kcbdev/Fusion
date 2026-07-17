@@ -34,6 +34,19 @@ const mockErrors = vi.hoisted(() => ({
 }));
 
 vi.mock("@fusion/core", () => ({
+  /*
+  FNXC:CliTests 2026-07-17-10:56:
+  The extension experiment-finalize path now boots its store through
+  createTaskStoreForBackend. Keep this full-replacement mock aligned with that
+  module export so mock-completeness drift cannot block the tool before its assertions run.
+  */
+  createTaskStoreForBackend: vi.fn(async () => ({
+    taskStore: {
+      init: vi.fn().mockResolvedValue(undefined),
+      getExperimentSessionStore: vi.fn(() => ({})),
+    },
+    shutdown: vi.fn().mockResolvedValue(undefined),
+  })),
   TaskStore: makeConstructibleMock(() => ({
     init: vi.fn().mockResolvedValue(undefined),
     getExperimentSessionStore: vi.fn(() => ({})),
