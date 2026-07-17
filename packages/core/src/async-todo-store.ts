@@ -391,6 +391,23 @@ export class AsyncTodoStore extends EventEmitter<TodoStoreEvents> {
     return getTodoListsWithItems(this.layer.db, projectId);
   }
 
+  /*
+  FNXC:TodoStore 2026-07-16-00:48:
+  The /api/todos single-resource GET and create-task routes need the same
+  read-side methods for PostgreSQL as the sync TodoStore exposes.
+  */
+  async getList(id: string): Promise<TodoList | undefined> {
+    return getTodoList(this.layer.db, id);
+  }
+
+  async getItem(id: string): Promise<TodoItem | undefined> {
+    return getTodoItem(this.layer.db, id);
+  }
+
+  async listItems(listId: string): Promise<TodoItem[]> {
+    return listTodoItems(this.layer.db, listId);
+  }
+
   async createList(projectId: string, input: TodoListCreateInput): Promise<TodoList> {
     const now = new Date().toISOString();
     const list = await createTodoList(this.layer.db, {
