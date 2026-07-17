@@ -43,7 +43,7 @@ import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgre
 import { ACTIVE_STATUSES, isTaskAgentActive } from "../utils/taskActivity";
 import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getActiveRuntimeMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
-import { getTaskStatusBadgeLabel } from "../utils/taskStatusBadgeLabel";
+import { getTaskStatusBadgeLabel, shouldSuppressPlanningStatusBadge } from "../utils/taskStatusBadgeLabel";
 import { isReviewBudgetExhaustedApproval } from "../utils/reviewBudgetApproval";
 import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
 import type { ToastType } from "../hooks/useToast";
@@ -2857,6 +2857,14 @@ function TaskCardComponent({
    * guard — operators found it fired as noise on nearly every in-progress
    * card. The oversight-level badge (`showOversightBadge`) is untouched.
    */
+  /*
+  FNXC:TaskStatusBadge 2026-07-16-12:00:
+  FN-8170 shares this predicate with ListView so stale planning status never produces a Todo/In Progress board badge or its otherwise-empty header wrapper.
+  */
+  const showStatusBadge = !isPaused
+    && Boolean(visualStatus)
+    && visualStatus !== "queued"
+    && !shouldSuppressPlanningStatusBadge({ status: visualStatus, column: task.column });
   const hasCardMetaBadges = showPriorityBadge
     || task.executionMode === "fast"
     // FNXC:PlannerOversight 2026-07-04-00:00: the oversight badge is opt-in
@@ -2864,7 +2872,7 @@ function TaskCardComponent({
     // guard so `.card-meta-badges` only renders when it has a real child.
     || showOversightBadge;
   const hasHeaderBadges = Boolean(isPaused)
-    || Boolean(!isPaused && visualStatus && visualStatus !== "queued")
+    || showStatusBadge
     || (planReviewRunning && isAgentActive)
     || Boolean(!isPaused && task.column === "todo" && !visualStatus && (task.steps?.length ?? 0) > 0)
     || Boolean(hasInReviewStall && stallCopy)
@@ -2981,7 +2989,7 @@ function TaskCardComponent({
             {pausedByAgent ? t("tasks.pausedByAgent", "paused by agent") : t("tasks.paused", "paused")}
           </span>
         )}
-        {!isPaused && visualStatus && visualStatus !== "queued" && (
+        {showStatusBadge && (
           <span
             className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${isPlanReviewReplanCapApproval ? " awaiting-approval--plan-review-replan-cap" : ""}${isAwaitingInput ? " awaiting-input" : ""}${isAgentActive ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
             title={
@@ -3010,7 +3018,7 @@ function TaskCardComponent({
                     ? t("tasks.needsInput", "Needs input")
                     : visualStatus === "merging-fix"
                       ? t("tasks.statusMergingFix", "Merging fixes…")
-                      : getTaskStatusLabel(visualStatus, t)}
+                      : getTaskStatusLabel(visualStatus!, t)}
           </span>
         )}
         {planReviewRunning && isAgentActive && (

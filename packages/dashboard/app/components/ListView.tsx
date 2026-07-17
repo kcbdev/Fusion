@@ -24,7 +24,7 @@ import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/project
 import { ALL_WORKFLOWS_BOARD_VIEW_ID } from "../utils/boardWorkflowSelection";
 import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgress";
 import { isTaskAgentActive } from "../utils/taskActivity";
-import { getTaskStatusBadgeLabel } from "../utils/taskStatusBadgeLabel";
+import { getTaskStatusBadgeLabel, shouldSuppressPlanningStatusBadge } from "../utils/taskStatusBadgeLabel";
 import { isReviewBudgetExhaustedApproval } from "../utils/reviewBudgetApproval";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
@@ -2669,7 +2669,10 @@ export function ListView({
                           const isPaused = !isDoneColumn && task.paused === true;
                           const isStuckState = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
                           const isAgentActive = isTaskAgentActive(task, { globalPaused, isStuck: isStuckState });
-                          const hasStatus = typeof visualStatus === "string" && visualStatus.trim().length > 0;
+                          // FNXC:TaskStatusBadge 2026-07-16-12:00: FN-8170 keeps mobile and table list status rendering aligned with TaskCard through the shared Todo/In Progress planning suppression predicate.
+                          const hasStatus = typeof visualStatus === "string"
+                            && visualStatus.trim().length > 0
+                            && !shouldSuppressPlanningStatusBadge({ status: visualStatus, column: task.column });
                           const isReviewBudgetExhausted = isReviewBudgetExhaustedApproval(task);
                           const planReviewRunning = isPlanReviewRunning(task);
                           const hasDependencies = Boolean(task.dependencies && task.dependencies.length > 0);
@@ -2883,6 +2886,8 @@ export function ListView({
                             const isStuckState = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
                             const isAgentActive = isTaskAgentActive(task, { globalPaused, isStuck: isStuckState });
                             const isReviewBudgetExhausted = isReviewBudgetExhaustedApproval(task);
+                            const showStatusBadge = Boolean(visualStatus)
+                              && !shouldSuppressPlanningStatusBadge({ status: visualStatus, column: task.column });
                             const planReviewRunning = isPlanReviewRunning(task);
                             const isDragging = draggingTaskId === task.id;
 
@@ -2947,7 +2952,7 @@ export function ListView({
                                       <span className="list-status-badge stuck">
                                         {t("listView.stuck", "Stuck")}
                                       </span>
-                                    ) : visualStatus ? (
+                                    ) : showStatusBadge ? (
                                       <span
                                         className={`list-status-badge list-status-badge--${task.column}${isReviewBudgetExhausted ? " list-status-badge--review-budget-exhausted" : ""}${isFailed ? " failed" : ""}${
                                           isAgentActive ? " pulsing" : ""

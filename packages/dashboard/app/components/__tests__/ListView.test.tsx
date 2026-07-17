@@ -2131,6 +2131,35 @@ describe("ListView", () => {
     expect(screen.queryByText("Reviewing")).not.toBeInTheDocument();
   });
 
+  it("FN-8170 suppresses stale planning only on Todo and In Progress table rows", () => {
+    const matchMediaSpy = mockDesktopViewport();
+    try {
+      renderListView({
+        tasks: [
+          createMockTask({ id: "FN-8170-todo", column: "todo", status: "planning" }),
+          createMockTask({ id: "FN-8170-active", column: "in-progress", status: "planning" }),
+          createMockTask({ id: "FN-8170-triage", column: "triage", status: "planning" }),
+          createMockTask({
+            id: "FN-8170-executing",
+            column: "in-progress",
+            status: "executing",
+            steps: [{ name: "Running step", status: "in-progress" }],
+          }),
+        ],
+      });
+
+      for (const id of ["FN-8170-todo", "FN-8170-active"]) {
+        const row = screen.getByText(id).closest("tr") as HTMLElement;
+        expect(within(row).queryByText("planning")).toBeNull();
+        expect(row.querySelector(".list-status-badge")).toHaveTextContent("-");
+      }
+      expect(within(screen.getByText("FN-8170-triage").closest("tr") as HTMLElement).getByText("planning")).toBeInTheDocument();
+      expect(within(screen.getByText("FN-8170-executing").closest("tr") as HTMLElement).getByText("executing")).toBeInTheDocument();
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
   it("renders paused tasks with dimmed styling", () => {
     const tasks = [createMockTask({ id: "FN-001", paused: true })];
 
@@ -5101,6 +5130,30 @@ describe("ListView - Bulk Selection", () => {
       expect(within(card as HTMLElement).getByText("FN-001")).toBeInTheDocument();
       expect(within(card as HTMLElement).getByText("Card title")).toBeInTheDocument();
       expect(within(card as HTMLElement).getByText("executing")).toBeInTheDocument();
+    });
+
+    it("FN-8170 suppresses stale planning only on Todo and In Progress mobile cards", () => {
+      mockMobileViewport();
+
+      const { container } = renderListView({
+        tasks: [
+          createMockTask({ id: "FN-8170-mobile-todo", column: "todo", status: "planning" }),
+          createMockTask({ id: "FN-8170-mobile-active", column: "in-progress", status: "planning" }),
+          createMockTask({ id: "FN-8170-mobile-triage", column: "triage", status: "planning" }),
+          createMockTask({
+            id: "FN-8170-mobile-executing",
+            column: "in-progress",
+            status: "executing",
+            steps: [{ name: "Running step", status: "in-progress" }],
+          }),
+        ],
+      });
+
+      for (const id of ["FN-8170-mobile-todo", "FN-8170-mobile-active"]) {
+        expect(within(container.querySelector(`[data-id="${id}"]`) as HTMLElement).queryByText("planning")).toBeNull();
+      }
+      expect(within(container.querySelector('[data-id="FN-8170-mobile-triage"]') as HTMLElement).getByText("planning")).toBeInTheDocument();
+      expect(within(container.querySelector('[data-id="FN-8170-mobile-executing"]') as HTMLElement).getByText("executing")).toBeInTheDocument();
     });
 
     it("shows fast indicator in mobile cards only for fast-mode tasks", () => {

@@ -2176,6 +2176,46 @@ describe("TaskCard", () => {
     expect(screen.getByText("executing")).toBeDefined();
   });
 
+  it.each([
+    { column: "todo" as const, status: "planning" },
+    { column: "in-progress" as const, status: "planning" },
+  ])("FN-8170 suppresses stale planning status and its empty header wrapper on $column cards", ({ column, status }) => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column, status })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("planning")).toBeNull();
+    expect(container.querySelector(".card-header-badges")).toBeNull();
+  });
+
+  it("FN-8170 preserves triage planning and non-planning status badges", () => {
+    const { rerender } = render(
+      <TaskCard
+        task={makeTask({ column: "triage", status: "planning" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+    expect(screen.getByText("planning")).toBeDefined();
+
+    rerender(
+      <TaskCard
+        task={makeTask({
+          column: "in-progress",
+          status: "executing",
+          steps: [{ name: "Executing step", status: "in-progress" }],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+    expect(screen.getByText("executing")).toBeDefined();
+  });
+
   it("renders merge-remediation status as merge-active for in-review tasks", () => {
     const { container } = render(
       <TaskCard
