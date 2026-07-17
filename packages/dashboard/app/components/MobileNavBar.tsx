@@ -626,7 +626,9 @@ export function MobileNavBar({
 
 
 
-            {effectiveOmittedItems.map((item) => renderSelectableItem(item, "more"))}
+            {effectiveOmittedItems
+              .filter((item) => item !== "settings")
+              .map((item) => renderSelectableItem(item, "more"))}
 
             {overflowPluginViews.map((entry) => {
                 const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
@@ -646,6 +648,13 @@ export function MobileNavBar({
               })}
 
             <div className="mobile-more-separator" />
+            {/*
+            FNXC:Navigation 2026-07-17-15:43:
+            Mobile More-sheet pins Settings below the `mobile-more-separator` divider so it stays at the bottom of
+            the list (FN-8250), not inline in the middle. The omitted-items guard prevents a duplicate when Settings
+            is promoted to a primary footer tab.
+            */}
+            {effectiveOmittedItems.includes("settings") && renderSelectableItem("settings", "more")}
 
           </div>
         </>

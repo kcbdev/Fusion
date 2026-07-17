@@ -703,6 +703,28 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
   });
 
+  it("pins omitted Settings below the More divider as the final selectable item", () => {
+    const { container } = render(<MobileNavBar {...createDefaultProps()} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+
+    const sheet = container.querySelector(".mobile-more-sheet");
+    const separator = sheet?.querySelector(".mobile-more-separator");
+    const settings = screen.getByTestId("mobile-more-item-settings");
+
+    expect(sheet).toBeInTheDocument();
+    expect(separator).toBeInTheDocument();
+    expect(separator!.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(Array.from(sheet!.querySelectorAll(".mobile-more-item")).at(-1)).toBe(settings);
+  });
+
+  it("does not duplicate Settings in More when Settings is a primary tab", () => {
+    render(<MobileNavBar {...createDefaultProps()} mobileNavPrimaryItems={["settings"]} />);
+
+    expect(screen.getByTestId("mobile-nav-tab-settings")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.queryByTestId("mobile-more-item-settings")).toBeNull();
+  });
+
   it("shows the stash orphan badge on the Git Manager item instead of a Stash Recovery item", () => {
     render(<MobileNavBar {...createDefaultProps()} stashOrphanCount={8} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
