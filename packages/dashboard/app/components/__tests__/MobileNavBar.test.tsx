@@ -152,6 +152,22 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
   });
 
+  it("promotes Planning and routes demoted Missions to More without an empty tab", () => {
+    const { container } = render(<MobileNavBar {...createDefaultProps()} mobileNavPrimaryItems={["command-center", "tasks", "agents", "planning", "chat", "mailbox"]} />);
+    expect(screen.getByTestId("mobile-nav-tab-planning")).toBeInTheDocument();
+    expect(screen.queryByTestId("mobile-nav-tab-missions")).toBeNull();
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-missions")).toBeInTheDocument();
+    expect(container.querySelector('[data-testid="mobile-nav-tab-missions"]')).toBeNull();
+  });
+
+  it("never promotes overflow-only ids and always keeps More", () => {
+    render(<MobileNavBar {...createDefaultProps()} mobileNavPrimaryItems={["settings", "planning"]} />);
+    expect(screen.queryByTestId("mobile-nav-tab-settings")).toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-planning")).toBeInTheDocument();
+    expect(screen.getByTestId("mobile-nav-tab-more")).toBeInTheDocument();
+  });
+
   it("does not render legacy roadmaps tab", () => {
     render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{}} />);
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();

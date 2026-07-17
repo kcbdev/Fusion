@@ -49,6 +49,15 @@ export const generalSearchEntries: SettingsSearchEntry[] = [
   },
   {
     sectionId: "general",
+    key: "mobileNavPrimaryItems",
+    labelKey: "settings.general.mobileNavPrimaryItems",
+    labelFallback: "Mobile footer quick actions",
+    helpKey: "settings.general.mobileNavPrimaryItemsHint",
+    helpFallback: "Default: Dashboard, Tasks, Agents, Missions, Chat, Mailbox. Unselected destinations remain in More.",
+    keywords: ["mobile", "footer", "navigation", "planning", "more"],
+  },
+  {
+    sectionId: "general",
     key: "quickChatButtonMode",
     labelKey: "settings.general.quickChatLauncher",
     labelFallback: "Quick Chat launcher",

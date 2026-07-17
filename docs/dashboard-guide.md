@@ -2034,3 +2034,7 @@ If the endpoint is unavailable on the running dashboard build, the response will
 In **Settings → Notifications**, enable **Agent clarification** to let Planning Mode pause when the planner needs an answer. The Planning Mode advanced settings include a per-session override, initialized from that global preference. With clarification disabled, proactive questions are redirected to a final plan summary instead of holding the session; the final summary deepening checkpoint is unchanged.
 
 When enabled, a proactive question holds the planner at `awaiting_input`, sends the configured `planning-awaiting-input` ntfy event, and delivers a dashboard mailbox message that links the operator back to planner chat. Mailbox delivery does not depend on ntfy configuration and is deduplicated by session/question across restarts.
+
+### Mobile footer quick actions
+
+In **Settings → General**, choose up to six Mobile footer quick actions with the ordered checkbox list. Planning can replace a default destination; use the adjacent earlier/later controls to set the footer order. Any unselected quick action moves to More, so it remains reachable.

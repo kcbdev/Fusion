@@ -253,6 +253,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   mailAutoCleanupDays: "general.deleteInboxOutboxMessagesOlderThanThisMany",
   operationalLogRetentionDays: "general.loweringThisWindowMeansReliabilityMetricsChartsAnd",
   quickChatButtonMode: "general.quickChatLauncherHint",
+  mobileNavPrimaryItems: "general.mobileNavPrimaryItemsHint",
   quickChatCloseOnOutsideClick: "general.quickChatCloseOnOutsideClickHint",
   showTaskChatsInCommonFeed: "general.showTaskChatsInCommonFeedHint",
   taskPrefix: "general.prefixForNewTaskIDsEGKB",

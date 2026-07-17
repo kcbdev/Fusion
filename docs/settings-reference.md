@@ -1773,3 +1773,7 @@ Values are project-scoped and finite values are floored; count/backoff must be a
 Escalation is enabled only when the toggle is true and either a complete provider/model pair or a node ID is configured. It is single-shot: after FN-7996 exhausts same-model retries, Fusion persists the override and tries once before the existing terminal park. The alternate model enters the [model-selection hierarchy](#model-selection-hierarchy) as a task-level override; a node target enters `resolveEffectiveNode` as a task-level routing override and is requeued so scheduler routing is recalculated. This remains opt-in by default to avoid unexpected model cost or execution behavior. Column-agent overrides still govern their sessions and can supersede a task-level model target.
 
 | `triageDuplicateResolution` | `"prompt" \| "keep" \| "delete"` | `"prompt"` | Controls `DUPLICATE: FN-NNNN` markers emitted during triage. **prompt** flags and system-pauses the task for an operator Keep/Delete decision; the existing decision banner links to the canonical task. **keep** dismisses the marker and replans a real task. **delete** restores legacy auto-delete behavior. |
+
+### `mobileNavPrimaryItems`
+
+Project-scoped ordered list of mobile footer quick actions. The default is `command-center`, `tasks`, `agents`, `missions`, `chat`, `mailbox`. The only selectable ids are those six plus `planning`; unknown, `more`, and overflow-only ids are ignored. Omitted selectable destinations remain reachable in the More sheet, whose trailing footer tab is always present.

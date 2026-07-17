@@ -1975,6 +1975,15 @@ export type {
 
 export { isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG } from "./experimental-features.js";
 export {
+  DEFAULT_MOBILE_NAV_PRIMARY_ITEMS,
+  MAX_MOBILE_NAV_PRIMARY_ITEMS,
+  MOBILE_NAV_SELECTABLE_ITEMS,
+  MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS,
+  resolveMobileNavPrimaryItems,
+  type MobileNavSelectableItem,
+  type ResolvedMobileNavPrimaryItems,
+} from "./mobile-nav-primary-items.js";
+export {
   POST_MERGE_VERIFICATION_GROUP_ID,
   postMergeOptionalGroupNode,
   postMergeVerificationOptionalGroupNode,

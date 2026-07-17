@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchConfig, fetchSettings, updateSettings, updateGlobalSettings } from "../api";
 import type { GlobalSettings, ProjectSettings } from "@fusion/core";
+import { resolveMobileNavPrimaryItems } from "../../../core/src/mobile-nav-primary-items";
 import type { ModelPricingOverrides } from "../../../core/src/model-pricing";
 import { setAutoReloadEnabled } from "../versionCheck";
 import { DEFAULT_DASHBOARD_KEYBOARD_SHORTCUTS, resolveDashboardKeyboardShortcuts, type DashboardKeyboardShortcutMap } from "../utils/keyboardShortcuts";
@@ -34,6 +35,7 @@ export interface UseAppSettingsResult {
   modelPricingOverrides?: ModelPricingOverrides;
   taskDetailChatFirst: boolean;
   quickChatButtonMode: QuickChatButtonMode;
+  mobileNavPrimaryItems: string[];
   quickChatCloseOnOutsideClick: boolean;
   dashboardKeyboardShortcuts: Required<DashboardKeyboardShortcutMap>;
   dismissModalsOnOutsideClick: boolean;
@@ -93,6 +95,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [modelPricingOverrides, setModelPricingOverrides] = useState<ModelPricingOverrides | undefined>(undefined);
   const [taskDetailChatFirst, setTaskDetailChatFirst] = useState(false);
   const [quickChatButtonMode, setQuickChatButtonMode] = useState<QuickChatButtonMode>("off");
+  const [mobileNavPrimaryItems, setMobileNavPrimaryItems] = useState<string[]>(() => resolveMobileNavPrimaryItems().primaryItems);
   const [quickChatCloseOnOutsideClick, setQuickChatCloseOnOutsideClick] = useState(true);
   const [dashboardKeyboardShortcuts, setDashboardKeyboardShortcuts] = useState<Required<DashboardKeyboardShortcutMap>>(DEFAULT_DASHBOARD_KEYBOARD_SHORTCUTS);
   const [dismissModalsOnOutsideClick, setDismissModalsOnOutsideClick] = useState(false);
@@ -161,6 +164,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
             ? "floating"
             : "off";
       setQuickChatButtonMode(nextQuickChatButtonMode);
+      setMobileNavPrimaryItems(resolveMobileNavPrimaryItems(settings).primaryItems);
       setQuickChatCloseOnOutsideClick(settings.quickChatCloseOnOutsideClick !== false);
       setDashboardKeyboardShortcuts(resolveDashboardKeyboardShortcuts((settings as GlobalSettings).dashboardKeyboardShortcuts));
       setDismissModalsOnOutsideClick(settings.dismissModalsOnOutsideClick === true);
@@ -349,6 +353,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     modelPricingOverrides,
     taskDetailChatFirst,
     quickChatButtonMode,
+    mobileNavPrimaryItems,
     quickChatCloseOnOutsideClick,
     dashboardKeyboardShortcuts,
     dismissModalsOnOutsideClick,

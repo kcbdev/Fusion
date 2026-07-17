@@ -4250,6 +4250,13 @@ export interface ProjectSettings {
   reviewHandoffPolicy?: "disabled" | "comment-triggered" | "always";
   /** Quick Chat launcher placement. "floating" shows the draggable FAB, "footer" shows a footer button, "off" hides both. */
   quickChatButtonMode?: "floating" | "footer" | "off";
+  /*
+   * FNXC:Navigation 2026-07-17-00:00:
+   * Ordered quick-action ids shown before the always-present mobile More tab. Only command-center,
+   * tasks, agents, missions, chat, mailbox, and planning are eligible; unset falls back to the
+   * default order, invalid/overflow-only ids (including more) are ignored, and omitted ids stay in More.
+   */
+  mobileNavPrimaryItems?: string[];
   /**
    * FNXC:ChatModal 2026-06-28-00:00:
    * Outside-click dismissal of Quick Chat is now user-configurable; default true preserves the prior always-on behavior from FN-7152.

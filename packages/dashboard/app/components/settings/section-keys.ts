@@ -69,6 +69,7 @@ const PROJECT_SECTION_KEYS: Record<string, readonly string[]> = {
     "ephemeralAgentsEnabled",
     "sessionAdvisorEnabledByDefault",
     "mailAutoCleanupDays",
+    "mobileNavPrimaryItems",
     "operationalLogRetentionDays",
     "quickChatButtonMode",
     "quickChatCloseOnOutsideClick",

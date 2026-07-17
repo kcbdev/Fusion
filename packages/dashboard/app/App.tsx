@@ -685,6 +685,7 @@ function AppInner() {
     modelPricingOverrides,
     taskDetailChatFirst,
     quickChatButtonMode,
+    mobileNavPrimaryItems,
     quickChatCloseOnOutsideClick,
     dashboardKeyboardShortcuts,
     dismissModalsOnOutsideClick,
@@ -1772,6 +1773,7 @@ function AppInner() {
         footerVisible={viewMode === "project" && !!currentProject}
         modalOpen={modalManager.anyModalOpen}
         keyboardOpen={mobileNavKeyboardOpen}
+        mobileNavPrimaryItems={mobileNavPrimaryItems}
         onOpenSettings={openSettingsWithNav}
         onOpenActivityLog={openActivityLogWithNav}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}

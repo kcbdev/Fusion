@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type WorkflowDefinition } from "@fusion/core";
+import { DEFAULT_MOBILE_NAV_PRIMARY_ITEMS, MAX_MOBILE_NAV_PRIMARY_ITEMS, MOBILE_NAV_SELECTABLE_ITEMS } from "../../../../../core/src/mobile-nav-primary-items";
+import { SettingsFieldRow } from "../SettingsFieldRow";
 import { SettingsToggleRow } from "../SettingsToggleRow";
 import { SettingsSelectRow } from "../SettingsSelectRow";
 import { SettingsNumberRow } from "../SettingsNumberRow";
@@ -289,6 +291,49 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
             return { ...f, quickChatButtonMode: mode, showQuickChatFAB: mode === "floating" };
         })}
       />
+      {/*
+        FNXC:Navigation 2026-07-17-00:00:
+        The Settings control exposes only the fixed seven-item quick-action universe. Checkboxes choose
+        destinations and the adjacent controls preserve their selected order; core still sanitizes persisted
+        values so unselected destinations remain reachable through More and its trailing tab cannot be removed.
+        */}
+      <SettingsFieldRow
+        htmlFor="mobileNavPrimaryItems"
+        label={t("settings.general.mobileNavPrimaryItems", "Mobile footer quick actions")}
+        help={t("settings.general.mobileNavPrimaryItemsHint", "Default: Dashboard, Tasks, Agents, Missions, Chat, Mailbox. Unselected destinations remain in the More menu.")}
+        scope="project"
+      >
+        <div role="group" aria-label={t("settings.general.mobileNavPrimaryItems", "Mobile footer quick actions")}>
+          {MOBILE_NAV_SELECTABLE_ITEMS.map((item) => {
+            const selectedItems = Array.isArray(form.mobileNavPrimaryItems)
+              ? form.mobileNavPrimaryItems
+              : DEFAULT_MOBILE_NAV_PRIMARY_ITEMS;
+            const selectedIndex = selectedItems.indexOf(item);
+            const selected = selectedIndex >= 0;
+            const label = t(`nav.${item === "command-center" ? "commandCenter" : item}`, item);
+            const updateItems = (nextItems: string[]) => setForm((current) => ({ ...current, mobileNavPrimaryItems: nextItems }));
+            return (
+              <div key={item}>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={!selected && selectedItems.length >= MAX_MOBILE_NAV_PRIMARY_ITEMS}
+                    onChange={(event) => updateItems(event.target.checked ? [...selectedItems, item] : selectedItems.filter((selectedItem) => selectedItem !== item))}
+                  />
+                  <span>{label}</span>
+                </label>
+                {selected && (
+                  <>
+                    <button type="button" className="btn btn-icon" disabled={selectedIndex === 0} aria-label={t("settings.general.moveNavItemEarlier", "Move {{item}} earlier", { item: label })} onClick={() => updateItems(selectedItems.map((selectedItem, index) => index === selectedIndex - 1 ? item : index === selectedIndex ? selectedItems[index - 1] : selectedItem))}>↑</button>
+                    <button type="button" className="btn btn-icon" disabled={selectedIndex === selectedItems.length - 1} aria-label={t("settings.general.moveNavItemLater", "Move {{item}} later", { item: label })} onClick={() => updateItems(selectedItems.map((selectedItem, index) => index === selectedIndex + 1 ? item : index === selectedIndex ? selectedItems[index + 1] : selectedItem))}>↓</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </SettingsFieldRow>
       {/*
         FNXC:ChatModal 2026-06-28-00:00:
         Operators need a Settings > General toggle for Quick Chat outside-click dismissal because accidental board clicks can otherwise close active chat context. Default checked preserves the shipped FN-7152 interaction.

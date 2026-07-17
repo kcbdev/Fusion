@@ -38,6 +38,7 @@ import { NavigationHistoryContext } from "../hooks/useNavigationHistory";
 import type { TaskView } from "../hooks/useViewState";
 import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
 import { getPluginDashboardViewNavIcon } from "./pluginNavIcon";
+import { resolveMobileNavPrimaryItems, type MobileNavSelectableItem } from "../../../core/src/mobile-nav-primary-items";
 
 export interface PublishedMobileNavHeightInput {
   navOffsetHeight: number;
@@ -116,6 +117,8 @@ export interface MobileNavBarProps {
   };
   pluginDashboardViews?: PluginDashboardViewEntry[];
   shellConnectionControl?: ReactNode;
+  /** Ordered quick-action tabs; invalid values resolve to the safe default. */
+  mobileNavPrimaryItems?: string[];
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -167,6 +170,7 @@ export function MobileNavBar({
   experimentalFeatures,
   pluginDashboardViews = [],
   shellConnectionControl,
+  mobileNavPrimaryItems,
 }: MobileNavBarProps) {
   const { t } = useTranslation("app");
   const mode = useViewportMode();
@@ -402,8 +406,10 @@ export function MobileNavBar({
     .filter((entry) => !topLevelPluginViewKeys.has(`${entry.pluginId}:${entry.view.viewId}`))
     .sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER));
 
+  const { primaryItems, omittedItems } = resolveMobileNavPrimaryItems({ mobileNavPrimaryItems });
   const isMoreActive =
-    view === "documents"
+    omittedItems.some((item) => (item === "tasks" ? view === "board" || view === "list" : view === item))
+    || view === "documents"
     || (Boolean(experimentalFeatures?.evalsView) && view === "evals")
     || (Boolean(experimentalFeatures?.goalsView) && view === "goalsView")
     || view === "research"
@@ -417,6 +423,29 @@ export function MobileNavBar({
     || view === "graph"
     || (isPluginViewId(view) && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
 
+  /*
+  FNXC:Navigation 2026-07-17-00:00:
+  A configured quick-action destination renders exactly once: as a footer tab or as a More-sheet item.
+  This preserves its handlers and indicators while ensuring invalid settings cannot strand navigation.
+  */
+  const renderSelectableItem = (item: MobileNavSelectableItem, surface: "primary" | "more") => {
+    const isPrimary = surface === "primary";
+    const active = item === "tasks" ? view === "board" || view === "list" : view === item;
+    const navigate = () => {
+      if (item === "tasks") onChangeView(view === "board" || view === "list" ? view : "board");
+      else if (item === "planning") { if (isPrimary) planningHandler?.(); else handleMoreAction(planningHandler); }
+      else if (isPrimary) onChangeView(item);
+      else handleMoreAction(() => onChangeView(item));
+    };
+    const icon = item === "command-center" ? <Gauge /> : item === "tasks" ? <LayoutGrid /> : item === "agents" ? <Bot /> : item === "missions" ? <Target /> : item === "chat" ? <MessageSquare /> : item === "mailbox" ? <Mail /> : <Lightbulb />;
+    const label = t(`nav.${item === "command-center" ? "commandCenter" : item}`, item === "command-center" ? "Dashboard" : item[0].toUpperCase() + item.slice(1));
+    const indicator = (item === "chat" && chatHasUnreadResponse && !active) || (item === "mailbox" && mailboxPendingApprovalCount > 0 && !active) || (item === "planning" && planningNeedsInput && !active);
+    const badge = item === "mailbox" ? mailboxUnreadCount : item === "planning" ? activePlanningSessionCount : 0;
+    const indicatorLabel = item === "chat" ? t("nav.chatUnreadAriaLabel", "Unread chat response") : item === "mailbox" ? t("nav.mailboxPendingAriaLabel", "Pending approvals") : t("nav.planningNeedsInputAriaLabel", "Planning needs your input");
+    if (isPrimary) return <button key={item} type="button" className={`mobile-nav-tab${active ? " mobile-nav-tab--active" : ""}`} data-testid={`mobile-nav-tab-${item}`} role="tab" aria-selected={active} onClick={navigate}><span className="mobile-nav-tab-icon-wrapper">{icon}{indicator && <span className="status-dot status-dot--pending mobile-nav-chat-unread-dot" aria-label={indicatorLabel} />}</span><span className="mobile-nav-tab-label">{label}</span>{badge > 0 && <span className="mobile-nav-tab-badge">{formatCount(badge)}</span>}</button>;
+    return <button key={item} type="button" className="mobile-more-item" data-testid={`mobile-more-item-${item}`} onClick={navigate}><span className="mobile-more-item-icon-wrapper">{icon}{indicator && <span className="status-dot status-dot--pending mobile-more-item-icon-dot" aria-label={indicatorLabel} />}</span><span>{label}</span>{badge > 0 && <span className="mobile-more-item-badge">{formatCount(badge)}</span>}</button>;
+  };
+
   return (
     <>
       <nav
@@ -425,115 +454,7 @@ export function MobileNavBar({
         role="tablist"
         aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}
       >
-        {/*
-        FNXC:Navigation 2026-06-22-01:40:
-        Dashboard (Command Center) is the first mobile tab, before Tasks, matching the desktop sidebar order.
-        */}
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "command-center" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-command-center"
-          role="tab"
-          aria-selected={view === "command-center"}
-          onClick={() => onChangeView("command-center")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Gauge />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.commandCenter", "Dashboard")}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "board" || view === "list" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-tasks"
-          role="tab"
-          aria-selected={view === "board" || view === "list"}
-          onClick={() => {
-            // If already on a tasks view, stay there; otherwise go to board
-            if (view === "board" || view === "list") {
-              onChangeView(view);
-            } else {
-              onChangeView("board");
-            }
-          }}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <LayoutGrid />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.tasks", "Tasks")}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "agents" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-agents"
-          role="tab"
-          aria-selected={view === "agents"}
-          onClick={() => onChangeView("agents")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Bot />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.agents", "Agents")}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "missions" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-missions"
-          role="tab"
-          aria-selected={view === "missions"}
-          onClick={() => onChangeView("missions")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Target />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.missions", "Missions")}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "chat" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-chat"
-          role="tab"
-          aria-selected={view === "chat"}
-          onClick={() => onChangeView("chat")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <MessageSquare />
-            {chatHasUnreadResponse && view !== "chat" && (
-              <span className="status-dot status-dot--pending mobile-nav-chat-unread-dot" aria-label={t("nav.chatUnreadAriaLabel", "Unread chat response")} />
-            )}
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.chat", "Chat")}</span>
-        </button>
-
-
-        {/*
-        FNXC:Navigation 2026-06-19-12:30:
-        Mailbox is a top-level mobile tab only and must not be duplicated in the three-dot More sheet; Todos lives only in the three-dot overflow/More menu, never the main tab list.
-        Keep unread and pending-approval indicators on this surviving Mailbox tab so removing the More-sheet duplicate does not hide mailbox state.
-        */}
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "mailbox" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-mailbox"
-          role="tab"
-          aria-selected={view === "mailbox"}
-          onClick={() => onChangeView("mailbox")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Mail />
-            {mailboxPendingApprovalCount > 0 && view !== "mailbox" && (
-              <span className="status-dot status-dot--pending mobile-nav-chat-unread-dot" aria-label={t("nav.mailboxPendingAriaLabel", "Pending approvals")} />
-            )}
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.mailbox", "Mailbox")}</span>
-          {mailboxUnreadCount > 0 && (
-            <span className="mobile-nav-tab-badge">{formatCount(mailboxUnreadCount)}</span>
-          )}
-        </button>
+        {primaryItems.map((item) => renderSelectableItem(item, "primary"))}
 
         {showSkillsTopLevel && (
           <button
@@ -737,23 +658,7 @@ export function MobileNavBar({
               <span>{t("nav.files", "Files")}</span>
             </button>
 
-            <button
-              type="button"
-              className="mobile-more-item"
-              data-testid="mobile-more-item-planning"
-              onClick={() => handleMoreAction(planningHandler)}
-            >
-              <span className="mobile-more-item-icon-wrapper">
-                <Lightbulb />
-                {planningNeedsInput && (
-                  <span className="status-dot status-dot--pending mobile-more-item-icon-dot" aria-label={t("nav.planningNeedsInputAriaLabel", "Planning needs your input")} />
-                )}
-              </span>
-              <span>{t("nav.planning", "Planning")}</span>
-              {activePlanningSessionCount > 0 && (
-                <span className="mobile-more-item-badge">{formatCount(activePlanningSessionCount)}</span>
-              )}
-            </button>
+            {omittedItems.map((item) => renderSelectableItem(item, "more"))}
 
             <button
               type="button"
