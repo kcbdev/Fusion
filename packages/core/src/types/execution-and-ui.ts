@@ -128,6 +128,7 @@ export const COLOR_THEMES = [
   "shadcn-pink",
   "shadcn-orange",
   "shadcn-yellow",
+  "shadcn-mono",
   "shadcn-mono-red",
   "shadcn-mono-blue",
   "shadcn-mono-green",

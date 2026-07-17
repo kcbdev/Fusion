@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { CommandCenterControls } from "../CommandCenterControls";
 import { ConfirmDialogProvider } from "../../../hooks/useConfirm";
 
@@ -73,6 +73,17 @@ function expectCommandCenterUseOffset(testId: string, ratio: number) {
   );
 }
 
+// FNXC:Theme 2026-07-16-14:30: FN-8146 pins the historical Settings-grid set, including restored shadcn-mono, so a removal from COLOR_THEMES cannot make the all-themes checks pass circularly.
+const EXPECTED_THEME_IDS = ['default', 'ocean', 'forest', 'sunset', 'zen', 'berry', 'high-contrast', 'industrial', 'monochrome', 'slate', 'ash', 'air', 'graphite', 'silver', 'solarized', 'factory', 'factory-mono', 'ayu', 'one-dark', 'nord', 'dracula', 'gruvbox', 'tokyo-night', 'catppuccin-mocha', 'github-dark', 'everforest', 'rose-pine', 'kanagawa', 'night-owl', 'palenight', 'monokai-pro', 'slime', 'brutalist', 'neon-city', 'parchment', 'terminal', 'glass', 'glass-silver', 'horizon', 'vitesse', 'outrun', 'snazzy', 'porple', 'espresso', 'mars', 'poimandres', 'ember', 'rust', 'copper', 'foundry', 'carbon', 'sandstone', 'lagoon', 'frost', 'lavender', 'neon-bloom', 'sepia', 'cobalt', 'clay', 'moss', 'shadcn', 'shadcn-ember', 'shadcn-custom', 'shadcn-blue', 'shadcn-green', 'shadcn-red', 'shadcn-purple', 'shadcn-pink', 'shadcn-orange', 'shadcn-yellow', 'shadcn-mono', 'shadcn-mono-red', 'shadcn-mono-blue', 'shadcn-mono-green', 'shadcn-mono-purple', 'shadcn-mono-pink', 'shadcn-mono-orange', 'shadcn-mono-yellow', 'shadcn-black', 'shadcn-gray', 'shadcn-gray-blue'] as const;
+
+function renderedThemeIds(listbox: HTMLElement) {
+  return within(listbox).getAllByRole("option").map((option) => {
+    const swatch = option.querySelector<HTMLElement>(".theme-option-swatch");
+    expect(swatch).toBeTruthy();
+    return [...(swatch?.classList ?? [])].find((className) => className.startsWith("theme-swatch-"))?.replace("theme-swatch-", "");
+  });
+}
+
 describe("CommandCenterControls concurrency markers", () => {
   beforeEach(() => {
     legacyMocks.fetchConfig.mockResolvedValue({ maxConcurrent: 12, rootDir: "/workspace/project" });
@@ -94,6 +105,8 @@ describe("CommandCenterControls concurrency markers", () => {
 
     expect(themeCard).toContainElement(trigger);
     fireEvent.click(trigger);
+    const listbox = screen.getByRole("listbox", { name: "Color theme" });
+    expect(renderedThemeIds(listbox)).toEqual(EXPECTED_THEME_IDS);
     fireEvent.click(screen.getByRole("option", { name: "Ocean" }));
 
     expect(onColorThemeChange).toHaveBeenCalledWith("ocean");

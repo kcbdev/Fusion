@@ -1,10 +1,9 @@
 import "./ThemeSelector.css";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Sun, Moon, Monitor } from "lucide-react";
 import type { ThemeMode, ColorTheme } from "@fusion/core";
 import { THEME_MODES } from "./themeOptions";
-import { ThemeDropdown, resolveColorTheme } from "./ThemeDropdown";
+import { ThemeDropdown } from "./ThemeDropdown";
 
 interface ThemeSelectorProps {
   themeMode: ThemeMode;
@@ -40,7 +39,6 @@ export function ThemeSelector({
   onShadcnCustomColorsChange = () => {},
 }: ThemeSelectorProps) {
   const { t } = useTranslation("app");
-  const currentColorTheme = resolveColorTheme(colorTheme);
   const handleReset = useCallback(() => {
     onThemeModeChange("system");
     /*
@@ -71,26 +69,16 @@ export function ThemeSelector({
         ))}
       </div>
 
-      {/* Current Theme Preview */}
-      <div className="theme-current-preview">
-        <div className="theme-preview-icon">
-          {themeMode === "light" ? (
-            <Sun size={20} />
-          ) : themeMode === "dark" ? (
-            <Moon size={20} />
-          ) : (
-            <Monitor size={20} />
-          )}
-        </div>
-        <div className="theme-preview-info">
-          <div className="theme-preview-label">{t("theme.currentTheme", "Current theme")}</div>
-          <div className="theme-preview-value">
-            {themeMode === "system" ? "System" : `${themeMode.charAt(0).toUpperCase() + themeMode.slice(1)}`}
-            {" / "}
-            {currentColorTheme.label}
-          </div>
-        </div>
-      </div>
+      {/* FNXC:Theme 2026-07-16-14:30: FN-8146 makes the current-theme row the sole Settings color-theme trigger, replacing the separate static preview and standalone dropdown without adding a second mode control. */}
+      <ThemeDropdown
+        triggerVariant="current-row"
+        colorTheme={colorTheme}
+        themeMode={themeMode}
+        onColorThemeChange={onColorThemeChange}
+        shadcnCustomColors={shadcnCustomColors}
+        resolvedThemeMode={resolvedThemeMode}
+        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+      />
 
       <div className="theme-section-title">{t("theme.fontSize", "Font Size")}</div>
       <div className="theme-font-size-toggle" role="radiogroup" aria-label={t("theme.fontSizeLabel", "Dashboard font size")}>
@@ -106,17 +94,6 @@ export function ThemeSelector({
         ))}
       </div>
 
-      {/*
-      FNXC:Theme 2026-07-16-12:00:
-      Settings Appearance reuses ThemeDropdown so it has the same compact, keyboard-accessible color-theme affordance as the Command Center. ThemeSelector retains its mode, font-size, and reset controls, while ThemeDropdown remains the sole custom-color picker owner to avoid duplicate controls.
-      */}
-      <ThemeDropdown
-        colorTheme={colorTheme}
-        onColorThemeChange={onColorThemeChange}
-        shadcnCustomColors={shadcnCustomColors}
-        resolvedThemeMode={resolvedThemeMode}
-        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
-      />
 
       {/* Reset Button */}
       <button

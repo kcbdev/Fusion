@@ -85,6 +85,8 @@ export const COLOR_THEMES: { value: ColorTheme; label: string; className: string
   { value: "shadcn-pink", label: "Shadcn Pink", className: "theme-swatch-shadcn-pink" },
   { value: "shadcn-orange", label: "Shadcn Orange", className: "theme-swatch-shadcn-orange" },
   { value: "shadcn-yellow", label: "Shadcn Yellow", className: "theme-swatch-shadcn-yellow" },
+  /* FNXC:DashboardTheming 2026-07-16-14:30: FN-8146 restores the historical Shadcn Mono selector after its FN-6813 migration to Mono Red, so operators can still choose the id shown by the old Settings grid. It intentionally shares Mono Red's tokens. */
+  { value: "shadcn-mono", label: "Shadcn Mono", className: "theme-swatch-shadcn-mono" },
   { value: "shadcn-mono-red", label: "Shadcn Mono Red", className: "theme-swatch-shadcn-mono-red" },
   { value: "shadcn-mono-blue", label: "Shadcn Mono Blue", className: "theme-swatch-shadcn-mono-blue" },
   { value: "shadcn-mono-green", label: "Shadcn Mono Green", className: "theme-swatch-shadcn-mono-green" },
