@@ -24,6 +24,7 @@ const mockState = vi.hoisted(() => {
 vi.mock("@whiskeysockets/baileys", () => ({
   default: mockState.makeWASocket,
   makeWASocket: mockState.makeWASocket,
+  fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 0], isLatest: true }),
   DisconnectReason: { loggedOut: 401 },
   BufferJSON: { reviver: undefined, replacer: undefined },
   initAuthCreds: () => ({}),
@@ -140,11 +141,12 @@ describe("WhatsAppConnection", () => {
     const connection = new WhatsAppConnection(makeCtx(), "0.1.0", vi.fn().mockResolvedValue("reply"), createInMemoryPersistence());
     await connection.start();
     await mockState.handlers.get("connection.update")?.({ connection: "close", lastDisconnect: { error: new Error("boom") } });
-    vi.advanceTimersByTime(1000);
+    // connect() awaits fetchLatestBaileysVersion before building the socket, so flush microtasks after the timer fires.
+    await vi.advanceTimersByTimeAsync(1000);
     expect(mockState.makeWASocket).toHaveBeenCalledTimes(2);
 
     await mockState.handlers.get("connection.update")?.({ connection: "close", lastDisconnect: { error: { output: { statusCode: 401 } } } });
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(mockState.makeWASocket).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });

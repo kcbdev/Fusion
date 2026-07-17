@@ -203,6 +203,13 @@ async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = fal
     target: "node22",
     outfile: join(destDir, "bundled.js"),
     external: ["@fusion/engine", ...external],
+    /*
+     * FNXC:BundledPlugins 2026-07-17-09:20:
+     * CJS dependencies bundled into ESM output (e.g. Baileys in the WhatsApp plugin) compile to esbuild's __require helper, which throws "Dynamic require of \"crypto\" is not supported" at load time in an ESM module. Inject the same createRequire shim dist/bin.js uses so every bundled.js can require node builtins.
+     */
+    banner: {
+      js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
+    },
     alias: {
       "@fusion/plugin-sdk": join(__dirname, "..", "plugin-sdk", "src", "index.ts"),
       /*

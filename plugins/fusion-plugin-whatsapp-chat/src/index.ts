@@ -95,11 +95,16 @@ const routes: PluginRouteDefinition[] = [
       const { connection, error } = getConnectionOrResponse(ctx);
       if (!connection) return error as PluginRouteResponse;
       const status = connection.getStatus();
+      /**
+       * FNXC:WhatsAppStatusVisibility 2026-07-17-09:15:
+       * /status must expose lastError: a stale-protocol 405 rejection previously showed only a bare "disconnected" with no way to diagnose it from the API surface the README points troubleshooters at.
+       */
       return {
         status: 200,
         body: {
           status: status.state,
           jid: status.jid,
+          lastError: status.lastError,
           allowedSenders: Array.from(getAllowedSenders(ctx.settings)),
         },
       };
