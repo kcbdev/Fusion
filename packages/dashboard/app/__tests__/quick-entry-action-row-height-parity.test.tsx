@@ -205,7 +205,7 @@ describe("quick-entry action row height parity (FN-7680)", () => {
     expect(mobileBlockMatch![1].trim()).toBe("var(--quick-entry-action-row-height-mobile)");
   });
 
-  it("enlarges every mobile action-row glyph with tokenized sizing and tightens horizontal spacing", () => {
+  it("keeps options-group glyphs intrinsic while sizing only mobile primary controls", () => {
     const cssContent = loadAllAppCss();
     const markerStart = cssContent.indexOf("Quick Entry Mobile Touch + Overflow Fixes");
     expect(markerStart).toBeGreaterThan(-1);
@@ -215,25 +215,24 @@ describe("quick-entry action row height parity (FN-7680)", () => {
     expect(sectionEnd).toBeGreaterThan(sectionStart);
     const mobileSection = cssContent.slice(sectionStart, sectionEnd);
 
-    // FNXC:QuickAddActionRow 2026-07-16-16:00: JSDOM cannot resolve CSS vars or
-    // render mocked lucide glyphs, so source-contract assertions prove the
-    // mobile-only cascade covers both option and primary groups. The broad
-    // primary-group selector includes the session-advisor glyph rather than
-    // leaving it at its inline 14px size.
+    // FNXC:QuickAddActionRow 2026-07-17-00:00: FN-8211 locks the operator
+    // requirement that mobile Deps, Models, and Agent glyphs retain their
+    // intrinsic sizes. JSDOM cannot resolve CSS vars or render mocked lucide
+    // glyphs, so this source contract proves the enlargement remains limited
+    // to the primary controls and cannot regress into the options group.
     const iconRule = mobileSection.match(
-      /\.quick-entry-options-group svg,\s*\n\s*\.quick-entry-primary-group svg\s*\{([^}]*)\}/,
+      /\.quick-entry-primary-group \.btn-icon svg,\s*\n\s*\.quick-entry-primary-group \[data-testid="quick-entry-priority-button"\] svg,\s*\n\s*\.quick-entry-primary-group \[data-testid="quick-entry-fast-toggle"\] svg\s*\{([^}]*)\}/,
     );
     expect(iconRule).not.toBeNull();
-    expect(iconRule![1]).toMatch(/width:\s*calc\(var\(--space-md\) \+ var\(--space-sm\)\);/);
-    expect(iconRule![1]).toMatch(/height:\s*calc\(var\(--space-md\) \+ var\(--space-sm\)\);/);
+    expect(iconRule![1]).toMatch(/width:\s*var\(--space-lg\);/);
+    expect(iconRule![1]).toMatch(/height:\s*var\(--space-lg\);/);
     expect(iconRule![1]).not.toMatch(/\d+(?:\.\d+)?px/);
+    expect(mobileSection).not.toMatch(/\.quick-entry-options-group svg/);
 
     const stylesCss = loadStylesCss();
-    const mediumToken = stylesCss.match(/--space-md:\s*(\d+)px;/);
-    const smallToken = stylesCss.match(/--space-sm:\s*(\d+)px;/);
-    expect(mediumToken).not.toBeNull();
-    expect(smallToken).not.toBeNull();
-    expect(Number(mediumToken![1]) + Number(smallToken![1])).toBeGreaterThan(16);
+    const largeToken = stylesCss.match(/--space-lg:\s*(\d+)px;/);
+    expect(largeToken).not.toBeNull();
+    expect(Number(largeToken![1])).toBeGreaterThan(14);
 
     const actionGapRule = mobileSection.match(/\.quick-entry-actions\s*\{([^}]*)\}/);
     const optionGapRule = mobileSection.match(/\.quick-entry-options-group\s*\{([^}]*)\}/);

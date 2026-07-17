@@ -831,14 +831,19 @@ FN-7682 — the tokenized-CSS test forbids raw px in the workflow-selector rules
   */
   /*
   FNXC:QuickAddActionRow 2026-07-16-16:00:
-  FN-8186 refines FN-8164 after mobile feedback: every rendered action-row
-  glyph uses the tokenized 20px composite size, rather than enlarging only
-  primary icon controls by 2px. Scoping to the two row groups covers option,
-  text, and icon controls (including the session-advisor toggle) without
-  changing desktop. Their horizontal padding is tightened locally so the larger
-  glyphs remain compact and Save keeps its never-clipped content width. The
-  FN-7683 fixed 36px touch-target height and 32px icon-button width floor stay
-  intact for accessibility.
+  FN-8186 broadened the mobile glyph-size override to both action-row groups.
+  It retained compact horizontal padding, Save's never-clipped content width,
+  and the FN-7683 fixed 36px touch-target height and 32px icon-button width
+  floor.
+
+  FNXC:QuickAddActionRow 2026-07-17-00:00:
+  FN-8211 reverts FN-8186's broad options-group and primary-group glyph
+  enlargement: operators reported the Deps, Models, and Agent options-group
+  icons read too large at 20px on mobile. Scope the mobile glyph-size override
+  back to the FN-8164 primary icon controls (Save, Attach, GitHub, Priority,
+  and Fast) at --space-lg so options-group controls fall back to their
+  intrinsic size={12}/size={14}. Desktop and the FN-7683 36px touch-target
+  floor are unchanged.
   */
   .quick-entry-actions {
     justify-content: space-between;
@@ -867,10 +872,11 @@ FN-7682 — the tokenized-CSS test forbids raw px in the workflow-selector rules
     min-width: var(--space-2xl);
   }
 
-  .quick-entry-options-group svg,
-  .quick-entry-primary-group svg {
-    width: calc(var(--space-md) + var(--space-sm));
-    height: calc(var(--space-md) + var(--space-sm));
+  .quick-entry-primary-group .btn-icon svg,
+  .quick-entry-primary-group [data-testid="quick-entry-priority-button"] svg,
+  .quick-entry-primary-group [data-testid="quick-entry-fast-toggle"] svg {
+    width: var(--space-lg);
+    height: var(--space-lg);
   }
 
   .quick-entry-box .dep-dropdown {
