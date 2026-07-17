@@ -228,6 +228,9 @@ The Thinking Level <select> renders inside the createPortal dropdown (.model-com
 /*
 FNXC:ModelDropdown 2026-07-09-00:00:
 FN-7760 requires the portaled model list to remain the touch-scroll owner on mobile. The global mobile lockdown keeps body/root overflow hidden and defaults touch gestures to vertical panning, so this fixed-position scroller needs its own iOS momentum scrolling, contained overscroll, and explicit vertical pan contract.
+
+FNXC:ModelDropdown 2026-07-15-00:00:
+FN-8212 refines FN-8193 by removing the scroller's top padding. A sticky provider header anchors at the list top, so top padding exposed scrolling model rows in a seam between the fixed header stack and that header. Bottom token spacing preserves the list's trailing rhythm.
 */
 .model-combobox-list {
   flex: 1;
@@ -236,7 +239,7 @@ FN-7760 requires the portaled model list to remain the touch-scroll owner on mob
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
-  padding: 4px 0;
+  padding: 0 0 var(--space-xs);
 }
 
 .model-combobox-option {

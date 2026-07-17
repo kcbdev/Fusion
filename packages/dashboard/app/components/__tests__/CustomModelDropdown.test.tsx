@@ -65,6 +65,52 @@ describe("CustomModelDropdown", () => {
     expect(within(list!).getByText("openai").closest(".model-combobox-optgroup")).not.toBeNull();
   });
 
+  it.each([
+    { width: 1024, query: "desktop", showThinking: false },
+    { width: 1024, query: "desktop", showThinking: true },
+    { width: 768, query: "(max-width: 768px)", showThinking: false },
+    { width: 768, query: "(max-width: 768px)", showThinking: true },
+    { width: 640, query: "(max-width: 640px)", showThinking: false },
+    { width: 640, query: "(max-width: 640px)", showThinking: true },
+  ])("keeps the provider header flush with the fixed header stack at $query with thinking $showThinking", async ({ width, showThinking }) => {
+    const user = userEvent.setup();
+    const css = readFileSync(resolve(__dirname, "../CustomModelDropdown.css"), "utf-8");
+    const listRules = css.match(/\.model-combobox-list\s*\{[^}]*\}/g) ?? [];
+
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(width);
+    render(
+      <CustomModelDropdown
+        label="Executor Model"
+        value=""
+        onChange={vi.fn()}
+        models={COLLAPSIBLE_MODELS}
+        favoriteModels={["anthropic/claude-haiku"]}
+        thinkingLevel={showThinking ? "high" : undefined}
+        onThinkingLevelChange={showThinking ? vi.fn() : undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Executor Model" }));
+
+    const portal = await screen.findByTestId("model-combobox-portal");
+    const list = portal.querySelector(".model-combobox-list");
+    const firstProviderGroup = Array.from(list?.children ?? []).find((child) =>
+      child.classList.contains("model-combobox-group"),
+    );
+
+    // JSDOM cannot scroll sticky elements; the zero top inset is the structural no-seam invariant.
+    expect(listRules).toHaveLength(1);
+    expect(listRules[0]).toContain("padding: 0 0 var(--space-xs);");
+    expect(listRules[0]).not.toMatch(/padding-top\s*:\s*(?!0[;}])/);
+    expect(firstProviderGroup?.querySelector(".model-combobox-optgroup")).not.toBeNull();
+    expect(firstProviderGroup?.parentElement).toBe(list);
+    if (showThinking) {
+      expect(portal.querySelector(".model-combobox-thinking")).not.toBeNull();
+    } else {
+      expect(portal.querySelector(".model-combobox-thinking")).toBeNull();
+    }
+  });
+
   it("collapses provider rows, preserves special rows, and persists the preference", async () => {
     const user = userEvent.setup();
 
