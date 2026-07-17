@@ -1,9 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { loadAllAppCss } from "../../test/cssFixture";
 
 describe("ConfirmDialog", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders title and message", () => {
     render(
       <ConfirmDialog
@@ -78,7 +82,8 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onCancel when a backdrop press and click both originate on the overlay", () => {
+  it("calls onCancel when a deliberate post-settle backdrop press and click both originate on the overlay", () => {
+    vi.useFakeTimers();
     const onCancel = vi.fn();
     render(
       <ConfirmDialog
@@ -92,9 +97,32 @@ describe("ConfirmDialog", () => {
     // FNXC: ConfirmDialog portals to document.body, so query from document (not the render container).
     const overlay = document.querySelector(".modal-overlay");
     expect(overlay).toBeTruthy();
-    fireEvent.pointerDown(overlay as Element);
+    vi.advanceTimersByTime(500);
+    fireEvent.pointerDown(overlay as Element, { pointerType: "mouse", isPrimary: true });
     fireEvent.click(overlay as Element);
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores the opening touch-to-mouse ghost burst even when it starts and ends on the overlay", () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn();
+    render(
+      <ConfirmDialog
+        isOpen={true}
+        options={{ title: "Delete Task", message: "Delete FN-001?", danger: true }}
+        onConfirm={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    const overlay = document.querySelector(".confirm-dialog-overlay");
+    expect(overlay).toBeTruthy();
+    fireEvent.mouseDown(overlay as Element);
+    fireEvent.mouseUp(overlay as Element);
+    fireEvent.click(overlay as Element);
+
+    expect(screen.getByRole("dialog", { name: "Delete Task" })).toBeInTheDocument();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it("renders and handles tertiary action when configured", () => {

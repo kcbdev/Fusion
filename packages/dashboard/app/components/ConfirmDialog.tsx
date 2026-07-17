@@ -5,6 +5,8 @@ import type { ConfirmOptions } from "../hooks/useConfirm";
 import { nextFloatingZ } from "./floatingWindowStack";
 import "./ConfirmDialog.css";
 
+const OPENING_GESTURE_SETTLE_MS = 500;
+
 export interface ConfirmDialogProps {
   isOpen: boolean;
   options: ConfirmOptions | null;
@@ -36,8 +38,13 @@ export function ConfirmDialog({
   */
   const [overlayZ, setOverlayZ] = useState<number | undefined>(undefined);
   const backdropPressStartedHereRef = useRef(false);
+  const backdropPressStartedAtRef = useRef(0);
+  const openedAtRef = useRef(0);
   useLayoutEffect(() => {
     if (isOpen) {
+      openedAtRef.current = Date.now();
+      backdropPressStartedHereRef.current = false;
+      backdropPressStartedAtRef.current = 0;
       setOverlayZ(nextFloatingZ());
     }
   }, [isOpen]);
@@ -47,15 +54,27 @@ export function ConfirmDialog({
   A confirm opened from a task delete must remain visible until an explicit user
   action. The trigger's trailing click can reach this newly portaled backdrop,
   so outside-dismiss is valid only after a press that began on the backdrop.
+
+  FNXC:Confirm 2026-07-17-00:15 (FN-8192):
+  Mobile touch activation may emit a delayed touch-to-mouse compatibility burst
+  after the confirm portal mounts. Its synthetic mousedown starts on the
+  backdrop and defeats the press-origin guard, so only accept backdrop dismissal
+  when that press began after the opening gesture settle window. This uses stored
+  timestamps rather than a timer and preserves deliberate post-open dismissal.
   */
   const recordBackdropPress = (event: React.SyntheticEvent<HTMLDivElement>) => {
-    backdropPressStartedHereRef.current = event.target === event.currentTarget;
+    const startedOnBackdrop = event.target === event.currentTarget;
+    backdropPressStartedHereRef.current = startedOnBackdrop;
+    backdropPressStartedAtRef.current = startedOnBackdrop ? Date.now() : 0;
   };
 
   const dismissFromBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const startedOnBackdrop = backdropPressStartedHereRef.current;
+    const pressStartedAt = backdropPressStartedAtRef.current;
     backdropPressStartedHereRef.current = false;
-    if (startedOnBackdrop && event.target === event.currentTarget) {
+    backdropPressStartedAtRef.current = 0;
+    const wasPostOpenPress = pressStartedAt - openedAtRef.current >= OPENING_GESTURE_SETTLE_MS;
+    if (startedOnBackdrop && wasPostOpenPress && event.target === event.currentTarget) {
       onCancel();
     }
   };
