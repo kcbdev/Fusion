@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { customProviderRegistryKey, type CustomProvider } from "@fusion/core";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { seedDashboardProviders } from "../provider-registration.js";
 import { registerCustomProviders } from "../custom-provider-registry.js";
@@ -34,6 +34,15 @@ function makeAuthStorage() {
     list: vi.fn(() => Object.keys(credentials)),
     getApiKey: vi.fn(async (provider: string) => credentials[provider]?.key),
   } as any;
+}
+
+async function createInMemoryModelRegistry(): Promise<ModelRegistry> {
+  const runtime = await ModelRuntime.create({
+    credentials: { read: async () => undefined, list: async () => [], modify: async (_id, fn) => fn(undefined), delete: async () => undefined },
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
+  return new ModelRegistry(runtime);
 }
 
 function makeModelRegistry() {
@@ -302,8 +311,7 @@ describe("FN-7689 symptom verification: cache_control on the wire for opted-in c
   });
 
   it("emits cache_control on the system message, last conversation message, and last tool", async () => {
-    const authStorage = AuthStorage.inMemory();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const modelRegistry = await createInMemoryModelRegistry();
 
     const provider = customProvider({
       id: "aa0e8400-e29b-41d4-a716-446655440099",
@@ -373,8 +381,7 @@ describe("FN-7689 symptom verification: cache_control on the wire for opted-in c
   });
 
   it("emits NO cache_control when the provider did not opt in (negative control)", async () => {
-    const authStorage = AuthStorage.inMemory();
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const modelRegistry = await createInMemoryModelRegistry();
 
     const provider = customProvider({
       id: "bb0e8400-e29b-41d4-a716-446655440098",

@@ -206,12 +206,16 @@ const TASK_DETAIL_ACTIVITY_LOG_LIMIT = 500;
 export { __resetBatchImportRateLimiter } from "./routes/register-git-github.js";
 
 /**
- * Minimal interface matching pi-coding-agent's ModelRegistry API surface
- * used by the models route. Avoids a direct dependency on the pi-coding-agent package.
+ * Minimal interface matching pi 0.80.8+ ModelRuntime's ModelRegistry
+ * compatibility facade. Avoids a direct dependency on the pi-coding-agent package.
  */
 export interface ModelRegistryLike {
-  /** Reload models from disk to pick up changes. */
-  refresh(): void;
+  /**
+   * FNXC:ModelCatalog 2026-07-16-17:55:
+   * pi 0.80.8 refreshes asynchronously, so the models endpoint must wait for it
+   * before reading getAvailable() and surface any refresh failure to the caller.
+   */
+  refresh(): Promise<void>;
   /** Get models that have auth configured. */
   getAvailable(): Array<{ id: string; name: string; provider: string; reasoning: boolean; contextWindow: number }>;
   /** Optional pi ModelRegistry surface used for supplemental model registration. */

@@ -98,7 +98,7 @@ vi.mock("../custom-providers.js", () => ({
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
-  AuthStorage: {
+  LegacyCredentialStorage: {
     create: () => ({
       setFallbackResolver: setFallbackResolverMock,
       getApiKey: authStorageGetApiKeyMock,
@@ -2811,7 +2811,7 @@ describe("createFnAgent", () => {
     it("without skillSelection does not pass skillsOverride to resource loader", async () => {
       let capturedResourceLoaderOptions: any;
       vi.doMock("@earendil-works/pi-coding-agent", () => ({
-        AuthStorage: {
+        LegacyCredentialStorage: {
           create: () => ({
             setFallbackResolver: setFallbackResolverMock,
           }),
@@ -2898,7 +2898,7 @@ describe("createFnAgent", () => {
 
       let capturedResourceLoaderOptions: any;
       vi.doMock("@earendil-works/pi-coding-agent", () => ({
-        AuthStorage: {
+        LegacyCredentialStorage: {
           create: () => ({
             setFallbackResolver: setFallbackResolverMock,
           }),
@@ -2982,7 +2982,7 @@ describe("createFnAgent", () => {
     it("with skillSelection (specific requested names) activates skill filtering", async () => {
       let capturedResourceLoaderOptions: any;
       vi.doMock("@earendil-works/pi-coding-agent", () => ({
-        AuthStorage: {
+        LegacyCredentialStorage: {
           create: () => ({
             setFallbackResolver: setFallbackResolverMock,
           }),

@@ -29,6 +29,7 @@ import {
   DefaultPackageManager,
   discoverAndLoadExtensions,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
@@ -63,7 +64,7 @@ import {
 } from "./skill-resolver.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { applyClaudeAcpEnable } from "./claude-acp-enable.js";
-import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
+import { createFusionAuthStorage, createFusionModelRegistry } from "./auth-storage.js";
 import { piLog, extensionsLog } from "./logger.js";
 import { readCustomProviders } from "./custom-providers.js";
 import { buildCustomProviderModels } from "./custom-provider-registry.js";
@@ -1542,12 +1543,12 @@ async function registerExtensionProviders(cwd: string, modelRegistry: ModelRegis
     extensionsResult.runtime.pendingProviderRegistrations = [];
     mergeBuiltInZaiProviderModels(modelRegistry, (message) => extensionsLog.warn(message));
     mergeBuiltInGrokProviderModels(modelRegistry, (message) => extensionsLog.warn(message));
-    modelRegistry.refresh();
+    await modelRegistry.refresh();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     extensionsLog.error(`Failed to discover extensions: ${message}`);
     createExtensionRuntime();
-    modelRegistry.refresh();
+    await modelRegistry.refresh();
   }
 }
 
@@ -2050,27 +2051,22 @@ export function buildSessionRoutingHeaders(sessionId: string): Record<string, st
  * Operating on the resolved output (rather than re-registering providers)
  * preserves provider-specific headers and never disturbs API-key resolution.
  */
-export function attachSessionRoutingHeaders(modelRegistry: ModelRegistry, sessionId: string): void {
-  // FNXC:SessionRouting 2026-06-23-16:46:
-  // Auxiliary feature: never let header injection break session creation. If a
-  // future pi-coding-agent rename removes getApiKeyAndHeaders, warn (rather than
-  // silently no-op) so the degraded routing/observability headers are detectable.
-  if (typeof modelRegistry.getApiKeyAndHeaders !== "function") {
-    piLog.warn("[pi] session-routing headers not attached: ModelRegistry.getApiKeyAndHeaders is not a function (pi API changed?)");
-    return;
-  }
+export function attachSessionRoutingHeaders(modelRuntime: ModelRuntime, sessionId: string): void {
+  /*
+  FNXC:ModelCatalog 2026-07-16-17:45:
+  pi 0.80.8 routes session request auth through ModelRuntime.getAuth rather than
+  ModelRegistry.getApiKeyAndHeaders. Decorate the runtime seam so routing headers
+  still reach every SDK-dispatched request before createAgentSession receives it.
+  */
   const routingHeaders = buildSessionRoutingHeaders(sessionId);
-  const resolveAuth = modelRegistry.getApiKeyAndHeaders.bind(modelRegistry);
-  modelRegistry.getApiKeyAndHeaders = async (model) => {
-    const result = await resolveAuth(model);
-    if (!result.ok) {
-      return result;
-    }
-    return {
+  const resolveAuth = modelRuntime.getAuth.bind(modelRuntime) as ModelRuntime["getAuth"];
+  (modelRuntime as unknown as { getAuth: ModelRuntime["getAuth"] }).getAuth = (async (providerOrModel: Parameters<ModelRuntime["getAuth"]>[0], overrides?: Parameters<ModelRuntime["getAuth"]>[1]) => {
+    const result = await resolveAuth(providerOrModel as never, overrides);
+    return result ? {
       ...result,
-      headers: { ...result.headers, ...routingHeaders },
-    };
-  };
+      auth: { ...result.auth, headers: { ...result.auth.headers, ...routingHeaders } },
+    } : undefined;
+  }) as ModelRuntime["getAuth"];
 }
 
 /**
@@ -2098,7 +2094,8 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     logMcpForwardingSkipped({ runtimeId: "pi", provider: options.defaultProvider, skippedCount: requestedMcpServers.length, lane: "createFnAgent" });
   }
   const authStorage = createFusionAuthStorage();
-  const modelRegistry = ModelRegistry.create(authStorage, getModelRegistryModelsPath());
+  const modelRegistry = await createFusionModelRegistry(authStorage);
+  const modelRuntime = modelRegistry.modelRuntime;
 
   // Resolve the project root early so extension providers, skill discovery,
   // and resource loading all use the correct root when cwd is a worktree,
@@ -2132,7 +2129,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       piLog.warn(`Failed to register custom provider "${provider.name}" (key=${registryKey}, id=${provider.id}, apiType=${provider.apiType}, baseUrl=${provider.baseUrl}): ${message}`);
     }
   }
-  modelRegistry.refresh();
+  await modelRegistry.refresh();
   mergeSupplementalAnthropicModels(modelRegistry, (message) => extensionsLog.warn(message));
   /*
    * FNXC:ModelCatalog 2026-07-09-00:00:
@@ -2322,7 +2319,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     : undefined;
   const sessionRoutingId = options.taskId ?? piSessionId;
   if (sessionRoutingId) {
-    attachSessionRoutingHeaders(modelRegistry, sessionRoutingId);
+    attachSessionRoutingHeaders(modelRuntime, sessionRoutingId);
   }
 
   const createSessionWithModel = async (modelOverride?: typeof selectedModel) => {
@@ -2435,8 +2432,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     }
     const createSessionOptions: Parameters<typeof createAgentSession>[0] = {
       cwd: options.cwd,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       resourceLoader,
       noTools: "builtin",
       customTools: customToolList,
