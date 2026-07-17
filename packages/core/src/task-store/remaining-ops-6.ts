@@ -22,7 +22,7 @@ import { validateNodeOverrideChange } from "../node-override-guard.js";
 import { WorkflowMovePolicyInput } from "../workflow-extension-types.js";
 import { resolveWorkflowIrById } from "../workflow-ir-resolver.js";
 import { WorkflowSettingDefinition } from "../workflow-ir-types.js";
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -432,6 +432,113 @@ export function clearWorkflowRunStepInstancesImpl(store: TaskStore, taskId: stri
     } catch {
       // Legacy/missing table — pruning is additive, so degrade silently.
     }
+}
+
+/*
+FNXC:WorkflowStepInstancePersistence 2026-07-16-20:20:
+PostgreSQL backend mode cannot use the removed synchronous SQLite `store.db`
+path. These async siblings preserve the existing identity, pin-clearing, and
+stale-run pruning semantics through the Drizzle async layer rather than
+silently dropping foreach crash-resume state.
+*/
+export async function saveWorkflowRunStepInstanceAsyncImpl(
+  store: TaskStore,
+  state: import("../types.js").WorkflowRunStepInstance,
+): Promise<void> {
+  if (!store.backendMode) {
+    return saveWorkflowRunStepInstanceImpl(store, state);
+  }
+  const layer = store.asyncLayer!;
+  const now = new Date().toISOString();
+  await layer.db
+    .insert(schema.project.workflowRunStepInstances)
+    .values({
+      taskId: state.taskId,
+      runId: state.runId,
+      foreachNodeId: state.foreachNodeId,
+      stepIndex: state.stepIndex,
+      pinnedStepCount: state.pinnedStepCount,
+      currentNodeId: state.currentNodeId ?? null,
+      status: state.status,
+      baselineSha: state.baselineSha ?? null,
+      checkpointId: state.checkpointId ?? null,
+      reworkCount: state.reworkCount ?? 0,
+      branchName: state.branchName ?? null,
+      integratedAt: state.integratedAt ?? null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        schema.project.workflowRunStepInstances.projectId,
+        schema.project.workflowRunStepInstances.taskId,
+        schema.project.workflowRunStepInstances.runId,
+        schema.project.workflowRunStepInstances.foreachNodeId,
+        schema.project.workflowRunStepInstances.stepIndex,
+      ],
+      set: {
+        pinnedStepCount: state.pinnedStepCount,
+        currentNodeId: state.currentNodeId ?? null,
+        status: state.status,
+        baselineSha: state.baselineSha ?? null,
+        checkpointId: state.checkpointId ?? null,
+        reworkCount: state.reworkCount ?? 0,
+        branchName: state.branchName ?? null,
+        integratedAt: state.integratedAt ?? null,
+        updatedAt: now,
+      },
+    });
+}
+
+export async function loadWorkflowRunStepInstancesAsyncImpl(
+  store: TaskStore,
+  taskId: string,
+  runId: string,
+): Promise<import("../types.js").WorkflowRunStepInstance[]> {
+  if (!store.backendMode) {
+    return loadWorkflowRunStepInstancesImpl(store, taskId, runId);
+  }
+  const layer = store.asyncLayer!;
+  const rows = await layer.db
+    .select()
+    .from(schema.project.workflowRunStepInstances)
+    .where(and(
+      eq(schema.project.workflowRunStepInstances.taskId, taskId),
+      eq(schema.project.workflowRunStepInstances.runId, runId),
+    ))
+    .orderBy(asc(schema.project.workflowRunStepInstances.stepIndex));
+  return rows.map((row) => ({
+    taskId: row.taskId,
+    runId: row.runId,
+    foreachNodeId: row.foreachNodeId,
+    stepIndex: row.stepIndex,
+    pinnedStepCount: row.pinnedStepCount,
+    currentNodeId: row.currentNodeId,
+    status: row.status as import("../types.js").WorkflowRunStepInstanceStatus,
+    baselineSha: row.baselineSha,
+    checkpointId: row.checkpointId,
+    reworkCount: row.reworkCount,
+    branchName: row.branchName,
+    integratedAt: row.integratedAt,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+export async function clearWorkflowRunStepInstancesAsyncImpl(
+  store: TaskStore,
+  taskId: string,
+  keepRunId?: string,
+): Promise<void> {
+  if (!store.backendMode) {
+    return clearWorkflowRunStepInstancesImpl(store, taskId, keepRunId);
+  }
+  const layer = store.asyncLayer!;
+  const conditions = [eq(schema.project.workflowRunStepInstances.taskId, taskId)];
+  if (keepRunId !== undefined) {
+    conditions.push(ne(schema.project.workflowRunStepInstances.runId, keepRunId));
+  }
+  await layer.db
+    .delete(schema.project.workflowRunStepInstances)
+    .where(and(...conditions));
 }
 
 export async function getActiveMergingTaskImpl(store: TaskStore, excludeTaskId?: string): Promise<string | undefined> {

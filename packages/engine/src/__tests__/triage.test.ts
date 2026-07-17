@@ -3556,11 +3556,11 @@ describe("requirePlanApproval setting", () => {
       status: "planning",
       steps: [{ name: "Old step", status: "pending" }],
     } as Partial<Task>);
-    const clearWorkflowRunStepInstances = vi.fn();
+    const clearWorkflowRunStepInstancesAsync = vi.fn().mockResolvedValue(undefined);
     const store = createMockStore({
       getTask: vi.fn().mockResolvedValue(task),
       parseStepsFromPrompt: vi.fn().mockResolvedValue([{ name: "Fresh step", status: "pending" }]),
-      clearWorkflowRunStepInstances,
+      clearWorkflowRunStepInstancesAsync,
     } as Partial<TaskStore>);
     const processor = new TriageProcessor(store, rootDir);
 
@@ -3572,7 +3572,7 @@ describe("requirePlanApproval setting", () => {
       { requirePlanApproval: false } as Settings,
     );
 
-    expect(clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-7224");
+    expect(clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-7224");
     expect(store.moveTask).toHaveBeenCalledWith("FN-7224", "todo");
   });
 

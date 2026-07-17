@@ -237,7 +237,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     getWorkflowStep: vi.fn(),
     updateWorkflowStep: vi.fn(),
     deleteWorkflowStep: vi.fn(),
-    clearWorkflowRunStepInstances: vi.fn(),
+    clearWorkflowRunStepInstancesAsync: vi.fn().mockResolvedValue(undefined),
     getMissionStore: vi.fn().mockReturnValue({
       listMissions: vi.fn().mockReturnValue([]),
       createMission: vi.fn(),
@@ -2272,7 +2272,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
         "Specification rebuild requested by user"
       );
       expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage", { moveSource: "user", recoveryRehome: true });
-      expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+      expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
     } finally {
@@ -2292,7 +2292,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
 
     expect(res.status).toBe(200);
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage", { moveSource: "user", recoveryRehome: true });
-    expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+    expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
   });
 
@@ -2308,7 +2308,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
 
     expect(res.status).toBe(200);
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage", { moveSource: "user", recoveryRehome: true });
-    expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+    expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
   });
 
   it("allows rebuild for task already in triage", async () => {
@@ -2334,7 +2334,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
         "Specification rebuild requested by user"
       );
       expect(store.moveTask).not.toHaveBeenCalled();
-      expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+      expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
       expect(res.body.status).toBe("needs-replan");
@@ -2354,7 +2354,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
 
     expect(res.status).toBe(200);
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage", { moveSource: "user", recoveryRehome: true });
-    expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+    expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
   });
 
@@ -2389,7 +2389,7 @@ describe("POST /tasks/:id/spec/rebuild", () => {
 
       expect(res.status).toBe(200);
       expect(store.moveTask).toHaveBeenCalledWith("FN-001", "triage", { moveSource: "user", recoveryRehome: true });
-      expect((store as unknown as { clearWorkflowRunStepInstances: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-001");
+      expect((store as unknown as { clearWorkflowRunStepInstancesAsync: ReturnType<typeof vi.fn> }).clearWorkflowRunStepInstancesAsync).toHaveBeenCalledWith("FN-001");
       expect(existsSync(join(taskDir, "PROMPT.md"))).toBe(false);
       expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: "needs-replan" });
     } finally {
