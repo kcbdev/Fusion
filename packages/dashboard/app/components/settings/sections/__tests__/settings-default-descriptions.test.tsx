@@ -126,6 +126,12 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   researchGlobalLocalDocsEnabled: "researchGlobal.localDocsSourceHint",
   researchGlobalWebSearchProvider: "researchGlobal.searchesAndFetchesUseTheAgentsNativeWebSearch",
   // NotificationsSection
+  /*
+   * FNXC:SettingsDefaults 2026-07-16-10:05:
+   * FN-8216 classifies the NotificationsSection clarification checkbox and SchedulingSection
+   * duplicate-resolution select as surfaced fields: their existing help text states each default.
+   */
+  agentClarificationEnabled: "notifications.agentClarificationHint",
   failureNotificationDelayMs: "notifications.howLongAFailureMustPersistBeforeA",
   failureNotificationMode: "notifications.stickyFailuresOnlyDefault",
   ntfyEnabled: "notifications.ntfyEnabledHint",
@@ -214,6 +220,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   autoArchiveDoneAfterMs: "scheduling.numberOfDaysATaskCanStayIn",
   archiveAgentLogMode: "scheduling.compactModeKeepsArchiveSizeLowWhilePreserving",
   autoArchiveDuplicateTasksEnabled: "scheduling.autoArchiveDuplicateTasksHelp",
+  triageDuplicateResolution: "scheduling.triageDuplicateResolutionHelp",
   maxStuckKills: "scheduling.maximumStuckDetectorRetriesBeforeATaskIs",
   groupOverlappingFiles: "scheduling.whenEnabledTasksThatModifyTheSameFiles",
   ignoreHiddenOverlapPaths: "scheduling.ignoreHiddenDotPathsHelp",
@@ -281,6 +288,8 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
 
 /** Setting keys intentionally not surfaced as a plain Settings UI description field, with reasons. */
 const NOT_SURFACED_ALLOWLIST: Record<string, string> = {
+  // Global-only serve/dashboard LAN discovery switch; no Settings UI description field exists.
+  localNetworkDiscoveryEnabled: "global-only LAN discovery runtime switch",
   // Moved to workflow settings (U4) — see MOVED_SETTINGS_KEYS in settings-schema.ts.
   workflowStepTimeoutMs: "moved to workflow settings (U4)",
   workflowStepScopeEnforcement: "moved to workflow settings (U4)",
