@@ -320,6 +320,26 @@ describe("TaskCard", () => {
     expect(screen.getByTestId("planner-overseer-state-badge")).toBeInTheDocument();
   });
 
+  it("does not render an overseer badge for a stale non-idle oversight-off snapshot", () => {
+    const staleOffTask = makeTask({
+      column: "in-review",
+      plannerOverseerState: {
+        state: "watching",
+        oversightLevel: "off",
+        watchedStage: "reviewer",
+        signal: "progressing",
+        attemptCount: 0,
+        attemptLimit: 3,
+        pendingConfirmation: false,
+        observedAt: 1700000000000,
+      },
+    });
+
+    render(<TaskCard task={staleOffTask} onOpenDetail={noop} addToast={noop} />);
+
+    expect(screen.queryByTestId("planner-overseer-state-badge")).not.toBeInTheDocument();
+  });
+
   // FN-7563: the badge used to print the raw kebab-case state (e.g.
   // "awaiting-confirmation") with a bare "Planner overseer: awaiting-confirmation"
   // tooltip. This reproduces the reported in-review symptom and asserts the badge

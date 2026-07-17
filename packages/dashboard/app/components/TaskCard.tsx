@@ -3135,8 +3135,15 @@ function TaskCardComponent({
           `data-planner-overseer-state` attribute in TaskCard.css — do not fork the label
           logic here; `plannerOverseerStateLabel`/`plannerOverseerBadgeTooltip` remain the
           single source of truth.
+
+          FNXC:PlannerOversight 2026-07-17-00:00:
+          FN-8221 defensively hides a stale non-idle snapshot when its oversight level is off.
+          The engine clears this runtime at the source, but a client payload must never leak
+          the Eye badge for an oversight-off in-progress or in-review task.
         */}
-        {task.plannerOverseerState && task.plannerOverseerState.state !== "idle" && (
+        {task.plannerOverseerState
+          && task.plannerOverseerState.state !== "idle"
+          && task.plannerOverseerState.oversightLevel !== "off" && (
           <span
             className="card-status-badge card-planner-overseer-state"
             title={plannerOverseerBadgeTooltip(task.plannerOverseerState, t)}

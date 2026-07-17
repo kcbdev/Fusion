@@ -1724,6 +1724,10 @@ block right beside it: any engine error is swallowed and the un-enriched list is
 no active observation omit the field entirely (byte-identical payload). `Task.plannerOverseerState?` is a
 transient field — engine-populated at serialization time, never persisted to the store or task.json.
 
+When an in-flight task's effective planner oversight resolves to `"off"`,
+`ProjectEngine.pollPlannerOverseer` clears retained monitor observations and associated recovery/advisor
+runtime in that same poll. The snapshot therefore returns `null` rather than retaining a stale active state.
+
 FN-7516's `TaskCard` renders the badge/affordance; this task only provides the field, the engine
 accessor, and (since FN-7516 had not yet landed consumption) a minimal guarded read plus a
 memo-comparator entry so the card repaints on state change.

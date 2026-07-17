@@ -2807,6 +2807,18 @@ export class ProjectEngine {
             workflowEffective.plannerOversightLevel as string | undefined,
           );
           if (level === "off") {
+            /*
+             * FNXC:PlannerOversight 2026-07-17-00:00:
+             * FN-8221 requires tasks whose effective oversight resolves to off to discard retained
+             * observations plus recovery/advisor runtime. This makes getPlannerOverseerRuntimeSnapshot
+             * return null and prevents the TaskCard eye badge on oversight-off in-progress/in-review tasks.
+             */
+            overseer.clear(task.id);
+            this.plannerRecoveryController?.clear(task.id);
+            this.sessionAdvisor?.clear(task.id);
+            this.sessionAdvisorLogCursor.delete(task.id);
+            this.plannerObservationEmitDedup.delete(task.id);
+            this.clearPlannerEscalationDedup(task.id);
             continue;
           }
           // FN-7743: resolve the executor-stall threshold from the task's
