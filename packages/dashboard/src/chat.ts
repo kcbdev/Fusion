@@ -2375,7 +2375,7 @@ export class ChatManager {
 
       const messagingTools = agent?.id && this.messageStore
         ? [
-            createSendMessageTool(this.messageStore, agent.id),
+            createSendMessageTool(this.messageStore, agent.id, { agentStore: this.agentStore }),
             createReadMessagesTool(this.messageStore, agent.id),
           ]
         : [];

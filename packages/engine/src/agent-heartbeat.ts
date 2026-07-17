@@ -2503,7 +2503,7 @@ export class HeartbeatMonitor {
 
           // Messaging tools — when MessageStore is available
           if (this.messageStore) {
-            heartbeatTools.push(createSendMessageTool(this.messageStore, agentId));
+            heartbeatTools.push(createSendMessageTool(this.messageStore, agentId, { agentStore: this.store }));
             heartbeatTools.push(createReadMessagesTool(this.messageStore, agentId));
           }
           if (this.chatStore) {
@@ -3764,7 +3764,7 @@ export class HeartbeatMonitor {
 
     // Messaging tools — when MessageStore is available, agents can send and receive messages
     if (messageStore) {
-      tools.push(createSendMessageTool(messageStore, agentId));
+      tools.push(createSendMessageTool(messageStore, agentId, { agentStore: this.store }));
       tools.push(createReadMessagesTool(messageStore, agentId));
     }
     if (this.chatStore) {

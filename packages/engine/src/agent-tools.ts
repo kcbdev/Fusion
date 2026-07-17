@@ -4214,7 +4214,7 @@ export function createAskQuestionTool(): ToolDefinition {
 export function createSendMessageTool(
   messageStore: MessageStore,
   fromAgentId: string,
-  options?: { autoRecovery?: ProjectSettings["autoRecovery"]; runAudit?: RunAuditor; taskStore?: TaskStore; settings?: Settings },
+  options?: { autoRecovery?: ProjectSettings["autoRecovery"]; runAudit?: RunAuditor; taskStore?: TaskStore; settings?: Settings; agentStore?: AgentStore },
 ): ToolDefinition {
   const deliveryHandler = new MessageDeliveryAutoRecoveryHandler({
     runAudit: options?.runAudit ?? { database: async () => {}, git: async () => {}, filesystem: async () => {}, sandbox: async () => {} },
@@ -4259,6 +4259,28 @@ export function createSendMessageTool(
             content: [{ type: "text" as const, text: "ERROR: reply_to_message_id must be a non-empty string" }],
             details: {},
           };
+        }
+
+        /*
+        FNXC:AgentMessaging 2026-07-28-12:10:
+        Agent-to-agent sends must reject missing recipients rather than store an unread, undeliverable message and report false delivery success. Use async getAgent instead of getCachedAgent because the synchronous cache always returns null in PostgreSQL mode. A lookup failure is validation-unavailable and must block the send; only a successful lookup may establish delivery confidence.
+        */
+        if (recipient.type === "agent" && options?.agentStore) {
+          let resolvedRecipient: Awaited<ReturnType<AgentStore["getAgent"]>> | undefined;
+          try {
+            resolvedRecipient = await options.agentStore.getAgent(recipient.id);
+          } catch {
+            return {
+              content: [{ type: "text" as const, text: `ERROR: Recipient agent '${params.to_id}' could not be validated — message not sent` }],
+              details: {},
+            };
+          }
+          if (resolvedRecipient == null) {
+            return {
+              content: [{ type: "text" as const, text: `ERROR: Recipient agent '${params.to_id}' does not exist — message not sent` }],
+              details: {},
+            };
+          }
         }
 
         const result = await deliveryHandler.runWithBoundedRetry({

@@ -1321,7 +1321,7 @@ export class StepSessionExecutor {
           const messagingTools =
             this.options.messageStore && taskDetail.assignedAgentId
               ? [
-                  createSendMessageTool(this.options.messageStore, taskDetail.assignedAgentId, { autoRecovery: settings.autoRecovery, taskStore: this.options.store!, settings }),
+                  createSendMessageTool(this.options.messageStore, taskDetail.assignedAgentId, { autoRecovery: settings.autoRecovery, taskStore: this.options.store!, settings, agentStore: this.options.agentStore }),
                   createReadMessagesTool(this.options.messageStore, taskDetail.assignedAgentId),
                 ]
               : [];
