@@ -532,6 +532,75 @@ describe("TaskCard", () => {
     }
   });
 
+  /*
+  FNXC:TaskContextMenu 2026-07-16-20:50 (FN-8178):
+  All card entry points converge on the same portaled auto-focus lifecycle. Simulate a browser that
+  scrolls a focused portal unless `preventScroll` is requested; that scroll previously reached the
+  capture-phase closer and made every card action unusable.
+  */
+  it("keeps every card menu entry point open when autofocus would otherwise scroll", async () => {
+    vi.useFakeTimers();
+    const cleanupGeometry = mockBoardContextMenuGeometry();
+    const onPauseTask = vi.fn(async () => makeTask({ paused: true }));
+    const nativeFocus = HTMLElement.prototype.focus;
+    const focusSpy = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function focusWithBrowserScroll(options?: FocusOptions) {
+      nativeFocus.call(this);
+      if (!options?.preventScroll) {
+        window.setTimeout(() => window.dispatchEvent(new Event("scroll")), 0);
+      }
+    });
+    const openMethods = [
+      () => fireEvent.click(screen.getByTestId("card-menu-btn-FN-001")),
+      () => fireEvent.contextMenu(document.querySelector(".card")!, { clientX: 24, clientY: 28 }),
+      () => {
+        fireEvent.pointerDown(document.querySelector(".card")!, { pointerType: "touch", pointerId: 7, clientX: 24, clientY: 28 });
+        act(() => vi.advanceTimersByTime(550));
+      },
+      () => fireEvent.keyDown(document.querySelector(".card")!, { key: "ContextMenu" }),
+    ];
+
+    try {
+      render(
+        <TaskCard
+          task={makeTask({ column: "in-progress", status: "executing" as any })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onPauseTask={onPauseTask}
+        />,
+      );
+
+      for (const openMenu of openMethods) {
+        openMenu();
+        act(() => vi.runOnlyPendingTimers());
+        expectBoardContextMenuPortaled();
+        expect(focusSpy).toHaveBeenLastCalledWith({ preventScroll: true });
+
+        const pauseItem = screen.getByRole("menuitem", { name: "Pause" });
+        fireEvent.pointerUp(pauseItem, { pointerType: "touch", pointerId: 8 });
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(onPauseTask).toHaveBeenLastCalledWith("FN-001");
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      }
+
+      // Explicit dismissals remain intentional after focus no longer creates a scroll dismissal.
+      fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
+      expectBoardContextMenuPortaled();
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
+      act(() => window.dispatchEvent(new Event("scroll")));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    } finally {
+      focusSpy.mockRestore();
+      cleanupGeometry();
+    }
+  });
+
   it("opens Planning Mode from eligible pre-execution card menus only when wired", async () => {
     const cleanupGeometry = mockBoardContextMenuGeometry();
     const onPlanningMode = vi.fn();

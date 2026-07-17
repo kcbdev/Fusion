@@ -411,10 +411,17 @@ export function TaskContextMenu({
     selectAction(action);
   }, [selectAction]);
 
+  /*
+  FNXC:TaskContextMenu 2026-07-16-20:50 (FN-8178):
+  Menus are portaled while their TaskCard/ListView hosts close on capture-phase board scroll. Focusing
+  the first action must not scroll a board ancestor, because that focus-created scroll is not an
+  explicit dismissal and previously closed the menu immediately. Preserve keyboard focus while
+  `preventScroll` leaves real user scrolling available to close the menu.
+  */
   useEffect(() => {
     if (!autoFocusFirstItem) return;
     const firstItem = menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
-    firstItem?.focus();
+    firstItem?.focus({ preventScroll: true });
   }, [actions, autoFocusFirstItem]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
