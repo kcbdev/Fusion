@@ -3387,6 +3387,14 @@ export function TaskDetailContent({
   const isOverseerHumanReviewTerminal = task.column === "in-review" && !effectiveAutoMerge;
   const overseerHumanControlSuppressed = Boolean(isTaskPaused) || isDoneOrArchivedColumn || isOverseerHumanReviewTerminal;
   const oversightIsOff = effectiveOversightLevel === "off";
+  /*
+  FNXC:PlannerOversight 2026-07-17-13:18:
+  FN-8233: the Oversight trigger must visibly track effective overseer state.
+  `overseerTriggerOn = !oversightIsOff || effectiveSessionAdvisorEnabled` lets
+  either the level select or Session advisor toggle in its dropdown update the
+  shared trigger icon without introducing a stale local state snapshot.
+  */
+  const overseerTriggerOn = !oversightIsOff || effectiveSessionAdvisorEnabled;
   const canNudgeOverseer = overseerActive && !oversightIsOff && !overseerHumanControlSuppressed;
   const canExplainOverseer = overseerActive && !oversightIsOff;
   const showStopOverseer = !oversightIsOff;
@@ -4273,7 +4281,7 @@ export function TaskDetailContent({
                           aria-label={t("taskDetail.oversight.menuAriaLabel", "Oversight actions")}
                           title={t("taskDetail.oversight.menuAriaLabel", "Oversight actions")}
                         >
-                          <Eye aria-hidden="true" />
+                          {overseerTriggerOn ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
                         </button>
                         {showOversightMenu && (
                           <div className="detail-oversight-menu" role="menu" onKeyDown={handleOversightMenuKeyDown}>

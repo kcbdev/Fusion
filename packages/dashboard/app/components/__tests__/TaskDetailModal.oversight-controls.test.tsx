@@ -81,6 +81,67 @@ describe("TaskDetailModal oversight controls", () => {
     expect(trigger.querySelector('[data-testid="more-vertical-icon"]')).not.toBeInTheDocument();
   });
 
+  it("updates the trigger icon for oversight-level and session-advisor predicate changes", async () => {
+    const api = await import("../../api");
+    const mockUpdate = vi.mocked(api.updateTask);
+    let currentTask = makeTask({
+      id: "FN-8233",
+      column: "in-progress",
+      plannerOversightLevel: "observe",
+      sessionAdvisorEnabled: false,
+    });
+    mockUpdate.mockImplementation(async (_id, patch) => {
+      currentTask = makeTask({ ...currentTask, ...patch });
+      return currentTask as any;
+    });
+
+    let rerenderModal: (task: typeof currentTask) => void;
+    const renderModal = (task: typeof currentTask) => (
+      <TaskDetailModal
+        task={task}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onTaskUpdated={(updatedTask) => rerenderModal(updatedTask as typeof currentTask)}
+        addToast={noop}
+      />
+    );
+    const rendered = render(renderModal(currentTask));
+    rerenderModal = (updatedTask) => rendered.rerender(renderModal(updatedTask));
+
+    const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
+    expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
+
+    await openOversightMenu();
+    const select = await screen.findByTestId("detail-oversight-level-select");
+    fireEvent.change(select, { target: { value: "off" } });
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-off-icon"]')).toBeInTheDocument();
+    });
+
+    fireEvent.change(select, { target: { value: "observe" } });
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
+    });
+
+    fireEvent.change(select, { target: { value: "off" } });
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-off-icon"]')).toBeInTheDocument();
+    });
+
+    fireEvent.click(await screen.findByTestId("detail-session-advisor-toggle"));
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
+    });
+
+    fireEvent.click(await screen.findByTestId("detail-session-advisor-toggle"));
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-off-icon"]')).toBeInTheDocument();
+    });
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
     mockConfirm.mockResolvedValue(true);
