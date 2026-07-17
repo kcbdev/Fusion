@@ -30,7 +30,7 @@ import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isWorkspaceTask, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, resolveWorkflowIrForTask, AWAITING_APPROVAL_PAUSE_REASON, type Agent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult, type WorkflowStepResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isWorkspaceTask, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, flagTriageDuplicate, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, resolveWorkflowIrForTask, AWAITING_APPROVAL_PAUSE_REASON, type Agent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult, type WorkflowStepResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -11691,23 +11691,16 @@ export class SelfHealingManager {
             continue;
           }
 
-          await this.store.deleteTask(task.id, {
-            removeLineageReferences: true,
-            auditContext: {
-              agentId: "self-healing",
-              runId: generateSyntheticRunId("self-heal-explicit-duplicate", task.id),
-            },
-          });
-          await this.store.recordActivity({
-            type: "task:auto-archived-duplicate",
-            taskId: task.id,
-            taskTitle: task.title ?? "",
-            details: `Duplicate of ${canonicalTask.id} — closed`,
-            metadata: {
-              canonicalTaskId: canonicalTask.id,
-              source: "explicit-marker-sweep",
-            },
-          });
+          const resolution = settings.triageDuplicateResolution ?? "prompt";
+          if (resolution === "delete") {
+            await this.store.deleteTask(task.id, { removeLineageReferences: true, auditContext: { agentId: "self-healing", runId: generateSyntheticRunId("self-heal-explicit-duplicate", task.id) } });
+          } else if (resolution === "prompt") {
+            await flagTriageDuplicate(this.store, task.id, canonicalTask.id);
+            await this.store.updateTask(task.id, { paused: true, pausedReason: "duplicate-decision-required", status: null });
+          } else {
+            rmSync(promptPath, { force: true });
+            await this.store.updateTask(task.id, { paused: false, pausedReason: null, status: null, sourceMetadataPatch: { nearDuplicateOf: canonicalTask.id, nearDuplicateScore: 1, duplicateSource: "triage-marker", nearDuplicateDismissed: true } });
+          }
           log.log(`[self-healing] resolved explicit duplicate marker ${task.id} → ${canonicalTask.id}`);
           resolved += 1;
         } catch (error) {

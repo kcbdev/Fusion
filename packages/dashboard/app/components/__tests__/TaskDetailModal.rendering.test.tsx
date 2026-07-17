@@ -2777,6 +2777,32 @@ describe("TaskDetailModal", () => {
     });
   });
 
+  it("deletes a triage-marker duplicate through the shared delete API", async () => {
+    const onDeleteTask = vi.fn().mockResolvedValue(makeTask());
+    mockConfirm.mockResolvedValueOnce(true);
+
+    render(
+      <TaskDetailModal
+        initialTab="definition"
+        task={makeTask({ sourceMetadata: { nearDuplicateOf: "FN-1234", duplicateSource: "triage-marker" } })}
+        tasks={[makeTask({ id: "FN-1234" })]}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={onDeleteTask}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Choose Delete to remove this duplicate, or Keep to continue anyway.");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(onDeleteTask).toHaveBeenCalledWith("FN-099", { removeLineageReferences: true });
+    });
+  });
+
   it("renders corrected stats timing totals in Stats tab", async () => {
     const { fetchTaskDetail } = await import("../../api");
     const mockFetch = vi.mocked(fetchTaskDetail);

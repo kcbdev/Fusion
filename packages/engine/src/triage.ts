@@ -19,6 +19,7 @@ import {
   isUnplannedSeedPrompt,
   getTaskDuplicateLineage,
   parseExplicitDuplicateMarker,
+  flagTriageDuplicate,
   resolveAgentPrompt,
   builtinSeamPrompt,
   renderTriagePolicyPlaceholders,
@@ -153,7 +154,7 @@ import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
 import { exec } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -2647,37 +2648,38 @@ export class TriageProcessor {
     } = {},
   ): Promise<void> {
     let written = writtenInput;
-    const dupMatch = written.match(/^DUPLICATE:\s*([A-Z]+-\d+)/i);
+    const explicitDuplicateMarker = parseExplicitDuplicateMarker(written);
 
-    if (dupMatch) {
-      const dupId = dupMatch[1];
-      planLog.log(`${task.id} is a duplicate of ${dupId} — closing`);
-      await this.store.logEntry(
-        task.id,
-        `Duplicate of ${dupId} — closed`,
-      );
-      try {
+    /*
+     * FNXC:DuplicateIntake 2026-07-16-13:00:
+     * Issue #2225 makes triage marker deletion opt-in. Prompt parks a visible linked
+     * near-duplicate decision; keep removes the marker before the next real plan.
+     */
+    if (explicitDuplicateMarker) {
+      const canonicalId = explicitDuplicateMarker.canonicalId;
+      const resolution = settings.triageDuplicateResolution ?? "prompt";
+      if (resolution === "delete") {
         await this.store.recordActivity({
-          type: "task:auto-archived-duplicate",
-          taskId: task.id,
-          taskTitle: task.title ?? "",
-          details: `Duplicate of ${dupId} — closed`,
-          metadata: {
-            canonicalTaskId: dupId,
-            source: "explicit-marker",
-          },
+          type: "task:auto-archived-duplicate", taskId: task.id, taskTitle: task.title ?? "",
+          details: `Duplicate of ${canonicalId} — closed`, metadata: { canonicalTaskId: canonicalId, source: "explicit-marker" },
         });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        planLog.warn(`${task.id}: failed to record explicit duplicate-marker activity (${msg})`);
+        await this.store.deleteTask(task.id, {
+          removeLineageReferences: true,
+          auditContext: { agentId: task.assignedAgentId ?? "triage", runId: generateSyntheticRunId("triage-delete", task.id) },
+        });
+        return;
       }
-      // Pass removeLineageReferences so a duplicate-close cannot be blocked by lineage children (FN-5129 / FN-5131).
-      await this.store.deleteTask(task.id, {
-        removeLineageReferences: true,
-        auditContext: {
-          agentId: task.assignedAgentId ?? "triage",
-          runId: generateSyntheticRunId("triage-delete", task.id),
-        },
+      if (resolution === "prompt") {
+        await flagTriageDuplicate(this.store, task.id, canonicalId);
+        await this.store.updateTask(task.id, { paused: true, pausedReason: "duplicate-decision-required", status: null });
+        return;
+      }
+      await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
+      await this.store.updateTask(task.id, {
+        paused: false,
+        pausedReason: null,
+        status: null,
+        sourceMetadataPatch: { nearDuplicateOf: canonicalId, nearDuplicateScore: 1, duplicateSource: "triage-marker", nearDuplicateDismissed: true },
       });
       return;
     }

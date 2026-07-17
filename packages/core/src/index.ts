@@ -741,6 +741,7 @@ export {
   findSameAgentDuplicates,
   archiveAsSameAgentDuplicate,
   flagSameAgentDuplicate,
+  flagTriageDuplicate,
   type SameAgentDuplicateInput,
   type SameAgentDuplicateCandidate,
   type SameAgentDuplicateMatch,

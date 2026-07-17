@@ -4735,8 +4735,23 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       if (hasBodyField("overlapBlockedBy")) updates.overlapBlockedBy = validatedOverlapBlockedBy;
       if (hasBodyField("status")) updates.status = validatedStatus;
+      const existingTaskForDuplicateDismissal = dismissNearDuplicate === true
+        ? await scopedStore.getTask(req.params.id)
+        : null;
       if (dismissNearDuplicate === true) {
+        const isTriageMarkerDecision = existingTaskForDuplicateDismissal?.sourceMetadata?.duplicateSource === "triage-marker"
+          && existingTaskForDuplicateDismissal.pausedReason === "duplicate-decision-required";
+        /*
+         * FNXC:DuplicateIntake 2026-07-16-13:00:
+         * Keep resolves Issue #2225's default triage-marker hold by acknowledging the link,
+         * clearing only the system pause, and returning to planning without retaining a stub.
+         */
         updates.sourceMetadataPatch = { nearDuplicateDismissed: true };
+        if (isTriageMarkerDecision) {
+          updates.paused = false;
+          updates.pausedReason = null;
+          updates.status = null;
+        }
       }
 
       /*
@@ -4761,6 +4776,10 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
 
       const task = await scopedStore.updateTask(req.params.id, updates);
+      if (dismissNearDuplicate === true && task.sourceMetadata?.duplicateSource === "triage-marker") {
+        const { rm } = await import("node:fs/promises");
+        await rm(join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
+      }
 
       const manualUnlinkRequested =
         hasBodyField("githubTracking") &&

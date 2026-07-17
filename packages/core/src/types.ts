@@ -3942,6 +3942,12 @@ export interface ProjectSettings {
    * `archived`, so the dashboard's yellow "Duplicate" chip with Keep/Archive
    * actions surfaces it for a human decision. Default: false. */
   autoArchiveDuplicateTasksEnabled?: boolean;
+  /**
+   * FNXC:DuplicateIntake 2026-07-16-13:00:
+   * Issue #2225 requires triage marker duplicates to stay visible by default: `prompt`
+   * blocks for Keep/Delete, `keep` replans, and `delete` restores legacy deletion.
+   */
+  triageDuplicateResolution?: "prompt" | "keep" | "delete";
   /** How much agent log content to preserve when a task is moved to cold archive storage.
    *  - "compact": deterministic summary plus a small recent-entry snapshot (default)
    *  - "full": copy the full agent.log into archive.db
