@@ -11,7 +11,6 @@ import {
   HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
   PLANNER_OVERSIGHT_LEVELS,
   TASK_PRIORITIES,
-  VALID_TRANSITIONS,
   getErrorMessage,
 } from "@fusion/core";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
@@ -920,7 +919,6 @@ function TaskCardComponent({
   );
   const [missionTitle, setMissionTitle] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
-  const [showSendBackMenu, setShowSendBackMenu] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isPrCreateOpen, setIsPrCreateOpen] = useState(false);
@@ -939,7 +937,6 @@ function TaskCardComponent({
   click would immediately reopen it, breaking the toggle affordance.
   */
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const sendBackRef = useRef<HTMLDivElement>(null);
   const [isInViewport, setIsInViewport] = useState(false);
   const { badgeUpdates, subscribeToBadge, unsubscribeFromBadge } = useBadgeWebSocket(projectId);
   const { agentsMap } = useAgentsMapCache(projectId);
@@ -971,18 +968,6 @@ function TaskCardComponent({
   useEffect(() => {
     setEditDescription(task.description || "");
   }, [task.id, task.description]);
-
-  // Close send-back menu on outside click
-  useEffect(() => {
-    if (!showSendBackMenu) return;
-    const handleClick = (e: MouseEvent) => {
-      if (sendBackRef.current && !sendBackRef.current.contains(e.target as Node)) {
-        setShowSendBackMenu(false);
-      }
-    };
-    document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
-  }, [showSendBackMenu]);
 
 
   // Fetch mission title when missionId is set
@@ -1655,7 +1640,6 @@ function TaskCardComponent({
     return bestData;
   }, [liveBadgeData, batchData, task.issueInfo, task.updatedAt]);
 
-  const showInReviewMoveControl = task.column === "in-review" && Boolean(onMoveTask);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled ?? false });
   /*
    * FNXC:PlannerOversight 2026-07-04-12:30:
@@ -1748,37 +1732,7 @@ function TaskCardComponent({
     );
     return (next?.id ?? "todo") as ColumnId;
   }, [taskMoveColumns, task.column]);
-  const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || showAddressPrFeedbackAction || showStartAction || (showInReviewMoveControl && !metaRowVisible);
-
-  const renderInReviewMoveControl = () => (
-    <div className="card-send-back" ref={sendBackRef}>
-      <button
-        className="card-send-back-btn"
-        onClick={handleSendBackClick}
-        title={t("tasks.moveTask", "Move task")}
-        aria-label={t("tasks.moveTask", "Move task")}
-        aria-haspopup="menu"
-        aria-expanded={showSendBackMenu}
-      >
-        {t("tasks.move", "Move")}
-        <ChevronDown size={10} />
-      </button>
-      {showSendBackMenu && (
-        <div className="card-send-back-menu" role="menu">
-          {VALID_TRANSITIONS["in-review"].map((col) => (
-            <button
-              key={col}
-              className="card-send-back-menu-item"
-              role="menuitem"
-              onClick={(e) => handleSendBackOptionClick(e, col)}
-            >
-              {col === "done" ? t("tasks.doneNoMerge", "Done (no merge)") : columnLabel(col)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || showAddressPrFeedbackAction || showStartAction;
 
   const enterEditMode = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -2429,7 +2383,24 @@ function TaskCardComponent({
       actions.push({ id: taskActionMenuModel.reviewAction.id, label: taskActionMenuModel.reviewAction.label, disabled: taskActionMenuModel.reviewAction.disabled, onSelect: taskActionMenuModel.reviewAction.onSelect });
     }
     if (onMoveTask) {
-      for (const transition of taskActionMenuModel.moveTransitions) {
+      const moveTransitions = [...taskActionMenuModel.moveTransitions];
+      /*
+      FNXC:BoardCardActions 2026-07-16-00:00 (FN-8149):
+      The retired in-review Move dropdown offered Done (no merge) and Triage in addition to the shared menu model's Todo/In Progress defaults. Fold those targets into this TaskCard-only menu so card consolidation retains every move capability without changing ListView or TaskDetail menus.
+      */
+      if (task.column === "in-review") {
+        for (const column of ["done", "triage"] as const) {
+          if (moveTransitions.some((transition) => transition.column === column)) continue;
+          moveTransitions.push({
+            column,
+            label: column === "done"
+              ? t("tasks.doneNoMerge", "Done (no merge)")
+              : t("taskDetail.move.moveTo", "Move to {{column}}", { column: taskActionColumnLabel(column) }),
+            primaryLabel: t("taskDetail.move.moveTo", "Move to {{column}}", { column: taskActionColumnLabel(column) }),
+          });
+        }
+      }
+      for (const transition of moveTransitions) {
         actions.push({
           id: `move-${transition.column}`,
           label: transition.label,
@@ -2438,7 +2409,7 @@ function TaskCardComponent({
       }
     }
     return actions.filter((action) => action.tone === "note" || action.disabled === true || Boolean(action.onSelect));
-  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionRevert, handleTaskActionUnarchive, isRevertable, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onPlanningMode, onOpenRefine, onPauseTask, onResetTask, onRetryTask, onRevertTask, onUnarchiveTask, onUnpauseTask, onUpdateTask, t, task.column, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
+  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionRevert, handleTaskActionUnarchive, isRevertable, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onPlanningMode, onOpenRefine, onPauseTask, onResetTask, onRetryTask, onRevertTask, onUnarchiveTask, onUnpauseTask, onUpdateTask, t, task.column, taskActionColumnLabel, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
   const hasContextMenuActions = contextMenuActions.length > 0;
 
   const closeContextMenu = useCallback(() => {
@@ -2459,7 +2430,6 @@ function TaskCardComponent({
 
   const openContextMenuAt = useCallback((clientX: number, clientY: number) => {
     if (!hasContextMenuActions || isEditing) return;
-    setShowSendBackMenu(false);
     setContextMenuPosition({
       x: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientX, window.innerWidth - CONTEXT_MENU_VIEWPORT_MARGIN)),
       y: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientY, window.innerHeight - CONTEXT_MENU_VIEWPORT_MARGIN)),
@@ -2608,53 +2578,6 @@ function TaskCardComponent({
       onOpenMission(task.missionId);
     }
   }, [task.missionId, onOpenMission]);
-
-  const handleSendBackClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowSendBackMenu((current) => !current);
-  }, []);
-
-
-  const handleSendBackOptionClick = useCallback(async (e: React.MouseEvent, column: Column) => {
-    e.stopPropagation();
-    setShowSendBackMenu(false);
-    if (!onMoveTask) return;
-
-    try {
-      const hasStepProgress = task.steps.some((step) => step.status !== "pending");
-      const shouldPrompt = (column === "todo" || column === "triage") && hasStepProgress;
-      let moveOptions: { preserveProgress?: boolean } | undefined;
-
-      if (shouldPrompt) {
-        const keepProgress = await confirm({
-          title: t("tasks.preserveProgressTitle", "Preserve Progress?"),
-          message: t("tasks.preserveProgressMessage", "This task has completed steps. Keep progress before moving?"),
-          confirmLabel: t("tasks.keepProgress", "Keep Progress"),
-          cancelLabel: t("tasks.resetProgress", "Reset Progress"),
-        });
-
-        if (keepProgress) {
-          moveOptions = { preserveProgress: true };
-        } else {
-          const resetProgress = await confirm({
-            title: t("tasks.resetProgressTitle", "Reset Progress?"),
-            message: t("tasks.resetProgressMessage", "Reset all step progress before moving this task?"),
-            confirmLabel: t("tasks.resetProgress", "Reset Progress"),
-            cancelLabel: t("tasks.cancelMove", "Cancel Move"),
-            danger: true,
-          });
-          if (!resetProgress) {
-            return;
-          }
-        }
-      }
-
-      await onMoveTask(task.id, column, moveOptions);
-      addToast(t("tasks.moved", "Moved {{taskId}} to {{column}}", { taskId: task.id, column: columnLabel(column) }), "success");
-    } catch (err) {
-      addToast(t("tasks.moveFailed", "Failed to move {{taskId}}: {{error}}", { taskId: task.id, error: getErrorMessage(err) }), "error");
-    }
-  }, [addToast, confirm, onMoveTask, task.id, task.steps]);
 
   const handlePromoteClick = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -3392,37 +3315,6 @@ function TaskCardComponent({
               {t("tasks.revert", "Revert")}
             </button>
           )}
-          {task.column === "in-progress" && onMoveTask && (
-            <div className="card-send-back" ref={sendBackRef}>
-              <button
-                className="card-send-back-btn"
-                onClick={handleSendBackClick}
-                title={t("tasks.sendBack", "Send back")}
-                aria-label={t("tasks.sendBack", "Send back")}
-                aria-haspopup="menu"
-                aria-expanded={showSendBackMenu}
-              >
-                {t("tasks.sendBack", "Send back")}
-                <ChevronDown size={10} />
-              </button>
-              {showSendBackMenu && (
-                <div className="card-send-back-menu" role="menu">
-                  {VALID_TRANSITIONS["in-progress"]
-                    .filter((col) => col !== "in-review")
-                    .map((col) => (
-                      <button
-                        key={col}
-                        className="card-send-back-menu-item"
-                        role="menuitem"
-                        onClick={(e) => handleSendBackOptionClick(e, col)}
-                      >
-                        {columnLabel(col)}
-                      </button>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
           {/*
           FNXC:BoardCardActions 2026-07-15-00:00 (FN-8035):
           Done-card Archive and Revert are consolidated into this single three-dot TaskContextMenu;
@@ -3685,7 +3577,6 @@ function TaskCardComponent({
             </span>
           )}
           {(queued || task.status === "queued") && task.column !== "in-progress" && <span className="queued-badge"><Clock size={12} style={{ verticalAlign: "middle" }} /> {t("tasks.queued", "Queued")}</span>}
-          {showInReviewMoveControl && renderInReviewMoveControl()}
           {placeFooterRightInMeta && footerRightCluster}
         </div>
       )}
@@ -3775,7 +3666,6 @@ function TaskCardComponent({
               {isPromoting ? t("tasks.promoting", "Promoting…") : t("tasks.promote", "Promote")}
             </button>
           )}
-          {showInReviewMoveControl && !metaRowVisible && renderInReviewMoveControl()}
         </div>
       )}
       {isAgentCreated && (

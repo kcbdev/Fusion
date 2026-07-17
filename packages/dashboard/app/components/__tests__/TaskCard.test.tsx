@@ -3849,126 +3849,39 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(menuButton)).toBe(true);
   });
 
-  it("renders in-review Move control inline in card-meta for overlap-blocked tasks", () => {
-    const { container } = render(
-      <TaskCard
-        task={makeTask({ column: "in-review", overlapBlockedBy: "FN-OVER", blockedBy: undefined })}
-        onOpenDetail={noop}
-        addToast={noop}
-        onMoveTask={vi.fn()}
-      />,
-    );
-
-    const moveControl = container.querySelector(".card-send-back");
-    const metaRow = container.querySelector(".card-meta");
-
-    expect(metaRow).not.toBeNull();
-    expect(moveControl).not.toBeNull();
-    expect(metaRow?.contains(moveControl as HTMLElement)).toBe(true);
-    expect(container.querySelector(".card-action-row")).toBeNull();
-  });
-
-  it("renders in-review Move control after queued badge in card-meta", () => {
-    const { container } = render(
-      <TaskCard
-        task={makeTask({ column: "in-review", status: "queued" as any, dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined })}
-        queued={true}
-        onOpenDetail={noop}
-        addToast={noop}
-        onMoveTask={vi.fn()}
-      />,
-    );
-
-    const metaRow = container.querySelector(".card-meta");
-    const queuedBadge = container.querySelector(".queued-badge");
-    const moveControl = container.querySelector(".card-send-back");
-
-    expect(metaRow).not.toBeNull();
-    expect(queuedBadge).not.toBeNull();
-    expect(moveControl).not.toBeNull();
-    expect(metaRow?.contains(moveControl as HTMLElement)).toBe(true);
-    expect(queuedBadge?.compareDocumentPosition(moveControl as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(container.querySelector(".card-action-row")).toBeNull();
-  });
-
-  it("keeps in-review Move control in card-action-row when meta row is not visible", () => {
-    const { container } = render(
-      <TaskCard
-        task={makeTask({ column: "in-review", dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined, status: undefined as any })}
-        onOpenDetail={noop}
-        addToast={noop}
-        onMoveTask={vi.fn()}
-      />,
-    );
-
-    const moveButton = screen.getByRole("button", { name: "Move task" });
-    const actionRow = container.querySelector(".card-action-row");
-
-    expect(actionRow).not.toBeNull();
-    expect(actionRow?.contains(moveButton)).toBe(true);
-    expect(moveButton.closest(".card-meta")).toBeNull();
-  });
-
-  it("renders Create PR before Move inside card-action-row", () => {
-    const { container } = render(
-      <TaskCard
-        task={makeTask({ column: "in-review", paused: false, userPaused: false, prInfo: undefined as any })}
-        onOpenDetail={noop}
-        addToast={noop}
-        onMoveTask={vi.fn()}
-        prAuthAvailable={true}
-        autoMergeEnabled={false}
-      />,
-    );
-
-    const createPrButton = screen.getByRole("button", { name: "Create pull request" });
-    const moveButton = screen.getByRole("button", { name: "Move task" });
-    const actionRow = createPrButton.closest(".card-action-row");
-
-    expect(actionRow).not.toBeNull();
-    expect(moveButton.closest(".card-action-row")).toBe(actionRow);
-    expect(createPrButton.compareDocumentPosition(moveButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    const moveControl = moveButton.closest(".card-send-back") as HTMLElement | null;
-    expect(moveControl).not.toBeNull();
-    expect(getComputedStyle(moveControl as HTMLElement).marginLeft).toBe("auto");
-
-    fireEvent.click(moveButton);
-    const menu = screen.getByRole("menu");
-    expect(moveControl?.contains(menu)).toBe(true);
-    const menuStyle = getComputedStyle(menu);
-    expect(menuStyle.right).toBe("0px");
-    expect(menuStyle.left).not.toBe("0px");
-  });
-
   it.each([
-    { name: "meta-row-visible variant", task: makeTask({ column: "in-review", blockedBy: "FN-777" }), expectedContainer: ".card-meta" },
-    { name: "no-meta variant", task: makeTask({ column: "in-review", dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined, status: undefined as any }), expectedContainer: ".card-action-row" },
-  ])("keeps Move dropdown behavior for $name", ({ task, expectedContainer }) => {
+    { name: "meta-row overlap badge", task: makeTask({ column: "in-review", overlapBlockedBy: "FN-OVER", blockedBy: undefined }), queued: false },
+    { name: "meta-row queued badge", task: makeTask({ column: "in-review", status: "queued" as any, dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined }), queued: true },
+    { name: "no-meta action-row placement", task: makeTask({ column: "in-review", dependencies: [], blockedBy: undefined, overlapBlockedBy: undefined, status: undefined as any }), queued: false },
+  ])("uses the three-dot menu as the only in-review move entry point for $name", ({ task, queued }) => {
     const onMoveTask = vi.fn();
     const { container } = render(
       <TaskCard
         task={task}
+        queued={queued}
         onOpenDetail={noop}
         addToast={noop}
         onMoveTask={onMoveTask}
       />,
     );
 
-    const host = container.querySelector(expectedContainer);
-    const moveButton = screen.getByRole("button", { name: "Move task" });
-    expect(host?.contains(moveButton)).toBe(true);
+    expect(container.querySelector(".card-send-back")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send back" })).toBeNull();
 
-    fireEvent.click(moveButton);
+    fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
 
-    expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
+    expect(screen.getByRole("menuitem", { name: "Done (no merge)" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Move to Planning" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Move to Todo" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Back to In Progress" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Done (no merge)" }));
 
     expect(onMoveTask).toHaveBeenCalledWith("FN-001", "done", undefined);
   });
 
-  it("FN-4540 keeps in-progress Send back control in card-header-actions", () => {
+  it("uses the three-dot menu for every in-progress move target without a Send back shell", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({ column: "in-progress" })}
@@ -3978,11 +3891,28 @@ describe("TaskCard", () => {
       />,
     );
 
-    const sendBackButton = screen.getByRole("button", { name: "Send back" });
-    const actionsContainer = container.querySelector(".card-header-actions");
+    expect(container.querySelector(".card-send-back")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send back" })).toBeNull();
 
-    expect(actionsContainer).not.toBeNull();
-    expect(actionsContainer?.contains(sendBackButton)).toBe(true);
+    fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
+
+    expect(screen.getByRole("menuitem", { name: "Move to Todo" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Move to Planning" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Move to Done" })).toBeTruthy();
+  });
+
+  it("does not render a move shell when onMoveTask is absent", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-review" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(container.querySelector(".card-send-back")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send back" })).toBeNull();
   });
 
   it("shows timer chip for in-progress cards summing workflow runtime + timed events", () => {
