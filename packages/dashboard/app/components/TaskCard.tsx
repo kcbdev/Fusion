@@ -780,6 +780,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.updatedAt === nextTask.updatedAt &&
     previousTask.createdAt === nextTask.createdAt &&
     previousTask.status === nextTask.status &&
+    previousTask.recentAgentActivityAt === nextTask.recentAgentActivityAt &&
     previousTask.priority === nextTask.priority &&
     previousTask.executionMode === nextTask.executionMode &&
     previousTask.paused === nextTask.paused &&
@@ -2884,11 +2885,15 @@ function TaskCardComponent({
    * card. The oversight-level badge (`showOversightBadge`) is untouched.
    */
   /*
-  FNXC:TaskStatusBadge 2026-07-16-12:00:
-  FN-8170 shares this predicate with ListView so stale planning status never produces a Todo/In Progress board badge or its otherwise-empty header wrapper.
+  FNXC:TaskStatusBadge 2026-07-28-12:00:
+  FN-8300 keeps Planning cards visually consistent with their fresh planner-log timeline: a transient client signal renders the existing pulsing Planning badge even while the authoritative status is null. ListView uses the same condition on both render paths.
   */
+  const isTransientPlannerActive = task.column === "triage"
+    && !visualStatus
+    && Boolean(task.recentAgentActivityAt)
+    && isAgentActive;
   const showStatusBadge = !isPaused
-    && Boolean(visualStatus)
+    && (Boolean(visualStatus) || isTransientPlannerActive)
     && visualStatus !== "queued"
     && !shouldSuppressPlanningStatusBadge({ status: visualStatus, column: task.column });
   const hasCardMetaBadges = showPriorityBadge
@@ -3046,6 +3051,7 @@ function TaskCardComponent({
                     )
                   : undefined
             }
+            aria-label={isTransientPlannerActive ? t("tasks.statusPlanning", "Planning") : undefined}
             data-testid={isAwaitingApproval ? `card-awaiting-approval-${task.id}` : undefined}
             data-awaiting-approval-reason={isAwaitingApproval ? (task.awaitingApprovalReason ?? "manual") : undefined}
           >
@@ -3057,9 +3063,11 @@ function TaskCardComponent({
                   ? t("tasks.awaitingApproval", "Awaiting Approval")
                   : isAwaitingInput
                     ? t("tasks.needsInput", "Needs input")
-                    : visualStatus === "merging-fix"
-                      ? t("tasks.statusMergingFix", "Merging fixes…")
-                      : getTaskStatusLabel(visualStatus!, t)}
+                    : isTransientPlannerActive
+                      ? t("tasks.statusPlanning", "Planning")
+                      : visualStatus === "merging-fix"
+                        ? t("tasks.statusMergingFix", "Merging fixes…")
+                        : getTaskStatusLabel(visualStatus!, t)}
           </span>
         )}
         {planReviewRunning && isAgentActive && (

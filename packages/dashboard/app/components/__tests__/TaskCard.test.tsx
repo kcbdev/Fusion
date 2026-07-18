@@ -2456,10 +2456,25 @@ describe("TaskCard", () => {
     expect(headerBadges.contains(badge)).toBe(true);
   });
 
-  it("does not render a status badge when task.status is falsy", () => {
+  it("renders an active Planning badge when a status-null triage card has fresh planner activity", () => {
+    const recentAgentActivityAt = new Date().toISOString();
     const { container } = render(
-      <TaskCard task={makeTask({ status: undefined as any })} onOpenDetail={noop} addToast={noop} />,
+      <TaskCard
+        task={makeTask({ column: "triage", status: null as any, recentAgentActivityAt })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
     );
+
+    expect(container.querySelector(".card")).toHaveClass("agent-active");
+    expect(screen.getByLabelText("Planning")).toHaveClass("card-status-badge", "pulsing");
+  });
+
+  it("does not render a status badge when a status-null triage card has no fresh planner activity", () => {
+    const { container } = render(
+      <TaskCard task={makeTask({ column: "triage", status: undefined as any })} onOpenDetail={noop} addToast={noop} />,
+    );
+    expect(container.querySelector(".card")).not.toHaveClass("agent-active");
     expect(container.querySelector(".card-status-badge")).toBeNull();
   });
 

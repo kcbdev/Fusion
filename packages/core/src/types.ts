@@ -1443,6 +1443,12 @@ export interface Task {
    */
   customFields?: Record<string, unknown>;
   status?: string;
+  /**
+   * FNXC:TaskActivity 2026-07-28-12:00:
+   * Dashboard-only signal from a fresh planner agent-log SSE entry. It is never
+   * persisted or sent to the server; authoritative task updates clear it.
+   */
+  recentAgentActivityAt?: string;
   /** ID of the in-progress task whose file scope overlaps with this task,
    *  causing the scheduler to defer it. Set when the scheduler queues
    *  the task due to file-scope overlap; cleared (set to `undefined`)
