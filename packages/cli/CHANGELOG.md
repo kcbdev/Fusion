@@ -1,5 +1,19 @@
 # @runfusion/fusion
 
+## 0.71.0
+
+### Minor Changes
+
+- 0b6c4cd: summary: Show live database-migration progress during boot — dashboard holding page/banner and desktop launch screen.
+  category: feature
+  dev: CLI binds a temporary holding server on the dashboard port during `createTaskStoreForBackend` (new `onMigrationProgress` option) serving an auto-reloading page + `/api/health` `status:"migrating"`; open tabs render `MigrationInProgressBanner` from the health poll. Desktop publishes progress via `DesktopRuntimeStatus.migration` → IPC → `DesktopLaunchGate`, which shows the label and suspends its 30s timeout while progress advances.
+
+### Patch Changes
+
+- 48b0d04: summary: Fix first-boot SQLite→PostgreSQL migration failing on legacy data containing NUL (\u0000) characters.
+  category: fix
+  dev: The migrator now strips U+0000 from plain text cells, JSON string values/keys, malformed-JSON scalars, and opaque legacy-preservation cells before insert; content-checksum verification compares sanitized source against sanitized target.
+
 ## 0.70.2
 
 ### Patch Changes

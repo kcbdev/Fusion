@@ -2,21 +2,94 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
-## 0.70.2
+## 0.71.0
 
 ### Highlights
-- Fixed npm-installed CLI crashing at startup from missing PostgreSQL migrations
-- Plugin registry and llama.cpp extension now ship correctly in published npm installs
-- Fixed child-process isolation mode failing on npm installs
-- Fixed the standalone fn binary failing to boot in embedded-Postgres and DATABASE_URL modes
-- Fixed embedded PostgreSQL refusing to start on Windows
+- See live progress instead of a blank screen during database migrations on boot
+- Desktop launch screen now shows migration status and won't time out mid-migration
+- Fixed a first-boot crash migrating legacy SQLite data containing NUL characters
+
+### New
+- Dashboard now shows a holding page and banner with live progress while a database migration runs in the background
+- Desktop launch screen displays migration progress and pauses its timeout until migration finishes
 
 ### Fixed
-- Fixed npm-installed CLI crashing at startup because PostgreSQL migrations were missing from the published package.
-- Shipped the plugin registry manifest and llama.cpp extension in the published npm package, fixing silently missing plugins and a broken llama.cpp integration status.
-- Shipped the child-process runtime worker so isolationMode "child-process" works correctly from npm installs.
-- Fixed the standalone fn binary failing to boot in both embedded-Postgres and DATABASE_URL modes, and added self-contained release binaries.
-- Fixed embedded PostgreSQL failing to start on Windows after a recent shared-memory default change.
+- Fixed first-boot SQLite-to-PostgreSQL migration failing on legacy data containing NUL (\u0000) characters
+
+## 0.70.2
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.70.2
+- @fusion/engine@0.70.2
+- @fusion/i18n@0.39.28
+- @fusion-plugin-examples/claude-runtime@0.1.3
+- @fusion-plugin-examples/cli-printing-press@0.1.45
+- @fusion-plugin-examples/compound-engineering@0.1.28
+- @fusion-plugin-examples/dependency-graph@0.1.59
+- @fusion-plugin-examples/grok-runtime@0.2.6
+- @fusion-plugin-examples/omp-runtime@0.1.3
+- @fusion-plugin-examples/quality@0.1.3
+- @fusion-plugin-examples/roadmap@0.1.47
+- @fusion-plugin-examples/cursor-runtime@0.1.47
+- @fusion-plugin-examples/droid-runtime@0.1.54
+- @fusion-plugin-examples/hermes-runtime@0.2.78
+- @fusion-plugin-examples/openclaw-runtime@0.2.78
+- @fusion-plugin-examples/paperclip-runtime@0.2.78
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.70.2
+- @fusion/dashboard@0.70.2
+- @fusion/engine@0.70.2
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.70.2
+- @fusion/pi-claude-cli@0.70.2
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.70.2
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- 4970465: summary: Fix npm-installed CLI crashing at startup because PostgreSQL migrations were missing from the published package.
+  category: fix
+  dev: "tsup stages packages/core/src/postgres/migrations into dist/migrations, but the package files globs (dist/**/_.js, _.d.ts, maps, named dirs) matched no .sql file, so npm pack stripped every migration from the tarball. Installed CLIs failed schema init with ENOENT dist/migrations/0000_initial.sql and the dashboard supervisor crash-looped. Added dist/migrations/** to files; npm pack --dry-run now lists all 21 migration files. Sibling of the desktop staging fix 6e5bb5d3d."
+- c831ccb: summary: Ship the plugin registry manifest and llama.cpp extension in the published npm package.
+  category: fix
+  dev: "Tarball-completeness audit follow-ups to the migrations fix: (1) dist/pi-llama-cpp was staged by tsup but matched no files glob, so useLlamaCpp silently reported not-installed in every published build — added dist/pi-llama-cpp/\*\* to files. (2) dashboard plugin-routes resolves ./registry-manifest.json beside the bundled bin.js but it was never staged into the CLI dist, so published installs served an empty plugin registry — tsup now stages it from packages/dashboard/src and files includes dist/registry-manifest.json."
+- 90a1a4b: summary: Ship the child-process runtime worker so isolationMode "child-process" works from npm installs.
+  category: fix
+  dev: New tsup entry emits dist/child-process-worker.js beside bin.js, matching the engine's getWorkerPath() sibling resolution; bundled with bin.js's noExternal/external/banner shape.
+- 6b893f7: summary: Fix the standalone `fn` binary failing to boot in both embedded-Postgres and DATABASE_URL modes.
+  category: fix
+  dev: Migrations now resolve via FUSION_MIGRATIONS_DIR > module-relative > execPath-relative; embedded-postgres ships as a self-contained bundle + native payload under runtime/<platform>/embedded-postgres (override root with FUSION_EMBEDDED_PG_RUNTIME_DIR); releases add self-contained fn-cli-<platform>.tar.gz assets.
+- 8517a5d: summary: Fix embedded PostgreSQL failing to start on Windows after the mmap shared-memory default.
+  category: fix
+  dev: "shared_memory_type=mmap (default added 2026-07-16 for SysV shm exhaustion) is rejected on Windows, where the only valid value is windows — every Windows embedded start died with FATAL invalid value for parameter before the port opened, failing the v0.70.0/v0.70.1 Windows release smoke. Default flags are now platform-aware via defaultEmbeddedPostgresFlagsFor: empty on win32 (Windows needs no override; SysV exhaustion cannot occur there), mmap elsewhere."
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [4970465]
+- Updated dependencies [c831ccb]
+- Updated dependencies [90a1a4b]
+- Updated dependencies [6b893f7]
+- Updated dependencies [8517a5d]
+  - @runfusion/fusion@0.70.2
 
 ## 0.70.1
 
