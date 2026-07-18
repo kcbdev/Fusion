@@ -2739,7 +2739,21 @@ function TaskCardComponent({
     && Boolean(githubTrackedIssue);
   const footerHasLeadingContent = Boolean(filesChangedButton)
     || (isGitHubImportedTask && !showLinkedIssueChipForImport);
-  const footerRightHasContent = Boolean(cardCostLabel
+  const costBadgeBelowPromote = Boolean(onPromote && cardCostLabel);
+  const costBadgeChip = cardCostLabel ? (
+    <span
+      className="card-cost-indicator"
+      title={t("tasks.costBadgeTitle", "Estimated cost {{amount}}", { amount: cardCostLabel })}
+      aria-label={t("tasks.costBadgeAriaLabel", "Estimated cost {{amount}}", { amount: cardCostLabel })}
+    >
+      {/*
+      FNXC:TaskCardCostBadge 2026-07-12-00:00:
+      The cost chip must show only the formatted amount because formatCost already includes the currency symbol; do not render a leading dollar-sign icon that duplicates the label.
+      */}
+      <span>{cardCostLabel}</span>
+    </span>
+  ) : null;
+  const footerRightHasContent = Boolean((!costBadgeBelowPromote && cardCostLabel)
     || timeIndicator
     || showNearDuplicateChip
     || showUndoOfChip
@@ -2849,19 +2863,7 @@ function TaskCardComponent({
       FNXC:TaskCardTimingBadge 2026-06-13-17:20:
       The execution-time badge belongs in the bottom-right footer cluster and must match sibling footer badge sizing while preserving its existing label, title, aria text, and live-update data.
       */}
-      {cardCostLabel && (
-        <span
-          className="card-cost-indicator"
-          title={t("tasks.costBadgeTitle", "Estimated cost {{amount}}", { amount: cardCostLabel })}
-          aria-label={t("tasks.costBadgeAriaLabel", "Estimated cost {{amount}}", { amount: cardCostLabel })}
-        >
-          {/*
-          FNXC:TaskCardCostBadge 2026-07-12-00:00:
-          The cost chip must show only the formatted amount because formatCost already includes the currency symbol; do not render a leading dollar-sign icon that duplicates the label.
-          */}
-          <span>{cardCostLabel}</span>
-        </span>
-      )}
+      {!costBadgeBelowPromote && costBadgeChip}
       {timeIndicator && (
         <span
           className="card-time-indicator"
@@ -3652,6 +3654,7 @@ function TaskCardComponent({
         </div>
       )}
       {shouldRenderActionRow && (
+        <>
         <div className="card-action-row">
           {showCreatePrQuickAction && (
             <button
@@ -3715,6 +3718,16 @@ function TaskCardComponent({
             </button>
           )}
         </div>
+        {costBadgeBelowPromote && (
+          <div className="card-promote-cost-row">
+            {/*
+            FNXC:TaskCardCostBadge 2026-07-12-00:00:
+            Promote-bearing cards must place the enabled cost badge directly below Promote in the bottom-right corner. Cards without Promote retain the footer/meta placement so other footer chips and card layouts do not move.
+            */}
+            {costBadgeChip}
+          </div>
+        )}
+        </>
       )}
       {isAgentCreated && (
         <div className="card-agent-badge-row" data-testid="card-agent-badge-row">

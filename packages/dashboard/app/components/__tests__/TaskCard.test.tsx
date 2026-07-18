@@ -5814,6 +5814,78 @@ describe("TaskCard", () => {
     expect(noUsage.container.querySelector(".card-cost-indicator")).toBeNull();
   });
 
+  it("places an enabled cost badge below Promote without leaving it in the footer cluster", () => {
+    const pricedTask = makeTask({
+      id: "FN-8324",
+      column: "todo",
+      tokenUsage: {
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 1_000_000,
+        firstUsedAt: "2026-01-01T00:00:00Z",
+        lastUsedAt: "2026-01-01T00:00:00Z",
+        modelProvider: "openai",
+        modelId: "gpt-5-mini",
+      },
+    } as Partial<Task>);
+
+    const { container } = render(
+      <CostBadgeProvider value={{ enabled: true }}>
+        <TaskCard
+          task={pricedTask}
+          onOpenDetail={noop}
+          addToast={noop}
+          onPromote={vi.fn().mockResolvedValue(undefined)}
+        />
+      </CostBadgeProvider>,
+    );
+
+    const promoteButton = screen.getByTestId("card-promote-FN-8324");
+    const costBadge = container.querySelector(".card-cost-indicator") as HTMLElement | null;
+    const costRow = container.querySelector(".card-promote-cost-row");
+    expect(costBadge).not.toBeNull();
+    expect(costBadge?.closest(".card-promote-cost-row")).toBe(costRow);
+    expect(costBadge?.closest(".card-footer-row-right")).toBeNull();
+    expect(promoteButton.compareDocumentPosition(costBadge!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const css = loadAllAppCss();
+    expect(css).toMatch(/\.card-promote-cost-row\s*\{[^}]*justify-content:\s*flex-end;[^}]*margin-top:\s*var\(--space-xs\);[^}]*\}/);
+    expect(css).toMatch(/@media[^{}]*\(max-width:\s*768px\)[^{]*\{[\s\S]*?\.card-promote-cost-row\s*\{[^}]*justify-content:\s*flex-end;[^}]*\}/);
+  });
+
+  it("keeps the cost badge absent below Promote when disabled or without token usage", () => {
+    const onPromote = vi.fn().mockResolvedValue(undefined);
+    const pricedTask = makeTask({
+      id: "FN-8324-disabled",
+      column: "todo",
+      tokenUsage: {
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cachedTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 1_000_000,
+        firstUsedAt: "2026-01-01T00:00:00Z",
+        lastUsedAt: "2026-01-01T00:00:00Z",
+        modelProvider: "openai",
+        modelId: "gpt-5-mini",
+      },
+    } as Partial<Task>);
+    const disabled = render(<TaskCard task={pricedTask} onOpenDetail={noop} addToast={noop} onPromote={onPromote} />);
+    expect(disabled.container.querySelector(".card-cost-indicator")).toBeNull();
+    expect(disabled.container.querySelector(".card-promote-cost-row")).toBeNull();
+    disabled.unmount();
+
+    const noUsage = render(
+      <CostBadgeProvider value={{ enabled: true }}>
+        <TaskCard task={makeTask({ id: "FN-8324-no-usage", column: "todo" })} onOpenDetail={noop} addToast={noop} onPromote={onPromote} />
+      </CostBadgeProvider>,
+    );
+    expect(noUsage.container.querySelector(".card-cost-indicator")).toBeNull();
+    expect(noUsage.container.querySelector(".card-promote-cost-row")).toBeNull();
+  });
+
   it("places a todo cost badge inside the meta row when the footer has no leading content", () => {
     const { container } = render(
       <CostBadgeProvider value={{ enabled: true }}>

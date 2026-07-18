@@ -889,6 +889,16 @@ at desktop and mobile breakpoints.
   row-gap: var(--space-xs);
 }
 
+/*
+FNXC:TaskCardCostBadge 2026-07-12-00:00:
+On cards with Promote, the opt-in cost badge belongs directly below that action in the bottom-right corner. Keep its shared card-cost-indicator styling and only position its wrapper so cards without Promote retain their existing footer/meta layout.
+*/
+.card-promote-cost-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-xs);
+}
+
 .card-provider-icons {
   display: inline-flex;
   align-items: center;
@@ -1908,6 +1918,10 @@ The three-dot menu is the sole card move/action entry point. Keep this shared bu
   .card-promote-action.card-send-back-btn {
     opacity: 1;
     margin-left: auto;
+  }
+
+  .card-promote-cost-row {
+    justify-content: flex-end;
   }
 
   /* Card: compact progress bar on narrow cards */
