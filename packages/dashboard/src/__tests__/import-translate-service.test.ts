@@ -86,6 +86,51 @@ const SPANISH_BODY =
 const ENGLISH_BODY =
   "The server returns an error when the user tries to save the changes to the configuration. The operation cannot be completed because the system does not respond. Please review the server logs for more information about this problem.";
 
+const REPORTED_CZECH_ISSUE_FORM = `
+# PWA na iOS: studený start bez tokenu skončí ve smyčce „Can't reach Fusion Backend" — dialog pro vložení tokenu se nikdy nezobrazí
+
+**GitHub issue:** Runfusion/Fusion#TBD
+**Verze Fusion:** 0.72.0 (zdrojový checkout)
+**Oblast:** Dashboard / autentizace (PWA, vzdálený přístup přes tunel)
+**Závažnost:** Vysoká — aplikaci přidanou na plochu iPhonu nelze vůbec autorizovat.
+
+## Shrnutí
+
+Dashboard zpřístupněný přes Remote Access funguje v mobilním Safari správně. Token přiteče přes přihlašovací URL a uloží se do localStorage. Po přidání na plochu na iOS ale instalovaná webová aplikace startuje bez tokenu v URL, běží v izolovaném úložišti a místo dialogu pro vložení tokenu zobrazí jen chybovou stránku Unauthorized.
+
+## Reprodukce
+
+1. Spusťte dashboard s aktivní bearer-token autentizací a zpřístupněte ho přes tunel.
+2. Na iPhonu otevřete přihlašovací URL v Safari a potom aplikaci přidejte na plochu.
+3. Otevřete aplikaci z plochy: zobrazí se chyba Unauthorized a tlačítko Retry Connection nic nedělá.
+
+## Očekávané chování
+
+Nepřihlášený studený start nabídne vložení tokenu, aby aplikace nebyla trvale nepoužitelná.
+`;
+
+const GITLAB_HANGUL_ISSUE_FORM = `
+<!-- Please complete each field before submitting. -->
+### Bug description
+**What happened?**
+### Expected behavior
+**What did you expect to happen?**
+### Environment
+**Which operating system and version are you using?**
+### Additional details
+**What other context would help us investigate?**
+대시보드에서 설정을 저장하면 오류가 발생하고 사용자가 변경한 내용을 확인할 수 없습니다. 이 문제는 모든 프로젝트에서 반복되며 화면을 새로 고쳐도 계속됩니다.
+
+### Steps to reproduce
+**Steps**
+- [x] I searched existing issues
+- [ ] I can provide more details
+
+### Additional context
+**Logs**
+_No response_
+`;
+
 beforeEach(() => {
   translateTextMock.mockReset();
   translateTextMock.mockResolvedValue({ title: "TRANSLATED", body: "TRANSLATED BODY" });
@@ -142,6 +187,17 @@ describe("isTranslatable", () => {
 
   it("accepts foreign-language open content", () => {
     expect(isTranslatable({ number: 1, title: "Error del servidor", body: SPANISH_BODY, state: "open" }, "en")).toBe(true);
+  });
+
+  it("selects foreign GitHub and GitLab issue-form bodies through the provider-agnostic seam", () => {
+    const items = [
+      { number: 2306, title: "PWA na iOS bez tokenu", body: REPORTED_CZECH_ISSUE_FORM, state: "open" as const },
+      { number: 2307, title: "설정 저장 오류", body: GITLAB_HANGUL_ISSUE_FORM, state: "open" as const },
+    ];
+
+    expect(isTranslatable(items[0], "en")).toBe(true);
+    expect(isTranslatable(items[1], "en")).toBe(true);
+    expect(selectEligibleItems(items, "en").map((item) => item.number)).toEqual([2306, 2307]);
   });
 });
 
