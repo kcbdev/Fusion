@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const componentsDir = resolve(__dirname, "../components");
+const stylesPath = resolve(__dirname, "../styles.css");
 
 const recentlyLandedResponsiveFiles = [
   "PluginManager.css",
@@ -20,8 +21,18 @@ const recentlyLandedHygieneFiles = [
   "TaskFieldsSection.css",
 ];
 
+const tokenizedWhiteFiles = [
+  "ArtifactsGallery.css",
+  "WorkflowSimpleCanvas.css",
+  "WorkflowAddStepModal.css",
+];
+
 function readComponentCss(name: string): string {
   return readFileSync(join(componentsDir, name), "utf-8");
+}
+
+function readStylesCss(): string {
+  return readFileSync(stylesPath, "utf-8");
 }
 
 function linesWith(source: string, predicate: (line: string) => boolean): string[] {
@@ -90,9 +101,16 @@ describe("component CSS hygiene scan regressions", () => {
     expect(findings).toEqual([]);
   });
 
+  it("defines semantic tokens for always-white workflow chips and preview canvases", () => {
+    const styles = readStylesCss();
+
+    expect(styles).toContain("--workflow-chip-foreground: #ffffff;");
+    expect(styles).toContain("--preview-page-bg: #ffffff;");
+  });
+
   it("does not use hardcoded hex colors outside token fallback patterns in scanned recent CSS", () => {
     const hexPattern = /#[0-9a-fA-F]{3,8}\b/;
-    const findings = recentlyLandedHygieneFiles.flatMap((file) =>
+    const findings = [...recentlyLandedHygieneFiles, ...tokenizedWhiteFiles].flatMap((file) =>
       linesWith(
         readComponentCss(file),
         (line) => hexPattern.test(line) && !line.includes("var(--")
