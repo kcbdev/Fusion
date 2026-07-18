@@ -2358,23 +2358,15 @@ describe("PlanningModeModal", () => {
       expect(screen.getByRole("button", { name: "Start Planning" })).toBeDefined();
     });
 
-    it("auto-retries when resuming an errored session", async () => {
-      /*
-       * FNXC:PlanningRetry 2026-07-15-00:00:
-       * FN-8025 requires the stream to remain in the retry loading window while this test observes the transient status.
-       * Do not use the suite default here: its delayed question event clears the auto-retry state before the assertion can run.
-       */
-      mockConnectPlanningStream.mockImplementation(() => ({
-        close: vi.fn(),
-        isConnected: vi.fn().mockReturnValue(true),
-      }));
+    it.each(["desktop", "mobile"] as const)("FN-8332 restores an errored resumed session without auto-retry on %s", async (viewportMode) => {
+      mockViewport(viewportMode);
       mockFetchAiSession.mockResolvedValueOnce({
-        id: "session-error-1",
+        id: `session-error-${viewportMode}`,
         type: "planning",
         status: "error",
         title: "Errored planning",
         inputPayload: JSON.stringify({ initialPlan: "Recover planning" }),
-        conversationHistory: "[]",
+        conversationHistory: JSON.stringify([{ thinkingOutput: "Persisted analysis" }]),
         currentQuestion: null,
         result: null,
         thinkingOutput: "",
@@ -2383,7 +2375,6 @@ describe("PlanningModeModal", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
-      mockRetryPlanningSession.mockResolvedValueOnce({ success: true, sessionId: "session-error-1" });
 
       render(
         <PlanningModeModal
@@ -2392,23 +2383,148 @@ describe("PlanningModeModal", () => {
           onTaskCreated={mockOnTaskCreated}
           onTasksCreated={vi.fn()}
           tasks={mockTasks}
-          resumeSessionId="session-error-1"
+          resumeSessionId={`session-error-${viewportMode}`}
         />,
       );
 
-      await waitFor(() => {
-        expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-error-1", undefined);
-      });
-      await waitFor(() => expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined());
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Session interrupted");
+      fireEvent.click(screen.getByRole("button", { name: "Show AI reasoning" }));
+      expect(screen.getByText("Persisted analysis")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+      expect(mockRetryPlanningSession).not.toHaveBeenCalled();
+      expect(mockStartPlanningStreaming).not.toHaveBeenCalled();
     });
 
-    it("auto-retries when selecting an errored session from the sidebar", async () => {
-      mockConnectPlanningStream.mockImplementation(() => ({
+    it("FN-8332 keeps a resumed generating stream error manual", async () => {
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return { close: vi.fn(), isConnected: vi.fn().mockReturnValue(true) };
+      });
+      mockFetchAiSession
+        .mockResolvedValueOnce({
+          id: "session-resumed-generating-stream",
+          type: "planning",
+          status: "generating",
+          title: "Resumed generation",
+          inputPayload: JSON.stringify({ initialPlan: "Restore a live server turn" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: null,
+          thinkingOutput: "Persisted thinking",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })
+        .mockResolvedValueOnce({
+          id: "session-resumed-generating-stream",
+          type: "planning",
+          status: "error",
+          title: "Resumed generation",
+          inputPayload: JSON.stringify({ initialPlan: "Restore a live server turn" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: null,
+          thinkingOutput: "Persisted thinking",
+          error: "Persisted server failure",
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-resumed-generating-stream"
+        />,
+      );
+
+      await waitFor(() => expect(streamHandlers).toBeDefined());
+      await act(async () => {
+        streamHandlers.onError?.("Stream disconnected");
+      });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Stream disconnected");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(mockRetryPlanningSession).not.toHaveBeenCalled();
+    });
+
+    it("FN-8332 keeps a resumed generating poll error manual", async () => {
+      let pollTick: (() => void | Promise<void>) | undefined;
+      const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation((callback: TimerHandler, timeout?: number) => {
+        if (timeout === 8000) {
+          pollTick = callback as () => void | Promise<void>;
+        }
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      });
+      mockConnectPlanningStream.mockImplementationOnce(() => ({
         close: vi.fn(),
         isConnected: vi.fn().mockReturnValue(true),
       }));
+      mockFetchAiSession
+        .mockResolvedValueOnce({
+          id: "session-resumed-generating-poll",
+          type: "planning",
+          status: "generating",
+          title: "Resumed polling generation",
+          inputPayload: JSON.stringify({ initialPlan: "Restore polling turn" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: null,
+          thinkingOutput: "",
+          error: null,
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })
+        .mockResolvedValueOnce({
+          id: "session-resumed-generating-poll",
+          type: "planning",
+          status: "error",
+          title: "Resumed polling generation",
+          inputPayload: JSON.stringify({ initialPlan: "Restore polling turn" }),
+          conversationHistory: "[]",
+          currentQuestion: null,
+          result: null,
+          thinkingOutput: "",
+          error: "Persisted polling failure",
+          projectId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        });
+
+      try {
+        render(
+          <PlanningModeModal
+            isOpen={true}
+            onClose={mockOnClose}
+            onTaskCreated={mockOnTaskCreated}
+            onTasksCreated={vi.fn()}
+            tasks={mockTasks}
+            resumeSessionId="session-resumed-generating-poll"
+          />,
+        );
+
+        await waitFor(() => expect(pollTick).toBeDefined());
+        await act(async () => {
+          await pollTick?.();
+        });
+
+        expect(await screen.findByRole("alert")).toHaveTextContent("Persisted polling failure");
+        expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+        expect(mockRetryPlanningSession).not.toHaveBeenCalled();
+      } finally {
+        setIntervalSpy.mockRestore();
+      }
+    });
+
+    it("FN-8332 restores an errored sidebar selection without auto-retry", async () => {
       mockFetchAiSessions.mockResolvedValueOnce([
         {
           id: "session-sidebar-error",
@@ -2435,7 +2551,6 @@ describe("PlanningModeModal", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
-      mockRetryPlanningSession.mockResolvedValueOnce({ success: true, sessionId: "session-sidebar-error" });
 
       render(
         <PlanningModeModal
@@ -2447,19 +2562,13 @@ describe("PlanningModeModal", () => {
         />,
       );
 
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /Sidebar errored session/i })).toBeDefined();
-      });
-
+      await screen.findByRole("button", { name: /Sidebar errored session/i });
       fireEvent.click(screen.getByRole("button", { name: /Sidebar errored session/i }));
 
-      await waitFor(() => {
-        expect(mockFetchAiSession).toHaveBeenCalledWith("session-sidebar-error");
-        expect(mockRetryPlanningSession).toHaveBeenCalledWith("session-sidebar-error", undefined);
-      });
-      await waitFor(() => expect(screen.getByText("Retrying… (attempt 1 of 3)")).toBeDefined());
-      expect(screen.queryByRole("alert")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Start Planning" })).toBeNull();
+      expect(await screen.findByRole("alert")).toHaveTextContent("Sidebar session interrupted");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(mockRetryPlanningSession).not.toHaveBeenCalled();
+      expect(mockStartPlanningStreaming).not.toHaveBeenCalled();
     });
 
     it("routes malformed persisted result data from sidebar selection to the recoverable error view", async () => {
