@@ -33,6 +33,12 @@ function addMediaChangeListener(query: MediaQueryList, listener: () => void): ()
  * regressed FN-001 by snapping against stale iOS layout metrics. Preserve proximity CSS and
  * snap only after verified user horizontal movement has ended; mount, reflow, resize, pageshow,
  * and programmatic scrolling must never choose a board column.
+ *
+ * FNXC:BoardNavigation 2026-07-16-08:35:
+ * Issue #2245 / #2303 unifies the native `x proximity` drag behavior and JS scroll-end drop
+ * behavior by suspending native snap only during a verified user pan. The hook then owns the
+ * one-column resolution and restores the prior inline value; `x mandatory` remains prohibited
+ * to preserve the FN-001 corner-rendering fix.
  */
 export function useColumnScrollSnap(
   scroller: HTMLElement | null,
@@ -71,6 +77,8 @@ export function useColumnScrollSnap(
     let interactionScrollLeft = scroller.scrollLeft;
     let sawHorizontalMovement = false;
     let isSnapping = false;
+    let nativeSnapSuspended = false;
+    let priorInlineScrollSnapType = "";
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let snapReleaseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -79,26 +87,56 @@ export function useColumnScrollSnap(
       idleTimer = null;
     };
 
+    const restoreNativeSnap = () => {
+      if (!nativeSnapSuspended) return;
+      scroller.style.scrollSnapType = priorInlineScrollSnapType;
+      nativeSnapSuspended = false;
+    };
+
+    const suspendNativeSnap = () => {
+      if (nativeSnapSuspended) return;
+      priorInlineScrollSnapType = scroller.style.scrollSnapType;
+      scroller.style.scrollSnapType = "none";
+      nativeSnapSuspended = true;
+    };
+
+    const finishWithoutSnap = () => {
+      interactionActive = false;
+      sawHorizontalMovement = false;
+      restoreNativeSnap();
+    };
+
     const releaseSnap = () => {
       if (snapReleaseTimer !== null) clearTimeout(snapReleaseTimer);
       snapReleaseTimer = setTimeout(() => {
         isSnapping = false;
         snapReleaseTimer = null;
+        restoreNativeSnap();
       }, SNAP_RELEASE_DELAY_MS);
     };
 
     const snapToNearestColumn = () => {
       clearIdleTimer();
-      if (!interactionActive || !sawHorizontalMovement || isSnapping) return;
+      if (isSnapping) return;
+      if (!interactionActive || !sawHorizontalMovement) {
+        if (interactionActive) finishWithoutSnap();
+        return;
+      }
       interactionActive = false;
       sawHorizontalMovement = false;
 
       const columns = Array.from(scroller.children) as HTMLElement[];
-      if (columns.length < 2) return;
+      if (columns.length < 2) {
+        restoreNativeSnap();
+        return;
+      }
 
       const scrollerRect = scroller.getBoundingClientRect();
       const viewportWidth = scroller.clientWidth || scrollerRect.width;
-      if (viewportWidth <= 0) return;
+      if (viewportWidth <= 0) {
+        restoreNativeSnap();
+        return;
+      }
 
       const viewportCenter = scrollerRect.left + viewportWidth / 2;
       let nearestColumn: HTMLElement | null = null;
@@ -111,7 +149,10 @@ export function useColumnScrollSnap(
           nearestDistance = distance;
         }
       }
-      if (!nearestColumn || nearestDistance <= CENTER_TOLERANCE_PX) return;
+      if (!nearestColumn || nearestDistance <= CENTER_TOLERANCE_PX) {
+        restoreNativeSnap();
+        return;
+      }
 
       const columnRect = nearestColumn.getBoundingClientRect();
       const targetLeft = scroller.scrollLeft + columnRect.left + columnRect.width / 2 - viewportCenter;
@@ -129,6 +170,14 @@ export function useColumnScrollSnap(
       interactionActive = true;
       sawHorizontalMovement = false;
       interactionScrollLeft = scroller.scrollLeft;
+      suspendNativeSnap();
+      // FNXC:BoardNavigation 2026-07-18-09:03: Wheel input has no end event. Arm the same idle
+      // settlement path immediately so vertical and boundary wheels that produce no horizontal
+      // scroll restore the proximity baseline instead of leaving native snapping disabled.
+      if (event.type === "wheel") {
+        clearIdleTimer();
+        idleTimer = setTimeout(snapToNearestColumn, SCROLL_IDLE_DELAY_MS);
+      }
     };
 
     const handleScroll = () => {
@@ -141,7 +190,12 @@ export function useColumnScrollSnap(
     };
 
     const handleInteractionEnd = () => {
-      if (!interactionActive || !sawHorizontalMovement || isSnapping) return;
+      if (!interactionActive || isSnapping) return;
+      if (!sawHorizontalMovement) {
+        clearIdleTimer();
+        finishWithoutSnap();
+        return;
+      }
       clearIdleTimer();
       idleTimer = setTimeout(snapToNearestColumn, SCROLL_IDLE_DELAY_MS);
     };
@@ -151,6 +205,7 @@ export function useColumnScrollSnap(
         isSnapping = false;
         if (snapReleaseTimer !== null) clearTimeout(snapReleaseTimer);
         snapReleaseTimer = null;
+        restoreNativeSnap();
         return;
       }
       snapToNearestColumn();
@@ -167,6 +222,7 @@ export function useColumnScrollSnap(
     return () => {
       clearIdleTimer();
       if (snapReleaseTimer !== null) clearTimeout(snapReleaseTimer);
+      restoreNativeSnap();
       scroller.removeEventListener("pointerdown", beginInteraction);
       scroller.removeEventListener("touchstart", beginInteraction);
       scroller.removeEventListener("wheel", beginInteraction);

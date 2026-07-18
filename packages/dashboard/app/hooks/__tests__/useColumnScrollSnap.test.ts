@@ -65,13 +65,42 @@ describe("useColumnScrollSnap", () => {
     vi.restoreAllMocks();
   });
 
-  it("centers the nearest column after verified user horizontal movement ends", () => {
+  it("unifies a user pan into one JS snap and restores the CSS proximity baseline", () => {
     const scroller = createScroller();
     renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
 
-    act(() => dispatchUserPan(scroller));
+    act(() => scroller.dispatchEvent(new Event("pointerdown")));
+    expect(scroller.style.scrollSnapType).toBe("none");
 
+    act(() => {
+      scroller.scrollLeft = 10;
+      scroller.dispatchEvent(new Event("scroll"));
+      scroller.dispatchEvent(new Event("scrollend"));
+    });
+
+    expect(scroller.scrollTo).toHaveBeenCalledTimes(1);
     expect(scroller.scrollTo).toHaveBeenCalledWith({ left: 40, behavior: "smooth" });
+    expect(scroller.style.scrollSnapType).toBe("none");
+
+    act(() => scroller.dispatchEvent(new Event("scrollend")));
+    expect(scroller.style.scrollSnapType).toBe("");
+    expect(scroller.scrollTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores a pre-existing inline snap value after completion and cleanup", () => {
+    const scroller = createScroller();
+    scroller.style.scrollSnapType = "x proximity";
+    const { unmount } = renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => dispatchUserPan(scroller));
+    expect(scroller.style.scrollSnapType).toBe("none");
+    act(() => scroller.dispatchEvent(new Event("scrollend")));
+    expect(scroller.style.scrollSnapType).toBe("x proximity");
+
+    act(() => scroller.dispatchEvent(new Event("pointerdown")));
+    expect(scroller.style.scrollSnapType).toBe("none");
+    unmount();
+    expect(scroller.style.scrollSnapType).toBe("x proximity");
   });
 
   it("attaches after a loading skeleton is replaced by the live board", () => {
@@ -107,13 +136,27 @@ describe("useColumnScrollSnap", () => {
     const scroller = createScroller();
     renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
 
+    act(() => scroller.dispatchEvent(new Event("pointerdown")));
+    expect(scroller.style.scrollSnapType).toBe("none");
     act(() => {
-      scroller.dispatchEvent(new Event("pointerdown"));
-      scroller.dispatchEvent(new Event("scrollend"));
+      scroller.dispatchEvent(new Event("pointerup"));
       vi.advanceTimersByTime(500);
     });
 
     expect(scroller.scrollTo).not.toHaveBeenCalled();
+    expect(scroller.style.scrollSnapType).toBe("");
+  });
+
+  it("restores native proximity after a wheel that produces no horizontal scroll", () => {
+    const scroller = createScroller();
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => scroller.dispatchEvent(new Event("wheel")));
+    expect(scroller.style.scrollSnapType).toBe("none");
+    act(() => vi.advanceTimersByTime(120));
+
+    expect(scroller.scrollTo).not.toHaveBeenCalled();
+    expect(scroller.style.scrollSnapType).toBe("");
   });
 
   it.each([0, 1])("does nothing with %s snap children", (columnCount) => {
@@ -123,6 +166,7 @@ describe("useColumnScrollSnap", () => {
     act(() => dispatchUserPan(scroller));
 
     expect(scroller.scrollTo).not.toHaveBeenCalled();
+    expect(scroller.style.scrollSnapType).toBe("");
   });
 
   it("does not attach magnetic snapping on a wide, short non-phone desktop", () => {
@@ -140,6 +184,7 @@ describe("useColumnScrollSnap", () => {
     act(() => dispatchUserPan(scroller));
 
     expect(addListener).not.toHaveBeenCalledWith("scrollend", expect.any(Function));
+    expect(scroller.style.scrollSnapType).toBe("");
     expect(scroller.scrollTo).not.toHaveBeenCalled();
   });
 
