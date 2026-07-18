@@ -3300,7 +3300,7 @@
     "useProjectDefault": "使用專案預設",
     "viewOptions": "檢視選項",
     "workflowLabel": "",
-    "statusReplan": ""
+    "statusReplan": "重新規劃"
   },
   "mailbox": {
     "agent": "代理",
@@ -5889,13 +5889,13 @@
       "restartNow": "",
       "restartUnavailable": "",
       "restarting": "",
-      "mobileNavPrimaryItems": "",
-      "mobileNavPrimaryItemsHint": "",
-      "addNavItem": "",
-      "selectNavItem": "",
-      "removeNavItem": "",
-      "moveNavItemEarlier": "",
-      "moveNavItemLater": ""
+      "mobileNavPrimaryItems": "行動版底部快捷操作",
+      "mobileNavPrimaryItemsHint": "預設：儀表板、任務、代理、任務組、聊天、信箱。可新增符合條件的目的地；未選取的目的地仍在「更多」中。",
+      "addNavItem": "新增快捷操作",
+      "selectNavItem": "選擇目的地",
+      "removeNavItem": "移除 {{item}}",
+      "moveNavItemEarlier": "將 {{item}} 前移",
+      "moveNavItemLater": "將 {{item}} 後移"
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8371,7 +8371,7 @@
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
     "awaitingApprovalTitle": "",
-    "statusReplan": ""
+    "statusReplan": "重新規劃"
   },
   "terminal": {
     "arrowKeysLabel": "",

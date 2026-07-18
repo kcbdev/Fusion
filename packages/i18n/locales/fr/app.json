@@ -3300,7 +3300,7 @@
     "useProjectDefault": "Utiliser le défaut du projet",
     "viewOptions": "Options d'affichage",
     "workflowLabel": "",
-    "statusReplan": ""
+    "statusReplan": "Replanifier"
   },
   "mailbox": {
     "agent": "Agent",
@@ -5889,13 +5889,13 @@
       "restartNow": "",
       "restartUnavailable": "",
       "restarting": "",
-      "mobileNavPrimaryItems": "",
-      "mobileNavPrimaryItemsHint": "",
-      "addNavItem": "",
-      "selectNavItem": "",
-      "removeNavItem": "",
-      "moveNavItemEarlier": "",
-      "moveNavItemLater": ""
+      "mobileNavPrimaryItems": "Actions rapides du bas mobile",
+      "mobileNavPrimaryItemsHint": "Par défaut : Tableau de bord, Tâches, Agents, Missions, Chat, Boîte de réception. Ajoutez des destinations éligibles ; les non sélectionnées restent dans Plus.",
+      "addNavItem": "Ajouter une action rapide",
+      "selectNavItem": "Choisir une destination",
+      "removeNavItem": "Retirer {{item}}",
+      "moveNavItemEarlier": "Déplacer {{item}} plus tôt",
+      "moveNavItemLater": "Déplacer {{item}} plus tard"
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8371,7 +8371,7 @@
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
     "awaitingApprovalTitle": "",
-    "statusReplan": ""
+    "statusReplan": "Replanifier"
   },
   "terminal": {
     "arrowKeysLabel": "",

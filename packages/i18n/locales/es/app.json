@@ -3300,7 +3300,7 @@
     "useProjectDefault": "Usar predeterminado del proyecto",
     "viewOptions": "Opciones de vista",
     "workflowLabel": "",
-    "statusReplan": ""
+    "statusReplan": "Replanificar"
   },
   "mailbox": {
     "agent": "Agente",
@@ -5889,13 +5889,13 @@
       "restartNow": "",
       "restartUnavailable": "",
       "restarting": "",
-      "mobileNavPrimaryItems": "",
-      "mobileNavPrimaryItemsHint": "",
-      "addNavItem": "",
-      "selectNavItem": "",
-      "removeNavItem": "",
-      "moveNavItemEarlier": "",
-      "moveNavItemLater": ""
+      "mobileNavPrimaryItems": "Acciones rápidas del pie móvil",
+      "mobileNavPrimaryItemsHint": "Predeterminado: Panel, Tareas, Agentes, Misiones, Chat, Buzón. Añade destinos elegibles; los no seleccionados permanecen en Más.",
+      "addNavItem": "Añadir acción rápida",
+      "selectNavItem": "Elegir un destino",
+      "removeNavItem": "Quitar {{item}}",
+      "moveNavItemEarlier": "Mover {{item}} antes",
+      "moveNavItemLater": "Mover {{item}} después"
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8371,7 +8371,7 @@
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
     "awaitingApprovalTitle": "",
-    "statusReplan": ""
+    "statusReplan": "Replanificar"
   },
   "terminal": {
     "arrowKeysLabel": "",

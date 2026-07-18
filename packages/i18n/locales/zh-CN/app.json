@@ -3300,7 +3300,7 @@
     "useProjectDefault": "使用项目默认",
     "viewOptions": "视图选项",
     "workflowLabel": "",
-    "statusReplan": ""
+    "statusReplan": "重新规划"
   },
   "mailbox": {
     "agent": "代理",
@@ -5889,13 +5889,13 @@
       "restartNow": "",
       "restartUnavailable": "",
       "restarting": "",
-      "mobileNavPrimaryItems": "",
-      "mobileNavPrimaryItemsHint": "",
-      "addNavItem": "",
-      "selectNavItem": "",
-      "removeNavItem": "",
-      "moveNavItemEarlier": "",
-      "moveNavItemLater": ""
+      "mobileNavPrimaryItems": "移动端底部快捷操作",
+      "mobileNavPrimaryItemsHint": "默认：仪表盘、任务、代理、任务组、聊天、邮箱。可添加符合条件的目标；未选中的目标仍在“更多”中。",
+      "addNavItem": "添加快捷操作",
+      "selectNavItem": "选择目标",
+      "removeNavItem": "移除 {{item}}",
+      "moveNavItemEarlier": "将 {{item}} 前移",
+      "moveNavItemLater": "将 {{item}} 后移"
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8371,7 +8371,7 @@
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
     "awaitingApprovalTitle": "",
-    "statusReplan": ""
+    "statusReplan": "重新规划"
   },
   "terminal": {
     "arrowKeysLabel": "",
