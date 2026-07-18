@@ -272,6 +272,10 @@ export function closeTopmostDashboardPopupForShortcut(
 function AppInner() {
   const { t } = useTranslation("app");
   const { toasts, addToast, removeToast } = useToast();
+  useEffect(() => {
+    const latest = toasts[toasts.length - 1];
+    if (latest) recordActivity({ kind: latest.type === "error" ? "error" : "toast", label: latest.message });
+  }, [toasts]);
   const { shellApi, state: shellState, ready: shellReady, openConnectionManagerSignal } = useShellConnection();
   const shellHost = useShellHostContext();
 
@@ -426,7 +430,12 @@ function AppInner() {
     recordActivity({ kind: "view", label: String(viewMode) });
   }, [viewMode]);
   useEffect(() => {
-    const recordError = (event: ErrorEvent) => recordActivity({ kind: "client-error", label: event.message });
+    /*
+    FNXC:ReportPipeline 2026-07-18-12:50:
+    Report traces must retain uncaught client errors independently of toast UI.
+    Window errors reveal failures that never produce a typed error toast.
+    */
+    const recordError = (event: ErrorEvent) => recordActivity({ kind: "error", label: event.message });
     window.addEventListener("error", recordError);
     return () => window.removeEventListener("error", recordError);
   }, []);

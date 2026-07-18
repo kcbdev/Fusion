@@ -64,6 +64,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
     setBusy(true);
     setError(undefined);
     try {
+      recordActivity({ kind: "report", label: `${actionType} report filed` });
       setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, activityTrace: snapshotActivityTrace(), screenshotArtifactId }));
     } catch {
       setError("We could not send your report. Your draft is still here; try again.");
