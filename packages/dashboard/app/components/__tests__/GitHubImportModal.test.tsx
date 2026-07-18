@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useEffect, type ReactNode } from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { GitHubImportModal } from "../GitHubImportModal";
+import { buildIssuePlanningSeed, GitHubImportModal } from "../GitHubImportModal";
 import { ConfirmDialogProvider } from "../../hooks/useConfirm";
 import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import {
@@ -281,6 +281,85 @@ describe("GitHubImportModal", () => {
       <GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" />
     </MobileNavigationHarness>,
   );
+
+  it("builds a Planning Mode seed with the GitHub issue context", () => {
+    expect(buildIssuePlanningSeed({
+      number: 42,
+      title: "Plan import",
+      body: "Capture the original issue context.",
+      html_url: "https://github.com/owner/repo/issues/42",
+      labels: [],
+      state: "open",
+    })).toContain("Plan import");
+    expect(buildIssuePlanningSeed({
+      number: 42,
+      title: "Plan import",
+      body: "Capture the original issue context.",
+      html_url: "https://github.com/owner/repo/issues/42",
+      labels: [],
+      state: "open",
+    })).toContain("Capture the original issue context.");
+    expect(buildIssuePlanningSeed({
+      number: 42,
+      title: "Plan import",
+      body: "Capture the original issue context.",
+      html_url: "https://github.com/owner/repo/issues/42",
+      labels: [],
+      state: "open",
+    })).toContain("https://github.com/owner/repo/issues/42");
+  });
+
+  it("plans a selected issue after closing the embedded import surface", async () => {
+    const issue = { number: 42, title: "Plan import", body: "Capture the original issue context.", html_url: "https://github.com/owner/repo/issues/42", labels: [], state: "open" };
+    const sequence: string[] = [];
+    let destination = "import";
+    const onPlanningMode = vi.fn((seed: string) => {
+      sequence.push("planning");
+      destination = "planning";
+      expect(seed).toContain(issue.title);
+      expect(seed).toContain(issue.body);
+      expect(seed).toContain(issue.html_url);
+    });
+    const closeToBoard = vi.fn(() => {
+      sequence.push("board");
+      destination = "board";
+    });
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([issue]);
+
+    render(<GitHubImportModal isOpen onClose={closeToBoard} onImport={onImport} onPlanningMode={onPlanningMode} tasks={[]} presentation="embedded" />);
+    fireEvent.click(await screen.findByRole("button", { name: /Select issue #42/i }));
+    expect(screen.getByTestId("github-import-action-plan")).toBeEnabled();
+    expect(screen.getByTestId("github-import-action-top")).toHaveTextContent("Import as task");
+
+    fireEvent.click(screen.getByTestId("github-import-action-plan"));
+
+    // FNXC:GitHubImport 2026-07-30-00:00: The embedded close routes to Board; Planning must run second so it remains the final destination.
+    expect(sequence).toEqual(["board", "planning"]);
+    expect(destination).toBe("planning");
+    expect(onPlanningMode).toHaveBeenCalledTimes(1);
+    expect(apiImportGitHubIssue).not.toHaveBeenCalled();
+  });
+
+  it("renders Plan only for selectable GitHub issues with Planning Mode", async () => {
+    const issue = { number: 43, title: "Optional plan", body: "Issue body", html_url: "https://github.com/owner/repo/issues/43", labels: [], state: "open" };
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([issue]);
+
+    const view = render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} onPlanningMode={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Select issue #43/i }));
+    expect(screen.getByTestId("github-import-action-plan")).toBeEnabled();
+
+    view.rerender(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} onPlanningMode={vi.fn()} tasks={[{ ...mockTask, description: `Source: ${issue.html_url}` }]} />);
+    expect(screen.getByTestId("github-import-action-plan")).toBeDisabled();
+
+    view.unmount();
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([issue]);
+    render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Select issue #43/i }));
+    expect(screen.queryByTestId("github-import-action-plan")).toBeNull();
+  });
 
   const dispatchDetailBack = (delivery: "popstate" | "native") => {
     if (delivery === "native") {
@@ -728,7 +807,7 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiImportGitLabGroupIssue).mockResolvedValueOnce({ ...mockTask, id: "FN-100", title: "Group issue" });
     vi.mocked(apiImportGitLabMergeRequest).mockResolvedValueOnce({ ...mockTask, id: "FN-101", title: "Review MR !5: Review me" });
 
-    render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+    render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} onPlanningMode={vi.fn()} tasks={[]} />);
     fireEvent.click(await screen.findByRole("button", { name: "GitLab" }));
 
     fireEvent.click(screen.getByRole("tab", { name: "Group issues" }));
@@ -737,6 +816,7 @@ describe("GitHubImportModal", () => {
     expect(await screen.findByText(/#7 Group issue/)).toBeInTheDocument();
     fireEvent.click(screen.getByText(/#7 Group issue/));
     expect(screen.getByTestId("gitlab-import-preview-body")).toHaveTextContent("(no description)");
+    expect(screen.queryByTestId("github-import-action-plan")).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: "Import" })[0]);
     await waitFor(() => expect(apiImportGitLabGroupIssue).toHaveBeenCalledWith(expect.objectContaining({ iid: 7 }), "group", undefined));
 
@@ -1737,13 +1817,14 @@ describe("GitHubImportModal", () => {
       vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
       vi.mocked(apiFetchGitHubPulls).mockResolvedValue([{ number: 23, title: "Action PR", body: "body", html_url: "https://github.com/owner/repo/pull/23", headBranch: "feature", baseBranch: "main" }]);
       vi.mocked(apiFetchGitHubIssues).mockResolvedValue([{ number: 24, title: "Action issue", body: "body", html_url: "https://github.com/owner/repo/issues/24", labels: [], state: "open", author: "owner" }]);
-      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />);
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} onPlanningMode={vi.fn()} tasks={[]} presentation="embedded" />);
       fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
       fireEvent.click(await screen.findByRole("button", { name: /Select pull request #23/i }));
       expect(await screen.findByRole("button", { name: "Resolve feedback" })).toBeTruthy();
+      expect(screen.queryByTestId("github-import-action-plan")).toBeNull();
       fireEvent.click(screen.getByRole("tab", { name: "Issues" }));
       fireEvent.click(await screen.findByRole("button", { name: /Select issue #24/i }));
-      expect(await screen.findByRole("button", { name: "Import" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: "Import as task" })).toBeTruthy();
     });
 
     // FNXC:GitHubImport 2026-06-23-03:30: The Human filter hides bot comments; All (default) shows both.
@@ -2947,7 +3028,7 @@ describe("GitHubImportModal — detail actions sit at the bottom (operator repor
     bottom of the flex panel. Geometry itself was verified in a real browser at 412px.
     */
     expect(content!.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(within(bar).getByRole("button", { name: /^Import$/i })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: /^Import as task$/i })).toBeTruthy();
     expect(within(bar).getByTestId("github-import-issue-close")).toBeTruthy();
   });
 

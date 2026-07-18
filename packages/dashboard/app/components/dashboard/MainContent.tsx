@@ -662,6 +662,7 @@ export function MainContent({
             isOpen={true}
             onClose={() => handleChangeTaskView("board")}
             onImport={handleGitHubImport}
+            onPlanningMode={openPlanningWithInitialPlanWithNav}
             tasks={tasks}
             projectId={currentProject?.id}
             presentation="embedded"

@@ -393,6 +393,7 @@ export function AppModals({
         isOpen={modalManager.githubImportOpen}
         onClose={closeGitHubImportWithNav}
         onImport={taskHandlers.handleGitHubImport}
+        onPlanningMode={onPlanningMode}
         tasks={tasks}
         projectId={projectId}
       />

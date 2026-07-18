@@ -50,6 +50,8 @@ interface GitHubImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (task: Task) => void;
+  /** Optional because callers without Planning Mode retain the direct-import-only surface. */
+  onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
   tasks: Task[];
   projectId?: string;
   /*
@@ -368,6 +370,23 @@ const ISSUES_PAGE_SIZE = 30;
  * FN-8110 lets an operator create a repair task from a failed PR check without retyping its context.
  * Keep this prompt composition pure so every check row carries its repository, PR, branch, status, and details-link evidence.
  */
+/*
+FNXC:GitHubImport 2026-07-30-00:00:
+Operators can choose direct task import or Planning Mode for GitHub issues. Planning receives a
+self-contained issue seed, including the source URL, but intentionally does not establish GitHub
+sourceIssue tracking or deduplication; those remain exclusive to direct import.
+*/
+export function buildIssuePlanningSeed(issue: GitHubIssue): string {
+  return [
+    `Plan work for GitHub issue: ${issue.title}`,
+    "",
+    "Issue description:",
+    issue.body?.trim() || "(no description)",
+    "",
+    `Source: ${issue.html_url}`,
+  ].join("\n");
+}
+
 export function buildCheckFixTaskPrompt(
   pull: GitHubPull,
   check: GitHubPullDetail["checks"][number],
@@ -391,7 +410,7 @@ export function buildCheckFixTaskPrompt(
   };
 }
 
-export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
+export function GitHubImportModal({ isOpen, onClose, onImport, onPlanningMode, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
   const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
   useMobileScrollLock(isOpen && scrollLockEnabled);
   const { t, i18n } = useTranslation("app");
@@ -1159,6 +1178,18 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       }
     }
   }, [activeTab, selectedIssueNumber, selectedPullNumber, issues, pulls, owner, repo, projectId, onImport, returnToIssueListAfterSuccess, clearDetailSelection]);
+
+  const handlePlanIssue = useCallback(() => {
+    const selectedIssue = activeTab === "issues"
+      ? issues.find((issue) => issue.number === selectedIssueNumber)
+      : undefined;
+    if (!selectedIssue || !onPlanningMode || importing || isUrlImported(selectedIssue.html_url)) return;
+
+    const seed = buildIssuePlanningSeed(selectedIssue);
+    // FNXC:GitHubImport 2026-07-30-00:00: Embedded close navigates to Board, so close first and open Planning last to preserve Planning as the final destination.
+    onClose();
+    onPlanningMode(seed);
+  }, [activeTab, importing, isUrlImported, issues, onClose, onPlanningMode, selectedIssueNumber]);
 
   const fetchPullDetail = useCallback((force: boolean) => {
     const requestId = ++pullDetailRequestRef.current;
@@ -2280,6 +2311,17 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                     {closingIssue ? <Loader2 size={14} className="spin" /> : t("git.closeIssue", "Close issue")}
                   </button>
                 )}
+                {activeTab === "issues" && selectedIssue && onPlanningMode && (
+                  <button
+                    type="button"
+                    className="btn github-import-action"
+                    data-testid="github-import-action-plan"
+                    onClick={handlePlanIssue}
+                    disabled={importing || isUrlImported(selectedIssue.html_url)}
+                  >
+                    {t("git.planIssue", "Plan")}
+                  </button>
+                )}
                 <button
                   className="btn btn-primary github-import-action"
                   data-testid="github-import-action-top"
@@ -2288,7 +2330,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                     (activeTab === "issues" ? selectedIssueNumber === null || isUrlImported(selectedIssue?.html_url) : selectedPullNumber === null || isUrlImported(selectedPull?.html_url)) || importing
                   }
                 >
-                  {importing ? <Loader2 size={14} className="spin" /> : activeTab === "pulls" ? t("git.resolveFeedback", "Resolve feedback") : t("git.import", "Import")}
+                  {importing ? <Loader2 size={14} className="spin" /> : activeTab === "pulls" ? t("git.resolveFeedback", "Resolve feedback") : t("git.importAsTask", "Import as task")}
                 </button>
               </div>
               </div>

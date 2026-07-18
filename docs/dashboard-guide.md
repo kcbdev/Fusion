@@ -339,8 +339,9 @@ Import Tasks documentation distinguishes Add comment (an upstream GitHub mutatio
 -->
 5. In an issue detail, use **Add comment** to write a new upstream GitHub comment. The composer remains available for open and closed issues; posting adds the comment to the preview thread immediately. This is separate from **Import as task**, which creates a Fusion resolve-feedback task from an existing GitHub comment.
    Expected outcome: Fusion posts the new comment to GitHub, keeps its inline composer available for another response, and shows a success or retryable error message without leaving Import Tasks.
-6. Select the import action in the detail window. Pull requests use **Resolve feedback**, which creates a task to resolve reviewer feedback and address failed CI checks; issues keep **Import**. Each GitHub issue and pull-request comment also has **Import as task**, which creates a separate resolve-feedback task quoting that comment and linking its source without closing the detail window.
-   Expected outcome: Fusion creates the requested task, preserves GitHub provenance/tracking metadata, and returns the completed PR/issue import to the list while leaving comment imports available for further feedback.
+<!-- FNXC:GitHubImportDocs 2026-07-30-00:00: GitHub issue detail now gives operators a deliberate direct-import versus Planning Mode choice; Planning preserves textual source context but must not imply direct-import sourceIssue tracking. -->
+6. In a GitHub **issue** detail, choose **Import as task** to create the board task directly with GitHub provenance/tracking metadata, or choose **Plan** to close Import Tasks and open Planning Mode with the issue title, body, and source URL as the initial plan. The Planning path does not establish GitHub source-issue tracking or direct-import deduplication. Pull requests continue to use **Resolve feedback**, which creates a task to resolve reviewer feedback and address failed CI checks. Each GitHub issue and pull-request comment also has **Import as task**, which creates a separate resolve-feedback task quoting that comment and linking its source without closing the detail window.
+   Expected outcome: direct import creates the requested tracked task and returns the completed PR/issue import to the list; Plan opens the docked Planning Mode interview with the issue context; comment imports remain available for further feedback.
 
 Leaving and returning to **Import Tasks** (for example switching to Board and back) restores the prior context for the current project — provider (GitHub/GitLab), active Issues/PRs tab, label filter, selected repository/remote, GitLab project/group inputs, the **Hide imported** preference, and the previously selected issue/PR — instead of resetting to defaults. When GitLab integration is disabled in Settings, the GitLab provider tab is hidden and any restored GitLab provider preference opens on GitHub instead; saved GitLab URLs and tokens remain configured. The restored selection re-validates against the freshly reloaded list; a selection that no longer exists (e.g. the issue was closed upstream) clears gracefully rather than showing a stuck or empty preview. First-time opens with no prior state keep the existing default-remote auto-detect behavior. State is scoped per project and does not leak across projects.
 
@@ -348,8 +349,8 @@ Use GitHub import on mobile:
 
 1. Open the compact Header actions or bottom **More** sheet and select **Import from GitHub**.
    Expected outcome: the same import workflow opens in the mobile modal layout.
-2. Choose the repository, issue/PR tab, candidate row, and import action.
-   Expected outcome: Fusion creates the board task with the same GitHub provenance/tracking metadata as the desktop/tablet **Import Tasks** view.
+2. Choose the repository, issue/PR tab, candidate row, and detail action. For GitHub issues, choose **Import as task** for direct tracked creation or **Plan** to start Planning Mode with the issue context.
+   Expected outcome: direct import creates the board task with the same GitHub provenance/tracking metadata as the desktop/tablet **Import Tasks** view; Plan opens the Planning Mode interview without source-issue tracking.
 3. While a candidate detail sheet is open, use the platform Back gesture or control.
    Expected outcome: the first Back dismisses only the issue, pull request, or GitLab detail and returns to the import candidate list; a second Back dismisses the import form.
 
