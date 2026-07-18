@@ -121,6 +121,19 @@ const quarantinedCliTests: string[] = [
   "src/commands/dashboard-tui/__tests__/terminal-attach.test.ts",
 ];
 
+/*
+FNXC:CliTests 2026-07-18-02:15:
+The full CLI suite must continue excluding quarantined integration tests, but an explicitly named quarantined file needs to remain runnable for focused diagnosis and regression verification. Preserve the quarantine for discovery runs while removing only the exact requested path from Vitest's exclude list (FN-8268).
+*/
+const explicitlyRequestedTestFiles = new Set(
+  process.argv
+    .filter((argument) => /(^|[/\\])src[/\\].+\.test\.(?:ts|tsx)$/.test(argument))
+    .map((argument) => argument.replace(/\\/g, "/").replace(/^\.\//, "")),
+);
+const activeQuarantinedCliTests = quarantinedCliTests.filter(
+  (testFile) => !explicitlyRequestedTestFiles.has(testFile),
+);
+
 export default defineConfig({
   resolve: {
     // Keep these aliases exact and ordered (subpaths before package roots).
@@ -179,6 +192,14 @@ export default defineConfig({
         replacement: resolve(__dirname, "../../plugins/fusion-plugin-grok-runtime/src/index.ts"),
       },
       /*
+      FNXC:PluginTests 2026-07-18-01:58:
+      runtime-provider-probes.ts is reached from @fusion/dashboard through server.ts, routes.ts, and register-runtime-provider-routes.ts, where it imports @fusion-plugin-examples/claude-runtime. Mirror the Cursor, Grok, and OMP source aliases so source checkouts without built plugin dist resolve the Claude runtime (FN-8268).
+      */
+      {
+        find: /^@fusion-plugin-examples\/claude-runtime$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-claude-runtime/src/index.ts"),
+      },
+      /*
       FNXC:OmpAcp 2026-07-11-23:35:
       runtime-provider-probes imports @fusion-plugin-examples/omp-runtime; alias source for checkout tests.
       */
@@ -214,7 +235,7 @@ export default defineConfig({
     // build-exe + build-exe-cross live in their own vitest project
     // (see vitest.build-exe.config.ts) so the rest of the CLI suite can
     // run with file parallelism enabled.
-    exclude: ["**/node_modules/**", "**/dist/**", "src/__tests__/build-exe*.test.ts", ...quarantinedCliTests],
+    exclude: ["**/node_modules/**", "**/dist/**", "src/__tests__/build-exe*.test.ts", ...activeQuarantinedCliTests],
     setupFiles: [
       resolve(__dirname, "../core/src/__test-utils__/vitest-setup.ts"),
     ],
