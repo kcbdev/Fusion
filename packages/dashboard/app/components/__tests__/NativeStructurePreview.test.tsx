@@ -31,14 +31,20 @@ describe("NativeStructurePreview", () => {
     expect(fetchPreview).not.toHaveBeenCalled();
   });
 
-  it("fetches a ref-only payload and dispatches consumer navigation without a dead anchor", async () => {
-    const ref = refs[0];
+  it.each(refs)("fetches and renders a ref-only %s card", async (ref) => {
     const result = payload(ref);
     fetchPreview.mockResolvedValueOnce(result);
-    const onOpen = vi.fn();
-    const { container } = render(<NativeStructurePreview ref={ref} onOpen={onOpen} />);
-    await waitFor(() => expect(screen.getByTestId("native-structure-preview")).toBeInTheDocument());
+    render(<NativeStructurePreview ref={ref} onOpen={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("native-structure-preview")).toHaveAttribute("data-kind", ref.kind));
     expect(fetchPreview).toHaveBeenCalledWith(ref);
+    expect(screen.getByText(`${ref.kind} title`)).toBeInTheDocument();
+  });
+
+  it("dispatches consumer navigation without a dead anchor", () => {
+    const ref = refs[0];
+    const result = payload(ref);
+    const onOpen = vi.fn();
+    const { container } = render(<NativeStructurePreview ref={ref} payload={result} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole("button", { name: "Open mission: mission title" }));
     expect(onOpen).toHaveBeenCalledWith(ref, result);
     expect(container.querySelector('a[href*="/missions/"]')).toBeNull();

@@ -57,6 +57,20 @@ describe("resolveNativeStructurePreview", () => {
 });
 
 describe("native structure preview route", () => {
+  it.each([
+    ["mission", mission.id, { view: "missions", id: mission.id }],
+    ["milestone", milestone.id, { view: "missions", id: milestone.id, missionId: mission.id }],
+    ["research-finding", insight.id, { view: "insights", id: insight.id }],
+    ["eval-result", evaluation.id, { view: "evals", id: evaluation.id }],
+    ["goal", goal.id, { view: "goals", id: goal.id }],
+  ] as const)("returns the %s preview projection", async (kind, id, openTarget) => {
+    const app = express();
+    app.use("/api", createApiRoutes(store()));
+    const res = await REQUEST(app, "GET", `/api/native-structures/${kind}/${id}/preview`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ available: true, kind, openTarget });
+  });
+
   it("returns the typed unavailable payload with 200", async () => {
     const app = express();
     app.use("/api", createApiRoutes(store()));
