@@ -35,6 +35,7 @@ import { OnboardingDisclosure } from "./OnboardingDisclosure";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { PluginSlot } from "./PluginSlot";
 import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
+import { openExternalUrl } from "../utils/open-external";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 import { useShellConnection } from "../hooks/useShellConnection";
@@ -1441,7 +1442,7 @@ export function ModelOnboardingModal({
           setDeviceCodes((prev) => ({ ...prev, [providerId]: deviceCode }));
         }
         if (providerId !== "github-copilot" || !deviceCode) {
-          window.open(appendTokenQuery(deviceCode?.verificationUri ?? url), "_blank");
+          openExternalUrl(appendTokenQuery(deviceCode?.verificationUri ?? url));
         }
 
         // Poll for auth completion
@@ -2395,7 +2396,7 @@ export function ModelOnboardingModal({
               >
                 {t("setup.copyCode", "Copy code")}
               </button>
-              <button className="btn btn-sm" onClick={() => window.open(appendTokenQuery(deviceCodes[provider.id].verificationUri), "_blank")}>
+              <button className="btn btn-sm" onClick={() => openExternalUrl(appendTokenQuery(deviceCodes[provider.id].verificationUri))}>
                 {t("setup.openGitHub", "Open GitHub")}
               </button>
             </div>

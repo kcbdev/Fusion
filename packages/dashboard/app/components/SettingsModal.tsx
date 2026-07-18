@@ -76,6 +76,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { generateUniquePresetId } from "../utils/modelPresets";
 import { copyTextToClipboard } from "../utils/copyToClipboard";
 import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
+import { openExternalUrl } from "../utils/open-external";
 import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
@@ -2535,7 +2536,7 @@ export function SettingsModal({
         setDeviceCodes((prev) => ({ ...prev, [providerId]: deviceCode }));
       }
       if (providerId !== "github-copilot" || !deviceCode) {
-        window.open(appendTokenQuery(deviceCode?.verificationUri ?? url), "_blank");
+        openExternalUrl(appendTokenQuery(deviceCode?.verificationUri ?? url));
       }
 
       // Poll for auth completion every 2 seconds
