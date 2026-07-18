@@ -47,7 +47,7 @@ export const NativeStructurePreview = memo(function NativeStructurePreview({ ref
         if (active) setError(true);
       });
     return () => { active = false; };
-  }, [payload, ref]);
+  }, [payload, ref.kind, ref.id, ref.projectId]);
 
   if (error) {
     return (
