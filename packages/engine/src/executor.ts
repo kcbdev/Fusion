@@ -232,6 +232,7 @@ import {
   createListAgentsTool,
   createMemoryTools,
   createGoalRetrievalTools,
+  createMissionTools,
   createWebFetchTool,
   createReadMessagesTool,
   createReflectOnPerformanceTool,
@@ -11668,6 +11669,7 @@ export class TaskExecutor {
             getSettings: async () => this.store.getSettings(),
           })
           : []),
+        ...createMissionTools(this.store),
         ...createGoalRetrievalTools(this.store, {
           runContext: {
             runId: engineRunContext.runId,

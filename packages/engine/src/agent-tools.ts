@@ -3402,6 +3402,70 @@ export function createGoalRetrievalTools(
   ];
 }
 
+
+/*
+FNXC:MissionToolParity 2026-07-29-12:00:
+FN-8294 requires every engine-managed lane to use TaskStore's project-scoped MissionStore
+instead of reproducing route or pi-extension persistence. Mutations deliberately remain plain
+ToolDefinitions: session action/permanent-agent gates classify their names at the boundary.
+*/
+export const missionListParams = Type.Object({});
+export const missionShowParams = Type.Object({ id: Type.String({ description: "Mission ID (e.g., M-001)" }) });
+export const missionCreateParams = Type.Object({
+  title: Type.String({ description: "Mission title — brief but descriptive" }),
+  description: Type.Optional(Type.String({ description: "Detailed mission objectives and context" })),
+  autoAdvance: Type.Optional(Type.Boolean({ description: "Automatically activate the next pending slice" })),
+  baseBranch: Type.Optional(Type.String({ description: "Optional integration base branch" })),
+});
+export const missionUpdateParams = Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), description: Type.Optional(Type.String()) });
+export const missionDeleteParams = Type.Object({ id: Type.String() });
+export const milestoneAddParams = Type.Object({ missionId: Type.String(), title: Type.String(), description: Type.Optional(Type.String()) });
+export const milestoneUpdateParams = Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), description: Type.Optional(Type.String()), acceptanceCriteria: Type.Optional(Type.String()) });
+export const milestoneDeleteParams = Type.Object({ milestoneId: Type.String(), force: Type.Optional(Type.Boolean()) });
+export const sliceAddParams = Type.Object({ milestoneId: Type.String(), title: Type.String(), description: Type.Optional(Type.String()) });
+export const sliceActivateParams = Type.Object({ id: Type.String() });
+export const sliceDeleteParams = Type.Object({ sliceId: Type.String(), force: Type.Optional(Type.Boolean()) });
+export const featureAddParams = Type.Object({ sliceId: Type.String(), title: Type.String(), description: Type.Optional(Type.String()), acceptanceCriteria: Type.Optional(Type.String()) });
+export const featureUpdateParams = Type.Object({ id: Type.String(), title: Type.Optional(Type.String()), description: Type.Optional(Type.String()), acceptanceCriteria: Type.Optional(Type.String()) });
+export const featureDeleteParams = Type.Object({ featureId: Type.String(), force: Type.Optional(Type.Boolean()) });
+export const featureLinkTaskParams = Type.Object({ featureId: Type.String(), taskId: Type.String() });
+
+const missionToolResult = (text: string, details: Record<string, unknown>, isError = false) => ({
+  content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}),
+});
+const optionalText = (value: string | undefined) => value?.trim() || undefined;
+/* FNXC:MissionToolParity 2026-07-30-09:56: A supplied empty update value must remain an empty string so MissionStore can clear it, matching the pi-extension contract; only omitted values leave a field unchanged. */
+const updateFields = (params: Record<string, unknown>, fields: string[]) => Object.fromEntries(
+  fields.filter((field) => params[field] !== undefined).map((field) => [field, (params[field] as string).trim()]),
+);
+
+/** Create the project-scoped Mission hierarchy surface shared by engine lanes and dashboard chat. */
+export function createMissionTools(store: TaskStore): ToolDefinition[] {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const tool = (name: string, label: string, description: string, parameters: any, execute: (params: any) => Promise<ReturnType<typeof missionToolResult>>): ToolDefinition => ({
+    name, label, description, parameters,
+    execute: async (_id, params: any) => { try { return await execute(params); } catch (error) { const message = error instanceof Error ? error.message : String(error); return missionToolResult(`ERROR: ${message}`, { error: message }, true); } },
+  });
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  return [
+    tool("fn_mission_list", "List Missions", "List all missions with their current status.", missionListParams, async () => { const missions = await store.getMissionStore().listMissions(); return missionToolResult(missions.length ? `Missions (${missions.length})\n${missions.map((m) => `- ${m.id}: ${m.title} (${m.status})`).join("\n")}` : "No missions yet.", { missions, count: missions.length }); }),
+    tool("fn_mission_show", "Show Mission", "Show a mission with its full milestone, slice, and feature hierarchy.", missionShowParams, async ({ id }) => { const mission = await store.getMissionStore().getMissionWithHierarchy(id); return mission ? missionToolResult(`${mission.id}: ${mission.title}`, { mission }) : missionToolResult(`Mission ${id} not found`, { code: "MISSION_NOT_FOUND", missionId: id }, true); }),
+    tool("fn_mission_create", "Create Mission", "Create a high-level mission.", missionCreateParams, async (p) => { const ms = store.getMissionStore(); const mission = await ms.createMission({ title: p.title.trim(), description: optionalText(p.description), baseBranch: optionalText(p.baseBranch) }); const updated = p.autoAdvance === undefined ? mission : await ms.updateMission(mission.id, { autoAdvance: p.autoAdvance }); return missionToolResult(`Created ${updated.id}: ${updated.title}`, { mission: updated }); }),
+    tool("fn_mission_update", "Update Mission", "Partially update a mission.", missionUpdateParams, async (p) => { const updates = updateFields(p, ["title", "description"]); if (!Object.keys(updates).length) return missionToolResult("No fields to update", {}, true); const mission = await store.getMissionStore().updateMission(p.id, updates); return missionToolResult(`Updated ${mission.id}: ${mission.title}`, { mission }); }),
+    tool("fn_mission_delete", "Delete Mission", "Delete a mission and its hierarchy.", missionDeleteParams, async ({ id }) => { await store.getMissionStore().deleteMission(id); return missionToolResult(`Deleted ${id}`, { missionId: id }); }),
+    tool("fn_milestone_add", "Add Milestone", "Add a milestone to a mission.", milestoneAddParams, async (p) => { const milestone = await store.getMissionStore().addMilestone(p.missionId, { title: p.title.trim(), description: optionalText(p.description) }); return missionToolResult(`Added ${milestone.id}`, { milestone }); }),
+    tool("fn_milestone_update", "Update Milestone", "Partially update a milestone.", milestoneUpdateParams, async (p) => { const updates = updateFields(p, ["title", "description", "acceptanceCriteria"]); if (!Object.keys(updates).length) return missionToolResult("No fields to update", {}, true); const milestone = await store.getMissionStore().updateMilestone(p.id, updates); return missionToolResult(`Updated ${milestone.id}`, { milestone }); }),
+    tool("fn_milestone_delete", "Delete Milestone", "Delete a milestone and descendants.", milestoneDeleteParams, async (p) => { await store.getMissionStore().deleteMilestone(p.milestoneId, p.force === true); return missionToolResult(`Deleted ${p.milestoneId}`, { milestoneId: p.milestoneId }); }),
+    tool("fn_slice_add", "Add Slice", "Add a slice to a milestone.", sliceAddParams, async (p) => { const slice = await store.getMissionStore().addSlice(p.milestoneId, { title: p.title.trim(), description: optionalText(p.description) }); return missionToolResult(`Added ${slice.id}`, { slice }); }),
+    tool("fn_slice_activate", "Activate Slice", "Activate a pending slice.", sliceActivateParams, async ({ id }) => { const slice = await store.getMissionStore().activateSlice(id); return missionToolResult(`Activated ${slice.id}`, { slice }); }),
+    tool("fn_slice_delete", "Delete Slice", "Delete a slice and descendants.", sliceDeleteParams, async (p) => { await store.getMissionStore().deleteSlice(p.sliceId, p.force === true); return missionToolResult(`Deleted ${p.sliceId}`, { sliceId: p.sliceId }); }),
+    tool("fn_feature_add", "Add Feature", "Add a feature to a slice.", featureAddParams, async (p) => { const feature = await store.getMissionStore().addFeature(p.sliceId, { title: p.title.trim(), description: optionalText(p.description), acceptanceCriteria: optionalText(p.acceptanceCriteria) }); return missionToolResult(`Added ${feature.id}`, { feature }); }),
+    tool("fn_feature_update", "Update Feature", "Partially update a feature.", featureUpdateParams, async (p) => { const updates = updateFields(p, ["title", "description", "acceptanceCriteria"]); if (!Object.keys(updates).length) return missionToolResult("No fields to update", {}, true); const feature = await store.getMissionStore().updateFeature(p.id, updates); return missionToolResult(`Updated ${feature.id}`, { feature }); }),
+    tool("fn_feature_delete", "Delete Feature", "Delete a feature, respecting linked-task guards.", featureDeleteParams, async (p) => { await store.getMissionStore().deleteFeature(p.featureId, p.force ===true); return missionToolResult(`Deleted ${p.featureId}`, { featureId: p.featureId }); }),
+    tool("fn_feature_link_task", "Link Feature to Task", "Link a feature to a live project-scoped task.", featureLinkTaskParams, async (p) => { const feature = await store.getMissionStore().linkFeatureToTask(p.featureId, p.taskId); return missionToolResult(`Linked ${feature.id} to ${p.taskId}`, { feature }); }),
+  ];
+}
+
 /**
  * Create a `fn_reflect_on_performance` tool that asks the reflection service to
  * analyze recent agent performance and return actionable insights.

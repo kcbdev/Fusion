@@ -4198,8 +4198,8 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
 
       try {
+        // FNXC:MissionToolParity 2026-07-29-12:00: linkFeatureToTask owns both feature and project-scoped task linkage; do not duplicate a route/tool-level slice update.
         const updated = await missionStore.linkFeatureToTask(params.featureId, params.taskId);
-        await store.updateTask(params.taskId, { sliceId: feature.sliceId });
 
         return {
           content: [

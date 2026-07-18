@@ -6789,8 +6789,9 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
   async function captureCreateFnAgentArgs(options?: {
     assignedAgentId?: string;
     assignedAgentSkills?: string[];
+    permissionPolicy?: Record<string, unknown>;
   }) {
-    const { assignedAgentId, assignedAgentSkills } = options || {};
+    const { assignedAgentId, assignedAgentSkills, permissionPolicy } = options || {};
 
     const mockAgentStore = {
       getAgent: vi.fn().mockImplementation(async (id: string) => {
@@ -6801,6 +6802,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
             role: "triage",
             state: "idle",
             metadata: { skills: assignedAgentSkills },
+            permissionPolicy,
           };
         }
         return null;
@@ -6881,6 +6883,36 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
 
       expect(args).not.toBeNull();
       expect(args.skillSelection?.sessionPurpose).toBe("triage");
+    });
+
+    it.each(["block", "require-approval"] as const)("passes triage Mission mutations through the %s action gate", async (disposition) => {
+      const args = await captureCreateFnAgentArgs({
+        assignedAgentId: "agent-001",
+        assignedAgentSkills: ["triage"],
+        permissionPolicy: {
+          presetId: "custom",
+          rules: {
+            git_write: "allow",
+            file_write_delete: "allow",
+            command_execution: "allow",
+            network_api: "allow",
+            task_agent_mutation: disposition,
+            review_gate_bypass: "allow",
+            file_scope: "allow",
+          },
+        },
+      });
+
+      const { evaluateAgentActionGate } = await import("../agent-action-gate.js");
+      expect(args.actionGateContext).toBeDefined();
+      expect(args.permanentAgentGating).toBeDefined();
+      expect(evaluateAgentActionGate({
+        agentId: args.actionGateContext.agentId,
+        taskId: args.actionGateContext.taskId,
+        toolName: "fn_mission_create",
+        args: { title: "Gated mission" },
+        permissionPolicy: args.actionGateContext.permissionPolicy,
+      })).toMatchObject({ category: "task_agent_mutation", disposition });
     });
 
     it("skillSelection is undefined when no agentStore provided (role fallback behavior)", async () => {
