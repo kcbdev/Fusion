@@ -26,6 +26,19 @@ describe("report pipeline", () => {
     expect(context.client!.createIssue).not.toHaveBeenCalled();
   });
 
+  it("scrubs activity trace text along with all report context", async () => {
+    const result = await runReportPipeline({
+      actionType: "bug",
+      userPrompt: "report failure",
+      activityTrace: [{ ts: "2026-07-16T00:00:00Z", kind: "error", label: "Jane Doe at /Users/alice/private-project/a.ts emailed alice@example.com with ghp_abcdefghijk1234567890 and sk-abcdefghijklmnopqrstuvwxyz" }],
+    }, deps());
+    expect(result.kind).toBe("draft-ready");
+    if (result.kind === "draft-ready") {
+      expect(result.report.body).toContain("activityTrace");
+      expect(result.report.body).not.toMatch(/private-project|alice@example\.com|ghp_|sk-|Jane Doe/);
+    }
+  });
+
   it("only accepts open duplicate matches", async () => {
     const context = deps({ client: { createIssue: vi.fn(), addIssueReaction: vi.fn(), commentOnIssue: vi.fn(), searchIssues: vi.fn().mockResolvedValue([{ number: 1, title: "dashboard rendering failed issue", body: "dashboard rendering failed", html_url: "url", state: "closed" }]) } });
     const result = await runReportPipeline({ actionType: "bug", userPrompt: "dashboard rendering failed" }, context);

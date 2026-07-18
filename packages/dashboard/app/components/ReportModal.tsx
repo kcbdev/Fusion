@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReportActionType } from "@fusion/core";
-import { reportDraft, reportFile, reportHelp } from "../api";
+import { reportDraft, reportFile, reportHelp, uploadReportScreenshot } from "../api";
+import { captureAppScreenshot, type CapturedScreenshot } from "../utils/capture-screenshot";
+import { recordActivity, snapshotActivityTrace } from "../utils/activity-trace";
 import "./ReportModal.css";
 
 const prompts: Record<ReportActionType, string> = { bug: "What went wrong?", feedback: "What would you like to share?", idea: "What would you like Fusion to do?", help: "What would you like help with?" };
@@ -16,16 +18,43 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
   const [result, setResult] = useState<ModalResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const submit = async () => {
-    if (!prompt.trim()) return;
+  const [screenshotEnabled, setScreenshotEnabled] = useState(false);
+  const [capturedScreenshot, setCapturedScreenshot] = useState<CapturedScreenshot>();
+  const [screenshotConfirmed, setScreenshotConfirmed] = useState(false);
+  const [screenshotArtifactId, setScreenshotArtifactId] = useState<string>();
+  useEffect(() => () => { if (capturedScreenshot) URL.revokeObjectURL(capturedScreenshot.previewUrl); }, [capturedScreenshot]);
+  const captureScreenshot = async () => {
     setBusy(true);
     setError(undefined);
     try {
+      const captured = await captureAppScreenshot();
+      setCapturedScreenshot(captured);
+      setScreenshotConfirmed(false);
+    } catch (captureError) {
+      setScreenshotEnabled(false);
+      setError(captureError instanceof Error ? captureError.message : "We could not capture the current screen.");
+    } finally { setBusy(false); }
+  };
+  const submit = async () => {
+    if (!prompt.trim()) return;
+    if (screenshotEnabled && (!capturedScreenshot || !screenshotConfirmed)) {
+      setError("Preview and confirm the screenshot before continuing.");
+      return;
+    }
+    setBusy(true);
+    setError(undefined);
+    try {
+      recordActivity({ kind: "report", label: `${actionType} report submitted` });
       if (actionType === "help") {
         const help = await reportHelp(prompt);
         if (help.answered) { setResult({ kind: "help", answer: help.answer }); return; }
       }
-      setResult(await reportDraft({ actionType, userPrompt: prompt, contextRefs }));
+      const attachment = screenshotEnabled && capturedScreenshot && !screenshotArtifactId
+        ? await uploadReportScreenshot(capturedScreenshot.blob, contextRefs)
+        : undefined;
+      const artifactId = attachment?.artifactId ?? screenshotArtifactId;
+      if (artifactId) setScreenshotArtifactId(artifactId);
+      setResult(await reportDraft({ actionType, userPrompt: prompt, contextRefs, activityTrace: snapshotActivityTrace(), screenshotArtifactId: artifactId }));
     } catch {
       setError("We could not prepare your report. Check your connection and try again.");
     } finally { setBusy(false); }
@@ -35,7 +64,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
     setBusy(true);
     setError(undefined);
     try {
-      setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId }));
+      setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, activityTrace: snapshotActivityTrace(), screenshotArtifactId }));
     } catch {
       setError("We could not send your report. Your draft is still here; try again.");
     } finally { setBusy(false); }
@@ -43,7 +72,13 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
   return <div className="report-modal-backdrop" role="presentation"><section className="card report-modal" role="dialog" aria-modal="true" aria-label={`${actionType} report`}>
     <button className="btn-icon report-modal__close" type="button" aria-label="Close report" onClick={onClose}>×</button>
     {error && <p className="report-modal__error" role="alert">{error}</p>}
-    {!result && <><h2>{actionType[0].toUpperCase() + actionType.slice(1)}</h2><label htmlFor="report-prompt">{prompts[actionType]}</label><textarea id="report-prompt" className="input" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} /><button className="btn btn-primary" type="button" disabled={!prompt.trim() || busy} onClick={() => void submit()}>{error ? "Retry" : "Continue"}</button></>}
+    {!result && <><h2>{actionType[0].toUpperCase() + actionType.slice(1)}</h2><label htmlFor="report-prompt">{prompts[actionType]}</label><textarea id="report-prompt" className="input" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} />
+      {/* FNXC:ReportPipeline 2026-07-16-11:00: Screenshot capture is opt-in and always previewed and explicitly confirmed before its local upload or any report filing, including auto-file mode. */}
+      <label className="report-modal__screenshot-option"><input type="checkbox" checked={screenshotEnabled} onChange={(event) => { setScreenshotEnabled(event.target.checked); if (event.target.checked) void captureScreenshot(); else { setScreenshotConfirmed(false); setScreenshotArtifactId(undefined); } }} /> Attach a screenshot of the current screen</label>
+      {screenshotEnabled && <div className="report-modal__screenshot-preview">
+        {capturedScreenshot ? <><img src={capturedScreenshot.previewUrl} alt="Preview of the screenshot that will be retained locally" /><label><input type="checkbox" checked={screenshotConfirmed} onChange={(event) => setScreenshotConfirmed(event.target.checked)} /> I confirm this preview may be retained locally with my report.</label></> : <p>Capturing a preview…</p>}
+      </div>}
+      <button className="btn btn-primary" type="button" disabled={!prompt.trim() || busy} onClick={() => void submit()}>{error ? "Retry" : "Continue"}</button></>}
     {result?.kind === "draft-ready" && result.report && <><h2>Review your report</h2><label htmlFor="report-review-prompt">Report summary</label><textarea id="report-review-prompt" className="input" value={result.report.userPrompt} onChange={(event) => {
       const userPrompt = event.target.value;
       // FNXC:ReportPipeline 2026-07-16-18:45:

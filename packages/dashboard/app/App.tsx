@@ -48,6 +48,7 @@ import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
 import { isIOS, useMobileKeyboardViewportLock, useMobileViewportRestoreReset } from "./hooks/useMobileScrollLock";
 import { computeMobileBarKeyboardFlags } from "./utils/mobileBarKeyboardFlags";
+import { recordActivity } from "./utils/activity-trace";
 import { closeViewShortcut, retainViewNavRevert } from "./utils/dashboardShortcutToggles";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useGithubSetupWarningDelay } from "./hooks/useGithubSetupWarningDelay";
@@ -420,6 +421,15 @@ function AppInner() {
     themeMode,
     setThemeMode,
   });
+
+  useEffect(() => {
+    recordActivity({ kind: "view", label: String(viewMode) });
+  }, [viewMode]);
+  useEffect(() => {
+    const recordError = (event: ErrorEvent) => recordActivity({ kind: "client-error", label: event.message });
+    window.addEventListener("error", recordError);
+    return () => window.removeEventListener("error", recordError);
+  }, []);
 
   const { views: rawPluginDashboardViews } = usePluginDashboardViews(currentProject?.id);
   const graphPluginTaskView = useMemo(() => {

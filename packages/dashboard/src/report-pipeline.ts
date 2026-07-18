@@ -7,10 +7,18 @@ import { scrubReportPayload, type ReportScrubContext } from "./report-scrub.js";
 
 export type { ReportActionType, ReportMode };
 
+export interface ReportActivityTraceEntry {
+  ts: string;
+  kind: string;
+  label: string;
+}
+
 export interface ReportInput {
   actionType: ReportActionType;
   userPrompt: string;
   contextRefs?: { taskId?: string; agentId?: string };
+  activityTrace?: ReportActivityTraceEntry[];
+  screenshotArtifactId?: string;
 }
 
 export interface StructuredReport {
@@ -39,6 +47,12 @@ export interface ReportPipelineDeps {
 }
 
 const MAX_PROMPT_LENGTH = 4_000;
+/*
+FNXC:ReportPipeline 2026-07-16-10:45:
+Screenshot capture remains a per-report, off-by-default user choice rather than
+project policy. Activity trace is default-on client context because it is bounded
+and scrubbed; no persisted settings are needed for either behavior.
+*/
 const endorsedSessions = new Map<string, { url: string; issueNumber: number }>();
 
 export function resolveReportMode(actionType: ReportActionType, settings: ReportPipelineDeps["projectSettings"]): ReportMode {
@@ -69,7 +83,10 @@ function expectedBehavior(actionType: ReportActionType): string {
 
 function structureReport(input: ReportInput, gathered: Record<string, unknown>): StructuredReport {
   const prompt = requirePrompt(input);
-  const context = { actionType: input.actionType, ...gathered, ...input.contextRefs };
+  // FNXC:ReportPipeline 2026-07-16-09:00:
+  // Activity trace is ordinary text context. It must continue through
+  // scrubReportPayload with every other report field before GitHub egress.
+  const context = { actionType: input.actionType, ...gathered, ...input.contextRefs, ...(input.activityTrace?.length ? { activityTrace: input.activityTrace } : {}) };
   const formattedContext = formatContext(context);
   return {
     userPrompt: prompt,
@@ -175,7 +192,15 @@ function normalizeSubmittedReport(input: ReportInput, gathered: Record<string, u
 
 export async function runReportPipeline(input: ReportInput, deps: ReportPipelineDeps, options: { file?: boolean; endorseIssueNumber?: number; endorseDiscussionId?: string; report?: StructuredReport } = {}): Promise<ReportResult> {
   const gathered = await deps.gatherContext?.(input) ?? { taskId: input.contextRefs?.taskId, agentId: input.contextRefs?.agentId };
-  const report = scrubReportPayload(normalizeSubmittedReport(input, gathered, options.report), deps.scrubContext);
+  let report = scrubReportPayload(normalizeSubmittedReport(input, gathered, options.report), deps.scrubContext);
+  if (input.screenshotArtifactId) {
+    // FNXC:ReportPipeline 2026-07-16-10:30:
+    // The route has validated this reference before pipeline entry. Rebuild the
+    // text-only local-retention note here so edited drafts cannot omit it and
+    // image bytes never cross the GitHub boundary.
+    const note = `Screenshot captured and retained locally (artifact ${input.screenshotArtifactId}).`;
+    if (!report.body.includes(note)) report = { ...report, body: `${report.body}\n\n${note}` };
+  }
   const mode = resolveReportMode(input.actionType, deps.projectSettings);
   const clientResult = createClient(deps);
   if (clientResult.unavailable) return clientResult.unavailable;

@@ -2257,7 +2257,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // index holds sensitive repo/PR content so no endpoint is unauthenticated or
   // cross-project readable.
   registerKnowledgeRoutes(routeContext);
-  registerReportRoutes(routeContext);
+  registerReportRoutes({ ...routeContext, reportUpload: upload });
   // U11 — inbound external signal webhooks (Sentry/Datadog/PagerDuty/generic).
   // Each route HMAC-verifies against a per-provider secret; never an
   // unauthenticated task-creation endpoint.
