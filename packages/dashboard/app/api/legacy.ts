@@ -243,6 +243,7 @@ export {
   fetchAgentLogs,
   fetchAgentLogsWithMeta,
   fetchSessionFiles,
+  fetchTaskVerificationRequest,
   fetchTaskComments,
   addTaskComment,
   updateTaskComment,

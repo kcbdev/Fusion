@@ -15,10 +15,20 @@ import type {
   NativeStructureRef,
   NativeStructurePreviewResult,
   AgentLogEntry,
+  TaskVerificationRequest,
 } from "@fusion/core";
 import { appendTokenQuery, withTokenHeader } from "../auth";
 import { api, buildApiUrl } from "./client.js";
 import { withProjectId } from "./health.js";
+
+/**
+ * FNXC:TaskVerificationStatus 2026-07-30-00:00:
+ * Task detail polls this persisted read model because verification state changes do
+ * not mutate the task row and therefore do not emit a task-board SSE update.
+ */
+export function fetchTaskVerificationRequest(taskId: string, projectId?: string): Promise<TaskVerificationRequest | null> {
+  return api<TaskVerificationRequest | null>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/verification-request`, projectId));
+}
 
 export async function uploadAttachment(id: string, file: File, projectId?: string): Promise<TaskAttachment> {
   const formData = new FormData();

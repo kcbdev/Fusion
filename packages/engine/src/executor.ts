@@ -268,7 +268,7 @@ import {
   isResearchToolSurfaceEnabled,
 } from "./tool-availability.js";
 import { createFusionAuthStorage, createFusionModelRegistry } from "./auth-storage.js";
-import { createRunVerificationTool } from "./run-verification-tool.js";
+import { createRunVerificationTool, runVerificationCommand as runTaskVerificationCommand } from "./run-verification-tool.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { recordRetry } from "./retry-burned-logger.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
@@ -11654,6 +11654,43 @@ export class TaskExecutor {
         executorLog.log(`${task.id}: fast mode — fn_review_step tool not injected`);
       }
 
+      /*
+      FNXC:TaskVerificationRequest 2026-07-30-00:00:
+      Chat can only enqueue a server-resolved profile. The executor owns the live
+      worktree, so it claims and runs that request here through the existing bounded
+      runner (which acquires withVerificationSlot); no chat-side subprocess exists.
+      */
+      let verificationRequestInFlight = false;
+      const runPendingTaskVerification = async (): Promise<void> => {
+        if (verificationRequestInFlight) return;
+        const pendingVerification = await this.store.getTaskVerificationRequestAsync(task.id);
+        if (pendingVerification?.status !== "requested") return;
+        verificationRequestInFlight = true;
+        try {
+          const claimedVerification = await this.store.claimTaskVerificationRequest(task.id, pendingVerification.requestId);
+          if (!claimedVerification) return;
+          const startedAt = Date.now();
+          try {
+            const verificationResult = await runTaskVerificationCommand({
+              command: claimedVerification.command,
+              cwd: worktreePath,
+              timeoutMs: settings.verificationCommandTimeoutMs ?? 300_000,
+              onHeartbeat: () => stuckDetector?.recordActivity(task.id),
+            });
+            await this.store.finishTaskVerificationRequest(task.id, claimedVerification.requestId, verificationResult.success ? "passed" : "failed", {
+              success: verificationResult.success, exitCode: verificationResult.exitCode,
+              durationMs: Date.now() - startedAt, timedOut: verificationResult.timedOut ?? false,
+              stdoutTail: verificationResult.stdout.slice(-8_000), stderrTail: verificationResult.stderr.slice(-8_000),
+            });
+          } catch (error) {
+            await this.store.finishTaskVerificationRequest(task.id, claimedVerification.requestId, "failed", undefined, error instanceof Error ? error.message.slice(0, 1_000) : "Verification runner failed");
+          }
+        } finally {
+          verificationRequestInFlight = false;
+        }
+      };
+      await runPendingTaskVerification();
+
       const customTools = [
         this.createTaskUpdateTool(task.id, codeReviewVerdicts, sessionRef, stepCheckpoints, stuckDetector),
         this.createTaskLogTool(task.id),
@@ -12002,6 +12039,17 @@ export class TaskExecutor {
           lastEffectiveColumnAgentId: columnAgentSeam?.agent.id ?? null,
         }, worktreePath);
 
+        /*
+        FNXC:TaskVerificationRequest 2026-07-30-17:40:
+        A chat request can arrive after this executor session starts. Poll while
+        this task retains the live worktree so requested records are claimed by
+        their owner rather than waiting for an unrelated future dispatch.
+        */
+        const verificationRequestTimer = setInterval(() => {
+          void runPendingTaskVerification().catch((error) => {
+            executorLog.warn(`${task.id}: verification request pickup failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }, 1_000);
         let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
         if (detail.assignedAgentId && detail.checkedOutBy === detail.assignedAgentId) {
           const leaseEpoch = detail.checkoutLeaseEpoch ?? 0;
@@ -12638,6 +12686,7 @@ export class TaskExecutor {
             }
           }
         } finally {
+          clearInterval(verificationRequestTimer);
           if (leaseRenewalTimer) {
             clearInterval(leaseRenewalTimer);
           }

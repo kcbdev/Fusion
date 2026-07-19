@@ -3237,6 +3237,23 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /*
+  FNXC:TaskVerificationStatus 2026-07-30-00:00:
+  FN-8296 exposes the executor-owned verification read model through a scoped
+  route. The client polls this record independently because it is not a task-row
+  mutation and should not fabricate a board update just to refresh status.
+  */
+  router.get("/tasks/:id/verification-request", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      await scopedStore.getTask(req.params.id);
+      res.json(await scopedStore.getTaskVerificationRequestAsync(req.params.id));
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to read task verification status");
+    }
+  });
+
   // Get single task with prompt content
   router.get("/tasks/:id", async (req, res) => {
     try {

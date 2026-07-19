@@ -562,6 +562,31 @@ export const taskWorkflowSelection = projectSchema.table("task_workflow_selectio
   updatedAt: text("updated_at").notNull(),
 }, (t) => [primaryKey({ columns: [t.projectId, t.taskId] })]);
 
+/*
+FNXC:TaskVerificationRequest 2026-07-30-00:00:
+One latest request per project/task gives chat an observable queue while CAS writes
+prevent stale executor completions from overwriting a later request.
+*/
+export const taskVerificationRequests = projectSchema.table("task_verification_requests", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  taskId: text("task_id").notNull(),
+  requestId: text("request_id").notNull(),
+  status: text("status").notNull(),
+  profile: text("profile").notNull(),
+  command: text("command").notNull(),
+  scope: text("scope").notNull(),
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: text("requested_at").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  result: jsonb("result"),
+  rejectionReason: text("rejection_reason"),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.taskId] }),
+  unique("task_verification_requests_project_request_id_unique").on(t.projectId, t.requestId),
+  index("idx_task_verification_requests_status").on(t.projectId, t.status, t.requestedAt),
+]);
+
 // ── Activity log ─────────────────────────────────────────────────────
 export const activityLog = projectSchema.table("activity_log", {
   // FNXC:AnalyticsIsolation 2026-07-13-23:41: Shared PostgreSQL telemetry must carry an explicit project partition; dashboard ranges must never aggregate another project's activity.

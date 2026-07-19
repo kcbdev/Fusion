@@ -2132,6 +2132,36 @@ export type RetrySummary = {
   total: number;
 };
 
+/*
+FNXC:TaskVerificationRequest 2026-07-30-00:00:
+Chat may request only a server-resolved verification profile. The persisted record
+keeps executor-owned subprocess results observable without exposing raw commands.
+*/
+export type TaskVerificationStatus = "requested" | "running" | "passed" | "failed" | "rejected";
+export type TaskVerificationProfile = "verify:fast" | "test-command";
+export interface TaskVerificationResultSummary {
+  success: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
+  stdoutTail: string;
+  stderrTail: string;
+}
+export interface TaskVerificationRequest {
+  taskId: string;
+  requestId: string;
+  status: TaskVerificationStatus;
+  profile: TaskVerificationProfile;
+  command: string;
+  scope: "package" | "workspace";
+  requestedBy: string;
+  requestedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  result?: TaskVerificationResultSummary;
+  rejectionReason?: string;
+}
+
 export interface TaskDetail extends Task {
   prompt: string;
   /** Derived aggregate of retry counters (computed on read; never persisted). */
