@@ -2411,21 +2411,24 @@ export default function kbExtension(pi: ExtensionAPI) {
 
       // Check which issues are already imported
       const store = await getStore(ctx.cwd);
-      const existingTasks = await store.listTasks({ slim: true });
-      const importedUrls = new Set<string>();
-
-      for (const task of existingTasks) {
-        const match = task.description.match(/Source: (https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+)/);
-        if (match) {
-          importedUrls.add(match[1]);
-        }
-      }
+      // FNXC:GithubImport 2026-07-17-00:00: Browse must load full provenance and use the shared helper so its imported marker agrees with all issue-import surfaces even after descriptions are edited.
+      const existingTasks = await store.listTasks({ slim: false });
+      const importedIssueNumbers = new Set(
+        issues
+          .filter((issue) => existingTasks.some((task) => dashboard.isGitHubIssueAlreadyImported(task, {
+            owner,
+            repo,
+            issueNumber: issue.number,
+            sourceUrl: issue.html_url,
+          })))
+          .map((issue) => issue.number),
+      );
 
       const lines: string[] = [];
       lines.push(`Found ${issues.length} open issues in ${owner}/${repo}:\n`);
 
       for (const issue of issues) {
-        const isImported = importedUrls.has(issue.html_url);
+        const isImported = importedIssueNumbers.has(issue.number);
         const issueLabels = issue.labels ?? [];
         const labelStr = issueLabels.length > 0 ? ` [${issueLabels.map((label) => label.name).join(", ")}]` : "";
         const importedStr = isImported ? " ✓ Imported" : "";
@@ -2444,7 +2447,7 @@ export default function kbExtension(pi: ExtensionAPI) {
             title: issue.title,
             url: issue.html_url,
             labels: (issue.labels ?? []).map((label) => label.name),
-            imported: importedUrls.has(issue.html_url),
+            imported: importedIssueNumbers.has(issue.number),
           })),
         },
       };

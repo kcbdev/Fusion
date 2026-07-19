@@ -2781,6 +2781,33 @@ legacyDescribe("fn pi extension (legacy exhaustive suite)", () => {
       expect(result.content[0].text).toContain(existing.id);
     });
 
+    it("fn_task_browse_github_issues marks sourceIssue-only imports as imported", async () => {
+      await h.store().createTask({
+        title: "Imported issue",
+        description: "Edited description without source URL",
+        sourceIssue: {
+          provider: "github",
+          repository: "Acme/Demo",
+          externalIssueId: "10",
+          issueNumber: 10,
+          url: "https://github.com/other/repo/issues/99",
+        },
+      });
+      const tool = api.tools.get("fn_task_browse_github_issues")!;
+      vi.mocked(runGhJsonAsync).mockResolvedValueOnce([{
+        number: 10,
+        title: "Investigate latency",
+        body: null,
+        html_url: "https://github.com/acme/demo/issues/10",
+        labels: [],
+      }] as never);
+
+      const result = await tool.execute("gh-3a", { owner: "acme", repo: "demo" }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.content[0].text).toContain("✓ Imported");
+      expect(result.details.issues[0]).toMatchObject({ number: 10, imported: true });
+    });
+
     it("fn_task_browse_github_issues lists issues via gh api", async () => {
       const tool = api.tools.get("fn_task_browse_github_issues")!;
       vi.mocked(runGhJsonAsync).mockResolvedValueOnce([

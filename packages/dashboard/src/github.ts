@@ -113,8 +113,11 @@ function parseIssueUrl(stdout: string): { owner: string; repo: string; number: n
 }
 
 /*
-FNXC:GithubImport 2026-07-15-00:00:
-GitHub import deduplication must survive edited task descriptions and owner/repo casing changes. Both CLI import paths, both extension tools, and dashboard single/batch routes share this sourceIssue-first helper, mirroring GitLab provenance while retaining legacy description URL matching.
+FNXC:GithubImport 2026-07-17-00:00:
+GitHub issue import deduplication treats persisted provenance as authoritative so edited descriptions and owner/repo casing changes cannot misidentify an import. Every dashboard, CLI, and extension issue-import surface shares this helper, which checks sourceIssue first, legacy github_import metadata second, and legacy description URLs last.
+
+FNXC:GithubImport 2026-07-17-00:00:
+The description compatibility fallback is eligible only when neither GitHub sourceIssue nor object-shaped github_import metadata exists. A nonmatching structured record must return false rather than letting quoted or stale URL text override its provenance.
 */
 export function buildGitHubIssueSource(owner: string, repo: string, issue: { number: number; html_url: string }): {
   sourceIssue: TaskSourceIssue;
@@ -148,12 +151,9 @@ export function isGitHubIssueAlreadyImported(
 ): boolean {
   const { owner, repo, issueNumber, sourceUrl } = input;
   const repository = `${owner}/${repo}`;
-  const normalizedSourceUrl = sourceUrl.toLocaleLowerCase();
-
-  if (task.description?.toLocaleLowerCase().includes(normalizedSourceUrl)) return true;
-
   const sourceIssue = task.sourceIssue;
-  if (sourceIssue?.provider === "github") {
+  const hasGitHubSourceIssue = sourceIssue?.provider === "github";
+  if (hasGitHubSourceIssue) {
     if (equalsIgnoreCase(sourceIssue.url, sourceUrl)) return true;
     if (equalsIgnoreCase(sourceIssue.repository, repository)
       && (sourceIssue.issueNumber === issueNumber || sourceIssue.externalIssueId === String(issueNumber))) {
@@ -162,14 +162,19 @@ export function isGitHubIssueAlreadyImported(
   }
 
   const metadata = task.source?.sourceMetadata;
-  if (task.source?.sourceType === "github_import" && metadata && typeof metadata === "object") {
+  const hasGitHubSourceMetadata = task.source?.sourceType === "github_import" && metadata && typeof metadata === "object";
+  if (hasGitHubSourceMetadata) {
     const sourceMetadata = metadata as Record<string, unknown>;
     if (equalsIgnoreCase(typeof sourceMetadata.issueUrl === "string" ? sourceMetadata.issueUrl : undefined, sourceUrl)) return true;
-    return sourceMetadata.issueNumber === issueNumber
-      && equalsIgnoreCase(repositoryFromGitHubIssueUrl(sourceMetadata.issueUrl), repository);
+    if (sourceMetadata.issueNumber === issueNumber
+      && equalsIgnoreCase(repositoryFromGitHubIssueUrl(sourceMetadata.issueUrl), repository)) {
+      return true;
+    }
   }
 
-  return false;
+  if (hasGitHubSourceIssue || hasGitHubSourceMetadata) return false;
+
+  return task.description?.toLocaleLowerCase().includes(sourceUrl.toLocaleLowerCase()) ?? false;
 }
 
 /**

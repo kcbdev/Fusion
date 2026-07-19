@@ -1419,6 +1419,28 @@ describe("POST /github/issues/batch-import", () => {
     expect(throttledSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("deduplicates repeated issue numbers using tasks accumulated within the batch", async () => {
+    const throttledSpy = vi.spyOn(GitHubClient.prototype, "fetchThrottled")
+      .mockResolvedValueOnce({ success: true, data: mockGitHubIssue(1, "Duplicate issue") } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
+      .mockResolvedValueOnce({ success: true, data: mockGitHubIssue(1, "Duplicate issue") } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/github/issues/batch-import",
+      JSON.stringify({ owner: "owner", repo: "repo", issueNumbers: [1, 1], delayMs: 1 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([
+      { issueNumber: 1, success: true, taskId: expect.any(String) },
+      { issueNumber: 1, success: true, skipped: true, taskId: expect.any(String) },
+    ]);
+    expect(store.createTask).toHaveBeenCalledTimes(1);
+    expect(throttledSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("returns 400 for empty issueNumbers array", async () => {
     const res = await REQUEST(
       buildApp(),
