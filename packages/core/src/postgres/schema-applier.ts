@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type PluginSchemaInitHook } from "./plugin-schema-hook.js";
+import { acquireSchemaMutationLocks } from "./advisory-locks.js";
 
 /** The latest PostgreSQL schema version known to this applier. */
 /*
@@ -274,7 +275,7 @@ export async function applySchemaBaseline(
    * cannot both apply a version or race its primary-key marker.
   */
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fusion:schema-applier'))`);
+    await acquireSchemaMutationLocks(tx);
     await ensureBookkeepingTable(tx);
     /*
     FNXC:PostgresSchema 2026-07-16-00:55:
