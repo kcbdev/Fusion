@@ -165,7 +165,7 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `researchGlobalMaxSearchResults` | `number` | `undefined` | Maximum search results per provider query. |
 | `researchGlobalFetchTimeoutMs` | `number` | `30000` | Timeout for individual HTTP fetches in milliseconds. |
 | `researchGlobalUserAgent` | `string` | `"FusionResearchBot/1.0"` | User-Agent header for HTTP requests made by research providers. |
-| `experimentalFeatures` | `Record<string, boolean>` | `{}` | Global-scoped experimental feature flags. Includes `experimentalFeatures.researchView`, which gates all Research surfaces and tools (dashboard view, engine task-session tools, and CLI `fn_research_*` tools), and `experimentalFeatures.evalsView`, which gates Evals surfaces (dashboard view, Settings → Scheduled Evals, and scheduled-eval cron execution). |
+| `experimentalFeatures` | `Record<string, boolean>` | `{}` | Global-scoped experimental feature flags. Includes `experimentalFeatures.researchView`, which gates all Research surfaces and tools (dashboard view, engine task-session tools, and CLI `fn_research_*` tools); `experimentalFeatures.evalsView`, which gates Evals surfaces (dashboard view, Settings → Scheduled Evals, and scheduled-eval cron execution); and default-off `experimentalFeatures.ideationView`, which gates the top-level Ideation view (desktop sidebar/Header fallback and mobile More only). |
 | `remoteAccess` | `RemoteAccessSettings` | `{ activeProvider: null, providers: {...}, tokenStrategy: {...}, lifecycle: {...} }` | Global-scoped remote access provider + token strategy configuration used by Remote Access routes and tunnel lifecycle controls. |
 | `mcpServers` | `McpServersSettings` | `{ enabled: false, servers: [] }` | Global MCP server declarations shared across projects. Project `mcpServers` can enable/disable the effective set, override a same-named global server, or disable a global server with a same-named `enabled:false` entry. Sensitive env/header/token values must be `{ secretRef, scope }` references to Fusion-managed secrets, never plaintext. |
 | `worktrunk` | `WorktrunkSettings` | `{ enabled: false, binaryPath: undefined, installedBinaryPath: undefined, onFailure: "fail" }` | Global defaults for worktrunk integration. Merged field-by-field with project `worktrunk` values; project values override global values for matching fields. |
@@ -1567,6 +1567,7 @@ Common built-in dashboard/runtime flags include:
 - `todoView` (enables dashboard Todo View; see [Todo View](./todo-view.md))
 - `researchView`
 - `evalsView` (gates Evals dashboard view, Settings → Scheduled Evals section, and scheduled-eval cron execution)
+- `ideationView` (default off; gates the top-level Ideation view, which is mobile More-only and replaces the Command Center Ideation tab)
 - `workflowGraphExecutor` (enables the workflow-IR interpreter path)
 - `graphNativePostMerge` (**default-ON**; the graph is the sole owner of post-merge `optional-group` steps after a successful merge — the legacy merger-owned post-merge path was deleted. Post-merge failures are non-blocking. See [Workflow Steps → Execution Phases](./workflow-steps.md#execution-phases))
 - `workflowInterpreterDualObserve` (retired/inert; stale persisted `true` values are forced OFF and must not reactivate hidden shadow observation)

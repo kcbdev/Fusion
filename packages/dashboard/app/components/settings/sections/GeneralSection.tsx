@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type ReportActionType, type WorkflowDefinition } from "@fusion/core";
-import { DEFAULT_MOBILE_NAV_PRIMARY_ITEMS, MAX_MOBILE_NAV_PRIMARY_ITEMS, MOBILE_NAV_SELECTABLE_ITEMS, MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS } from "../../../../../core/src/mobile-nav-primary-items";
+import { DEFAULT_MOBILE_NAV_PRIMARY_ITEMS, MAX_MOBILE_NAV_PRIMARY_ITEMS, MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS, MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS } from "../../../../../core/src/mobile-nav-primary-items";
 import { SettingsFieldRow } from "../SettingsFieldRow";
 import { SettingsToggleRow } from "../SettingsToggleRow";
 import { SettingsSelectRow } from "../SettingsSelectRow";
@@ -374,8 +374,8 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
       {/*
         FNXC:Navigation 2026-07-17-00:00:
         Render the selected quick actions in persisted order so move controls visibly reorder their rows.
-        The add picker exposes every eligible destination, while each mutation updates the live footer before
-        Settings is saved; More, Terminal/scripts, shell controls, and plugin views remain unavailable here.
+        The add picker exposes only footer-eligible destinations, while each mutation updates the live footer before
+        Settings is saved; More, Ideation, Terminal/scripts, shell controls, and plugin views remain unavailable here.
         */}
       <SettingsFieldRow
         htmlFor="mobileNavPrimaryItems"
@@ -386,13 +386,13 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
         <div role="group" aria-label={t("settings.general.mobileNavPrimaryItems", "Mobile footer quick actions")}>
           {(() => {
             const selectedItems = Array.isArray(form.mobileNavPrimaryItems) && form.mobileNavPrimaryItems.length > 0
-              ? form.mobileNavPrimaryItems.filter((item): item is typeof MOBILE_NAV_SELECTABLE_ITEMS[number] => MOBILE_NAV_SELECTABLE_ITEMS.includes(item as typeof MOBILE_NAV_SELECTABLE_ITEMS[number]))
+              ? form.mobileNavPrimaryItems.filter((item): item is typeof MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS[number] => MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS.includes(item as typeof MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS[number]))
               : [...DEFAULT_MOBILE_NAV_PRIMARY_ITEMS];
             const updateItems = (nextItems: string[]) => {
               setForm((current) => ({ ...current, mobileNavPrimaryItems: nextItems }));
               onMobileNavPrimaryItemsChange?.(nextItems);
             };
-            const availableItems = MOBILE_NAV_SELECTABLE_ITEMS.filter((item) => !selectedItems.includes(item));
+            const availableItems = MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS.filter((item) => !selectedItems.includes(item));
             return <>
               {selectedItems.map((item, selectedIndex) => {
                 const label = t(MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS[item], item);

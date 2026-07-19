@@ -11,6 +11,7 @@ import { TaskDetailContent } from "../TaskDetailModal";
 import { ProjectOverview } from "../ProjectOverview";
 import { MissionManager } from "../MissionManager";
 import { MailboxView } from "../MailboxView";
+import { IdeationPanel } from "../command-center/IdeationPanel";
 import { PageErrorBoundary } from "../ErrorBoundary";
 import { BackendConnectionErrorPage } from "../BackendConnectionErrorPage";
 import { CapacityRiskBanner } from "../CapacityRiskBanner";
@@ -103,6 +104,7 @@ export function MainContent({
   openSettingsWithNav,
   researchReadinessVersion,
   evalsEnabled,
+  ideationEnabled,
   memoryEnabled,
   goalsEnabled,
   handleOpenMission,
@@ -522,6 +524,17 @@ export function MainContent({
             }}
           />
         </Suspense>
+      </PageErrorBoundary>
+    );
+  }
+
+  if (taskView === "ideation") {
+    if (!settingsLoaded || !ideationEnabled) {
+      return null;
+    }
+    return (
+      <PageErrorBoundary>
+        <IdeationPanel projectId={currentProject?.id} />
       </PageErrorBoundary>
     );
   }

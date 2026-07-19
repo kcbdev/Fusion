@@ -801,6 +801,7 @@ function AppInner() {
   const nodesEnabled = experimentalFeatures.nodesView === true;
   const researchEnabled = experimentalFeatures.researchView === true;
   const evalsEnabled = experimentalFeatures.evalsView === true;
+  const ideationEnabled = experimentalFeatures.ideationView === true;
   /* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: Missing or false `subtaskBreakdown` settings must hide the AI Subtask quick-add handoff across List, Board, and New Task Modal surfaces; only an explicit true wires the callback. */
   const subtaskBreakdownEnabled = experimentalFeatures.subtaskBreakdown === true;
   /*
@@ -863,13 +864,22 @@ function AppInner() {
     if (taskView === "evals" && !evalsEnabled) {
       handleChangeTaskView("board");
     }
+    /*
+    FNXC:Navigation 2026-08-01-00:00:
+    FN-8352 promotes Ideation to a default-off experimental top-level view.
+    Redirect persisted and deep-linked disabled views to Board so MainContent
+    never leaves users on a blank unavailable surface.
+    */
+    if (taskView === "ideation" && !ideationEnabled) {
+      handleChangeTaskView("board");
+    }
     if (taskView === "goalsView" && !goalsEnabled) {
       handleChangeTaskView("board");
     }
     if (taskView === "todos" && !todosEnabled) {
       handleChangeTaskView("board");
     }
-  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled, evalsEnabled, goalsEnabled, todosEnabled, graphPluginTaskView]);
+  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled, evalsEnabled, ideationEnabled, goalsEnabled, todosEnabled, graphPluginTaskView]);
 
   const {
     availableModels,
@@ -1518,6 +1528,7 @@ function AppInner() {
     openSettingsWithNav,
     researchReadinessVersion,
     evalsEnabled,
+    ideationEnabled,
     memoryEnabled,
     goalsEnabled,
     handleOpenMission,
@@ -1729,6 +1740,7 @@ function AppInner() {
           devServerView: devServerEnabled,
           researchView: researchEnabled,
           evalsView: evalsEnabled,
+          ideationView: ideationEnabled,
           goalsView: goalsEnabled,
           leftSidebarNav: leftSidebarNavEnabled,
           rightDock: rightDockEnabled,
@@ -1763,6 +1775,7 @@ function AppInner() {
               devServerView: devServerEnabled,
               researchView: researchEnabled,
               evalsView: evalsEnabled,
+              ideationView: ideationEnabled,
               goalsView: goalsEnabled,
             }}
             pluginDashboardViews={pluginDashboardViews}
@@ -1850,6 +1863,7 @@ function AppInner() {
           todoView: todosEnabled,
           researchView: researchEnabled,
           evalsView: evalsEnabled,
+          ideationView: ideationEnabled,
           goalsView: goalsEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}

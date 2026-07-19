@@ -1024,6 +1024,20 @@ Navigation:
 
 For the full research workflow, provider setup, CLI commands, API reference, and agent integration, see the canonical [Research guide](./research.md).
 
+## Ideation View
+
+<!-- FNXC:Navigation 2026-08-01-00:00: FN-8352 promotes Ideation from Command Center into one default-off experimental top-level destination. Desktop uses the sidebar (or Header More fallback when the sidebar is opted out), while mobile always keeps it in More rather than a configurable footer tab. -->
+Ideation is a standalone dashboard surface for capturing divergent candidates and converging one into the Mission hierarchy.
+
+> Available only when `experimentalFeatures.ideationView` is enabled. The flag is off by default and is managed in **Settings → Experimental Features**.
+
+Navigation:
+- Desktop/tablet: **Left sidebar → Ideation**, or the Header **More views** menu when the desktop sidebar is opted out
+- Mobile: **More** sheet → **Ideation**
+- Mobile footer customization never promotes Ideation to a primary tab, including when older persisted settings list it
+
+The view replaces the former **Command Center → Ideation** tab. It preserves the same empty, populated, converged, and request-error states, so sessions and Mission handoff evidence remain in one canonical surface.
+
 ## Files Modal
 
 The Files modal provides a workspace-aware file browser and editor.
