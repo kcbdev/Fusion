@@ -431,7 +431,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       interviewState: row.interviewState as InterviewState,
       baseBranch: row.baseBranch || undefined,
       branchStrategy,
-      taskPrefix: row.taskPrefix || undefined,
+      // FNXC:MissionTaskPrefix 2026-07-19-13:05: match nullable text fields (?? not ||); keep parity with async-mission-store-queries rowToMission.
+      taskPrefix: row.taskPrefix ?? undefined,
       autoMerge: row.autoMerge === null ? undefined : Boolean(row.autoMerge),
       autoAdvance: Boolean(row.autoAdvance),
       autopilotEnabled: Boolean(row.autopilotEnabled),
