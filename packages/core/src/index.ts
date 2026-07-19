@@ -18,6 +18,16 @@ export {
   extractSymbolLockIdentity,
   symbolLocksConflict,
 } from "./task-store/symbol-locks.js";
+export {
+  MISSION_LINEAGE_APPROVAL_REQUIRED,
+  evaluateMissionLineageApproval,
+  isMissionLineageApproved,
+} from "./symbol-lock-lineage-approval.js";
+export type {
+  MissionLineageApprovalReason,
+  MissionLineageApprovalResult,
+  MissionLineageSnapshot,
+} from "./symbol-lock-lineage-approval.js";
 export { AGENT_VALID_TRANSITIONS, DUPLICATE_OF_METADATA_KEY, assertNotWorkspaceTaskMerge, isWorkspaceTask, WorkspaceTaskMergeError } from "./types.js";
 export {
   resolveEntryPointBranchAssignment,

@@ -23,6 +23,21 @@ Mission: Improve Reliability
         Task: FN-214
 ```
 
+## Canonical lineage approval for autonomous symbol locks
+
+Before autonomous scheduler work may acquire a symbol lock, it resolves the task's Mission → Milestone → Slice → Feature lineage and evaluates the single `@fusion/core` contract: `evaluateMissionLineageApproval`. Resolution and lock acquisition remain scheduler responsibilities; downstream schedulers must not redefine the approval rule.
+
+Approval requires every one of these statuses:
+
+- Mission: `active`
+- Milestone: `active`
+- Slice: `active`
+- Feature: `triaged` or `in-progress`
+
+When the scheduler passes `planApprovalRequired: true`, the linked task must also have an `approvedPlanFingerprint` that is a non-empty string after trimming whitespace. The predicate does not recompute the fingerprint; `plan-approval.ts` owns its generation and validation. When plan approval is not required, the fingerprint is ignored.
+
+The predicate is pure and returns `{ approved, reason }`. Its stable reasons are `approved`, `missing-mission`, `missing-milestone`, `missing-slice`, `missing-feature`, `mission-not-active`, `milestone-not-active`, `slice-not-active`, `feature-not-implementable`, and `plan-not-approved`. A false result is the scheduler's `lineage-blocked` outcome; only an approved result is eligible for symbol-lock admission.
+
 ## Mission → Goal linkage
 
 Missions and goals are stored independently, with an optional many-to-many linkage persisted in the `mission_goals` join table.
