@@ -54,6 +54,20 @@ describe("resolveNativeStructurePreview", () => {
   it("never maps a missing eval to soft-deleted", async () => {
     await expect(resolveNativeStructurePreview(store(), { kind: "eval-result", id: "absent" })).resolves.toMatchObject({ reason: "missing" });
   });
+
+  it("normalizes and bounds long excerpts for compact cards", async () => {
+    const longContent = `  ${"finding   detail ".repeat(30)}  `;
+    const result = await resolveNativeStructurePreview(store({
+      getInsightStore: vi.fn(() => ({ getInsight: vi.fn(async () => ({ ...insight, content: longContent })) })),
+    }), { kind: "research-finding", id: insight.id });
+
+    expect(result).toMatchObject({ available: true });
+    if (result.available) {
+      expect(result.excerpt.length).toBeLessThanOrEqual(180);
+      expect(result.excerpt).not.toMatch(/\s{2,}/);
+      expect(result.excerpt.endsWith("…")).toBe(true);
+    }
+  });
 });
 
 describe("native structure preview route", () => {

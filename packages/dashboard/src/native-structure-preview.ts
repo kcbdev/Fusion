@@ -12,6 +12,7 @@ const KIND_LABELS: Record<NativeStructureRef["kind"], string> = {
   "eval-result": "Evaluation result",
   goal: "Goal",
 };
+const MAX_EXCERPT_LENGTH = 180;
 
 function unavailable(ref: NativeStructureRef, reason: "missing" | "soft-deleted"): NativeStructurePreviewResult {
   return { available: false, kind: ref.kind, id: ref.id, reason };
@@ -28,7 +29,10 @@ function preview(
 
 function text(value: string | null | undefined, fallback: string): string {
   const normalized = value?.replace(/\s+/g, " ").trim();
-  return normalized || fallback;
+  const resolved = normalized || fallback;
+  return resolved.length <= MAX_EXCERPT_LENGTH
+    ? resolved
+    : `${resolved.slice(0, MAX_EXCERPT_LENGTH - 1).trimEnd()}…`;
 }
 
 /**
