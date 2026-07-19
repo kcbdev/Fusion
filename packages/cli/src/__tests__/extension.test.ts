@@ -3070,8 +3070,8 @@ pgTest("fn pi extension (runnable structured-output regression slice)", () => {
     });
 
     /*
-    FNXC:CliTests 2026-07-04-13:50:
-    FN-7530 split the sibling "executes with @fusion/core resolved through the built dist barrel" case (formerly directly below this test) into packages/cli/src/__tests__/extension-dist-barrel.test.ts. That test's own in-test dist-barrel recompilation (vi.resetModules + vi.importActual of the built @fusion/core dist barrel) is CPU-bound and timeout-prone under 4-shard CI contention (FN-6483/FN-6705/FN-6795/FN-6839/FN-7447 same signature); isolating it kept the ~68 stable tests in this file on the default lane while only the isolated file carries its own quarantine entry. This test covers the identical truncation invariant against the source-aliased @fusion/core.
+    FNXC:CliTests 2026-07-18-20:45:
+    FN-8381 deleted the fourth-quarantine built-dist-barrel companion because its full re-mocked module graph was CPU-bound and exceeded the default hook timeout under shard load. Retain this source-aliased test as the focused fn_task_list formatting, dependency, column, count, and truncation invariant; the deleted test's marginal full-barrel substitution signal did not justify timeout, retry, or worker-budget appeasement.
     */
     it("bounds large column-filtered listings as a single plain-text block", async () => {
       const store = createStore();
