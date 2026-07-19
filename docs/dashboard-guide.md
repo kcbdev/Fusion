@@ -585,6 +585,9 @@ The full **New Task** dialog includes a compact **GitHub issue or PR** picker ne
 
 Chat view provides project-scoped conversations with agents.
 
+<!-- FNXC:NativeStructureEmbed 2026-07-19-19:30: Document the shared chat reference contract so agents and operators can use an unambiguous token rather than relying on title matching. -->
+- Chat recognizes native structure references in both assistant and user messages using the explicit `fusion://<kind>/<id>` form. Supported kinds are `mission`, `milestone`, `roadmap-item`, `research-finding`, `eval-result`, and `goal`. Use a bare token such as `fusion://mission/M-001` in either message type, or an assistant Markdown link such as `[Mission](fusion://mission/M-001)`. `roadmap-item` currently resolves to the shared unavailable card until its plugin supplies a preview adapter and dashboard destination.
+- Recognized references render an inline preview card before you leave the conversation. Select **Open** on an available card to navigate to its owning dashboard view; missing, archived, or otherwise unavailable structures show a safe unavailable placeholder instead. Plain-text mode deliberately leaves reference text raw.
 - Entering `/new` or `/clear` (exact match after trimming) in the composer starts a fresh thread for the current chat target instead of sending the literal command to the model
 - On mobile, the New Chat and Delete Conversation dialogs use a compact inset treatment (centered, viewport-bounded, internally scrollable) instead of the app's default full-height mobile modal chrome.
 - **Settings → Project Models → Chat** controls New Chat defaults per project. Choose a default target kind (**Model** with provider/model and optional Thinking Level, or **Agent** with a durable agent id) and a mode: **Prompt for model each time** opens the New Chat dialog with that default preselected, while **Always use configured default** creates the session immediately from the resolved default. If the configured target is incomplete or missing, New Chat falls back to the dialog instead of creating an unroutable session.
@@ -1898,7 +1901,7 @@ The dashboard's CSS is split into a global stylesheet (`packages/dashboard/app/s
 
 ### Native structure previews
 
-`NativeStructurePreview` is the shared compact card for mission, milestone, research-finding, eval-result, and goal references. It resolves `GET /api/native-structures/:kind/:id/preview` to a typed available or unavailable payload and uses a required consumer-supplied `onOpen(ref, payload)` callback. `openTarget` is a view-state descriptor, not a URL, because dashboard navigation is callback based. `roadmap-item` is intentionally deferred until its plugin provides a backend-safe reader and dashboard destination.
+`NativeStructurePreview` is the shared compact card for mission, milestone, roadmap item, research-finding, eval-result, and goal references. It resolves `GET /api/native-structures/:kind/:id/preview` to a typed available or unavailable payload and uses a required consumer-supplied `onOpen(ref, payload)` callback. Chat is a consumer: it parses strict `fusion://<kind>/<id>` tokens/assistant Markdown links and dispatches the callback into its owning dashboard view. `openTarget` is a view-state descriptor, not a URL, because dashboard navigation is callback based. Until its plugin provides a backend-safe reader and dashboard destination, a `roadmap-item` uses the shared unavailable card.
 
 PR tab note: `PrPanel` cards use tokenized `.pr-card` grid spacing (`padding` + `gap`) and boxed token-based hint callouts for empty/loading states. Manual PR merges now show in-progress feedback (`Merging…` button state + status hint) until the merge call resolves.
 
