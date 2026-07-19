@@ -1221,6 +1221,50 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     ]);
   });
 
+  it("queues schema DDL behind an active SQLite migration transaction", async () => {
+    ctx = await setupFreshDb();
+    const migrationSql = postgres(ctx.testUrl, { max: 1, prepare: false, onnotice: () => {} });
+    const schemaSql = postgres(ctx.testUrl, {
+      max: 1,
+      prepare: false,
+      onnotice: () => {},
+      connection: { lock_timeout: 100 },
+    });
+    const schemaDb = drizzle(schemaSql);
+    let releaseMigration!: () => void;
+    let migrationLockAcquired!: () => void;
+    const release = new Promise<void>((resolve) => { releaseMigration = resolve; });
+    const acquired = new Promise<void>((resolve) => { migrationLockAcquired = resolve; });
+    const holder = migrationSql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtext('fusion:sqlite-migration-state'))`;
+      migrationLockAcquired();
+      await release;
+    });
+
+    try {
+      await acquired;
+      try {
+        let lockError: unknown;
+        try {
+          await applySchemaBaseline(schemaDb, { pluginHooks: [] });
+        } catch (error) {
+          lockError = error;
+        }
+        expect(lockError).toBeInstanceOf(Error);
+        expect((lockError as Error & { cause?: { code?: string } }).cause?.code).toBe("55P03");
+      } finally {
+        releaseMigration();
+        await holder;
+      }
+      expect((await applySchemaBaseline(schemaDb, { pluginHooks: [] })).applied).toBe(true);
+    } finally {
+      releaseMigration();
+      await holder.catch(() => undefined);
+      await migrationSql.end({ timeout: 5 });
+      await schemaSql.end({ timeout: 5 });
+    }
+  });
+
   /*
   FNXC:GitHubImportTranslate 2026-07-16-23:30:
   An upgrade has already recorded 0010, so editing its SQL only fixes fresh
