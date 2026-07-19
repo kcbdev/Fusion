@@ -129,6 +129,13 @@ describe("worktree-hooks", () => {
     expect(withQuote).toContain("PREFIX='O'\\''Brien'");
   });
 
+  it("single-quotes the fallback sed expression so backticks cannot execute", () => {
+    const hook = buildCommitMsgTrailerHook("not-a-numeric-id", { taskPrefix: "`id`" });
+
+    expect(hook).toContain("sed -E 's/^`id`-//i'");
+    expect(hook).not.toContain('sed -E "s/^`id`-//i"');
+  });
+
   it("quotes the case pattern for derived alphanumeric prefixes too", () => {
     const hook = buildCommitMsgTrailerHook("FN-42");
     expect(hook).toContain('"$PREFIX"-*) ;;');

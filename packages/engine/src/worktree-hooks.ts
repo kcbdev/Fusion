@@ -266,7 +266,7 @@ TASK_ID=$(cat "$TASK_FILE")
 PREFIX=${shellSingleQuote(taskPrefix)}
 case "$TASK_ID" in
   "$PREFIX"-*) ;;
-  *) TASK_ID="$PREFIX-$(printf '%s' "$TASK_ID" | sed -E "s/^${taskPrefixSedEre}-//i")" ;;
+  *) TASK_ID="$PREFIX-$(printf '%s' "$TASK_ID" | sed -E ${shellSingleQuote(`s/^${taskPrefixSedEre}-//i`)})" ;;
 esac
 
 TRAILER_NAME=${shellSingleQuote(trailerName)}

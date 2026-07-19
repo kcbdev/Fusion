@@ -173,4 +173,23 @@ describe("mission taskPrefix routes", () => {
     expect((ok.body as { taskPrefix?: string }).taskPrefix).toBe("ERR2");
     expect((await missionStore.getMission(mission.id))?.taskPrefix).toBe("ERR2");
   });
+
+  it.each([
+    [123, "taskPrefix must be a string or null"],
+    ["1ERR", "taskPrefix must start with a letter and contain only letters and digits"],
+  ])("returns 400 for invalid taskPrefix %j", async (taskPrefix, message) => {
+    const mission = await missionStore.createMission({ title: "Plain" });
+
+    const response = await request(
+      app,
+      "PATCH",
+      `/api/missions/${mission.id}`,
+      JSON.stringify({ taskPrefix }),
+      { "content-type": "application/json" },
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: message });
+    expect(missionStore.updateMission).not.toHaveBeenCalled();
+  });
 });

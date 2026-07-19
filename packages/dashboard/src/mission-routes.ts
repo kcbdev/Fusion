@@ -191,12 +191,12 @@ PATCH/POST accept taskPrefix as a string, empty string, or null. null/empty norm
 function validateTaskPrefix(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") {
-    throw new Error("taskPrefix must be a string or null");
+    throw badRequest("taskPrefix must be a string or null");
   }
   const trimmed = value.trim().toUpperCase();
   if (!trimmed) return undefined;
   if (!/^[A-Z][A-Z0-9]*$/.test(trimmed)) {
-    throw new Error("taskPrefix must start with a letter and contain only letters and digits");
+    throw badRequest("taskPrefix must start with a letter and contain only letters and digits");
   }
   return trimmed;
 }
