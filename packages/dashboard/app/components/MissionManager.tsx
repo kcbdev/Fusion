@@ -1657,6 +1657,13 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   ]);
 
   // Mission handlers
+  const handleMissionTaskPrefixChange = useCallback((rawValue: string) => {
+    const taskPrefix = rawValue.toUpperCase();
+    /** FNXC:MissionTaskPrefix 2026-07-19-14:15: keep all mission forms aligned with server validation so invalid prefixes never enter client state (Greptile P2 on PR #2334). */
+    if (taskPrefix !== "" && !/^[A-Z][A-Z0-9]*$/.test(taskPrefix)) return;
+    setMissionForm((current) => ({ ...current, taskPrefix }));
+  }, []);
+
   const handleEditMission = useCallback((mission: Mission) => {
     setEditingMissionId(mission.id);
     setIsCreatingMission(false);
@@ -2908,7 +2915,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       type="text"
                       placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
                       value={missionForm.taskPrefix}
-                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      onChange={(e) => handleMissionTaskPrefixChange(e.target.value)}
                       aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
                     />
                   </label>
@@ -4670,7 +4677,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       type="text"
                       placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
                       value={missionForm.taskPrefix}
-                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      onChange={(e) => handleMissionTaskPrefixChange(e.target.value)}
                       aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
                     />
                   </label>
@@ -4789,7 +4796,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       type="text"
                       placeholder={t("missions.taskPrefixPlaceholder", "e.g. ERR (defaults to project prefix)")}
                       value={missionForm.taskPrefix}
-                      onChange={(e) => setMissionForm({ ...missionForm, taskPrefix: e.target.value.toUpperCase() })}
+                      onChange={(e) => handleMissionTaskPrefixChange(e.target.value)}
                       aria-label={t("missions.taskPrefixAriaLabel", "Mission task prefix")}
                     />
                   </label>

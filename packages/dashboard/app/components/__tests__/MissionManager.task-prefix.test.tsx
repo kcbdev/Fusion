@@ -151,4 +151,30 @@ describe("MissionManager taskPrefix clear", () => {
     // JSON wire format must retain the key; undefined would drop it and skip the clear.
     expect(JSON.stringify(updates)).toContain('"taskPrefix":null');
   });
+
+  it("uppercases valid prefixes and rejects invalid characters before they enter form state", async () => {
+    render(
+      <ConfirmDialogProvider>
+        <MissionManager isInline isOpen onClose={() => {}} addToast={vi.fn()} projectId={projectId} />
+      </ConfirmDialogProvider>,
+    );
+
+    const listItem = (await screen.findByText("Prefixed Mission")).closest(".mission-list__item");
+    fireEvent.click(listItem as HTMLElement);
+    await waitFor(() => expect(mockFetchMission).toHaveBeenCalledWith("M-001", projectId));
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit mission" })[0]);
+
+    const prefixInput = await screen.findByLabelText("Mission task prefix");
+    fireEvent.change(prefixInput, { target: { value: "err2" } });
+    expect(prefixInput).toHaveValue("ERR2");
+
+    fireEvent.change(prefixInput, { target: { value: "1ERR" } });
+    expect(prefixInput).toHaveValue("ERR2");
+
+    fireEvent.change(prefixInput, { target: { value: "ERR-2" } });
+    expect(prefixInput).toHaveValue("ERR2");
+
+    fireEvent.change(prefixInput, { target: { value: "" } });
+    expect(prefixInput).toHaveValue("");
+  });
 });
