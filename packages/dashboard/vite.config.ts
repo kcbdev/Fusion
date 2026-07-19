@@ -172,6 +172,10 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-quality/src/dashboard-view.tsx",
       ),
+      "@fusion-plugin-examples/roadmap/dashboard-view": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-roadmap/src/dashboard-view.tsx",
+      ),
       "@fusion-plugin-examples/quality/qa-tab": resolve(
         __dirname,
         "../../plugins/fusion-plugin-quality/src/qa-tab.tsx",

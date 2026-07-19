@@ -874,11 +874,11 @@ export function isReviewArtifactGenerationEligible(
 /**
  * FNXC:NativeStructureEmbed 2026-07-16-12:00:
  * Chat and mail share this compact reference contract so their consumers never invent
- * incompatible structure identifiers. `roadmap-item` remains a deferred future kind until
- * its plugin exposes a PostgreSQL-safe read adapter and a restored dashboard destination.
+ * incompatible structure identifiers. `roadmap-item` is resolved through the roadmap plugin's
+ * PostgreSQL-safe adapter and is missing-only because roadmap entities have no soft-delete state.
  */
 export interface NativeStructureRef {
-  kind: "mission" | "milestone" | "research-finding" | "eval-result" | "goal";
+  kind: "mission" | "milestone" | "research-finding" | "eval-result" | "goal" | "roadmap-item";
   id: string;
   projectId?: string;
 }
@@ -887,11 +887,17 @@ export interface NativeStructureRef {
  * FNXC:NativeStructureEmbed 2026-07-16-12:00:
  * Dashboard destinations are callback/view-state based rather than HTML routes. Consumers use
  * this stable descriptor with their navigation callback; it is intentionally not a URL.
+ *
+ * FNXC:NativeStructureEmbed 2026-07-19-12:30:
+ * Roadmap-item descriptors carry optional hierarchy context for the hosted `roadmaps` view;
+ * consumers pass this object to onOpen instead of manufacturing a deep-link URL.
  */
 export interface NativeStructureOpenTarget {
-  view: "missions" | "insights" | "evals" | "goals";
+  view: "missions" | "insights" | "evals" | "goals" | "roadmaps";
   id: string;
   missionId?: string;
+  roadmapId?: string;
+  milestoneId?: string;
 }
 
 /**
@@ -6206,16 +6212,16 @@ export function validateMessageMetadata(metadata: MessageMetadata | undefined): 
   }
 
   /*
-  FNXC:NativeStructureEmbed 2026-07-20-12:00:
-  Mail accepts only the shared five-kind NativeStructureRef union. Reject unsupported future
-  kinds at the persistence boundary so every stored attachment remains renderable by the shared
-  preview component; labels are optional attach-time fallbacks, not serialized preview snapshots.
+  FNXC:NativeStructureEmbed 2026-07-19-12:30:
+  Mail accepts only the shared six-kind NativeStructureRef union. The roadmap item uses the
+  plugin-owned read adapter at render time, so attachment metadata remains a ref rather than a
+  duplicated persistence snapshot; labels are optional attach-time fallbacks.
   */
   if (metadata.nativeStructures !== undefined) {
     if (!Array.isArray(metadata.nativeStructures)) {
       throw new Error("metadata.nativeStructures must be an array");
     }
-    const supportedKinds: NativeStructureRef["kind"][] = ["mission", "milestone", "research-finding", "eval-result", "goal"];
+    const supportedKinds: NativeStructureRef["kind"][] = ["mission", "milestone", "research-finding", "eval-result", "goal", "roadmap-item"];
     for (const embed of metadata.nativeStructures) {
       if (typeof embed !== "object" || embed === null || Array.isArray(embed)) {
         throw new Error("metadata.nativeStructures entries must be objects");

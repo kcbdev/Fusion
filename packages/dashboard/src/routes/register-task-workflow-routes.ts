@@ -4011,8 +4011,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.get("/native-structures/:kind/:id/preview", async (req, res) => {
     try {
       const { kind, id } = req.params;
-      if (kind !== "mission" && kind !== "milestone" && kind !== "research-finding" && kind !== "eval-result" && kind !== "goal") {
-        throw badRequest("kind must be one of: mission, milestone, research-finding, eval-result, goal");
+      if (kind !== "mission" && kind !== "milestone" && kind !== "research-finding" && kind !== "eval-result" && kind !== "goal" && kind !== "roadmap-item") {
+        throw badRequest("kind must be one of: mission, milestone, research-finding, eval-result, goal, roadmap-item");
       }
       if (!id.trim()) throw badRequest("id must be non-empty");
       const { store: scopedStore } = await getProjectContext(req);

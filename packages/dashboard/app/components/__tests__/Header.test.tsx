@@ -360,7 +360,7 @@ describe("Header", () => {
       expect(onChangeView).toHaveBeenCalledWith("plugin:fusion-plugin-dependency-graph:queue");
     });
 
-    it("hides legacy roadmaps overflow item when roadmap plugin view is present", () => {
+    it("renders hosted roadmaps primary item when roadmap plugin view is present", () => {
       renderHeader({
         onChangeView: noop,
         experimentalFeatures: {},
@@ -372,8 +372,7 @@ describe("Header", () => {
         ],
       });
 
-      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-      expect(screen.queryByTestId("view-overflow-roadmaps")).toBeNull();
+      expect(screen.getByTestId("view-toggle-plugin-fusion-plugin-roadmap-roadmaps")).toBeInTheDocument();
     });
 
     it("renders view overflow trigger when an experimental overflow feature is enabled", () => {

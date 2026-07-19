@@ -388,7 +388,7 @@ describe("LeftSidebarNav", () => {
     expect(screen.queryByRole("button", { name: /view$/i })).toBeNull();
   });
 
-  it("filters the removed Roadmaps plugin destination when registered", () => {
+  it("renders the hosted Roadmaps plugin destination when registered", () => {
     const roadmapView: PluginDashboardViewEntry = {
       pluginId: "fusion-plugin-roadmap",
       view: {
@@ -401,8 +401,7 @@ describe("LeftSidebarNav", () => {
     };
     renderSidebar({ pluginDashboardViews: [pluginViews[0], roadmapView, pluginViews[1]] });
 
-    // FNXC:Navigation 2026-06-22-18:50: Roadmaps was removed from dashboard navigation; plugin rows must not reintroduce it.
-    expect(screen.queryByTestId("sidebar-nav-plugin-fusion-plugin-roadmap-roadmaps")).toBeNull();
+    expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-roadmap-roadmaps")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-primary-primary-view")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-overflow-overflow-view")).toBeInTheDocument();
   });
