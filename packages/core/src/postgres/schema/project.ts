@@ -521,6 +521,35 @@ export const distributedTaskIdReservations = projectSchema.table("distributed_ta
   index("idxDistributedTaskIdReservationsExpiry").on(t.status, t.expiresAt),
 ]);
 
+// ── Durable symbol locks ─────────────────────────────────────────────
+/*
+FNXC:SymbolLock 2026-07-30-14:10:
+Mission-lineage admission needs one project-scoped row per canonical symbol.
+A composite primary key retains released/expired ownership history while the
+atomic store seam may reclaim those rows as held without cross-project conflict.
+*/
+export const symbolLocks = projectSchema.table("symbol_locks", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  symbolKey: text("symbol_key").notNull(),
+  ownerTaskId: text("owner_task_id").notNull(),
+  missionId: text("mission_id"),
+  featureId: text("feature_id"),
+  lineageId: text("lineage_id"),
+  nodeId: text("node_id"),
+  agentId: text("agent_id"),
+  status: text("status").notNull(),
+  acquiredAt: text("acquired_at").notNull(),
+  renewedAt: text("renewed_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.symbolKey] }),
+  check("symbol_locks_status_check", sql`${t.status} IN ('held', 'released', 'expired')`),
+  index("idxSymbolLocksOwner").on(t.projectId, t.ownerTaskId),
+  index("idxSymbolLocksExpiry").on(t.status, t.expiresAt),
+]);
+
 // ── Workflow step definitions ────────────────────────────────────────
 export const workflowSteps = projectSchema.table("workflow_steps", {
   id: text("id").primaryKey(),

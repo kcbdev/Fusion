@@ -243,6 +243,31 @@ CREATE INDEX IF NOT EXISTS "idxDistributedTaskIdReservationsPrefixStatus"
 CREATE INDEX IF NOT EXISTS "idxDistributedTaskIdReservationsExpiry"
   ON project.distributed_task_id_reservations(status, expires_at);
 
+-- FNXC:SymbolLock 2026-07-30-14:10: baseline creates the table only; 0025
+-- applies RLS after 0006 defines the ownership trigger and policy machinery.
+CREATE TABLE IF NOT EXISTS project.symbol_locks (
+  project_id text NOT NULL DEFAULT current_setting('fusion.project_id', true),
+  symbol_key text NOT NULL,
+  owner_task_id text NOT NULL,
+  mission_id text,
+  feature_id text,
+  lineage_id text,
+  node_id text,
+  agent_id text,
+  status text NOT NULL,
+  acquired_at text NOT NULL,
+  renewed_at text NOT NULL,
+  expires_at text NOT NULL,
+  created_at text NOT NULL,
+  updated_at text NOT NULL,
+  PRIMARY KEY (project_id, symbol_key),
+  CONSTRAINT symbol_locks_status_check CHECK (status IN ('held', 'released', 'expired'))
+);
+CREATE INDEX IF NOT EXISTS "idxSymbolLocksOwner"
+  ON project.symbol_locks(project_id, owner_task_id);
+CREATE INDEX IF NOT EXISTS "idxSymbolLocksExpiry"
+  ON project.symbol_locks(status, expires_at);
+
 CREATE TABLE IF NOT EXISTS project.workflow_steps (
   id text PRIMARY KEY,
   template_id text,

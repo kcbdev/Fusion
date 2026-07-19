@@ -751,6 +751,8 @@ export class SelfHealingManager {
    * because the task leaves the promotable state before returning to it.
    */
   private strandedCompletedFailureProvenanceWarned = new Set<string>();
+  /* FNXC:SymbolLock 2026-07-30-14:20: idle symbol-lock sweeps emit one no-action audit until a stale lock re-arms the diagnostic. */
+  private symbolLockNoActionAudited = false;
   private metaResolvedSkipAuditMemo = new Map<string, string>();
   private metaStalledSkipAuditMemo = new Map<string, string>();
   private preservedQueuedOverlapLogged = new Map<string, string>();
@@ -1396,6 +1398,7 @@ export class SelfHealingManager {
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
       { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases().then(() => undefined) },
+      { name: "reconcile-stale-symbol-locks", fn: () => this.reconcileStaleSymbolLocks().then(() => undefined) },
       { name: "reconcile-completed-blocked", fn: () => this.reconcileCompletedBlockedTasks().then(() => undefined) },
       { name: "reconcile-in-review-unmet-dependencies", fn: () => this.reconcileInReviewUnmetDependencies().then(() => undefined) },
       { name: "reconcile-engine-downtime-active-timing", fn: () => this.reconcileEngineDowntimeActiveTiming().then(() => undefined) },
@@ -2511,6 +2514,10 @@ export class SelfHealingManager {
             }
             return result;
           },
+        },
+        {
+          name: "reconcile-stale-symbol-locks",
+          fn: () => this.reconcileStaleSymbolLocks(),
         },
         {
           name: "reconcile-phantom-committed-reservations",
@@ -5656,6 +5663,34 @@ export class SelfHealingManager {
       log.error(`Stale blockedBy sweep failed: ${errorMessage}`);
       return 0;
     }
+  }
+
+  /**
+   * FNXC:SymbolLock 2026-07-30-14:20:
+   * Crash recovery expires only locks whose owner is terminal/missing or whose
+   * lease elapsed. It is intentionally orthogonal to scheduler admission and
+   * never changes a task, worktree, semaphore, or verification state.
+   */
+  async reconcileStaleSymbolLocks(): Promise<number> {
+    const result = await this.store.reconcileStaleSymbolLocks();
+    if (result.reconciled.length > 0) {
+      this.symbolLockNoActionAudited = false;
+      await this.store.recordRunAuditEvent({
+        agentId: "self-healing", runId: "symbol-lock-reconcile", domain: "database",
+        mutationType: "symbol-lock:reconcile-stale", target: "symbol-locks",
+        metadata: { count: result.reconciled.length, symbolKeys: result.reconciled, outcome: "reconciled" },
+      });
+      return result.reconciled.length;
+    }
+    if (!this.symbolLockNoActionAudited) {
+      this.symbolLockNoActionAudited = true;
+      await this.store.recordRunAuditEvent({
+        agentId: "self-healing", runId: "symbol-lock-reconcile", domain: "database",
+        mutationType: "symbol-lock:reconcile-stale-no-action", target: "symbol-locks",
+        metadata: { count: 0, outcome: "no-action" },
+      });
+    }
+    return 0;
   }
 
   async reconcileDependencyBlockingLeases(): Promise<number> {

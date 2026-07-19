@@ -113,6 +113,8 @@ import { saveWorkflowRunBranchImpl, clearNearDuplicateReferencesToImpl, selectNe
 import { taskToArchiveEntryImpl, deleteTaskBackendImpl, archiveTaskBackendImpl, unarchiveTaskImpl, restoreFromArchiveImpl, listArchivedTasksImpl } from "./task-store/archive-lifecycle-2.js";
 import { pruneOperationalLogsAsync, pruneAgentLogFilesAsync, type OperationalLogPruneResult } from "./task-store/async-maintenance.js";
 import { reconcilePhantomCommittedReservationsAsync } from "./task-store/async-phantom-reservations.js";
+import { acquireSymbolLocksAsync, inspectSymbolLockConflictsAsync, reconcileStaleSymbolLocksAsync, releaseSymbolLocksAsync, renewSymbolLocksAsync } from "./task-store/symbol-locks.js";
+import type { AcquireSymbolLocksResult, ReconcileStaleSymbolLocksResult, ReleaseSymbolLocksResult, RenewSymbolLocksResult, SymbolLockConflict, SymbolLockOwner } from "./symbol-lock-types.js";
 import { queryRunAuditEvents } from "./task-store/async-audit.js";
 import { isValidMergeRequestTransitionImpl, enqueueMergeQueueSyncInternalImpl, releaseMergeQueueLeaseImpl, collectMergeDetailsImpl, applyPrMergedTransitionImpl } from "./task-store/merge-queue-ops-2.js";
 import { upsertWorkflowWorkItemImpl, transitionWorkflowWorkItemImpl, acquireWorkflowWorkItemLeaseImpl } from "./task-store/workflow-workitems-ops-2.js";
@@ -702,6 +704,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   async reconcileOrphanedTaskDirs( opts: { ignoreRecencyWindow?: boolean } = {}, ): Promise<{ recovered: string[]; skipped: Array<{ id: string; reason: string }> }> {
     return reconcileOrphanedTaskDirsImpl(this, opts);
+  }
+
+  /**
+   * FNXC:SymbolLock 2026-07-30-14:10:
+   * The TaskStore owns project binding, so callers cannot accidentally inspect
+   * or mutate an identically named symbol in another project's partition.
+   */
+  async acquireSymbolLocks(symbols: readonly string[], owner: SymbolLockOwner, leaseMs: number): Promise<AcquireSymbolLocksResult> {
+    return acquireSymbolLocksAsync(this, symbols, owner, leaseMs);
+  }
+  async renewSymbolLocks(symbols: readonly string[], ownerTaskId: string, leaseMs: number): Promise<RenewSymbolLocksResult> {
+    return renewSymbolLocksAsync(this, symbols, ownerTaskId, leaseMs);
+  }
+  async releaseSymbolLocks(symbols: readonly string[], ownerTaskId: string): Promise<ReleaseSymbolLocksResult> {
+    return releaseSymbolLocksAsync(this, symbols, ownerTaskId);
+  }
+  async inspectSymbolLockConflicts(symbols: readonly string[]): Promise<SymbolLockConflict[]> {
+    return inspectSymbolLockConflictsAsync(this, symbols);
+  }
+  async reconcileStaleSymbolLocks(): Promise<ReconcileStaleSymbolLocksResult> {
+    return reconcileStaleSymbolLocksAsync(this);
   }
 
   /** Reconcile committed reservations whose task and archive representations are absent. */
