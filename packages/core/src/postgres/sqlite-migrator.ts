@@ -459,6 +459,49 @@ async function ensureMigrationStateTable(db: PostgresJsDatabase<Record<string, n
   )`));
 }
 
+export interface SqliteMigrationState {
+  migrationKey: string;
+  projectId: string | null;
+  status: "running" | "complete" | "failed";
+  lastError: string | null;
+  updatedAt: Date | string;
+}
+
+/**
+ * FNXC:MigrationStatusDashboard 2026-07-19-12:25:
+ * Dashboard health reads the authoritative per-project cutover marker after
+ * listen. A running or failed marker is never aged out here: progress ticks do
+ * not update updated_at, and post-listen running means completion was missed.
+ */
+export async function getSqliteMigrationState(
+  db: PostgresJsDatabase<Record<string, never>>,
+  migrationKey: string,
+): Promise<SqliteMigrationState | null> {
+  await ensureMigrationStateTable(db);
+  const rows = (await db.execute(sql`
+    SELECT migration_key, project_id, status, last_error, updated_at
+    FROM public.${sql.identifier(SQLITE_MIGRATION_STATE_TABLE)}
+    WHERE migration_key = ${migrationKey}
+    LIMIT 1
+  `)) as unknown as Array<{
+    migration_key: string;
+    project_id: string | null;
+    status: "running" | "complete" | "failed";
+    last_error: string | null;
+    updated_at: Date | string;
+  }>;
+  const row = rows[0];
+  return row
+    ? {
+        migrationKey: row.migration_key,
+        projectId: row.project_id,
+        status: row.status,
+        lastError: row.last_error,
+        updatedAt: row.updated_at,
+      }
+    : null;
+}
+
 /** Return true only after a fully verified cutover records its durable marker. */
 export async function isSqliteMigrationComplete(
   db: PostgresJsDatabase<Record<string, never>>,

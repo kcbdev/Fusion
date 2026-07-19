@@ -127,13 +127,15 @@ function buildTaskIdIntegrityHealth(report: DashboardTaskIdIntegrityHealth) {
 function buildHealthPayload(args: {
   database: ReturnType<TaskStore["getDatabaseHealth"]>;
   taskIdIntegrityReport: DashboardTaskIdIntegrityHealth;
+  migration?: import("./dashboard-postgres-health.js").DashboardMigrationHealth;
   cliPackageVersion: string;
   engineAvailable: boolean;
 }) {
-  const { database, cliPackageVersion, engineAvailable } = args;
+  const { database, cliPackageVersion, engineAvailable, migration } = args;
   const taskIdIntegrity = buildTaskIdIntegrityHealth(args.taskIdIntegrityReport);
   return {
-    status: !database.healthy || database.corruptionDetected || taskIdIntegrity.status !== "ok" ? "degraded" : "ok",
+    // Durable running/failed migration markers must never be hidden behind ok health.
+    status: migration || !database.healthy || database.corruptionDetected || taskIdIntegrity.status !== "ok" ? "degraded" : "ok",
     version: cliPackageVersion,
     uptime: Math.floor(process.uptime()),
     /*
@@ -145,6 +147,7 @@ function buildHealthPayload(args: {
     },
     database,
     taskIdIntegrity,
+    ...(migration ? { migration } : {}),
   };
 }
 
@@ -1727,10 +1730,19 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
    * unreachable backend surfaces degraded status + errors.
    */
   app.get("/api/health", async (_req, res) => {
-    const health = await evaluateDashboardPostgresHealth(store, options?.postgresHealthLayer);
+    /*
+    FNXC:MigrationStatusDashboard 2026-07-19-14:30:
+    The daemon's TaskStore is bound to the engine project id, but TaskStore has
+    no project-id accessor. Pass that typed server identity to health so durable
+    migration markers use project:<projectId> instead of a root-path fallback.
+    */
+    const health = await evaluateDashboardPostgresHealth(store, options?.postgresHealthLayer, {
+      projectId: options?.engine?.getProjectId?.(),
+    });
     res.json(buildHealthPayload({
       database: health.database,
       taskIdIntegrityReport: health.taskIdIntegrity,
+      migration: health.migration,
       cliPackageVersion,
       engineAvailable: hasDashboardEngine(options),
     }));
@@ -1931,11 +1943,18 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
      * Force-recompute PostgreSQL connectivity and task-ID integrity through
      * the live TaskStore layer (or an explicit integration override). Query
      * failures remain visible as degraded health instead of healthy fallback.
+     *
+     * FNXC:MigrationStatusDashboard 2026-07-19-14:30:
+     * Preserve the engine's typed bound project identity on refresh so this
+     * endpoint queries the same durable project migration marker as GET health.
      */
-    const health = await evaluateDashboardPostgresHealth(store, options?.postgresHealthLayer);
+    const health = await evaluateDashboardPostgresHealth(store, options?.postgresHealthLayer, {
+      projectId: options?.engine?.getProjectId?.(),
+    });
     res.json(buildHealthPayload({
       database: health.database,
       taskIdIntegrityReport: health.taskIdIntegrity,
+      migration: health.migration,
       cliPackageVersion,
       engineAvailable: hasDashboardEngine(options),
     }));

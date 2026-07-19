@@ -64,7 +64,17 @@ vi.mock("../../ApprovalNotificationBanner", () => ({
 }));
 vi.mock("../../GitHubStarPrompt", () => ({ GitHubStarPrompt: () => null }));
 
-import { DashboardBanners } from "../DashboardBanners";
+import { DashboardBanners, isMigrationStatusBannerActive } from "../DashboardBanners";
+
+describe("isMigrationStatusBannerActive", () => {
+  it("covers boot progress and durable failed/running health without false positives", () => {
+    expect(isMigrationStatusBannerActive({ status: "migrating" } as any)).toBe(true);
+    expect(isMigrationStatusBannerActive({ status: "degraded", migration: { active: false, durableStatus: "failed" } } as any)).toBe(true);
+    expect(isMigrationStatusBannerActive({ status: "degraded", migration: { active: false, durableStatus: "running" } } as any)).toBe(true);
+    expect(isMigrationStatusBannerActive({ status: "ok", migration: { active: false } } as any)).toBe(false);
+    expect(isMigrationStatusBannerActive(undefined)).toBe(false);
+  });
+});
 
 function buildSession(overrides: Partial<AiSessionSummary> = {}): AiSessionSummary {
   return {

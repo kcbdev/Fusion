@@ -4,6 +4,11 @@
 
 See the [2026-07-14 PostgreSQL runtime cutover review](./postgres-migration-review-2026-07-14.md) for the audited authority inventory, exact authorized legacy readers, and deployment/rollback checklist.
 
+## SQLite→PostgreSQL cutover status
+
+- During a first-boot cutover, `fn dashboard`, `fn serve`, and `fn daemon --port <port>` keep their known HTTP port available with a migration holding page. Open dashboard tabs poll `/api/health` and show the migration banner with live progress.
+- After a successful cutover, the usual dismissible data-migrated notice may appear. If the durable cutover marker remains `running` or `failed`, real-server `/api/health` reports `status: "degraded"` with migration detail and the dashboard keeps the migration banner visible. Do not delete retained legacy `.fusion/fusion.db` backups; check logs and run `fn db migrate` after fixing a failure.
+
 ## Embedded PostgreSQL startup resources
 
 - The zero-config embedded PostgreSQL lifecycle uses mmap-backed primary shared memory to avoid exhausted SysV shared-memory IDs on constrained hosts.

@@ -176,6 +176,7 @@ export {
 export {
   migrateSqliteToPostgres,
   isSqliteMigrationComplete,
+  getSqliteMigrationState,
   completeSqliteMigration,
   defaultMigrationSources,
   formatMigrationProgress,
@@ -183,6 +184,7 @@ export {
   type SqliteMigrationSource,
   type SchemaName,
   type MigrationOptions,
+  type SqliteMigrationState,
   type MigrationReport,
   type MigrationProgressEvent,
   type MigrationProgressPhase,

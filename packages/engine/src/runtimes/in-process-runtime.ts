@@ -314,6 +314,7 @@ export class InProcessRuntime
         const backendBoot = await createTaskStoreForBackend({
           rootDir: this.config.workingDirectory,
           projectId: this.config.projectId,
+          onMigrationProgress: this.config.onMigrationProgress,
         });
         // FNXC:PostgresFinalCutover 2026-07-14-17:20: Engine runtimes must fail
         // startup when PostgreSQL cannot boot; constructing a SQLite TaskStore is no longer valid.
