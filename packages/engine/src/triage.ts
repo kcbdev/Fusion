@@ -18,7 +18,6 @@ import {
   isUnplannedSeedPrompt,
   getTaskDuplicateLineage,
   parseExplicitDuplicateMarker,
-  flagTriageDuplicate,
   resolveAgentPrompt,
   builtinSeamPrompt,
   renderTriagePolicyPlaceholders,
@@ -2272,7 +2271,7 @@ export class TriageProcessor {
    */
   private async updatePlanningStateIfStillCurrent(
     task: Task,
-    patch: Parameters<TaskStore["updateTask"]>[1],
+    patch: Parameters<TaskStore["updateTask"]>[1] | ((live: Task) => Parameters<TaskStore["updateTask"]>[1]),
   ): Promise<boolean> {
     if (typeof this.store.updateTaskAtomic !== "function") {
       // Compatibility adapters used by older embedded hosts do not expose the
@@ -2281,7 +2280,7 @@ export class TriageProcessor {
       if (!isTaskStillInPlanningStage(liveTask)) {
         return false;
       }
-      await this.store.updateTask(task.id, patch);
+      await this.store.updateTask(task.id, typeof patch === "function" ? patch(liveTask) : patch);
       return true;
     }
 
@@ -2301,9 +2300,24 @@ export class TriageProcessor {
         return null;
       }
       persisted = true;
-      return patch;
+      return typeof patch === "function" ? patch(liveTask) : patch;
     });
     return persisted;
+  }
+
+  /**
+   * FNXC:Triage 2026-07-30-15:00:
+   * FN-8361 requires filesystem recovery writes to keep the planning predicate and
+   * mutation in one task-lock acquisition; row-only atomic patches cannot protect PROMPT.md.
+   */
+  private async runIfStillPlanningUnderTaskLock(task: Task, operation: () => Promise<void>): Promise<boolean> {
+    const store = this.store as TaskStore;
+    if (typeof store.withTaskLock !== "function" || typeof store.readTaskForMove !== "function") return false;
+    return store.withTaskLock(task.id, async () => {
+      if (!isTaskStillInPlanningStage(await store.readTaskForMove(task.id))) return false;
+      await operation();
+      return true;
+    });
   }
 
   private restoreStatusAfterInterruptedTriageWork(task: Task): Task["status"] | null {
@@ -2444,42 +2458,58 @@ export class TriageProcessor {
       */
       if (isNearDuplicateCanonicalInactive(canonicalTask ?? undefined)) {
         if (canClearInactiveMarker) {
-          await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
-          await this.store.updateTask(task.id, { paused: false, pausedReason: null, status: null });
+          if (!await this.runIfStillPlanningUnderTaskLock(task, async () => {
+            await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
+          })) return;
+          await this.updatePlanningStateIfStillCurrent(task, { paused: false, pausedReason: null, status: null });
         }
         return;
       }
 
       const resolution = settings.triageDuplicateResolution ?? "prompt";
       if (resolution === "delete") {
+        const deleteTaskIf = (this.store as unknown as { deleteTaskIf?: TaskStore["deleteTaskIf"] }).deleteTaskIf;
+        if (typeof deleteTaskIf !== "function") return;
+        const result = await deleteTaskIf.call(this.store, task.id, isTaskStillInPlanningStage, {
+          removeLineageReferences: true,
+          auditContext: { agentId: task.assignedAgentId ?? "triage", runId: generateSyntheticRunId("triage-delete", task.id) },
+        });
+        if (!result.deleted) return;
         await this.store.recordActivity({
           type: "task:auto-archived-duplicate", taskId: task.id, taskTitle: task.title ?? "",
           details: `Duplicate of ${canonicalId} — closed`, metadata: { canonicalTaskId: canonicalId, source: "explicit-marker" },
         });
-        await this.store.deleteTask(task.id, {
-          removeLineageReferences: true,
-          auditContext: { agentId: task.assignedAgentId ?? "triage", runId: generateSyntheticRunId("triage-delete", task.id) },
-        });
         return;
       }
       if (resolution === "prompt") {
-        await flagTriageDuplicate(this.store, task.id, canonicalId);
-        await this.store.updateTask(task.id, { paused: true, pausedReason: "duplicate-decision-required", status: null });
+        const applied = await this.updatePlanningStateIfStillCurrent(task, {
+          paused: true,
+          pausedReason: "duplicate-decision-required",
+          status: null,
+          sourceMetadataPatch: { nearDuplicateOf: canonicalId, nearDuplicateScore: 1, duplicateSource: "triage-marker", nearDuplicateDismissed: false },
+        });
+        if (!applied) return;
+        await this.store.logEntry(task.id, "Flagged as triage duplicate", `Duplicate marker points to ${canonicalId}; awaiting operator decision`);
+        await this.store.recordActivity({ type: "task:auto-archived-duplicate", taskId: task.id, details: "Flagged (not deleted) as triage-marker duplicate", metadata: { canonicalTaskId: canonicalId, source: "triage-marker-flagged" } });
         return;
       }
-      await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
-      await this.store.updateTask(task.id, {
+      if (!await this.runIfStillPlanningUnderTaskLock(task, async () => {
+        await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
+      })) return;
+      if (!await this.updatePlanningStateIfStillCurrent(task, {
         paused: false,
         pausedReason: null,
         status: null,
         sourceMetadataPatch: { nearDuplicateOf: canonicalId, nearDuplicateScore: 1, duplicateSource: "triage-marker", nearDuplicateDismissed: true },
-      });
+      })) return;
       return;
     }
 
     const parsedDeps = await this.store.parseDependenciesFromPrompt(task.id);
 
-    const taskUpdates: Record<string, any> = { status: null, error: null };
+    // Keep status in its planning state until the guarded release move; clearing it here
+    // would make the finalizer's own later writes fail the planning-stage predicate.
+    const taskUpdates: Record<string, any> = { error: null };
 
     if (parsedDeps.length > 0) {
       taskUpdates.dependencies = parsedDeps;
@@ -2561,7 +2591,9 @@ export class TriageProcessor {
       if (nextPrompt !== written) {
         const promptPath = join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md");
         try {
-          await writeFile(promptPath, nextPrompt, "utf-8");
+          if (!await this.runIfStillPlanningUnderTaskLock(task, async () => {
+            await writeFile(promptPath, nextPrompt, "utf-8");
+          })) return;
           written = nextPrompt;
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
@@ -2604,7 +2636,12 @@ export class TriageProcessor {
     const promptDeclaredTitle = extractPromptDeclaredTitle(written, task.id);
     const shouldApplyPromptDeclaredTitle = shouldReplaceTaskTitleFromPrompt(task, promptDeclaredTitle);
 
-    await this.store.updateTask(task.id, taskUpdates);
+    /*
+    FNXC:Triage 2026-07-30-15:00:
+    FN-8361 treats every delayed-finalization mutation as a live planning-stage
+    transition. A normal scheduler advance skips and terminates this recovery body.
+    */
+    if (!await this.updatePlanningStateIfStillCurrent(task, taskUpdates)) return;
 
     try {
       const preflightDecision = await Promise.race([
@@ -2711,7 +2748,7 @@ export class TriageProcessor {
 
           // FN-5152: when the candidate is older (or tie-canonical), flag for user confirmation.
           if (isStrictlyOlderOrTieCanonical(canonicalTask)) {
-            await this.store.updateTask(task.id, {
+            if (!await this.updatePlanningStateIfStillCurrent(task, {
               sourceMetadataPatch: {
                 nearDuplicateOf: canonical.id,
                 nearDuplicateScore: canonical.score,
@@ -2719,7 +2756,7 @@ export class TriageProcessor {
                 intentSignature: taskIntentSignature,
                 ...(parsedFileScope.length > 0 ? { fileScope: parsedFileScope } : {}),
               },
-            });
+            })) return;
             await this.store.logEntry(
               task.id,
               `Flagged as near-duplicate of ${canonical.id} (awaiting user decision)`,
@@ -2766,7 +2803,7 @@ export class TriageProcessor {
     */
     if (latestTransitionTask?.paused === true || latestTransitionTask?.userPaused === true) {
       const restoreStatus = options.isReplan ? "needs-replan" : null;
-      await this.store.updateTask(task.id, { status: restoreStatus });
+      if (!await this.updatePlanningStateIfStillCurrent(task, { status: restoreStatus })) return;
       await this.store.logEntry(
         task.id,
         "Specification approved but task is paused — leaving in triage, will resume on unpause",
@@ -2843,7 +2880,7 @@ export class TriageProcessor {
         if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
           approvalUpdates.title = promptDeclaredTitle;
         }
-        await this.store.updateTask(task.id, approvalUpdates);
+        if (!await this.updatePlanningStateIfStillCurrent(task, approvalUpdates)) return;
         await this.store.logEntry(
           task.id,
           options.recoveryLogAction ?? "Specification approved by AI — awaiting manual approval",
@@ -2877,8 +2914,16 @@ export class TriageProcessor {
     FNXC:CodingIdeasWorkflow 2026-07-04-10:35:
     A task planned in place inside the merged "todo" column (Coding (Ideas) and any workflow with a manual intake) is already where it needs to be. Skipping the move avoids a redundant same-column transition that would re-run reset-on-entry and capacity trait hooks on a card that never left the column. Legacy triage tasks (column "triage") still move to "todo" as before.
     */
+    // Apply title while the live row is still planning; a post-release patch can race execution.
+    if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
+      if (!await this.updatePlanningStateIfStillCurrent(task, { title: promptDeclaredTitle })) return;
+    }
+
     if (task.column !== "todo") {
-      await this.store.moveTask(task.id, "todo");
+      const moveTaskIf = (this.store as unknown as { moveTaskIf?: TaskStore["moveTaskIf"] }).moveTaskIf;
+      if (typeof moveTaskIf !== "function") return;
+      const release = await moveTaskIf.call(this.store, task.id, "todo", isTaskStillInPlanningStage);
+      if (!release.moved) return;
     }
 
     /*
@@ -2918,10 +2963,6 @@ export class TriageProcessor {
         // Minimal test stores often omit getTask; still clear the mid-handoff planning stamp.
         await this.store.updateTask(task.id, { status: null, error: null });
       }
-    }
-
-    if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
-      await this.store.updateTask(task.id, { title: promptDeclaredTitle });
     }
 
     if (options.recoveryLogAction) {

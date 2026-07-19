@@ -8268,6 +8268,32 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
 
+    /*
+    FNXC:Triage 2026-07-29-13:00:
+    FN-8361 regression: a stale candidate may be claimed by execution after
+    listTasks but before the recovery patch acquires the task lock.
+    */
+    it.each([
+      { column: "in-progress", status: null, worktree: "/tmp/claimed" },
+      { column: "todo", status: null, worktree: undefined, steps: [{ id: "planned" }] },
+      { column: "triage", status: "planning", worktree: "/tmp/claimed" },
+    ])("does not clear a stale candidate advanced to $column", async (live) => {
+      const candidate = {
+        id: "FN-8361", column: "triage", status: "planning", paused: false,
+        log: [], updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const updateTaskAtomic = vi.fn(async (_id: string, updater: (row: any) => any) => updater({ ...candidate, ...live }));
+      const managerWithRecovery = new SelfHealingManager(createMockStore({
+        listTasks: vi.fn().mockResolvedValue([candidate]),
+        updateTaskAtomic,
+      }), { rootDir: "/tmp/test-project", getPlanningTaskIds: () => new Set<string>() });
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      expect(await managerWithRecovery.recoverOrphanedPlanningTasks()).toBe(0);
+      expect(updateTaskAtomic).toHaveBeenCalledOnce();
+      managerWithRecovery.stop();
+    });
+
     it("skips tasks that are still actively being specified", async () => {
       const getPlanning = vi.fn().mockReturnValue(new Set(["FN-201"]));
 

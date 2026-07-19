@@ -118,11 +118,18 @@ async function cleanupTriageFixtureRoot(rootDir: string | undefined): Promise<vo
 }
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
-  return {
+  let store: Partial<TaskStore>;
+  store = {
     getTask: vi.fn(),
     listTasks: vi.fn().mockResolvedValue([]),
     createTask: vi.fn(),
     moveTask: vi.fn(),
+    moveTaskIf: vi.fn(async (id, toColumn) => {
+      const task = await store.moveTask?.(id, toColumn);
+      return { task: task as Task, moved: true };
+    }),
+    withTaskLock: vi.fn(async (_id, callback) => callback()),
+    readTaskForMove: vi.fn(async (id) => (await store.getTask?.(id)) ?? ({ id, column: "triage", status: "planning" } as Task)),
     updateTask: vi.fn().mockResolvedValue(undefined),
     deleteTask: vi.fn(),
     mergeTask: vi.fn(),
@@ -155,7 +162,8 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     on: vi.fn(),
     emit: vi.fn(),
     ...overrides,
-  } as unknown as TaskStore;
+  };
+  return store as TaskStore;
 }
 
 const mockTaskDetail: TaskDetail = {
@@ -2805,11 +2813,9 @@ describe("specified triage recovery", () => {
 
     expect(recovered).toBe(true);
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
-      status: null,
       error: null,
       dependencies: ["FN-1247"],
       size: "M",
-      reviewLevel: 2,
       noCommitsExpected: true,
     });
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");

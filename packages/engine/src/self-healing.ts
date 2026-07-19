@@ -61,6 +61,7 @@ import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, ty
 import { finalizeProvenAutoMergeTask, validateWorkflowDoneMergeProof } from "./auto-merge-finalization.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
+import { isTaskStillInPlanningStage } from "./replan-target.js";
 /*
 FNXC:Workspace 2026-06-22-14:10 (Phase D review G — cycle dissolved):
 `isRepoLanded` is the CANONICAL per-repo landed predicate (Phase C, exported A6). It now lives in
@@ -11851,8 +11852,16 @@ export class SelfHealingManager {
 
       let recovered = 0;
       for (const task of orphanedApproved) {
+        // FNXC:Triage 2026-07-29-12:00:
+        // FN-8361 candidates come from a stale board snapshot. Do not enter delayed
+        // recovery after scheduler advancement; triage revalidates every later write.
+        const live = await this.store.getTask(task.id).catch(() => null);
+        // Narrow test/legacy adapters can return an unrelated fixture row; only use a
+        // re-read when it identifies the requested candidate.
+        const recoveryTask = live?.id === task.id ? live : task;
+        if (!isTaskStillInPlanningStage(recoveryTask)) continue;
         log.log(`Recovering specified triage task ${task.id}: ${task.title || task.description?.slice(0, 60) || "(untitled)"}`);
-        const success = await recoverFn(task);
+        const success = await recoverFn(recoveryTask);
         if (success) recovered++;
       }
 
@@ -12090,7 +12099,24 @@ export class SelfHealingManager {
       for (const task of orphaned) {
         try {
           log.log(`Recovering orphaned planning task ${task.id}: ${task.title || task.description?.slice(0, 60) || "(untitled)"}`);
-          await this.store.updateTask(task.id, { status: null });
+          // FNXC:Triage 2026-07-29-12:00:
+          // FN-8361 closes the stale listTasks → updateTask race: only clear planning
+          // under the TaskStore lock, never overwrite a scheduler-claimed row.
+          let applied = false;
+          if (typeof this.store.updateTaskAtomic === "function") {
+            await this.store.updateTaskAtomic(task.id, (live) => {
+              if (!isTaskStillInPlanningStage(live)) return null;
+              applied = true;
+              return { status: null };
+            });
+          } else {
+            const live = await this.store.getTask(task.id);
+            if (live && isTaskStillInPlanningStage(live)) {
+              await this.store.updateTask(task.id, { status: null });
+              applied = true;
+            }
+          }
+          if (!applied) continue;
           await this.store.logEntry(
             task.id,
             "Auto-recovered orphaned planning task — agent session lost, cleared for re-planning",
