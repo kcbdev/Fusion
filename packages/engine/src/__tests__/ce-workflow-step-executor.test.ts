@@ -857,6 +857,35 @@ describe("CE workflow-step executor integration", () => {
 
   // ── Item 5: FUSION_HEADLESS gating on stepEnv ───────────────────────────────
   describe("executeWorkflowStep FUSION_HEADLESS (U3)", () => {
+    it("makes the approved PROMPT.md contract authoritative during Code Review", async () => {
+      const store = createMockStore();
+      const { executor } = makeExecutor(store);
+      const cap = captureSession();
+      vi.spyOn(executor as any, "readTaskArtifact").mockResolvedValue(`
+# Approved contract
+
+Ship FIVE kinds. Do NOT add roadmap-item in this task.
+      `.trim());
+
+      await (executor as any).executeWorkflowStep(
+        baseStepTask({ description: "Original request: ship SIX kinds including roadmap-item." }),
+        makeStep({
+          id: "graph:code-review-step",
+          name: "Code Review",
+          optionalGroupId: "code-review",
+          prompt: "Review the implementation against the approved task contract.",
+          gateMode: "gate",
+        }),
+        "/tmp/wt",
+        {},
+      );
+
+      expect(cap.last?.systemPrompt).toContain("--- BEGIN APPROVED PROMPT.md ---");
+      expect(cap.last?.systemPrompt).toContain("Ship FIVE kinds. Do NOT add roadmap-item in this task.");
+      expect(cap.last?.systemPrompt).toContain("PROMPT.md is the authoritative current contract");
+      expect(cap.last?.systemPrompt).toContain("Do not enforce superseded requirements from the original Task Description");
+    });
+
     it("sets FUSION_HEADLESS=1 only when unattended=true; always sets FUSION_WORKFLOW_STEP", async () => {
       const store = createMockStore();
       const { executor } = makeExecutor(store);
