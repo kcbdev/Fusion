@@ -18,8 +18,12 @@ import {
   __setCreateFnAgent,
   createSession,
   createSessionWithAgent,
+  formatInitialRunningPlanRequestForAgent,
+  formatResponseForAgent,
   getSession,
+  normalizePlanningSummaryPayload,
   normalizePlanningQuestion,
+  PLANNING_SYSTEM_PROMPT,
   planningStreamManager,
   rewindSession,
   submitResponse,
@@ -92,6 +96,40 @@ const SECOND_QUESTION = {
 describe("reactive Planning Mode question contract", () => {
   beforeEach(() => {
     __resetPlanningState();
+  });
+
+  it("preserves every valid suggested refinement category", () => {
+    const refinementCategories = [
+      "Security boundaries",
+      "Rollout strategy",
+      "Failure recovery",
+      "Accessibility",
+      "Observability",
+    ];
+
+    const summary = normalizePlanningSummaryPayload({
+      title: "A plan",
+      description: "A description",
+      suggestedSize: "M",
+      suggestedDependencies: [],
+      keyDeliverables: [],
+      suggestedRefinements: refinementCategories,
+    });
+
+    expect(summary.suggestedRefinements).toEqual(refinementCategories);
+  });
+
+  it("asks the model for all high-value categories without a three-category cap", () => {
+    const prompts = [
+      PLANNING_SYSTEM_PROMPT,
+      formatInitialRunningPlanRequestForAgent("Build secure accounts"),
+      formatResponseForAgent(FIRST_QUESTION, { scope: "secure" }),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).not.toMatch(/exactly three/i);
+      expect(prompt).toMatch(/do not cap[^.]*three/i);
+    }
   });
 
   it("repairs malformed select options and appends one localized Other option", () => {

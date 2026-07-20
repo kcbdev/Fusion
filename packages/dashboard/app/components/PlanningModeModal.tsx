@@ -199,7 +199,7 @@ function normalizePlanningSummary(summary: PlanningSummary): PlanningSummary {
     priority: normalizeTaskPriority(summary.priority),
     suggestedDependencies: normalizeStringArray(raw.suggestedDependencies),
     keyDeliverables: normalizeStringArray(raw.keyDeliverables),
-    suggestedRefinements: normalizeStringArray(raw.suggestedRefinements).slice(0, 3),
+    suggestedRefinements: normalizeStringArray(raw.suggestedRefinements),
   };
 }
 

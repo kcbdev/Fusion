@@ -26,7 +26,7 @@ const summaryWithRefinements = {
   ...mockSummary,
   proposedChanges: ["Change the authentication API", "Add durable session recovery"],
   acceptanceCriteria: ["Refresh preserves generation", "The plan is reviewable before questions"],
-  suggestedRefinements: ["Security boundaries", "Rollout strategy", "Failure recovery"],
+  suggestedRefinements: ["Security boundaries", "Rollout strategy", "Failure recovery", "Accessibility", "Observability"],
 };
 
 describe("PlanningModeModal sequential flow", () => {
@@ -51,6 +51,8 @@ describe("PlanningModeModal sequential flow", () => {
     expect(screen.getByRole("radio", { name: "Security boundaries" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Rollout strategy" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Failure recovery" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Accessibility" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Observability" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Write your own focus" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refine" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Validate" })).toBeInTheDocument();
@@ -100,6 +102,7 @@ describe("PlanningModeModal sequential flow", () => {
     expect(await screen.findByText("What to change")).toBeInTheDocument();
     expect(screen.getByText("Acceptance criteria")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Security boundaries" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Observability" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Write your own focus" })).toBeInTheDocument();
   });
   it("restores a validated unlinked session to create-only retry", async () => {
