@@ -271,7 +271,7 @@ govern that execution belong to the workflow.
 **Where to set them.** The common model lanes for a project's default workflow are
 available directly in **Settings → Project Models → Default workflow model lanes**:
 Plan/Triage, Executor, Reviewer, and the Planning/Reviewer fallback lanes declared
-by the default workflow. Primary Plan/Triage, Executor, Reviewer, and declared fallback rows show an inline Thinking Level control when the workflow declares the companion `*ThinkingLevel` setting; unset means inherit. Those dropdown controls use the shared model picker and are persisted by the Settings modal's primary **Save** action, which writes
+by the default workflow. Primary Plan/Triage, Executor, Reviewer, and declared fallback rows show an inline Thinking Level control when the workflow declares the companion `*ThinkingLevel` setting; unset means inherit. Those dropdown controls use the shared model picker and are auto-saved by the Settings modal after an edit, which writes
 workflow setting values for the active project's default workflow; they do not
 restore the old project settings keys. The global **Fallback Model** remains in
 Settings → General Models and includes its own inline Thinking Level selector for `fallbackThinkingLevel`; workflow-specific fallbacks are also editable from
@@ -400,7 +400,7 @@ When `triageProactiveSubtaskSplittingEnabled` is `true` (the default), triage ma
 
 In the dashboard Settings modal, Project Models exposes Plan/Triage, Executor,
 Reviewer, and declared fallback dropdown controls for the default workflow. The
-modal's primary **Save** action persists pending default-workflow model lane
+Settings modal auto-save persists pending default-workflow model lane
 overrides; there is no separate workflow-model save button. The workflow editor's
 Settings → Values tab uses the same dropdown picker for declared provider/model
 pairs, including fallbacks. Former locations for advanced workflow policy still
@@ -1028,7 +1028,7 @@ Short-lived token bounds are enforced server-side:
 
 ## Model Selection Hierarchy
 
-Fusion resolves task models through workflow-backed lane values first, then global lane defaults, then the project/global default model fallback. The common workflow lanes are stored as setting values on the project's default workflow and can be edited with dropdown controls from Settings -> Project Models -> Default workflow model lanes (persisted by the Settings modal's primary Save) or from workflow editor -> Settings -> Values for declared workflow lanes and fallbacks. General-scope fallback selection remains the global Fallback Model picker in Settings -> General Models.
+Fusion resolves task models through workflow-backed lane values first, then global lane defaults, then the project/global default model fallback. The common workflow lanes are stored as setting values on the project's default workflow and can be edited with dropdown controls from Settings -> Project Models -> Default workflow model lanes (auto-saved by the Settings modal) or from workflow editor -> Settings -> Values for declared workflow lanes and fallbacks. General-scope fallback selection remains the global Fallback Model picker in Settings -> General Models.
 
 Direct-chat defaults are project-scoped and independent of task workflow lanes. Configure them in **Settings -> Project Models -> Chat**. `chatDefaultKind: "agent"` resolves only when `chatDefaultAgentId` is set; `chatDefaultKind: "model"` resolves only when both `chatDefaultModelProvider` and `chatDefaultModelId` are set, with optional `chatDefaultThinkingLevel`. If `chatNewSessionMode` is `"always-default"` and that target resolves, every New Chat entry point creates the session directly. If the target is incomplete, or the mode is unset/`"prompt"`, Fusion opens the New Chat dialog instead and preselects the resolved default when one exists. Chat Rooms additionally support a per-room `thinkingLevel` default that applies to every room responder; clearing it inherits the resolved project/global default.
 
@@ -1792,4 +1792,4 @@ Escalation is enabled only when the toggle is true and either a complete provide
 
 ### `mobileNavPrimaryItems`
 
-Project-scoped ordered list of up to six mobile footer quick actions. The default remains `command-center`, `tasks`, `agents`, `missions`, `chat`, `mailbox`. Settings shows selected items in order with move/remove controls and an add dropdown for eligible navigation destinations (including More-sheet actions and gated views); edits preview in the live footer before Save. Unknown ids plus `more`, Terminal/scripts, shell controls, plugin views, and separators are ignored. Omitted available destinations remain reachable in More, whose trailing footer tab is always present. Disabled feature-gated destinations render nowhere until their feature is enabled.
+Project-scoped ordered list of up to six mobile footer quick actions. The default remains `command-center`, `tasks`, `agents`, `missions`, `chat`, `mailbox`. Settings shows selected items in order with move/remove controls and an add dropdown for eligible navigation destinations (including More-sheet actions and gated views); edits preview in the live footer and auto-save after editing. Unknown ids plus `more`, Terminal/scripts, shell controls, plugin views, and separators are ignored. Omitted available destinations remain reachable in More, whose trailing footer tab is always present. Disabled feature-gated destinations render nowhere until their feature is enabled.
