@@ -34,7 +34,7 @@ import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REV
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
-import { RemovalReason, classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { RemovalReason, classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, relocateReclaimableWorktreeIntoRoot, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import {
   classifyMissingWorktreeSessionStartFailure,
   extractMissingWorktreePathFromSessionStartFailure,
@@ -77,6 +77,7 @@ import { shouldReclaimWedgedMerge } from "./merge-reclaim-policy.js";
 import { advanceIntegrationBranchRef } from "./merger-ref-update-advance.js";
 import { isAiMergeContainerDir, resolveAiMergeRootPath, resolveLegacyAiMergeRootPath, resolveWorktreesDir } from "./worktree-paths.js";
 import { canonicalFusionBranchName, resolveTaskWorkingBranch } from "./worktree-names.js";
+import { preservedWorktreeTargetPathForTask } from "./worktree-pinning.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { resolveBranchGroupMergeRouting } from "./group-merge-coordinator.js";
 import type { OwnedLandedClassification } from "./merger.js";
@@ -3844,6 +3845,32 @@ export class SelfHealingManager {
           const preservedCommitCount = inspection.kind === "fully-subsumed"
             ? 0
             : inspection.taskAttributedCommitCount;
+          const placement = await relocateReclaimableWorktreeIntoRoot({
+            rootDir: this.options.rootDir,
+            sourcePath: inspection.livePath,
+            targetPath: preservedWorktreeTargetPathForTask(task.id, inspection.livePath, settings, this.options.rootDir),
+            taskId: task.id,
+            settings,
+            isPathActive: (path) =>
+              activeSessionRegistry.isPathActive(path)
+              || executingTaskLock.has(task.id)
+              || executingIds.has(task.id)
+              || activeTaskIds.has(task.id.toUpperCase()),
+          });
+          if (placement.kind === "deferred-live") {
+            await this.store.logEntry(
+              task.id,
+              `[recovery] deferred relocation of active preserved worktree ${placement.path}`,
+            );
+            continue;
+          }
+          const reclaimedWorktreePath = placement.path;
+          if (placement.relocated) {
+            await this.store.logEntry(
+              task.id,
+              `[recovery] relocated preserved worktree from ${inspection.livePath} to ${reclaimedWorktreePath}`,
+            );
+          }
           const stepSignature = buildResumeLimboStepSignature(task);
           const hasActiveSessionSignal = Boolean(task.checkedOutBy) || activeTaskIds.has(task.id.toUpperCase());
           const hasPriorSnapshot = typeof task.resumeLimboTipSha === "string" && typeof task.resumeLimboStepSignature === "string";
@@ -3868,6 +3895,7 @@ export class SelfHealingManager {
               preserveResumeState: true,
             });
             await this.store.updateTask(task.id, {
+              ...(placement.relocated ? { worktree: reclaimedWorktreePath } : {}),
               resumeLimboCount: 0,
               resumeLimboTipSha: inspection.tipSha,
               resumeLimboStepSignature: stepSignature,
@@ -3908,7 +3936,7 @@ export class SelfHealingManager {
           }
 
           await this.store.updateTask(task.id, {
-            worktree: inspection.livePath,
+            worktree: reclaimedWorktreePath,
             branch: task.branch,
             paused: false,
             pausedReason: undefined,
@@ -3920,7 +3948,7 @@ export class SelfHealingManager {
           });
           await this.store.logEntry(
             task.id,
-            `[recovery] ${wasPausedBranchConflict ? "reclaim-paused-review" : "reclaim-self-owned"} ${task.id} at ${inspection.livePath} (${preservedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
+            `[recovery] ${wasPausedBranchConflict ? "reclaim-paused-review" : "reclaim-self-owned"} ${task.id} at ${reclaimedWorktreePath} (${preservedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
           );
 
           if (task.column === "in-review") {
@@ -3952,7 +3980,7 @@ export class SelfHealingManager {
               metadata: {
                 taskId: task.id,
                 branch: task.branch,
-                worktreePath: inspection.livePath,
+                worktreePath: reclaimedWorktreePath,
                 existingTipSha: inspection.tipSha,
                 strandedCommitCount: inspection.kind === "fully-subsumed" ? 0 : inspection.strandedCommits.length,
                 subsumed: inspection.kind === "fully-subsumed",

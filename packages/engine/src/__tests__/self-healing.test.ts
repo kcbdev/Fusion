@@ -91,6 +91,7 @@ vi.mock("../worktree-pool.js", () => ({
   getRegisteredWorktreePaths: vi.fn().mockResolvedValue(new Set<string>()),
   getRegisteredWorktreeBranchMap: vi.fn().mockResolvedValue(new Map<string, string>()),
   removeWorktree: vi.fn().mockResolvedValue(undefined),
+  relocateReclaimableWorktreeIntoRoot: vi.fn(async ({ sourcePath }: { sourcePath: string }) => ({ kind: "ready", path: sourcePath, relocated: false })),
   resolveWorktreeBackend: vi.fn(),
 }));
 
@@ -120,7 +121,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
+import { classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, relocateReclaimableWorktreeIntoRoot, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
 import { activeSessionRegistry, executingTaskLock } from "../active-session-registry.js";
 import * as branchConflictModule from "../branch-conflicts.js";
 import { createLogger } from "../logger.js";
@@ -10457,6 +10458,36 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-500", expect.objectContaining({ worktree: "/tmp/fn-500", branch: "fusion/fn-500", status: null, paused: false }));
   });
 
+  it("normalizes an out-of-root self-healing reclaim before persisting it", async () => {
+    const outsidePath = "/tmp/legacy-worktrees/recover-fn-8400";
+    const targetPath = "/tmp/test-project/.worktrees/recover-fn-8400";
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-8400", checkedOutBy: null, branch: "fusion/fn-8400", worktree: outsidePath, lineageId: "lin-8400" }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "reclaimable",
+      livePath: outsidePath,
+      tipSha: "abc123def456",
+      taskAttributedCommitCount: 1,
+      strandedCommits: [{ sha: "abc123", subject: "work" }],
+    } as any);
+    vi.mocked(relocateReclaimableWorktreeIntoRoot).mockResolvedValueOnce({ kind: "ready", path: targetPath, relocated: true });
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+
+    expect(recovered).toBe(1);
+    expect(relocateReclaimableWorktreeIntoRoot).toHaveBeenCalledWith(expect.objectContaining({
+      rootDir: "/tmp/test-project",
+      sourcePath: outsidePath,
+      targetPath,
+      taskId: "FN-8400",
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-8400", expect.objectContaining({ worktree: targetPath }));
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ worktreePath: targetPath }),
+    }));
+  });
+
   it("skips blocked todo tasks with preserved branches", async () => {
     (store.listTasks as any)
       .mockResolvedValueOnce([{ id: "FN-516", column: "todo", blockedBy: "FN-216", checkedOutBy: null, branch: "fusion/fn-516", worktree: "/tmp/fn-516" }])
@@ -11189,7 +11220,7 @@ describe("FN-5335 triple-proof no-action unit coverage", () => {
     });
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
     vi.spyOn(manager as any, "evaluateBackwardMoveTripleProof").mockResolvedValue({ ok: false, reason: "test" });
-    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValue({ kind: "reclaimable", tipSha: "abc", taskAttributedCommitCount: 1, strandedCommits: [{ sha: "abc", subject: "work" }] } as any);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValue({ kind: "reclaimable", livePath: "/tmp/wt-rsbc", tipSha: "abc", taskAttributedCommitCount: 1, strandedCommits: [{ sha: "abc", subject: "work" }] } as any);
 
     const result = await manager.reclaimSelfOwnedBranchConflicts();
     expect(result).toBeGreaterThanOrEqual(0);

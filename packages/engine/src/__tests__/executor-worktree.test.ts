@@ -949,7 +949,7 @@ describe("TaskExecutor worktree recovery", () => {
       const conflictPath = "/tmp/legacy-worktrees/recover-fn-8400";
       const targetPath = "/tmp/test/.worktrees/pearl-otter";
       vi.spyOn(executor as any, "shouldGenerateNewWorktreeName").mockResolvedValue(false);
-      const relocate = vi.spyOn(executor as any, "relocateReclaimableWorktree").mockResolvedValue(targetPath);
+      const relocate = vi.spyOn(executor as any, "normalizeReclaimableWorktreePath").mockResolvedValue(targetPath);
       vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
         kind,
         livePath: conflictPath,
@@ -980,6 +980,70 @@ describe("TaskExecutor worktree recovery", () => {
       );
     },
   );
+
+  it("normalizes an out-of-root branch-conflict reclaim before persisting it", async () => {
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({ worktreesDir: ".worktrees" } as any);
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const conflictPath = "/tmp/legacy-worktrees/recover-fn-8400";
+    const targetPath = "/tmp/test/.worktrees/recover-fn-8400";
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "reclaimable",
+      livePath: conflictPath,
+      tipSha: "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+      taskAttributedCommitCount: 1,
+      strandedCommits: [{ sha: "70b47804bc6f27659638e17ac7cf279ed343ff6f", subject: "fix(FN-8400): preserve implementation" }],
+    } as any);
+    const normalize = vi.spyOn(executor as any, "normalizeReclaimableWorktreePath").mockResolvedValue(targetPath);
+
+    const result = await (executor as any).handleBranchConflict(
+      { ...makeTask("FN-8400"), branch: "fusion/fn-8400", worktree: conflictPath },
+      new BranchConflictError({
+        branchName: "fusion/fn-8400",
+        conflictingWorktreePath: conflictPath,
+        existingTipSha: "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+        strandedCommits: [],
+        startPoint: "main",
+        recommendedAction: "reclaim",
+      }),
+    );
+
+    expect(result).toBe("reclaimed");
+    expect(normalize).toHaveBeenCalledWith(conflictPath, targetPath, "FN-8400", expect.objectContaining({ worktreesDir: ".worktrees" }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-8400", expect.objectContaining({ worktree: targetPath }));
+  });
+
+  it("uses the task-pinned target when normalizing a branch-conflict reclaim", async () => {
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({ worktreesDir: ".worktrees", worktreeNaming: "task-id" } as any);
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const conflictPath = "/tmp/legacy-worktrees/recover-fn-8400";
+    const pinnedPath = "/tmp/test/.worktrees/fn-8400";
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "reclaimable",
+      livePath: conflictPath,
+      tipSha: "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+      taskAttributedCommitCount: 1,
+      strandedCommits: [{ sha: "70b47804bc6f27659638e17ac7cf279ed343ff6f", subject: "fix(FN-8400): preserve implementation" }],
+    } as any);
+    const normalize = vi.spyOn(executor as any, "normalizeReclaimableWorktreePath").mockResolvedValue(pinnedPath);
+
+    const result = await (executor as any).handleBranchConflict(
+      { ...makeTask("FN-8400"), branch: "fusion/fn-8400", worktree: conflictPath },
+      new BranchConflictError({
+        branchName: "fusion/fn-8400",
+        conflictingWorktreePath: conflictPath,
+        existingTipSha: "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+        strandedCommits: [],
+        startPoint: "main",
+        recommendedAction: "reclaim",
+      }),
+    );
+
+    expect(result).toBe("reclaimed");
+    expect(normalize).toHaveBeenCalledWith(conflictPath, pinnedPath, "FN-8400", expect.objectContaining({ worktreeNaming: "task-id" }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-8400", expect.objectContaining({ worktree: pinnedPath }));
+  });
 
   it("records recovery context when handling a branch conflict (FN-4847: now discards + requeues instead of pausing)", async () => {
     // FN-4847: branch-conflict-unrecoverable previously paused the task with
