@@ -3636,16 +3636,55 @@ describe("PlanningModeModal", () => {
       expect(screen.getByRole("button", { name: "Running plan" })).toBeDefined();
       expect(screen.getByRole("button", { name: "Answered questions" })).toBeDefined();
       expect(screen.getByRole("button", { name: "Next question" })).toBeDefined();
+      expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-question");
+
+      fireEvent.click(screen.getByRole("button", { name: "Running plan" }));
+      expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-plan");
+      expect(screen.getByRole("button", { name: "Validate plan" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Answered questions" }));
+      expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-history");
+      expect(screen.getByRole("complementary", { name: "Answered questions" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Question" }));
+      expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-question");
 
       fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
       expect(await screen.findByRole("complementary", { name: "Planning sessions" })).toBeDefined();
       fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
       expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--show-detail", "planning-modal-body--compact-question");
       expect(screen.getByRole("button", { name: "Next question" })).toBeVisible();
-      fireEvent.click(screen.getByRole("button", { name: "Running plan" }));
-      expect(screen.getByRole("button", { name: "Validate plan" })).toBeDefined();
       rendered.unmount();
     }
+  });
+
+  it.each([
+    ["generating", {}],
+    ["error", { error: "Generation failed" }],
+  ])("keeps tablet progressive tabs for %s interview state", async (status, fields) => {
+    mockViewport("tablet");
+    mockFetchAiSession.mockResolvedValueOnce({
+      id: `session-tablet-${status}`,
+      type: "planning",
+      status,
+      title: "Tablet planning session",
+      inputPayload: JSON.stringify({ initialPlan: "Tablet plan prompt" }),
+      conversationHistory: "[]",
+      result: JSON.stringify(mockSummary),
+      thinkingOutput: "",
+      projectId: null,
+      ...fields,
+    });
+
+    const { container } = render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} resumeSessionId={`session-tablet-${status}`} />);
+
+    await screen.findByRole("button", { name: "Question" });
+    expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-question");
+    fireEvent.click(screen.getByRole("button", { name: "Running plan" }));
+    expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-plan");
+    expect(screen.getByRole("button", { name: "Validate plan" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Answered questions" }));
+    expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-history");
   });
 
   describe.each(["desktop", "mobile"] as const)("single interview action on %s", (viewport) => {

@@ -968,6 +968,31 @@ describe("PlanningModeModal", () => {
       });
     }
 
+    /*
+    FNXC:PlanningModeMobileTablet 2026-07-20-11:00:
+    Opening Planning on a phone with saved sessions is list-first, not an implicit resume.
+    The plan is permitted only after an intentional session selection and is unmounted again on return.
+    */
+    it("keeps mobile main list-first until an operator opens a session", async () => {
+      mockViewport("mobile");
+      mockActiveSession();
+      const { container } = render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} initialSessions={sessions} />);
+
+      expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--show-list");
+      expect(screen.getByRole("button", { name: /Active planning session/ })).toBeVisible();
+      expect(screen.queryByRole("complementary", { name: "Running plan" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: /Active planning session/ }));
+      await screen.findByText("What is the scope?");
+      expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--show-detail");
+      fireEvent.click(screen.getByRole("button", { name: "Running plan" }));
+      expect(screen.getByRole("complementary", { name: "Running plan" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      expect(container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--show-list");
+      expect(screen.queryByRole("complementary", { name: "Running plan" })).toBeNull();
+    });
+
     it("returns an active mobile interview to usable session rows without a running plan", async () => {
       mockViewport("mobile");
       mockActiveSession();
