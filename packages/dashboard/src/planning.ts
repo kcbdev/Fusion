@@ -1049,8 +1049,7 @@ export async function createSession(
   session.agent = agentResult;
   session.updatedAt = new Date();
 
-  // Send initial plan to get first question from AI
-  const firstResponse = await getFirstQuestionFromAgent(session, initialPlan);
+  const firstResponse = await getFirstQuestionFromAgent(session, formatInitialPlanRequestForAgent(initialPlan));
 
   const firstQuestion = firstResponse.data;
   session.currentQuestion = firstQuestion;
@@ -1665,8 +1664,7 @@ async function initializeAgent(
       session.updatedAt = new Date();
     });
 
-    // Send initial message to get first question
-    await continueAgentConversation(session, session.initialPlan);
+    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return;
@@ -2055,26 +2053,56 @@ function describePlanningAnswer(entry: PlanningHistoryEntry): string {
   return [...values, ...(comment ? [comment] : [])].join(", ") || "a response";
 }
 
+/*
+FNXC:PlanningMode 2026-07-20-14:30:
+FN-8438 requires the first Planning Mode turn to author a plan from the operator idea, and every
+following answer to refine that work product. Repeat this contract at the user-message boundary
+for both agent entry points because system instructions alone can be displaced by tool context.
+*/
+export function formatInitialPlanRequestForAgent(initialPlan: string): string {
+  return [
+    "Create the initial running plan from this operator idea before asking the first interview question.",
+    "Return only type:\"question\" JSON with a full runningPlan: a work-product title, a concise implementation description, and concrete work-item keyDeliverables derived from the idea.",
+    "Then ask exactly one high-impact clarifying question with alternatives and pros/cons. Never use that question text as a deliverable. Do not complete or validate the plan; only the user can validate it.",
+    "Operator idea:",
+    initialPlan,
+  ].join("\n\n");
+}
+
+function buildFallbackDeliverables(initialPlan: string): string[] {
+  const subject = initialPlan.trim() || "the requested work";
+  return [
+    `Define scope and acceptance criteria for ${subject}`,
+    `Implement the agreed approach for ${subject}`,
+    `Verify delivery and operational readiness for ${subject}`,
+  ];
+}
+
 function buildRunningSummary(
   initialPlan: string,
   history: PlanningHistoryEntry[],
   previousSummary?: PlanningSummary,
 ): PlanningSummary {
-  const initialDescription = initialPlan.trim() || "Plan details will be refined during the interview.";
-  const latestAnswer = history.length > 0 ? describePlanningAnswer(history[history.length - 1]!) : "";
-  const description = history.length === 0
+  const subject = initialPlan.trim() || "the requested work";
+  const initialDescription = `Plan and deliver ${subject}. Establish scope, implementation approach, and acceptance criteria through the planning interview.`;
+  const decisions = history.map(describePlanningAnswer).filter(Boolean);
+  const incorporatedDecisions = decisions.join("; ");
+  const priorDescription = previousSummary?.description
+    ?.replace(/\n\nPlanning decisions incorporated: [\s\S]*$/, "")
+    .replace(/\. Refine scope and implementation around the confirmed planning decisions: [\s\S]*$/, ".");
+  const description = decisions.length === 0
     ? initialDescription
-    : previousSummary?.description
-      ? `${previousSummary.description}\n\nLatest planning input: ${latestAnswer}`
-      : `${initialDescription}\n\nRefined with ${history.length} planning answer${history.length === 1 ? "" : "s"}: ${history.map(describePlanningAnswer).join("; ")}`;
+    : priorDescription
+      ? `${priorDescription}\n\nPlanning decisions incorporated: ${incorporatedDecisions}.`
+      : `Plan and deliver ${subject}. Refine scope and implementation around the confirmed planning decisions: ${incorporatedDecisions}.`;
   return normalizePlanningSummaryPayload({
-    title: previousSummary?.title || initialPlan.slice(0, 80),
+    title: previousSummary?.title || `Plan: ${subject.slice(0, 74)}`,
     description,
     suggestedSize: previousSummary?.suggestedSize ?? "M",
     priority: previousSummary?.priority,
     suggestedDependencies: previousSummary?.suggestedDependencies ?? [],
-    keyDeliverables: previousSummary?.keyDeliverables ?? [],
-  }, { title: initialPlan, description: initialDescription });
+    keyDeliverables: previousSummary?.keyDeliverables?.length ? previousSummary.keyDeliverables : buildFallbackDeliverables(subject),
+  }, { title: `Plan: ${subject}`, description: initialDescription });
 }
 
 function hasPlanContent(value: unknown): boolean {
@@ -2816,7 +2844,7 @@ export async function retrySession(
 
   if (session.history.length === 0) {
     await ensureSessionAgent(session, rootDir, [], promptOverrides, store);
-    await continueAgentConversation(session, session.initialPlan);
+    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
     return;
   }
 
@@ -2986,7 +3014,7 @@ export function formatResponseForAgent(
   System prompts can be displaced by long tool/context turns. Repeat the per-answer contract at the invocation boundary
   so every submitted answer steers the following high-impact question instead of inviting a model-generated completion.
   */
-  return `${answerContext}\n\nUpdate the runningPlan object with a concise title, description, and concrete work-item deliverables informed by this answer; never list interview questions as deliverables. Then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not complete or validate the plan; only the user can validate it.`;
+  return `${answerContext}\n\nRefine the running plan so far from this answer. Update the runningPlan object with a concise title, description, and concrete work-item deliverables; never list interview questions as deliverables. Then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not complete or validate the plan; only the user can validate it.`;
 }
 
 function coerceResponseRecord(question: PlanningQuestion, response: unknown): Record<string, unknown> {

@@ -241,8 +241,8 @@ describe("reactive Planning Mode question contract", () => {
     expect(await getSession(created.sessionId)).toMatchObject({ validated: true, currentQuestion: undefined });
   });
 
-  it("uses a model runningPlan attached to a continuing question", async () => {
-    installScriptedAgent([payload({
+  it("uses a model-authored initial plan on the non-streaming first turn", async () => {
+    const prompts = installScriptedAgent([payload({
       ...FIRST_QUESTION,
       runningPlan: {
         title: "Account recovery implementation plan",
@@ -258,6 +258,66 @@ describe("reactive Planning Mode question contract", () => {
       description: "Deliver a secure, observable recovery experience.",
       keyDeliverables: ["Add recovery token flow", "Test recovery audit events"],
     });
+    expect(prompts[0]).toContain("Create the initial running plan");
+    expect(prompts[0]).toContain("Build secure account recovery");
+    expect(created.summary.description).not.toBe(created.firstQuestion.question);
+  });
+
+  it("uses a model-authored initial plan on the streaming first turn before its question event", async () => {
+    installScriptedAgent([payload({
+      ...FIRST_QUESTION,
+      runningPlan: {
+        title: "Streaming account recovery plan",
+        description: "Stage a secure recovery flow with observability.",
+        keyDeliverables: ["Design recovery token lifecycle", "Test recovery telemetry"],
+      },
+    })]);
+    const sessionId = await createSessionWithAgent(
+      "127.0.0.15", "Build secure account recovery", "/tmp/project", MOCK_TASK_STORE,
+    );
+    const events: string[] = [];
+    const firstQuestion = new Promise<void>((resolve) => {
+      planningStreamManager.subscribe(sessionId, (event) => {
+        events.push(event.type);
+        if (event.type === "question") resolve();
+      });
+    });
+
+    planningStreamManager.consumeInitialTurn(sessionId)?.();
+    await firstQuestion;
+
+    expect((await getSession(sessionId))?.summary).toMatchObject({
+      title: "Streaming account recovery plan",
+      description: "Stage a secure recovery flow with observability.",
+      keyDeliverables: ["Design recovery token lifecycle", "Test recovery telemetry"],
+    });
+    expect(events.indexOf("summary")).toBeLessThan(events.indexOf("question"));
+  });
+
+  it("recovers a plan-shaped streaming first turn when the model omits runningPlan", async () => {
+    installScriptedAgent([payload(FIRST_QUESTION)]);
+    const sessionId = await createSessionWithAgent(
+      "127.0.0.16", "Build secure account recovery", "/tmp/project", MOCK_TASK_STORE,
+    );
+    const events: string[] = [];
+    const firstQuestion = new Promise<void>((resolve) => {
+      planningStreamManager.subscribe(sessionId, (event) => {
+        events.push(event.type);
+        if (event.type === "question") resolve();
+      });
+    });
+
+    planningStreamManager.consumeInitialTurn(sessionId)?.();
+    await firstQuestion;
+
+    const session = await getSession(sessionId);
+    expect(session?.summary).toMatchObject({
+      title: "Plan: Build secure account recovery",
+      description: expect.stringContaining("Plan and deliver Build secure account recovery"),
+    });
+    expect(session?.summary?.description).not.toBe(FIRST_QUESTION.question);
+    expect(session?.summary?.keyDeliverables).not.toEqual([FIRST_QUESTION.question]);
+    expect(events.indexOf("summary")).toBeLessThan(events.indexOf("question"));
   });
 
   it("merges a partial model running-plan update with the prior work product", async () => {
@@ -297,9 +357,11 @@ describe("reactive Planning Mode question contract", () => {
     const created = await createSession("127.0.0.12", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
 
     expect(created.summary).toMatchObject({
-      title: "Build secure account recovery",
-      description: "Build secure account recovery",
-      keyDeliverables: [],
+      title: "Plan: Build secure account recovery",
+      description: expect.stringContaining("Plan and deliver Build secure account recovery"),
+      keyDeliverables: expect.arrayContaining([
+        "Define scope and acceptance criteria for Build secure account recovery",
+      ]),
     });
 
     await submitResponse(created.sessionId, { scope: "secure" }, "/tmp/project", undefined, MOCK_TASK_STORE);
@@ -307,7 +369,7 @@ describe("reactive Planning Mode question contract", () => {
     const askedQuestions = session!.history.map((entry) => entry.question.question);
     expect(session?.summary?.description).toContain("Secure defaults");
     expect(session?.summary?.description).not.toBe(session?.currentQuestion?.question);
-    expect(session?.summary?.keyDeliverables).toEqual([]);
+    expect(session?.summary?.keyDeliverables).toContain("Define scope and acceptance criteria for Build secure account recovery");
     expect(session?.summary?.keyDeliverables).not.toEqual(askedQuestions);
     expect(session?.validated).toBe(false);
   });
@@ -335,5 +397,7 @@ describe("reactive Planning Mode question contract", () => {
     expect(edited?.history[1]?.response).toEqual({ [second.id]: "gradual" });
     expect(edited?.currentQuestion?.id).toBe("fresh-after-edit");
     expect(edited?.summary?.description).toContain("Fast delivery");
+    expect(edited?.summary?.description.match(/Gradual rollout/g)).toHaveLength(1);
+    expect(edited?.summary?.keyDeliverables).not.toContain(edited?.currentQuestion?.question);
   });
 });
