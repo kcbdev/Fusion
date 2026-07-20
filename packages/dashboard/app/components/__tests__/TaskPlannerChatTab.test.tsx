@@ -1644,9 +1644,9 @@ describe("TaskPlannerChatTab", () => {
       fireEvent.click(screen.getByText("Save"));
 
       await waitFor(() => expect(mockEditChatMessage).toHaveBeenCalledWith("chat-planner", "m1", "Hello, edited", undefined));
-      // Optimistic truncation happens before the PATCH resolves: the edited row and its tail drop immediately.
-      await waitFor(() => expect(screen.queryByText("Hello")).not.toBeInTheDocument());
-      expect(screen.queryByText("Hi there")).not.toBeInTheDocument();
+      // The edited row stays mounted until PATCH success so a rejected save can retain its correction.
+      expect(screen.getByTestId("chat-message-edit-editor-m1")).toBeInTheDocument();
+      expect(screen.getByText("Hi there")).toBeInTheDocument();
       expect(mockStreamChatResponse).not.toHaveBeenCalled();
 
       deferredEdit.resolve({ retained: [] });
@@ -1689,7 +1689,9 @@ describe("TaskPlannerChatTab", () => {
       await waitFor(() => expect(addToast).toHaveBeenCalledWith("edit failed", "error"));
       await waitFor(() => expect(mockFetchChatMessages).toHaveBeenCalledTimes(2));
       expect(mockStreamChatResponse).not.toHaveBeenCalled();
-      expect(await screen.findByText("Hello")).toBeInTheDocument();
+      // A rejected PATCH must leave the inline correction available for retry instead of closing it.
+      expect(screen.getByTestId("chat-message-edit-editor-m1")).toBeInTheDocument();
+      expect(textarea).toHaveValue("Hello, edited");
     });
 
     it("hides the edit affordance on an already-persisted message while a new generation is streaming", async () => {
