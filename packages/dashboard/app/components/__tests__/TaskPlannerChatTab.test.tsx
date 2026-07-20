@@ -937,6 +937,33 @@ describe("TaskPlannerChatTab", () => {
     expect(mobileTextHideRule).toMatch(/span:not\(\.chat-input-stop-icon\)/);
   });
 
+  it("keeps Planner Chat input and send/stop height-parity across desktop, tablet, and mobile (FN-8421)", () => {
+    const mobileQueryStart = taskPlannerChatCss.indexOf("@media (max-width: 768px)");
+    const desktopAndTabletCss = mobileQueryStart >= 0 ? taskPlannerChatCss.slice(0, mobileQueryStart) : taskPlannerChatCss;
+    const desktopInputRule = desktopAndTabletCss.match(/\.task-planner-chat-input\s*\{[^}]*\}/)?.[0] ?? "";
+    const desktopSendRule = desktopAndTabletCss.match(/\.task-planner-chat-send\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileInputRule = taskPlannerChatCss.slice(mobileQueryStart).match(/\.task-planner-chat-input\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileSendRule = taskPlannerChatCss.slice(mobileQueryStart).match(/\.task-planner-chat-send\s*\{[^}]*\}/)?.[0] ?? "";
+
+    // FNXC:TaskDetailPlannerChat 2026-07-20-12:00: The base contract serves
+    // desktop and the 769–1024 tablet band; explicit border-box sizing and
+    // zero button padding prevent inherited `.btn` padding from re-inflating
+    // the Send or Stop variant above the textarea.
+    const desktopTabletHeight = "calc(var(--space-2xl) + var(--space-sm))";
+    const mobileHeight = "calc(var(--space-2xl) + var(--space-lg))";
+    expect(desktopInputRule).toContain(`height: ${desktopTabletHeight};`);
+    expect(desktopInputRule).toContain(`min-height: ${desktopTabletHeight};`);
+    expect(desktopSendRule).toContain(`block-size: ${desktopTabletHeight};`);
+    expect(desktopSendRule).toContain(`min-block-size: ${desktopTabletHeight};`);
+    expect(desktopSendRule).toContain("box-sizing: border-box;");
+    expect(desktopSendRule).toContain("padding: 0;");
+    expect(mobileInputRule).toContain(`height: ${mobileHeight};`);
+    expect(mobileInputRule).toContain(`min-height: ${mobileHeight};`);
+    expect(mobileSendRule).toContain(`block-size: ${mobileHeight};`);
+    expect(mobileSendRule).toContain(`min-block-size: ${mobileHeight};`);
+    expect(mobileSendRule).toContain("padding: 0;");
+  });
+
   it("renders live and stored thinking output through the standard chat surface", async () => {
     const user = userEvent.setup();
     mockFetchChatMessages.mockResolvedValueOnce({
