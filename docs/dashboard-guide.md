@@ -1,5 +1,12 @@
 # Dashboard Guide
 
+## In-app report filing targets
+
+In **Settings → General**, operators can choose a default GitHub report target (**Issue** or **Discussion**) and add an optional per-action override for Bug, Feedback, Idea, or Help. Leaving these settings unset preserves the built-in routing: Bug and Idea file Issues; Feedback and Help file Discussions. A Discussion category ID may be configured when a repository requires a specific category.
+
+Discussion filing uses the same scrub-before-egress report pipeline as Issues. Duplicate matching considers open Discussions only; a confirmed duplicate receives an upvote reaction and one scrubbed data-point comment rather than a new Discussion.
+
+
 [← Docs index](./README.md)
 
 The Fusion dashboard is the main control plane for tasks, agents, missions, settings, logs, and repository operations.

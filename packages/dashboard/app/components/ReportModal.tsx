@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ReportActionType } from "@fusion/core";
+import type { ReportActionType, ReportTarget } from "@fusion/core";
 import { reportAttachment, reportDraft, reportFile, reportHelp } from "../api";
 import { captureScreenshot as captureScreen, getRecentActivity, recordActivity } from "../utils/report-capture";
 import "./ReportModal.css";
@@ -23,6 +23,8 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [screenshotEnabled, setScreenshotEnabled] = useState(false);
+  // FNXC:ReportPipeline 2026-07-16-21:00: A reporter can override the inherited target for this filing only.
+  const [targetType, setTargetType] = useState<ReportTarget | undefined>();
   const [screenshotArtifactId, setScreenshotArtifactId] = useState<string>();
   const [retentionConfirmed, setRetentionConfirmed] = useState(false);
   const captureGeneration = useRef(0);
@@ -57,7 +59,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
         const help = await reportHelp(prompt);
         if (help.answered) { setResult({ kind: "help", answer: help.answer }); return; }
       }
-      setResult(await reportDraft({ actionType, userPrompt: prompt, contextRefs, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
+      setResult(await reportDraft({ actionType, targetType, userPrompt: prompt, contextRefs, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
     } catch {
       setError("We could not prepare your report. Check your connection and try again.");
     } finally { setBusy(false); }
@@ -68,7 +70,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
     setError(undefined);
     try {
       recordActivity("report");
-setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
+setResult(await reportFile({ actionType, targetType, report: result.report, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
 
     } catch {
       setError("We could not send your report. Your draft is still here; try again.");
@@ -85,6 +87,7 @@ setResult(await reportFile({ actionType, report: result.report, endorseIssueNumb
       {screenshotEnabled && <div className="report-modal__screenshot-preview">
         {screenshotArtifactId ? <label className="report-modal__screenshot-option"><input type="checkbox" checked={retentionConfirmed} onChange={(event) => setRetentionConfirmed(event.target.checked)} /> I confirm Fusion may retain this screenshot locally for this report.</label> : <p>Capturing and storing locally…</p>}
       </div>}
+      <label htmlFor="report-target">{t("report.targetLabel", "Filing target")}</label><select id="report-target" className="input" value={targetType ?? ""} onChange={(event) => setTargetType((event.target.value || undefined) as ReportTarget | undefined)}><option value="">{t("report.targetInherit", "Use configured action target")}</option><option value="issue">{t("report.targetIssue", "GitHub Issue")}</option><option value="discussion">{t("report.targetDiscussion", "GitHub Discussion")}</option></select>
       <details className="report-modal__activity-trace"><summary>Activity trace to send</summary><ul>{getRecentActivity().map((entry, index) => <li key={`${entry}-${index}`}>{entry}</li>)}</ul></details>
       <button className="btn btn-primary" type="button" disabled={!prompt.trim() || busy} onClick={() => void submit()}>{error ? "Retry" : "Continue"}</button></>}
     {result?.kind === "draft-ready" && result.report && <><h2>Review your report</h2><label htmlFor="report-review-prompt">Report summary</label><textarea id="report-review-prompt" className="input" value={result.report.userPrompt} onChange={(event) => {

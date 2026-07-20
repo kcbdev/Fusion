@@ -28,6 +28,7 @@ function setup(projectSettings: Record<string, unknown> = { reportMode: "auto-fi
   });
   const router = {
     post: vi.fn((path: string, ...routeHandlers: TestHandler[]) => handlers.set(path, routeHandlers)),
+    get: vi.fn((path: string, ...routeHandlers: TestHandler[]) => handlers.set(path, routeHandlers)),
   } as unknown as Router;
   const store = {
     getSettingsByScopeFast: vi.fn().mockResolvedValue({ project: projectSettings, global: {} }),
@@ -135,6 +136,15 @@ describe("report routes", () => {
     });
   });
 
+  it.each(["/report/draft", "/report/file"])("passes valid targetType through the filing pipeline on %s", async (path) => {
+    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "draft-ready" } as never);
+    const { handlers } = setup();
+    await invoke(handlers.get(path)!, path === "/report/file"
+      ? { actionType: "bug", targetType: "discussion", report: { userPrompt: "Dashboard report controls", context: {} } }
+      : { actionType: "bug", targetType: "discussion", userPrompt: "Dashboard report controls" });
+    expect(vi.mocked(runReportPipeline).mock.calls.at(-1)?.[2]).toMatchObject({ targetType: "discussion", ...(path === "/report/file" ? { file: true } : {}) });
+  });
+
   describe("Help self-check", () => {
     it.each(["/report/draft", "/report/file"])("does not let direct Help %s bypass a confident knowledge answer", async (path) => {
       vi.mocked(queryKnowledgePagesAsync).mockResolvedValue([{ title: "Use settings", summary: "Open settings first." }]);
@@ -143,6 +153,15 @@ describe("report routes", () => {
         ? { actionType: "help", report: { userPrompt: "How do I use settings?", context: {} } }
         : { actionType: "help", userPrompt: "How do I use settings?" });
       expect(response.body).toMatchObject({ kind: "help", answer: { title: "Use settings" } });
+      expect(runReportPipeline).not.toHaveBeenCalled();
+    });
+
+    it.each(["/report/draft", "/report/file"])("rejects invalid targetType before Help returns locally on %s", async (path) => {
+      vi.mocked(queryKnowledgePagesAsync).mockResolvedValue([{ title: "Use settings", summary: "Open settings first." }]);
+      const { handlers } = setup();
+      await expect(invoke(handlers.get(path)!, path === "/report/file"
+        ? { actionType: "help", targetType: "invalid", report: { userPrompt: "How do I use settings?", context: {} } }
+        : { actionType: "help", targetType: "invalid", userPrompt: "How do I use settings?" })).rejects.toThrow("Report target must be issue or discussion");
       expect(runReportPipeline).not.toHaveBeenCalled();
     });
   });

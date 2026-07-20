@@ -77,10 +77,13 @@ import {
   installSettingsModalEnv,
 } from "./SettingsModal.test-harness";
 
+const mockListDiscussionCategories = vi.fn(async () => ({ categories: [] }));
+
 vi.mock("../../api", async (importOriginal) => {
   const { createDashboardApiMock } = await import("../../test/mockApi");
   return createDashboardApiMock(() => importOriginal<typeof import("../../api")>(), {
     fetchSettings: (...args: unknown[]) => mockFetchSettings(...args),
+    listDiscussionCategories: (...args: unknown[]) => mockListDiscussionCategories(...args),
     fetchSettingsByScope: (...args: unknown[]) => mockFetchSettingsByScope(...args),
     updateSettings: (...args: unknown[]) => mockUpdateSettings(...args),
     updateGlobalSettings: (...args: unknown[]) => mockUpdateGlobalSettings(...args),
@@ -209,6 +212,8 @@ describe("SettingsModal", () => {
 
   afterEach(() => {
     viewportMode = "mobile";
+    mockListDiscussionCategories.mockReset();
+    mockListDiscussionCategories.mockResolvedValue({ categories: [] });
   });
 
   const availableUpdate = {
@@ -1227,6 +1232,19 @@ describe("SettingsModal", () => {
   });
 
   describe("General · Project", () => {
+    it("populates the Discussion category selector from the report category route", async () => {
+      mockListDiscussionCategories.mockResolvedValue({ categories: [{ id: "DC_ideas", name: "Ideas", slug: "ideas" }] });
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      const category = await screen.findByLabelText("Discussion category");
+      expect(category).toBeEnabled();
+      expect(screen.getByRole("option", { name: "Ideas" })).toHaveValue("DC_ideas");
+      await settingsModalUser.selectOptions(category, "DC_ideas");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mockUpdateSettings.mock.calls[0]?.[0]).toMatchObject({ reportDiscussionCategory: "DC_ideas" }));
+    });
+
     it("renders completion documentation automation control", async () => {
       renderModal({ initialSection: "general" });
       await waitForSettingsModalReady();

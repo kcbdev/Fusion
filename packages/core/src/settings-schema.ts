@@ -646,6 +646,10 @@ export const DEFAULT_PROJECT_SETTINGS = {
   githubTrackingDefaultRepo: undefined,
   reportMode: "draft-review" as const,
   reportModeByAction: undefined,
+  // FNXC:ReportPipeline 2026-07-16-20:15: Unset targets preserve action-specific routing.
+  reportTarget: undefined,
+  reportTargetByAction: undefined,
+  reportDiscussionCategory: undefined,
   reportRoadmapDedupeEnabled: true,
   reportRoadmapLabel: "roadmap",
   reportRoadmapRepo: undefined,

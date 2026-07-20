@@ -5953,7 +5953,25 @@
       "reportRoadmapDedupeEnabled": "Deduplicate reports against public roadmap",
       "reportRoadmapDedupeEnabledHelp": "Match open, labeled roadmap issues before filing. Default: on.",
       "reportRoadmapLabel": "Public roadmap label",
-      "reportRoadmapLabelHelp": "Open GitHub Issues with this label are considered roadmap items. Default: roadmap."
+      "reportRoadmapLabelHelp": "Open GitHub Issues with this label are considered roadmap items. Default: roadmap.",
+      "reportRoadmapDedup": "Vérifier la feuille de route avant d’envoyer les rapports",
+      "reportRoadmapDedupHelp": "Lorsqu’elle est activée, les fonctionnalités correspondantes de la feuille de route sont affichées directement au lieu de créer une autre Issue ou Discussion GitHub. Par défaut : désactivé.",
+      "reportTarget": "Cible de rapport par défaut",
+      "reportTargetHelp": "Cible facultative Issue ou Discussion. Si elle n’est pas définie, les retours et l’aide utilisent les Discussions, tandis que les bugs et idées utilisent les Issues.",
+      "reportTargetInherit": "Conserver la cible par défaut de l’action",
+      "reportTargetIssue": "Issue GitHub",
+      "reportTargetDiscussion": "Discussion GitHub",
+      "reportTargetOverride": {
+        "bug": "Remplacement de cible pour les bugs",
+        "feedback": "Remplacement de cible pour les retours",
+        "idea": "Remplacement de cible pour les idées",
+        "help": "Remplacement de cible pour l’aide"
+      },
+      "reportDiscussionCategory": "Catégorie de discussion",
+      "reportDiscussionCategoryHelp": "Obligatoire pour envoyer vers les Discussions GitHub. Les catégories sont chargées depuis le dépôt configuré.",
+      "reportDiscussionCategorySelect": "Sélectionnez une catégorie de discussion",
+      "reportDiscussionCategoryUnavailable": "Les catégories de discussion ne sont pas disponibles pour le dépôt configuré.",
+      "reportDiscussionCategoryEmpty": "Aucune catégorie de discussion n’est disponible pour le dépôt configuré."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -9154,6 +9172,10 @@
     },
     "roadmapDuplicate": {
       "title": "Already on the roadmap — add your data point?"
-    }
+    },
+    "targetLabel": "Cible de dépôt",
+    "targetInherit": "Utiliser la cible configurée pour l’action",
+    "targetIssue": "Issue GitHub",
+    "targetDiscussion": "Discussion GitHub"
   }
 }

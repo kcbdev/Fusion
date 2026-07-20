@@ -5953,7 +5953,25 @@
       "reportRoadmapRepo": "Public roadmap repository (optional)",
       "reportRoadmapRepoHelp": "GitHub owner/repository containing public roadmap issues. When unset, uses the tracking repository. No default — unset.",
       "reviewArtifacts": "審查產物",
-      "reviewArtifactsHint": "控制符合條件的未來任務是否產生審查交付物。面向使用者的報告與活動擷取保持獨立。預設：關閉。"
+      "reviewArtifactsHint": "控制符合條件的未來任務是否產生審查交付物。面向使用者的報告與活動擷取保持獨立。預設：關閉。",
+      "reportRoadmapDedup": "Check roadmap before filing reports",
+      "reportRoadmapDedupHelp": "When enabled, matching roadmap features are shown inline instead of filing another GitHub Issue or Discussion. Default: off.",
+      "reportTarget": "預設報告目標",
+      "reportTargetHelp": "可選的議題或討論目標。未設定時，回饋和說明使用討論，錯誤和想法使用議題。",
+      "reportTargetInherit": "保留操作預設目標",
+      "reportTargetIssue": "GitHub 議題",
+      "reportTargetDiscussion": "GitHub 討論",
+      "reportTargetOverride": {
+        "bug": "錯誤目標覆寫",
+        "feedback": "回饋目標覆寫",
+        "idea": "想法目標覆寫",
+        "help": "說明目標覆寫"
+      },
+      "reportDiscussionCategory": "討論分類",
+      "reportDiscussionCategoryHelp": "Required when filing to GitHub Discussions. Categories are loaded from the configured repository.",
+      "reportDiscussionCategorySelect": "選擇討論分類",
+      "reportDiscussionCategoryUnavailable": "Discussion categories are unavailable for the configured repository.",
+      "reportDiscussionCategoryEmpty": "No Discussion categories are available for the configured repository."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -9151,6 +9169,10 @@
     "roadmapMatch": {
       "title": "已在路線圖中",
       "message": "此報告與已規劃的功能相符。"
-    }
+    },
+    "targetLabel": "提交目標",
+    "targetInherit": "使用設定的操作目標",
+    "targetIssue": "GitHub 議題",
+    "targetDiscussion": "GitHub 討論"
   }
 }

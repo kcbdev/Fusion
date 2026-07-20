@@ -1,6 +1,8 @@
-import { REPORT_ATTACHMENT_SOURCE } from "@fusion/core";
+import { REPORT_ATTACHMENT_SOURCE, resolveTaskGithubTracking } from "@fusion/core";
 import type { Request, Response } from "express";
 import { ApiError } from "../api-error.js";
+import { GitHubClient } from "../github.js";
+import { resolveGithubTrackingAuth } from "../github-auth.js";
 import { queryKnowledgePagesAsync } from "../knowledge-index.js";
 import { requireAsyncLayer } from "../require-async-layer.js";
 import { runReportPipeline, type ReportInput, type StructuredReport } from "../report-pipeline.js";
@@ -9,6 +11,7 @@ import { selfCheckHelp } from "../report-help-selfcheck.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
 const ACTION_TYPES = new Set(["bug", "feedback", "idea", "help"]);
+const REPORT_TARGETS = new Set(["issue", "discussion"]);
 const MAX_ACTIVITY_TRACE_ENTRIES = 20;
 const MAX_ACTIVITY_TRACE_CHARS = 4_000;
 export const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
@@ -27,7 +30,7 @@ function parseActivityTrace(value: unknown): string[] | undefined {
 function parseScreenshotArtifactId(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !ARTIFACT_ID_PATTERN.test(value)) throw new ApiError(400, "Screenshot artifact reference is invalid.");
-  return value;
+  return value as "issue" | "discussion";
 }
 
 async function validateScreenshotArtifact(store: Awaited<ReturnType<Parameters<ApiRouteRegistrar>[0]["getScopedStore"]>>, id: string | undefined): Promise<void> {
@@ -57,6 +60,12 @@ async function selfCheckHelpBeforePipeline(store: Awaited<ReturnType<Parameters<
   if (input.actionType !== "help") return undefined;
   const layer = requireAsyncLayer(store, "Help self-check");
   return selfCheckHelp(input.userPrompt, (query) => queryKnowledgePagesAsync(layer, { query, limit: 1 }));
+}
+
+function parseTargetType(value: unknown): "issue" | "discussion" | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !REPORT_TARGETS.has(value)) throw new ApiError(400, "Report target must be issue or discussion.");
+  return value as "issue" | "discussion";
 }
 
 function parseInput(body: unknown): ReportInput {
@@ -93,10 +102,12 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
   router.post("/report/draft", async (req, res) => {
     try {
       const store = await getScopedStore(req); const scopes = await store.getSettingsByScopeFast(); const input = parseInput(req.body);
+      // FNXC:ReportPipeline 2026-07-16-21:00: Validate target before Help can return locally.
+      const targetType = parseTargetType((req.body as Record<string, unknown> | undefined)?.targetType);
       await validateScreenshotArtifact(store, input.screenshotArtifactId);
       const help = await selfCheckHelpBeforePipeline(store, input);
       if (help?.answered) return void res.json({ kind: "help", answer: help.answer });
-      res.json(await runReportPipeline(input, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }));
+      res.json(await runReportPipeline(input, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, targetType ? { targetType } : {}));
     } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to prepare report draft"); }
   });
 
@@ -106,11 +117,24 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
       const { screenshotArtifactId: reportArtifactId, ...textualRawReport } = rawReport;
       const untrusted = scrubReportPayload(textualRawReport, { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() });
       const input = parseInput({ actionType: raw.actionType ?? (untrusted.context as Record<string, unknown> | undefined)?.actionType ?? "bug", userPrompt: untrusted.userPrompt ?? untrusted.summary, contextRefs: (untrusted.context as Record<string, unknown> | undefined) && { taskId: typeof (untrusted.context as Record<string, unknown>).taskId === "string" ? (untrusted.context as Record<string, unknown>).taskId : undefined, agentId: typeof (untrusted.context as Record<string, unknown>).agentId === "string" ? (untrusted.context as Record<string, unknown>).agentId : undefined }, activityTrace: raw.activityTrace ?? (untrusted.context as Record<string, unknown> | undefined)?.activityTrace, screenshotArtifactId: raw.screenshotArtifactId ?? reportArtifactId });
+      // FNXC:ReportPipeline 2026-07-16-21:00: Validate target before Help can return locally.
+      const targetType = parseTargetType(raw.targetType);
       await validateScreenshotArtifact(store, input.screenshotArtifactId);
       const help = await selfCheckHelpBeforePipeline(store, input);
       if (help?.answered) return void res.json({ kind: "help", answer: help.answer });
-      res.json(await runReportPipeline(input, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
+      res.json(await runReportPipeline(input, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, targetType, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
     } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to file report"); }
+  });
+
+  router.get("/report/discussion-categories", async (req, res) => {
+    try {
+      const store = await getScopedStore(req); const scopes = await store.getSettingsByScopeFast();
+      const auth = resolveGithubTrackingAuth({ projectSettings: scopes.project, globalSettings: scopes.global });
+      const repo = resolveTaskGithubTracking({ githubTracking: undefined }, scopes.project, scopes.global).repo;
+      if (!auth.ok || !repo) return void res.json({ categories: [], reason: auth.ok ? "repo_missing" : auth.reason });
+      const client = auth.auth.mode === "token" ? new GitHubClient({ token: auth.auth.token, forceMode: "token" }) : new GitHubClient({ forceMode: "gh-cli" });
+      try { res.json({ categories: await client.listDiscussionCategories(repo.owner, repo.repo) }); } catch { res.json({ categories: [], reason: "discussion_categories_unavailable" }); }
+    } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to list Discussion categories"); }
   });
 
   router.post("/report/help", async (req, res) => { try { const store = await getScopedStore(req); const layer = requireAsyncLayer(store, "Help self-check"); res.json(await selfCheckHelp(typeof req.body?.question === "string" ? req.body.question : "", (query) => queryKnowledgePagesAsync(layer, { query, limit: 1 }))); } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to self-check help question"); } });

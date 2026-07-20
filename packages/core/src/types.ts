@@ -3318,6 +3318,7 @@ export type SecretsEnvConfig = SecretsEnvSettings;
  */
 export type ReportMode = "draft-review" | "auto-file";
 export type ReportActionType = "bug" | "feedback" | "idea" | "help";
+export type ReportTarget = "issue" | "discussion";
 
 export interface ProjectSettings {
   /** Hard stop: when true, all automated agent activity is **immediately**
@@ -4234,6 +4235,15 @@ export interface ProjectSettings {
    */
   reportMode?: ReportMode;
   reportModeByAction?: Partial<Record<ReportActionType, ReportMode>>;
+  /*
+  FNXC:ReportPipeline 2026-07-16-20:15:
+  Report filing targets remain unset by default so the report pipeline retains
+  its established action-specific routing. Operators may select a project-wide
+  Issue/Discussion target, a per-action exception, and a Discussion category.
+  */
+  reportTarget?: ReportTarget;
+  reportTargetByAction?: Partial<Record<ReportActionType, ReportTarget>>;
+  reportDiscussionCategory?: string;
   /**
    * FNXC:ReportPipeline 2026-07-18-12:00:
    * FR-30 public-roadmap dedupe is an additive GitHub Issue source. Effective

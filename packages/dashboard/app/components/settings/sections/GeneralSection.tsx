@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type ReportActionType, type WorkflowDefinition } from "@fusion/core";
+import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type ReportActionType, type ReportTarget, type WorkflowDefinition } from "@fusion/core";
 import { DEFAULT_MOBILE_NAV_PRIMARY_ITEMS, MAX_MOBILE_NAV_PRIMARY_ITEMS, MOBILE_NAV_PRIMARY_SELECTABLE_ITEMS, MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS } from "../../../../../core/src/mobile-nav-primary-items";
 import { SettingsFieldRow } from "../SettingsFieldRow";
 import { SettingsToggleRow } from "../SettingsToggleRow";
@@ -18,7 +18,7 @@ The core helper is the same list the translate banner labels source languages wi
 import { localeDisplayName } from "@fusion/core/detect-content-language";
 import { ProjectDefaultWorkflowField } from "../../WorkflowSelector";
 import { WorkflowIcon } from "../../WorkflowIcon";
-import { fetchWorkflows } from "../../../api";
+import { fetchWorkflows, listDiscussionCategories, type DiscussionCategoryOption } from "../../../api";
 import { clearAllLocalCache } from "../../../utils/swrCache";
 import type { ToastType } from "../../../hooks/useToast";
 import type { SectionBaseProps } from "./context";
@@ -48,7 +48,14 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
     const { t } = useTranslation("app");
     const [builtinWorkflows, setBuiltinWorkflows] = useState<WorkflowDefinition[]>([]);
     const [reportAction, setReportAction] = useState<ReportActionType | null>(null);
+    const [discussionCategories, setDiscussionCategories] = useState<DiscussionCategoryOption[]>([]);
     const reportContextRefs = typeof window === "undefined" ? undefined : resolveReportContextRefs(window.location);
+    useEffect(() => {
+        let cancelled = false;
+        // FNXC:GithubDiscussions 2026-07-16-21:15: Category IDs are repository-owned, so settings loads safe server-provided choices.
+        void listDiscussionCategories().then((result) => { if (!cancelled) setDiscussionCategories(Array.isArray(result.categories) ? result.categories : []); }).catch(() => { if (!cancelled) setDiscussionCategories([]); });
+        return () => { cancelled = true; };
+    }, []);
     useEffect(() => {
         let cancelled = false;
         fetchWorkflows(projectId, { includeDisabledBuiltins: true })
@@ -354,6 +361,11 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
             </select>
           </div>
         ))}
+        <div className="settings-field-label-row"><label htmlFor="reportTarget">{t("settings.general.reportTarget", "Default report target")}</label><SettingsHelpTip settingKey="reportTarget">{t("settings.general.reportTargetHelp", "Optional Issue or Discussion target. When unset, action defaults are preserved.")}</SettingsHelpTip></div>
+        <select id="reportTarget" value={form.reportTarget ?? ""} onChange={(event) => setForm((current) => ({ ...current, reportTarget: (event.target.value || undefined) as ReportTarget | undefined }))}><option value="">{t("settings.general.reportTargetInherit", "Preserve action default")}</option><option value="issue">{t("settings.general.reportTargetIssue", "GitHub Issue")}</option><option value="discussion">{t("settings.general.reportTargetDiscussion", "GitHub Discussion")}</option></select>
+        {(["bug", "feedback", "idea", "help"] as const).map((action) => <div key={`report-target-${action}`}><label htmlFor={`reportTarget-${action}`}>{t(`settings.general.reportTargetOverride.${action}`, `${action[0].toUpperCase()}${action.slice(1)} target override`)}</label><select id={`reportTarget-${action}`} value={form.reportTargetByAction?.[action] ?? ""} onChange={(event) => setForm((current) => { const reportTargetByAction = { ...current.reportTargetByAction }; const selected = event.target.value as "" | ReportTarget; if (selected) reportTargetByAction[action] = selected; else delete reportTargetByAction[action]; return { ...current, reportTargetByAction: Object.keys(reportTargetByAction).length ? reportTargetByAction : undefined }; })}><option value="">{t("settings.general.reportTargetInherit", "Preserve action default")}</option><option value="issue">{t("settings.general.reportTargetIssue", "GitHub Issue")}</option><option value="discussion">{t("settings.general.reportTargetDiscussion", "GitHub Discussion")}</option></select></div>)}
+        <div className="settings-field-label-row"><label htmlFor="reportDiscussionCategory">{t("settings.general.reportDiscussionCategory", "Discussion category")}</label><SettingsHelpTip settingKey="reportDiscussionCategory">{t("settings.general.reportDiscussionCategoryHelp", "Required when filing to GitHub Discussions.")}</SettingsHelpTip></div>
+        <select id="reportDiscussionCategory" value={form.reportDiscussionCategory ?? ""} onChange={(event) => setForm((current) => ({ ...current, reportDiscussionCategory: event.target.value || undefined }))} disabled={!discussionCategories.length}><option value="">{t("settings.general.reportDiscussionCategorySelect", "Select a Discussion category")}</option>{discussionCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select>
         <SettingsToggleRow
           descriptor={{
             key: "reportRoadmapDedupeEnabled",

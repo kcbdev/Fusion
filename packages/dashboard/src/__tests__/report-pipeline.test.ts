@@ -1,18 +1,37 @@
 import { describe, expect, it, vi } from "vitest";
-import { endorseDuplicate, runReportPipeline, type ReportPipelineDeps } from "../report-pipeline.js";
+import { endorseDuplicate, resolveReportTarget, runReportPipeline, type ReportPipelineDeps } from "../report-pipeline.js";
 
 const settings = { reportRoadmapDedupeEnabled: false, reportMode: "draft-review" as const, githubTrackingDefaultRepo: "Runfusion/Fusion", githubAuthMode: "token", githubAuthToken: "test" };
 
 function deps(overrides: Partial<ReportPipelineDeps> = {}): ReportPipelineDeps {
   return {
     projectSettings: settings,
-    client: { createIssue: vi.fn().mockResolvedValue({ number: 42, htmlUrl: "https://github.com/Runfusion/Fusion/issues/42" }), searchIssues: vi.fn().mockResolvedValue([]), addIssueReaction: vi.fn(), commentOnIssue: vi.fn().mockResolvedValue({ url: "https://github.com/Runfusion/Fusion/issues/1#issuecomment-1" }), searchDiscussions: vi.fn().mockResolvedValue([]), createDiscussion: vi.fn().mockResolvedValue({ htmlUrl: "https://github.com/Runfusion/Fusion/discussions/42" }), commentOnDiscussion: vi.fn().mockResolvedValue({ url: "https://github.com/Runfusion/Fusion/discussions/1#discussioncomment-1" }) },
+    client: { createIssue: vi.fn().mockResolvedValue({ number: 42, htmlUrl: "https://github.com/Runfusion/Fusion/issues/42" }), searchIssues: vi.fn().mockResolvedValue([]), addIssueReaction: vi.fn(), commentOnIssue: vi.fn().mockResolvedValue({ url: "https://github.com/Runfusion/Fusion/issues/1#issuecomment-1" }), searchDiscussions: vi.fn().mockResolvedValue([]), createDiscussion: vi.fn().mockResolvedValue({ htmlUrl: "https://github.com/Runfusion/Fusion/discussions/42" }), commentOnDiscussion: vi.fn().mockResolvedValue({ url: "https://github.com/Runfusion/Fusion/discussions/1#discussioncomment-1" }), listDiscussionCategories: vi.fn().mockResolvedValue([{ id: "DC_ideas", name: "Ideas", slug: "ideas" }]) },
     scrubContext: { projectName: "private-project", rootDir: "/Users/alice/private-project" },
     ...overrides,
   };
 }
 
 describe("report pipeline", () => {
+  it.each([
+    ["bug", "issue"], ["feedback", "discussion"], ["idea", "issue"], ["help", "discussion"],
+  ] as const)("preserves the historical %s → %s target when settings are unset", (actionType, target) => {
+    expect(resolveReportTarget(actionType, {})).toBe(target);
+  });
+
+  it("uses per-action settings and an explicit target override in precedence order", () => {
+    const configured = { reportTarget: "discussion" as const, reportTargetByAction: { feedback: "issue" as const } };
+    expect(resolveReportTarget("feedback", configured)).toBe("issue");
+    expect(resolveReportTarget("bug", configured)).toBe("discussion");
+    expect(resolveReportTarget("feedback", configured, "discussion")).toBe("discussion");
+  });
+
+  it("ignores malformed persisted targets rather than silently filing them as Issues", () => {
+    const malformed = { reportTarget: "not-a-target", reportTargetByAction: { feedback: "also-invalid" } } as never;
+    expect(resolveReportTarget("feedback", malformed)).toBe("discussion");
+    expect(resolveReportTarget("bug", malformed)).toBe("issue");
+  });
+
   it.each(["bug", "feedback", "idea", "help"] as const)("structures the guided %s prompt without filing in review mode", async (actionType) => {
     const context = deps();
     const result = await runReportPipeline({ actionType, userPrompt: "The private-project view failed at /Users/alice/private-project/a.ts" }, context);
@@ -107,11 +126,56 @@ describe("report pipeline", () => {
   });
 
   it("files feedback as a repository discussion in auto-file mode", async () => {
-    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file" } });
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportDiscussionCategory: "DC_ideas" } });
     const result = await runReportPipeline({ actionType: "feedback", userPrompt: "The report flow needs clearer status" }, context);
     expect(result.kind).toBe("filed");
     expect(context.client!.createDiscussion).toHaveBeenCalledOnce();
     expect(context.client!.createIssue).not.toHaveBeenCalled();
+  });
+
+  it("lets a per-action target override flip feedback to an issue and bug to a discussion", async () => {
+    const feedback = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportDiscussionCategory: "DC_ideas", reportTargetByAction: { feedback: "issue", bug: "discussion" } } });
+    await runReportPipeline({ actionType: "feedback", userPrompt: "Report status needs clarity" }, feedback);
+    await runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, feedback);
+    expect(feedback.client!.createIssue).toHaveBeenCalledOnce();
+    expect(feedback.client!.createDiscussion).toHaveBeenCalledOnce();
+  });
+
+
+  it("requires an explicitly configured Discussion category before creating a discussion", async () => {
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportTarget: "discussion" } });
+    await expect(runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, context))
+      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_category_missing" });
+    expect(context.client!.createDiscussion).not.toHaveBeenCalled();
+  });
+
+  it("maps Discussion search and endorsement GraphQL failures to a safe unavailable result", async () => {
+    const searchFailure = deps({
+      projectSettings: { ...settings, reportMode: "auto-file", reportTarget: "discussion", reportDiscussionCategory: "DC_ideas" },
+      client: { ...deps().client!, searchDiscussions: vi.fn().mockRejectedValue(new Error("scope missing")) },
+    });
+    await expect(runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, searchFailure))
+      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_unavailable" });
+
+    const endorseFailure = deps({
+      projectSettings: { ...settings, reportMode: "auto-file" },
+      client: {
+        ...deps().client!,
+        searchDiscussions: vi.fn().mockResolvedValue([{ id: "D_fail", number: 2, title: "report failure needs attention", body: "report failure needs attention", url: "https://github.com/Runfusion/Fusion/discussions/2", state: "open" }]),
+        addDiscussionReaction: vi.fn().mockRejectedValue(new Error("Discussions disabled")),
+      },
+    });
+    await expect(runReportPipeline({ actionType: "feedback", userPrompt: "report failure needs attention" }, endorseFailure))
+      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_unavailable" });
+  });
+
+  it("returns a typed reason when the configured Discussion category is unavailable", async () => {
+    const context = deps({
+      projectSettings: { ...settings, reportMode: "auto-file", reportTarget: "discussion", reportDiscussionCategory: "ideas" },
+      client: { ...deps().client!, listDiscussionCategories: vi.fn().mockResolvedValue([]) },
+    });
+    await expect(runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, context))
+      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_category_invalid" });
   });
 
   it("automatically endorses an open duplicate in auto-file mode", async () => {

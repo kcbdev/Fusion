@@ -1,11 +1,11 @@
-import type { GlobalSettings, ProjectSettings, ReportActionType, ReportMode } from "@fusion/core";
+import type { GlobalSettings, ProjectSettings, ReportActionType, ReportMode, ReportTarget } from "@fusion/core";
 import { parseRepoSlug, resolveTaskGithubTracking } from "@fusion/core";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 import { buildIssueSearchQueries, DEDUP_MATCH_THRESHOLD, scoreCandidateIssue } from "./github-tracking-dedup.js";
 import { scrubReportPayload, type ReportScrubContext } from "./report-scrub.js";
 
-export type { ReportActionType, ReportMode };
+export type { ReportActionType, ReportMode, ReportTarget };
 
 export interface ReportInput {
   actionType: ReportActionType;
@@ -37,9 +37,9 @@ export type ReportResult =
   | { kind: "unavailable"; reason: string; message: string };
 
 export interface ReportPipelineDeps {
-  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "reportRoadmapDedupeEnabled" | "reportRoadmapLabel" | "reportRoadmapRepo" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
+  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "reportTarget" | "reportTargetByAction" | "reportDiscussionCategory" | "reportRoadmapDedupeEnabled" | "reportRoadmapLabel" | "reportRoadmapRepo" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
   globalSettings?: Partial<GlobalSettings>;
-  client?: Pick<GitHubClient, "createIssue" | "searchIssues" | "commentOnIssue" | "addIssueReaction"> & Partial<Pick<GitHubClient, "searchDiscussions" | "createDiscussion" | "commentOnDiscussion" | "addDiscussionReaction">>;
+  client?: Pick<GitHubClient, "createIssue" | "searchIssues" | "commentOnIssue" | "addIssueReaction"> & Partial<Pick<GitHubClient, "searchDiscussions" | "createDiscussion" | "commentOnDiscussion" | "addDiscussionReaction" | "listDiscussionCategories">>;
   scrubContext?: ReportScrubContext;
   gatherContext?: (input: ReportInput) => Promise<Record<string, unknown>>;
 }
@@ -110,11 +110,17 @@ function resolveRepo(deps: ReportPipelineDeps) {
   return resolveTaskGithubTracking({ githubTracking: undefined }, deps.projectSettings, deps.globalSettings).repo;
 }
 
-type ReportDestination = "issue" | "discussion";
+type ReportDestination = ReportTarget;
 type DuplicateCandidate = { number: number; title: string; body: string | null; html_url: string; state: "open" | "closed"; discussionId?: string };
 
 function destinationFor(actionType: ReportActionType): ReportDestination {
   return actionType === "feedback" || actionType === "help" ? "discussion" : "issue";
+}
+
+/** FNXC:ReportPipeline 2026-07-16-20:30: Explicit and configured targets override historic action routing without changing its unset fallback. */
+export function resolveReportTarget(actionType: ReportActionType, settings: Pick<ProjectSettings, "reportTarget" | "reportTargetByAction">, explicitOverride?: ReportTarget): ReportTarget {
+  const isTarget = (value: unknown): value is ReportTarget => value === "issue" || value === "discussion";
+  return [explicitOverride, settings.reportTargetByAction?.[actionType], settings.reportTarget].find(isTarget) ?? destinationFor(actionType);
 }
 
 function reportKeywords(report: StructuredReport): string[] {
@@ -232,7 +238,7 @@ function normalizeSubmittedReport(input: ReportInput, gathered: Record<string, u
   };
 }
 
-export async function runReportPipeline(input: ReportInput, deps: ReportPipelineDeps, options: { file?: boolean; endorseIssueNumber?: number; endorseDiscussionId?: string; endorseRoadmapIssueNumber?: number; report?: StructuredReport } = {}): Promise<ReportResult> {
+export async function runReportPipeline(input: ReportInput, deps: ReportPipelineDeps, options: { file?: boolean; targetType?: ReportTarget; endorseIssueNumber?: number; endorseDiscussionId?: string; endorseRoadmapIssueNumber?: number; report?: StructuredReport } = {}): Promise<ReportResult> {
   const gathered = await deps.gatherContext?.(input) ?? { taskId: input.contextRefs?.taskId, agentId: input.contextRefs?.agentId };
   const normalized = normalizeSubmittedReport(input, gathered, options.report);
   const report: StructuredReport = scrubReportPayload(normalized, deps.scrubContext);
@@ -250,8 +256,13 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
   issue +1/scrub path; unavailable roadmap search falls through without egress.
   */
   const roadmapDuplicate = await findRoadmapDuplicate(clientResult.client, roadmap, report);
-  const destination = destinationFor(input.actionType);
-  const duplicate = await findDuplicate(clientResult.client, repo.owner, repo.repo, report, destination);
+  const destination = resolveReportTarget(input.actionType, deps.projectSettings, options.targetType);
+  let duplicate: DuplicateCandidate | undefined;
+  try { duplicate = await findDuplicate(clientResult.client, repo.owner, repo.repo, report, destination); } catch {
+    // FNXC:GithubDiscussions 2026-07-16-21:15: Discussion GraphQL scope and feature failures are safe availability states.
+    if (destination === "discussion") return { kind: "unavailable", reason: "discussion_unavailable", message: "GitHub Discussions are unavailable for this repository or token." };
+    throw new Error("GitHub Issue duplicate search failed.");
+  }
   if (options.endorseRoadmapIssueNumber) {
     if (!roadmapDuplicate || roadmapDuplicate.number !== options.endorseRoadmapIssueNumber || !roadmap.repo) {
       return { kind: "unavailable", reason: "duplicate_not_verified", message: "The selected roadmap item is no longer an open matching report. Please prepare the report again." };
@@ -283,8 +294,10 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
         if (!duplicate.discussionId || !clientResult.client.commentOnDiscussion || !clientResult.client.addDiscussionReaction) {
           return { kind: "unavailable", reason: "discussion_unsupported", message: "This GitHub connection cannot endorse discussions." };
         }
-        const endorsed = await endorseDiscussionDuplicate({ issueNumber: duplicate.number, discussionId: duplicate.discussionId, report, client: clientResult.client as NonNullable<ReportPipelineDeps["client"]> & Pick<GitHubClient, "commentOnDiscussion" | "addDiscussionReaction">, scrubContext: deps.scrubContext });
-    return endorsed;
+        try {
+          const endorsed = await endorseDiscussionDuplicate({ issueNumber: duplicate.number, discussionId: duplicate.discussionId, report, client: clientResult.client as NonNullable<ReportPipelineDeps["client"]> & Pick<GitHubClient, "commentOnDiscussion" | "addDiscussionReaction">, scrubContext: deps.scrubContext });
+          return endorsed;
+        } catch { return { kind: "unavailable", reason: "discussion_unavailable", message: "GitHub Discussions are unavailable for this repository or token." }; }
       }
       const endorsed = await endorseDuplicate({ owner: repo.owner, repo: repo.repo, issueNumber: duplicate.number, report, client: clientResult.client, scrubContext: deps.scrubContext });
     return endorsed;
@@ -294,8 +307,12 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
   if (!options.file && mode === "draft-review") return { kind: "draft-ready", report, mode };
   if (destination === "discussion") {
     if (!clientResult.client.createDiscussion || !clientResult.client.commentOnDiscussion) return { kind: "unavailable", reason: "discussion_unsupported", message: "This GitHub connection cannot create discussions." };
-    const created = await clientResult.client.createDiscussion(repo.owner, repo.repo, report.summary, report.body);
-    return { kind: "filed", url: created.htmlUrl, report };
+    const configuredCategory = deps.projectSettings.reportDiscussionCategory;
+    if (!configuredCategory || !clientResult.client.listDiscussionCategories) return { kind: "unavailable", reason: "discussion_category_missing", message: "Select a Discussion category before filing reports to GitHub Discussions." };
+    let categoryId: string | undefined;
+    try { categoryId = (await clientResult.client.listDiscussionCategories(repo.owner, repo.repo)).find((category) => category.id === configuredCategory || category.slug === configuredCategory)?.id; } catch { return { kind: "unavailable", reason: "discussion_categories_unavailable", message: "GitHub Discussions are unavailable for this repository or token." }; }
+    if (!categoryId) return { kind: "unavailable", reason: "discussion_category_invalid", message: "The selected Discussion category is missing or unavailable for this repository." };
+    try { const created = await clientResult.client.createDiscussion(repo.owner, repo.repo, report.summary, report.body, categoryId); return { kind: "filed", url: created.htmlUrl, report }; } catch { return { kind: "unavailable", reason: "discussion_unavailable", message: "GitHub Discussions are unavailable for this repository or token." }; }
   }
   const created = await clientResult.client.createIssue({ owner: repo.owner, repo: repo.repo, title: report.summary, body: report.body, labels: ["community"] });
   return { kind: "filed", url: created.htmlUrl, report };

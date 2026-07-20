@@ -243,6 +243,12 @@ export interface DiscussionCandidate {
   state: "open" | "closed";
 }
 
+export interface DiscussionCategory {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 export interface CreatedDiscussion {
   id: string;
   number: number;
@@ -2296,6 +2302,23 @@ export class GitHubClient {
     return matches;
   }
 
+  /*
+  FNXC:GithubDiscussions 2026-07-16-20:00:
+  GitHub Discussions have no REST API coverage. Category discovery stays on the
+  established GraphQL transport, preserving the same gh/token auth behavior as
+  search, creation, comments, and reactions.
+  */
+  async listDiscussionCategories(owner: string, repo: string): Promise<DiscussionCategory[]> {
+    type CategoryPayload = {
+      repository?: { discussionCategories?: { nodes?: Array<DiscussionCategory | null> | null } | null } | null;
+    };
+    const payload = await this.runGraphqlQuery<CategoryPayload>(`query($owner:String!, $repo:String!) {
+      repository(owner:$owner, name:$repo) { discussionCategories(first:100) { nodes { id name slug } } }
+    }`, { owner, repo });
+    return (payload?.repository?.discussionCategories?.nodes ?? [])
+      .filter((category): category is DiscussionCategory => Boolean(category?.id && category.name && category.slug));
+  }
+
   /** Adds the same visible +1 signal to a Discussion duplicate as to an Issue duplicate. */
   async addDiscussionReaction(discussionId: string): Promise<void> {
     const payload = await this.runGraphqlQuery<{
@@ -2306,15 +2329,21 @@ export class GitHubClient {
     if (!payload?.addReaction?.reaction) throw new Error("GitHub did not return the discussion reaction.");
   }
 
-  async createDiscussion(owner: string, repo: string, title: string, body: string): Promise<CreatedDiscussion> {
+  async createDiscussion(owner: string, repo: string, title: string, body: string, selectedCategoryId?: string): Promise<CreatedDiscussion> {
     const categoryPayload = await this.runGraphqlQuery<{
       repository?: { id?: string; discussionCategories?: { nodes?: Array<{ id: string }> | null } | null } | null;
     }>(`query($owner:String!, $repo:String!) {
-      repository(owner:$owner, name:$repo) { id discussionCategories(first:1) { nodes { id } } }
+      repository(owner:$owner, name:$repo) { id discussionCategories(first:100) { nodes { id } } }
     }`, { owner, repo });
     const repositoryId = categoryPayload?.repository?.id;
-    const categoryId = categoryPayload?.repository?.discussionCategories?.nodes?.[0]?.id;
-    if (!repositoryId || !categoryId) throw new Error(`Discussions are not enabled for ${owner}/${repo}.`);
+    const categories = categoryPayload?.repository?.discussionCategories?.nodes ?? [];
+    // FNXC:GithubDiscussions 2026-07-16-21:15: A report must never silently
+    // file into the repository's first category; an operator-selected category
+    // is required so disabled, missing, and stale selections fail safely.
+    const categoryId = selectedCategoryId;
+    if (!repositoryId || !categoryId || !categories.some((category) => category.id === categoryId)) {
+      throw new Error(`Discussion category is unavailable for ${owner}/${repo}.`);
+    }
     const payload = await this.runGraphqlQuery<{
       createDiscussion?: { discussion?: { id: string; number: number; url: string } | null } | null;
     }>(`mutation($repositoryId:ID!, $categoryId:ID!, $title:String!, $body:String!) {

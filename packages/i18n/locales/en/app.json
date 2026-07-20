@@ -5964,7 +5964,25 @@
       "reportRoadmapDedupeEnabled": "Deduplicate reports against public roadmap",
       "reportRoadmapDedupeEnabledHelp": "Match open, labeled roadmap issues before filing. Default: on.",
       "reportRoadmapLabel": "Public roadmap label",
-      "reportRoadmapLabelHelp": "Open GitHub Issues with this label are considered roadmap items. Default: roadmap."
+      "reportRoadmapLabelHelp": "Open GitHub Issues with this label are considered roadmap items. Default: roadmap.",
+      "reportRoadmapDedup": "Check roadmap before filing reports",
+      "reportRoadmapDedupHelp": "When enabled, matching roadmap features are shown inline instead of filing another GitHub Issue or Discussion. Default: off.",
+      "reportTarget": "Default report target",
+      "reportTargetHelp": "Optional Issue or Discussion target. When unset, Feedback and Help use Discussions while Bug and Idea use Issues.",
+      "reportTargetInherit": "Preserve action default",
+      "reportTargetIssue": "GitHub Issue",
+      "reportTargetDiscussion": "GitHub Discussion",
+      "reportTargetOverride": {
+        "bug": "Bug target override",
+        "feedback": "Feedback target override",
+        "idea": "Idea target override",
+        "help": "Help target override"
+      },
+      "reportDiscussionCategory": "Discussion category",
+      "reportDiscussionCategoryHelp": "Required when filing to GitHub Discussions. Categories are loaded from the configured repository.",
+      "reportDiscussionCategorySelect": "Select a Discussion category",
+      "reportDiscussionCategoryUnavailable": "Discussion categories are unavailable for the configured repository.",
+      "reportDiscussionCategoryEmpty": "No Discussion categories are available for the configured repository."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": " and shows update notices in the CLI and dashboard. Cadence is governed by the frequency below. Default: enabled. ",
@@ -9155,6 +9173,10 @@
     },
     "roadmapDuplicate": {
       "title": "Already on the roadmap — add your data point?"
-    }
+    },
+    "targetLabel": "Filing target",
+    "targetInherit": "Use configured action target",
+    "targetIssue": "GitHub Issue",
+    "targetDiscussion": "GitHub Discussion"
   }
 }
