@@ -182,6 +182,25 @@ export function createSmokeHtml() {
     </section>
   `).join("");
 
+  /*
+  FNXC:MailboxMobile 2026-07-19-17:00:
+  FN-8407 requires a real-browser 320px regression surface because jsdom cannot
+  measure the shared ViewHeader flex geometry. Exercise the unread Inbox's tightest
+  badge + Compose + Mark all read + Refresh row and both Compose + Refresh-only states.
+  */
+  const mailboxMobileHeaderFixtures = [
+    ["unread-inbox", '<span class="mailbox-unread-badge">9</span><button class="btn btn-sm btn-primary" data-testid="mailbox-header-compose" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10v10H2z"/></svg><span>Compose</span></button><button class="btn btn-sm btn-secondary" data-testid="mailbox-mark-all-read" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7l3 3 7-7"/></svg><span>Mark all read</span></button><button class="btn-icon" data-testid="mailbox-refresh" type="button" aria-label="Refresh"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7a5 5 0 1 0 2-4"/></svg></button>'],
+    ["read-inbox", '<button class="btn btn-sm btn-primary" data-testid="mailbox-header-compose" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10v10H2z"/></svg><span>Compose</span></button><button class="btn-icon" data-testid="mailbox-refresh" type="button" aria-label="Refresh"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7a5 5 0 1 0 2-4"/></svg></button>'],
+    ["non-inbox", '<button class="btn btn-sm btn-primary" data-testid="mailbox-header-compose" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10v10H2z"/></svg><span>Compose</span></button><button class="btn-icon" data-testid="mailbox-refresh" type="button" aria-label="Refresh"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7a5 5 0 1 0 2-4"/></svg></button>'],
+  ].map(([state, actions]) => `
+    <section class="mailbox-view mailbox-view--mobile" data-smoke="mailbox-mobile-header-${state}" style="width: 100%; max-width: 20rem;">
+      <header class="view-header">
+        <h2 class="view-header__title"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 3h16v14H2z"/></svg><span>Mailbox</span></h2>
+        <div class="view-header__actions">${actions}</div>
+      </header>
+    </section>
+  `).join("");
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -263,6 +282,10 @@ export function createSmokeHtml() {
 
       <section data-smoke="task-detail-inline-row-fixtures" aria-label="Task Detail inline action layout fixtures">
         ${taskDetailInlineRowFixtures}
+      </section>
+
+      <section data-smoke="mailbox-mobile-header-fixtures" aria-label="Mailbox mobile header layout fixtures">
+        ${mailboxMobileHeaderFixtures}
       </section>
 
       <footer class="executor-status-bar">
@@ -1199,6 +1222,50 @@ async function runSmokeChecks(page, pageUrl) {
       JSON.stringify(taskDetailIconSizes),
     );
   }
+
+  await page.send("Emulation.setDeviceMetricsOverride", {
+    width: 320,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evaluate(page, "document.fonts ? document.fonts.ready.then(() => true) : true");
+  const mailboxMobileHeaderLayout = await evaluate(page, `(() => {
+    return [...document.querySelectorAll('[data-smoke^="mailbox-mobile-header-"]:not([data-smoke="mailbox-mobile-header-fixtures"])')].map((fixture) => {
+      const header = fixture.querySelector('.view-header').getBoundingClientRect();
+      const title = fixture.querySelector('.view-header__title').getBoundingClientRect();
+      const titleLabel = fixture.querySelector('.view-header__title span').getBoundingClientRect();
+      const actions = fixture.querySelector('.view-header__actions').getBoundingClientRect();
+      return {
+        state: fixture.dataset.smoke,
+        documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        headerLeft: header.left,
+        headerRight: header.right,
+        headerOverflow: fixture.scrollWidth - fixture.clientWidth,
+        titleLeft: title.left,
+        titleTop: title.top,
+        titleBottom: title.bottom,
+        titleLabelWidth: titleLabel.width,
+        actionsLeft: actions.left,
+        actionsRight: actions.right,
+        actionsTop: actions.top,
+        actionsBottom: actions.bottom,
+        actionsHeight: actions.height,
+      };
+    });
+  })()`);
+  assertSmokeResult(
+    "Mailbox mobile headers keep title and actions inline at 320px",
+    mailboxMobileHeaderLayout.length === 3
+      && mailboxMobileHeaderLayout.every((layout) => layout.documentOverflow <= 1
+        && layout.headerOverflow <= 1
+        && layout.actionsLeft > layout.titleLeft
+        && layout.actionsRight <= layout.headerRight + 1
+        && Math.abs(layout.titleTop - layout.actionsTop) <= layout.actionsHeight
+        && layout.actionsTop < layout.titleBottom)
+      && mailboxMobileHeaderLayout.find((layout) => layout.state === "mailbox-mobile-header-unread-inbox")?.titleLabelWidth > 0,
+    JSON.stringify(mailboxMobileHeaderLayout),
+  );
 
   await page.send("Emulation.setDeviceMetricsOverride", {
     width: 412,

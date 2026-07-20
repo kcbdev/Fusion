@@ -2310,8 +2310,12 @@ describe("MailboxView", () => {
     it("defines class-gated, compact single-row mailbox mobile layout rules", () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header\s*\{[^}]*flex-wrap:\s*wrap;[^}]*\}/);
-      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header__actions\s*\{[^}]*flex:\s*1\s+1\s+100%;[^}]*min-width:\s*0;[^}]*flex-wrap:\s*nowrap;[^}]*margin-left:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*align-items:\s*center;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header__title\s*\{[^}]*flex:\s*1\s+1\s+auto;[^}]*min-width:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header__actions\s*\{[^}]*flex:\s*0\s+1\s+auto;[^}]*min-width:\s*0;[^}]*flex-wrap:\s*nowrap;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*auto;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header__actions\s+\.btn\s+span\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;[^}]*\}/);
+      expect(css).not.toMatch(/\.mailbox-view--mobile\s+\.view-header__title\s*\{[^}]*flex:\s*0\s+0\s+100%;[^}]*\}/);
+      expect(css).not.toMatch(/\.mailbox-view--mobile\s+\.view-header__actions\s*\{[^}]*flex:\s*1\s+1\s+100%;[^}]*\}/);
       expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-tabs\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*\}/);
       expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-tab\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+0;[^}]*flex-shrink:\s*1;[^}]*\}/);
       expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-message-detail-header\s*\{[^}]*flex-direction:\s*row;[^}]*flex-wrap:\s*nowrap;[^}]*\}/);
@@ -2321,7 +2325,7 @@ describe("MailboxView", () => {
       expect(css).toMatch(/\.mailbox-view:not\(\.mailbox-view--mobile\)\s+\.mailbox-message-detail-header\s*\{[^}]*flex-direction:\s*column;[^}]*\}/);
       expect(css).toMatch(/\.mailbox-view:not\(\.mailbox-view--mobile\)\s+\.mailbox-message-detail-actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*\}/);
 
-      // The runtime class, not a height or pointer media proxy, is the only FN-8238 gate.
+      // The runtime class, not a height or pointer media proxy, is the only FN-8407 gate.
       expect(css).not.toMatch(/@media\s*\([^)]*(?:max-height:\s*480px|pointer:\s*coarse)[^)]*\)\s*\{[\s\S]*?\.mailbox-view--mobile/);
     });
 
