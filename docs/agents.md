@@ -921,6 +921,12 @@ Messaging is available in dashboard mailbox UI and CLI. In dashboard Mailbox →
 
 Agent-backed dashboard chat sessions (including plugin-runtime agents such as Hermes/OpenClaw/Paperclip) also expose mailbox tools (`fn_send_message`, `fn_read_messages`) when a `MessageStore` is wired for that project. Model-only chats without an attached agent do not expose these tools.
 
+### Dashboard Chat workspace tools
+
+Dashboard Chat, Chat Room responders, and task-detail Planner Chat run at the interactive project checkout with coding workspace tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`. Use them for user-directed file changes and shell investigation. When a durable agent is bound, its permanent-agent permission policy still governs file writes/deletes and command execution; unbound model Chat has no durable-principal policy gate. Chat must keep the checkout branch sticky: inspect Git freely, but do not use `git checkout` or `git switch` unless the operator explicitly requests it.
+
+Task-detail Planner Chat is included because it is a `task-planner:<taskId>` ChatManager session. This does not change the readonly planning/mission interview lanes or WhatsApp plugin chat. Chat verification remains limited to its existing allowlisted profiles rather than accepting arbitrary shell commands.
+
 ```bash
 fn message inbox
 fn message outbox

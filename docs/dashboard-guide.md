@@ -592,6 +592,8 @@ The full **New Task** dialog includes a compact **GitHub issue or PR** picker ne
 
 Chat view provides project-scoped conversations with agents.
 
+- Direct Chat, Chat Room responders, and task-detail Planner Chat have coding workspace tools at the interactive project checkout: `read`, `write`, `edit`, `bash`, `grep`, `find`, and `ls`. They can make user-directed edits and run shell investigation; a bound durable agent remains subject to its permanent-agent file-write and command-execution permission policy. These Chat sessions keep the checkout branch sticky unless you explicitly ask to switch it. Planning/mission interviews and WhatsApp plugin chat remain readonly.
+
 <!-- FNXC:NativeStructureEmbed 2026-07-19-20:00: Roadmap-item references now resolve through the roadmap plugin's PostgreSQL-safe read adapter and open the restored hosted Roadmaps destination. -->
 - Chat recognizes native structure references in both assistant and user messages using the explicit `fusion://<kind>/<id>` form. Supported kinds are `mission`, `milestone`, `roadmap-item`, `research-finding`, `eval-result`, and `goal`. Use a bare token such as `fusion://mission/M-001` in either message type, or an assistant Markdown link such as `[Mission](fusion://mission/M-001)`. `roadmap-item` previews the roadmap feature title and description when available; a missing feature or unavailable roadmap data layer renders the shared unavailable card.
 - Recognized references render an inline preview card before you leave the conversation. Select **Open** on an available card to navigate to its owning dashboard view; missing, archived, or otherwise unavailable structures show a safe unavailable placeholder instead. Plain-text mode deliberately leaves reference text raw.

@@ -414,15 +414,19 @@ describe("ChatManager.sendMessage", () => {
   });
 
   it("records task-detail planner chat tokens separately from task execution usage", async () => {
-    __setCreateResolvedAgentSession(async () => ({
-      session: {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        dispose: vi.fn(),
-        model: { provider: "anthropic", id: "claude-sonnet-4-5" },
-        getSessionStats: () => ({ tokens: { input: 10, output: 4, cacheRead: 0, cacheWrite: 0 } }),
-        state: { messages: [{ role: "assistant", content: "Planner response" }] },
-      },
-    }));
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+          getSessionStats: () => ({ tokens: { input: 10, output: 4, cacheRead: 0, cacheWrite: 0 } }),
+          state: { messages: [{ role: "assistant", content: "Planner response" }] },
+        },
+      };
+    });
     mockChatStore.getSession.mockReturnValue({
       id: "chat-planner",
       agentId: "task-planner:FN-7449",
@@ -451,6 +455,8 @@ describe("ChatManager.sendMessage", () => {
       agentId: "task-planner:FN-7449",
       totalTokens: 14,
     }));
+    expect(createOptions.tools).toBe("coding");
+    expect(createOptions).not.toHaveProperty("toolsAllowlist");
   });
 
   it("does not record chat token usage when session stats are unavailable or zero", async () => {
@@ -1155,7 +1161,7 @@ describe("ChatManager.sendMessage", () => {
 
   it("creates chat agents with the full coding toolset", async () => {
     let createOptions: any;
-    __setCreateFnAgent(async (options: any) => {
+    __setCreateResolvedAgentSession(async (options: any) => {
       createOptions = options;
       return {
         session: {
@@ -1172,6 +1178,7 @@ describe("ChatManager.sendMessage", () => {
     await chatManager.sendMessage("chat-001", "Hello");
 
     expect(createOptions.tools).toBe("coding");
+    expect(createOptions).not.toHaveProperty("toolsAllowlist");
   });
 
   it("requests bound agent and enabled plugin skills for regular chat", async () => {
@@ -3669,7 +3676,9 @@ describe("ChatManager generation isolation", () => {
     mockAgentStore.getAgent.mockResolvedValue({ id: "agent-001", name: "Avery", role: "executor", state: "idle" });
 
     let capturedTools: Array<{ name: string }> = [];
+    let createOptions: any;
     __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
       capturedTools = options.customTools ?? [];
       return {
         session: {
@@ -3685,6 +3694,8 @@ describe("ChatManager generation isolation", () => {
     await chatManager.sendRoomMessage("room-1", "How many tokens did FN-7310 use?");
 
     const names = capturedTools.map((tool) => tool.name);
+    expect(createOptions.tools).toBe("coding");
+    expect(createOptions).not.toHaveProperty("toolsAllowlist");
     expect(names).not.toContain("fn_task_planner_get_task_metrics");
     for (const required of [
       "fn_task_list",

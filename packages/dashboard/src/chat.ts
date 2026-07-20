@@ -246,7 +246,7 @@ async function ensureEngineReady(): Promise<void> {
  */
 export const CHAT_SYSTEM_PROMPT = `${FUSION_RUNTIME_SELF_AWARENESS}
 
-You are a helpful AI assistant integrated into the fn task board system. You help users with questions about their project, code, architecture, and tasks. You have access to project files and can read them to provide informed responses, including referencing specific file paths and line numbers when possible. Do not change the branch the working directory is checked out on: do not run \`git checkout <branch>\` or \`git switch <branch>\` to a different branch unless the user explicitly asks. Read-only Git and branch inspection, such as \`git status\`, \`git branch\`, and \`git log\`, is allowed. Response length policy: default to a short, crisp reply (a few sentences or a short bulleted list) that directly answers the user; avoid preamble, restating the question, and filler. If a thorough answer genuinely needs long-form content (for example multi-step plans, design proposals, deep analyses, or long file excerpts), keep the chat reply brief with a one- or two-sentence summary and then send the full write-up via \`fn_send_message\` using \`type: "agent-to-user"\` and \`to_id: "dashboard"\`. That mailbox follow-up must add new substantive detail and must not duplicate the chat reply.`;
+You are a helpful AI assistant integrated into the fn task board system. You help users with questions about their project, code, architecture, and tasks. You have coding workspace tools on the project checkout: \`read\`, \`write\`, \`edit\`, \`bash\`, \`grep\`, \`find\`, and \`ls\`. Use \`write\`, \`edit\`, and \`bash\` for user-requested code changes, file edits, or shell investigation; prefer minimal, user-directed mutations and respect any pending-approval or blocked tool result. Do not claim that you only have read access. Do not change the branch the working directory is checked out on: do not run \`git checkout <branch>\` or \`git switch <branch>\` to a different branch unless the user explicitly asks. Read-only Git and branch inspection, such as \`git status\`, \`git branch\`, and \`git log\`, is allowed. Response length policy: default to a short, crisp reply (a few sentences or a short bulleted list) that directly answers the user; avoid preamble, restating the question, and filler. If a thorough answer genuinely needs long-form content (for example multi-step plans, design proposals, deep analyses, or long file excerpts), keep the chat reply brief with a one- or two-sentence summary and then send the full write-up via \`fn_send_message\` using \`type: "agent-to-user"\` and \`to_id: "dashboard"\`. That mailbox follow-up must add new substantive detail and must not duplicate the chat reply.`;
 
 export const CHAT_AGENT_MESSAGE_ROUTING_GUIDANCE = `## Messaging Semantics\n\nYour chat reply is the primary response to the user. Do not also call \`fn_send_message\` with the same content just to mirror your chat response into mailbox.\n\nUse \`fn_send_message\` only when either (a) the user explicitly asks for mailbox/inbox/notification delivery (for example: "send me this in mail", "ntfy me when…", or "leave me a note in my inbox"), or (b) you are sending a genuinely longer follow-up that did not fit in a short chat reply. In either case, send with \`type: "agent-to-user"\` and target the dashboard user alias (\`to_id: "dashboard"\` is preferred), and ensure the mailbox message is additive rather than a duplicate of the chat reply. Never route that as a user/CLI → agent message.`;
 
@@ -268,6 +268,12 @@ const MAX_MESSAGES_PER_IP_PER_MINUTE = 30;
 /** Maximum file size for # mentions (50KB). Files larger than this are skipped. */
 const MAX_REFERENCED_FILE_SIZE = 50 * 1024;
 export const TASK_PLANNER_CHAT_AGENT_ID_PREFIX = "task-planner:";
+
+/*
+FNXC:ChatCodingTools 2026-07-19-00:00:
+Dashboard Chat sessions intentionally use the project-root coding workspace builtins so direct, room, and task-detail planner Chat can read, write, edit, and investigate with bash. Keep this shared mode unfiltered: permanent-agent action gates still enforce file-write and command-execution policy when a durable agent is bound, while task-planner Chat reaches the same direct-chat session path.
+*/
+const CHAT_CODING_TOOLS = "coding" as const;
 const ROOM_AMBIENT_MAX_RESPONDERS = 5;
 
 type ChatSessionStatsLike = { tokens?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number } };
@@ -2036,7 +2042,7 @@ export class ChatManager {
       ...(mergedRoomSkillSelection ? { skillSelection: mergedRoomSkillSelection } : {}),
       cwd: this.rootDir,
       systemPrompt,
-      tools: "coding",
+      tools: CHAT_CODING_TOOLS,
       ...(workflowTools.length + chatFusionTools.length > 0
         ? { customTools: dedupeChatTools([...workflowTools, ...chatFusionTools]) }
         : {}),
@@ -2597,7 +2603,7 @@ export class ChatManager {
       const sessionOptions = {
         cwd: this.rootDir,
         systemPrompt,
-        tools: "coding" as const,
+        tools: CHAT_CODING_TOOLS,
         ...(customTools.length > 0 ? { customTools } : {}),
         sessionManager,
         ...(effectiveModelProvider && effectiveModelId
