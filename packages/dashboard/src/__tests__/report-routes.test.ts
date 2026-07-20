@@ -168,13 +168,20 @@ describe("report routes", () => {
     });
   });
 
-  it.each(["/report/draft", "/report/file"])("passes valid targetType through the filing pipeline on %s", async (path) => {
+  it.each(["/report/draft", "/report/file"])("passes target and category inputs through the filing pipeline on %s", async (path) => {
     vi.mocked(runReportPipeline).mockResolvedValue({ kind: "draft-ready" } as never);
     const { handlers } = setup();
     await invoke(handlers.get(path)!, path === "/report/file"
-      ? { actionType: "bug", targetType: "discussion", report: { userPrompt: "Dashboard report controls", context: {} } }
-      : { actionType: "bug", targetType: "discussion", userPrompt: "Dashboard report controls" });
-    expect(vi.mocked(runReportPipeline).mock.calls.at(-1)?.[2]).toMatchObject({ targetType: "discussion", ...(path === "/report/file" ? { file: true } : {}) });
+      ? { actionType: "bug", targetType: "discussion", discussionCategoryId: "DC_ideas", report: { userPrompt: "Dashboard report controls", context: {} } }
+      : { actionType: "bug", targetType: "discussion", discussionCategoryId: "DC_ideas", userPrompt: "Dashboard report controls" });
+    expect(vi.mocked(runReportPipeline).mock.calls.at(-1)?.[2]).toMatchObject({ targetType: "discussion", discussionCategoryId: "DC_ideas", ...(path === "/report/file" ? { file: true } : {}) });
+  });
+
+  it("returns the pipeline's Issue fallback destination unchanged", async () => {
+    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "filed", url: "https://github.com/Runfusion/Fusion/issues/42", destination: "issue", report: {} } as never);
+    const { handlers } = setup();
+    const response = await invoke(handlers.get("/report/file")!, { actionType: "feedback", report: { userPrompt: "Dashboard report controls", context: {} } });
+    expect(response.body).toMatchObject({ kind: "filed", destination: "issue" });
   });
 
   describe("Help self-check", () => {

@@ -267,6 +267,27 @@ export interface DiscussionCategory {
   slug: string;
 }
 
+/** A repository capability error that allows report delivery to fall back to Issues. */
+export class DiscussionsDisabledError extends Error {
+  override readonly name = "DiscussionsDisabledError";
+
+  constructor(owner: string, repo: string, cause?: unknown) {
+    super(`Discussions are not enabled for ${owner}/${repo}.`, { cause });
+  }
+}
+
+export function isDiscussionsDisabledError(error: unknown): error is DiscussionsDisabledError {
+  return error instanceof DiscussionsDisabledError;
+}
+
+function mapDiscussionsDisabledError(owner: string, repo: string, error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/discussions? (?:are |is )?(?:not )?(?:enabled|disabled)|discussion.*disabled/i.test(message)) {
+    throw new DiscussionsDisabledError(owner, repo, error);
+  }
+  throw error;
+}
+
 export interface CreatedDiscussion {
   id: string;
   number: number;
@@ -2342,9 +2363,14 @@ export class GitHubClient {
     so reports cannot silently miss a duplicate merely because it is inactive.
     */
     while (hasNextPage && matches.length < limit) {
-      const payload: DiscussionSearchPayload | undefined = await this.runGraphqlQuery<DiscussionSearchPayload>(`query($owner:String!, $repo:String!, $cursor:String) {
-        repository(owner:$owner, name:$repo) { discussions(first:100, after:$cursor, orderBy:{field:UPDATED_AT, direction:DESC}) { nodes { id number title body url isClosed } pageInfo { hasNextPage endCursor } } }
-      }`, { owner, repo, cursor });
+      let payload: DiscussionSearchPayload | undefined;
+      try {
+        payload = await this.runGraphqlQuery<DiscussionSearchPayload>(`query($owner:String!, $repo:String!, $cursor:String) {
+          repository(owner:$owner, name:$repo) { discussions(first:100, after:$cursor, orderBy:{field:UPDATED_AT, direction:DESC}) { nodes { id number title body url isClosed } pageInfo { hasNextPage endCursor } } }
+        }`, { owner, repo, cursor });
+      } catch (error) {
+        mapDiscussionsDisabledError(owner, repo, error);
+      }
       const discussions: DiscussionConnection | undefined = payload?.repository?.discussions ?? undefined;
       for (const discussion of discussions?.nodes ?? []) {
         if (discussion.isClosed) continue;
@@ -2386,26 +2412,33 @@ export class GitHubClient {
     if (!payload?.addReaction?.reaction) throw new Error("GitHub did not return the discussion reaction.");
   }
 
+  /*
+  FNXC:ReportPipeline 2026-07-18-12:00:
+  FN-8308 owns category discovery and the reportDiscussionCategory setting.
+  A stale or absent selected category deterministically uses the repository's
+  first category, while disabled Discussions is a typed signal for Issue fallback.
+  */
   async createDiscussion(owner: string, repo: string, title: string, body: string, selectedCategoryId?: string): Promise<CreatedDiscussion> {
-    const categoryPayload = await this.runGraphqlQuery<{
-      repository?: { id?: string; discussionCategories?: { nodes?: Array<{ id: string }> | null } | null } | null;
-    }>(`query($owner:String!, $repo:String!) {
-      repository(owner:$owner, name:$repo) { id discussionCategories(first:100) { nodes { id } } }
-    }`, { owner, repo });
+    let categoryPayload: { repository?: { id?: string; discussionCategories?: { nodes?: Array<{ id: string }> | null } | null } | null } | undefined;
+    try {
+      categoryPayload = await this.runGraphqlQuery(`query($owner:String!, $repo:String!) {
+        repository(owner:$owner, name:$repo) { id discussionCategories(first:100) { nodes { id } } }
+      }`, { owner, repo });
+    } catch (error) {
+      mapDiscussionsDisabledError(owner, repo, error);
+    }
     const repositoryId = categoryPayload?.repository?.id;
     const categories = categoryPayload?.repository?.discussionCategories?.nodes ?? [];
-    // FNXC:GithubDiscussions 2026-07-16-21:15: A report must never silently
-    // file into the repository's first category; an operator-selected category
-    // is required so disabled, missing, and stale selections fail safely.
-    const categoryId = selectedCategoryId;
-    if (!repositoryId || !categoryId || !categories.some((category) => category.id === categoryId)) {
-      throw new Error(`Discussion category is unavailable for ${owner}/${repo}.`);
+    const categoryId = categories.find((category) => category.id === selectedCategoryId)?.id ?? categories[0]?.id;
+    if (!repositoryId || !categoryId) throw new DiscussionsDisabledError(owner, repo);
+    let payload: { createDiscussion?: { discussion?: { id: string; number: number; url: string } | null } | null } | undefined;
+    try {
+      payload = await this.runGraphqlQuery(`mutation($repositoryId:ID!, $categoryId:ID!, $title:String!, $body:String!) {
+        createDiscussion(input:{repositoryId:$repositoryId, categoryId:$categoryId, title:$title, body:$body}) { discussion { id number url } }
+      }`, { repositoryId, categoryId, title, body });
+    } catch (error) {
+      mapDiscussionsDisabledError(owner, repo, error);
     }
-    const payload = await this.runGraphqlQuery<{
-      createDiscussion?: { discussion?: { id: string; number: number; url: string } | null } | null;
-    }>(`mutation($repositoryId:ID!, $categoryId:ID!, $title:String!, $body:String!) {
-      createDiscussion(input:{repositoryId:$repositoryId, categoryId:$categoryId, title:$title, body:$body}) { discussion { id number url } }
-    }`, { repositoryId, categoryId, title, body });
     const discussion = payload?.createDiscussion?.discussion;
     if (!discussion) throw new Error("GitHub did not return the created discussion.");
     return { id: discussion.id, number: discussion.number, htmlUrl: discussion.url };

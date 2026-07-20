@@ -8,7 +8,7 @@ import "./ReportModal.css";
 
 const prompts: Record<ReportActionType, string> = { bug: "What went wrong?", feedback: "What would you like to share?", idea: "What would you like Fusion to do?", help: "What would you like help with?" };
 
-type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string; roadmap?: true }; url?: string; answer?: { summary?: string; content?: string }; message?: string; screenshotNotAttached?: boolean };
+type ModalResult = { kind: string; destination?: "issue" | "discussion"; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string; roadmap?: true }; url?: string; answer?: { summary?: string; content?: string }; message?: string; screenshotNotAttached?: boolean };
 
 
 /**
@@ -119,7 +119,10 @@ setResult(await reportFile({ actionType, targetType, report: result.report, endo
       <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void file(result.issue!.discussionId ? undefined : result.issue!.roadmap ? undefined : result.issue!.number, result.issue!.discussionId, result.issue!.roadmap ? result.issue!.number : undefined)}>Confirm and add data point</button>
     </>}
 
-{(result?.kind === "filed" || result?.kind === "endorsed") && <><h2>Report sent</h2><a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
+{(result?.kind === "filed" || result?.kind === "endorsed") && <>
+      {/* FNXC:ReportPipeline 2026-07-18-12:30: When disabled Discussions fall back to
+      Issues, state the actual filed destination rather than implying the report became a Discussion. */}
+      <h2>{result.kind === "filed" && result.destination === "issue" ? "Report filed as an Issue" : "Report sent"}</h2><a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
 
     {result?.kind === "help" && <><h2>Suggested help</h2><p>{result.answer?.summary ?? result.answer?.content}</p></>}
     {result?.kind === "unavailable" && <>

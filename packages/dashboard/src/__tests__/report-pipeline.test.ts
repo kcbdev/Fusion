@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DiscussionsDisabledError } from "../github.js";
 import { endorseDuplicate, resolveReportTarget, runReportPipeline, type ReportPipelineDeps } from "../report-pipeline.js";
 
 const settings = { reportRoadmapDedupeEnabled: false, reportMode: "draft-review" as const, githubTrackingDefaultRepo: "Runfusion/Fusion", githubAuthMode: "token", githubAuthToken: "test" };
@@ -125,11 +126,11 @@ describe("report pipeline", () => {
     expect(context.client!.createIssue).toHaveBeenCalledOnce();
   });
 
-  it("files feedback as a repository discussion in auto-file mode", async () => {
+  it("files enabled Discussions with the configured category and destination", async () => {
     const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportDiscussionCategory: "DC_ideas" } });
     const result = await runReportPipeline({ actionType: "feedback", userPrompt: "The report flow needs clearer status" }, context);
-    expect(result.kind).toBe("filed");
-    expect(context.client!.createDiscussion).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ kind: "filed", destination: "discussion" });
+    expect(context.client!.createDiscussion).toHaveBeenCalledWith("Runfusion", "Fusion", expect.any(String), expect.any(String), "DC_ideas");
     expect(context.client!.createIssue).not.toHaveBeenCalled();
   });
 
@@ -142,11 +143,10 @@ describe("report pipeline", () => {
   });
 
 
-  it("requires an explicitly configured Discussion category before creating a discussion", async () => {
-    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportTarget: "discussion" } });
-    await expect(runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, context))
-      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_category_missing" });
-    expect(context.client!.createDiscussion).not.toHaveBeenCalled();
+  it("uses an explicit Discussion category before the FN-8308 persisted default", async () => {
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportDiscussionCategory: "DC_default" } });
+    await runReportPipeline({ actionType: "feedback", userPrompt: "Report status needs clarity" }, context, { discussionCategoryId: "DC_explicit" });
+    expect(context.client!.createDiscussion).toHaveBeenCalledWith("Runfusion", "Fusion", expect.any(String), expect.any(String), "DC_explicit");
   });
 
   it("maps Discussion search and endorsement GraphQL failures to a safe unavailable result", async () => {
@@ -169,13 +169,46 @@ describe("report pipeline", () => {
       .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_unavailable" });
   });
 
-  it("returns a typed reason when the configured Discussion category is unavailable", async () => {
-    const context = deps({
-      projectSettings: { ...settings, reportMode: "auto-file", reportTarget: "discussion", reportDiscussionCategory: "ideas" },
-      client: { ...deps().client!, listDiscussionCategories: vi.fn().mockResolvedValue([]) },
-    });
-    await expect(runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, context))
-      .resolves.toMatchObject({ kind: "unavailable", reason: "discussion_category_invalid" });
+  it("ignores a supplied Discussion category for Issue-targeted actions", async () => {
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file" } });
+    const result = await runReportPipeline({ actionType: "bug", userPrompt: "Report failure needs attention" }, context, { discussionCategoryId: "DC_ignored" });
+    expect(result).toMatchObject({ kind: "filed", destination: "issue" });
+    expect(context.client!.createDiscussion).not.toHaveBeenCalled();
+    expect(context.client!.createIssue).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["draft-review", false],
+    ["draft-review", true],
+    ["auto-file", false],
+  ] as const)("falls back to Issue after a disabled Discussion search in %s mode", async (reportMode, file) => {
+    const client = {
+      ...deps().client!,
+      searchDiscussions: vi.fn().mockRejectedValue(new DiscussionsDisabledError("Runfusion", "Fusion")),
+      searchIssues: vi.fn().mockResolvedValue([]),
+    };
+    const result = await runReportPipeline({ actionType: "feedback", userPrompt: "Report status needs clarity" }, deps({ projectSettings: { ...settings, reportMode }, client }), { file });
+    expect(client.searchIssues).toHaveBeenCalled();
+    if (file || reportMode === "auto-file") {
+      expect(result).toMatchObject({ kind: "filed", destination: "issue" });
+      expect(client.createIssue).toHaveBeenCalledOnce();
+    } else {
+      expect(result.kind).toBe("draft-ready");
+      expect(client.createIssue).not.toHaveBeenCalled();
+    }
+  });
+
+  it("falls back to an Issue after create reports disabled Discussions", async () => {
+    const client = {
+      ...deps().client!,
+      searchDiscussions: vi.fn().mockResolvedValue([]),
+      searchIssues: vi.fn().mockResolvedValue([]),
+      createDiscussion: vi.fn().mockRejectedValue(new DiscussionsDisabledError("Runfusion", "Fusion")),
+    };
+    const result = await runReportPipeline({ actionType: "feedback", userPrompt: "Report status needs clarity" }, deps({ projectSettings: { ...settings, reportMode: "auto-file", reportDiscussionCategory: "DC_ideas" }, client }));
+    expect(client.searchIssues).toHaveBeenCalled();
+    expect(client.createIssue).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ kind: "filed", destination: "issue" });
   });
 
   it("automatically endorses an open duplicate in auto-file mode", async () => {

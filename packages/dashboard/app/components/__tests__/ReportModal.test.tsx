@@ -132,6 +132,19 @@ describe("ReportModal", () => {
     expect(screen.getByLabelText("What would you like to share?")).toBeInTheDocument();
   });
 
+  it.each([
+    ["issue", "Report filed as an Issue"],
+    ["discussion", "Report sent"],
+  ] as const)("shows the %s filing destination", async (destination, message) => {
+    reportDraft.mockResolvedValueOnce({ kind: "filed", destination, url: "https://example.test/1" });
+    render(<ReportModal actionType="feedback" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("What would you like to share?"), { target: { value: "A thought" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
   it("keeps the original derivation marker when the review prompt is edited", async () => {
     reportDraft.mockResolvedValueOnce({ kind: "draft-ready", report: { userPrompt: "It crashes", sourcePrompt: "It crashes", body: "## Summary\nIt crashes\n\n## Environment\nCollected context", context: {} } });
     reportFile.mockResolvedValueOnce({ kind: "filed", url: "https://example.test/1" });

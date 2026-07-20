@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GitHubClient } from "../github.js";
+import { DiscussionsDisabledError, GitHubClient } from "../github.js";
 
 describe("GitHub Discussions GraphQL transport", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -32,13 +32,32 @@ describe("GitHub Discussions GraphQL transport", () => {
   });
 
 
-  it("requires callers to provide a validated category instead of choosing the first one", async () => {
+  it("maps disabled Discussions errors from search to a typed signal", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: { repository: { id: "R_1", discussionCategories: { nodes: [{ id: "DC_1" }] } } },
+      errors: [{ message: "Discussions are disabled for this repository" }],
     }), { status: 200 })));
 
-    await expect(new GitHubClient({ token: "test", forceMode: "token" }).createDiscussion("Runfusion", "Fusion", "Title", "Body"))
-      .rejects.toThrow("Discussion category is unavailable");
+    await expect(new GitHubClient({ token: "test", forceMode: "token" }).searchDiscussions("Runfusion", "Fusion", "report"))
+      .rejects.toBeInstanceOf(DiscussionsDisabledError);
+  });
+
+  it("maps disabled Discussions errors from create to the same typed signal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      errors: [{ message: "Discussions are not enabled for this repository" }],
+    }), { status: 200 })));
+
+    await expect(new GitHubClient({ token: "test", forceMode: "token" }).createDiscussion("Runfusion", "Fusion", "Title", "Body", "DC_1"))
+      .rejects.toBeInstanceOf(DiscussionsDisabledError);
+  });
+
+  it("uses the first category when the selected category is stale", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { repository: { id: "R_1", discussionCategories: { nodes: [{ id: "DC_1" }] } } } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { createDiscussion: { discussion: { id: "D_1", number: 1, url: "https://github.com/Runfusion/Fusion/discussions/1" } } } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new GitHubClient({ token: "test", forceMode: "token" }).createDiscussion("Runfusion", "Fusion", "Title", "Body", "stale-category");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).variables.categoryId).toBe("DC_1");
   });
 
 });
