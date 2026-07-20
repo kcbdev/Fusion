@@ -22,7 +22,7 @@ The following is the complete top-level registrar map currently imported by `rou
 - `registerGitLabRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerFilesTerminalWorkspaceRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerAgentsProjectsNodesRoutes` — domain registrar mounted by `createApiRoutes`.
-- `registerPluginsAutomationRoutes` — domain registrar mounted by `createApiRoutes`.
+- `registerPluginsAutomationRoutes` — automation and routine CRUD/manual-run/webhook endpoints plus live SSE streams, and plugin-management endpoints. It preserves the `/plugins/:id` registry pass-through; `createPluginRouter` remains mounted later by `routes.ts` so `/plugins/registry` retains precedence. Its co-located `automation-live-run.ts`, `automation-step-execution.ts`, and `plugin-bundled-runtimes.ts` helpers own replayable output, execution, and bundled-runtime fallback metadata.
 - `registerApprovalRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerWorktrunkRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerModelRoutes` — domain registrar mounted by `createApiRoutes`.
@@ -130,6 +130,7 @@ Express matches in registration order. `create-api-routes-mount-sequence.ts` is 
 - `registerProxyRoutes` is always last; its explicit `/proxy/:nodeId/health`, project, task, project-health, and event paths precede `ALL /proxy/:nodeId/{*splat}` inside the registrar.
 - Keep model → auth → usage, the agent core/list → core → runtime chain, and project → node → sync → mesh → discovery → inbound-sync ordering unchanged unless a tested precedence migration requires it.
 - Keep integrated routers before project/node routes and the integrated dev-server router before skills and proxy routes.
+- Keep plugin management registration ahead of the later `createPluginRouter` mount. Its `/plugins/:id` handler calls `next()` for `registry`, allowing the sub-router's registry route to serve that static path.
 - Preserve the file aggregator's session-diff → file-workspace → terminal nesting and its operation-before-wildcard rules.
 
 ## Guardrails and verification
