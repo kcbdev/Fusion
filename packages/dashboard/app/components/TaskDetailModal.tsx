@@ -4280,7 +4280,6 @@ export function TaskDetailContent({
                   </p>
                 </div>
               )}
-              <TaskVerificationStatus request={verificationRequest} />
               <div className="detail-meta">
                 {/*
                 FNXC:QuickAddActionRow 2026-07-16-16:00:
@@ -4760,6 +4759,8 @@ export function TaskDetailContent({
                   )}
                 </div>
               </div>
+              {/* FNXC:TaskVerificationStatus 2026-07-19-12:00: Verification status moved below metadata controls per UX feedback — empty state "No chat verification requested" was appearing too prominently near the top of the card. */}
+              <TaskVerificationStatus request={verificationRequest} />
               {shouldShowBranchGroupCard && task.branchContext?.groupId && (
                 /* FNXC:BranchGroupDetails 2026-06-30-00:00: Task-detail branch groups must return to their compact collapsed default when users switch tasks, including between members of the same shared branch group. Key by task and group so a manual expansion never leaks into the next task detail view. */
                 <BranchGroupCard
