@@ -477,17 +477,7 @@ const LOOP_COMPACTION_TIMEOUT_MS = 60_000;
 
 const TASK_DONE_REFUSAL_SUFFIX = "Either finish the work and resubmit, or do not call fn_task_done — exit the session and the engine will requeue.";
 
-export const DISSENT_PATTERNS: RegExp[] = [
-  /\btask (is|was)(?: not|n['’]?t) complete\b/i,
-  /\b(?:i (?:could|can)(?:not|n['’]?t)|unable to|failed to) (?:complete|finish|implement)\b/i,
-  /\b(?:partially|not fully) (?:complete|implemented|done|finished)\b/i,
-  /\b(?:i['’]?m blocked|blocked from|blocking issue prevents)\b/i,
-  /\bto unblock\b/i,
-  /\b(?:needs|requires) (?:FN-\d+|further work|additional work|follow[- ]?up)\b/i,
-];
-
 type TaskDoneRefusalClass =
-  | "summary-claims-incomplete"
   | "bulk-step-completion-without-review"
   | "pending-code-review-revise";
 
@@ -581,7 +571,7 @@ function formatTaskDoneRefusal(refusalClass: TaskDoneRefusalClass, reason: strin
 
 export function evaluateTaskDoneRefusal(
   task: Task,
-  params: { summary?: string },
+  _params: { summary?: string },
   codeReviewVerdicts: Map<number, ReviewVerdict>,
 ): TaskDoneRefusalResult {
   const pendingSteps: number[] = [];
@@ -599,48 +589,6 @@ export function evaluateTaskDoneRefusal(
         reason,
         message: formatTaskDoneRefusal("pending-code-review-revise", reason),
       };
-    }
-  }
-
-  const summary = params.summary?.trim();
-  // Preflight escape hatch: when the agent's preflight finds PROMPT.md is out
-  // of sync with HEAD (work already done on the base), it marks remaining
-  // steps `skipped` and calls fn_task_done with a `PREMISE STALE:` summary.
-  // Skip the summary-text refusals (dissent + scoped-incomplete) for this
-  // sentinel so a natural premise-stale explanation like "...the work is
-  // already done on HEAD" cannot deadlock the executor. The pending-review
-  // and bulk-step-completion guards above/below still apply.
-  const isPremiseStale = !!summary && /^premise stale:/i.test(summary);
-  if (summary && !isPremiseStale) {
-    const dissentMatch = DISSENT_PATTERNS.find((pattern) => pattern.test(summary));
-    if (dissentMatch) {
-      const matchText = summary.match(dissentMatch)?.[0] ?? dissentMatch.source;
-      const reason = `summary indicates incomplete work (${JSON.stringify(matchText)})`;
-      return {
-        ok: false,
-        refusalClass: "summary-claims-incomplete",
-        reason,
-        message: formatTaskDoneRefusal("summary-claims-incomplete", reason),
-      };
-    }
-
-    const scopedPattern = /\b(incomplete|not implemented|not done|not finished)\b/i;
-    const scopedMatch = scopedPattern.exec(summary);
-    if (scopedMatch) {
-      const start = Math.max(0, scopedMatch.index - 40);
-      const end = Math.min(summary.length, scopedMatch.index + scopedMatch[0].length + 40);
-      const scopedWindow = summary.slice(start, end);
-      const hasFirstPersonContext = /\b(i|i['’]?m|i['’]?ve|my|we)\b/i.test(scopedWindow)
-        || /\b(the task|this task)\b/i.test(scopedWindow);
-      if (hasFirstPersonContext) {
-        const reason = `summary indicates incomplete work (${JSON.stringify(scopedMatch[0])})`;
-        return {
-          ok: false,
-          refusalClass: "summary-claims-incomplete",
-          reason,
-          message: formatTaskDoneRefusal("summary-claims-incomplete", reason),
-        };
-      }
     }
   }
 
@@ -12386,7 +12334,7 @@ export class TaskExecutor {
             const implicitCheck = await this.store.getTask(task.id);
             if (implicitCheck.steps.length > 0 &&
                 implicitCheck.steps.every((s) => s.status === "done" || s.status === "skipped")) {
-              // Implicit path has no summary; evaluateTaskDoneRefusal will skip summary-claims-incomplete and only enforce pending-code-review-revise / bulk-step-completion-without-review.
+              // Implicit and explicit paths share the same structural pending-review and bulk-step-completion guards.
               const refusal = this.evaluateImplicitCompletionRefusal(implicitCheck, codeReviewVerdicts);
               if (!refusal.ok) {
                 await this.handleImplicitTaskDoneRefusal(implicitCheck, refusal);
@@ -12654,7 +12602,7 @@ export class TaskExecutor {
                 const implicitCheck = await this.store.getTask(task.id);
                 if (implicitCheck.steps.length > 0 &&
                     implicitCheck.steps.every((s) => s.status === "done" || s.status === "skipped")) {
-                  // Implicit path has no summary; evaluateTaskDoneRefusal will skip summary-claims-incomplete and only enforce pending-code-review-revise / bulk-step-completion-without-review.
+                  // Implicit and explicit paths share the same structural pending-review and bulk-step-completion guards.
                   const refusal = this.evaluateImplicitCompletionRefusal(implicitCheck, codeReviewVerdicts);
                   if (!refusal.ok) {
                     await this.handleImplicitTaskDoneRefusal(implicitCheck, refusal);
