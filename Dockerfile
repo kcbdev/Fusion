@@ -46,10 +46,11 @@ COPY plugins/fusion-plugin-linear-import/package.json ./plugins/fusion-plugin-li
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+RUN rm -rf plugins/fusion-plugin-claude-runtime
 RUN pnpm build
 
 FROM node:22-slim AS runner
-LABEL org.opencontainers.image.source="https://github.com/gsxdsm/fusion"
+LABEL org.opencontainers.image.source="https://github.com/kcbdev/fusion"
 LABEL org.opencontainers.image.description="AI-orchestrated task board"
 
 ENV NODE_ENV=production
