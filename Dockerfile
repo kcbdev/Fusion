@@ -59,8 +59,13 @@ LABEL org.opencontainers.image.description="AI-orchestrated task board"
 ENV NODE_ENV=production
 ENV PORT=4040
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends git curl \
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends git curl gh \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
@@ -85,6 +90,10 @@ COPY --from=builder /app/packages/cli/dist ./packages/cli/dist
 COPY --from=builder /app/node_modules/.pnpm/typebox@*/node_modules/typebox /project/node_modules/typebox
 
 RUN chown node:node /project
+
+RUN mkdir -p /data/fusion-projects && chown node:node /data/fusion-projects
+
+RUN npm install -g /project/packages/cli --no-audit --no-fund
 
 USER node
 
