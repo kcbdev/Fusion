@@ -38,6 +38,9 @@ COPY plugins/fusion-plugin-droid-runtime/package.json ./plugins/fusion-plugin-dr
 COPY plugins/fusion-plugin-cursor-runtime/package.json ./plugins/fusion-plugin-cursor-runtime/package.json
 COPY plugins/fusion-plugin-agent-browser/package.json ./plugins/fusion-plugin-agent-browser/package.json
 COPY plugins/fusion-plugin-whatsapp-chat/package.json ./plugins/fusion-plugin-whatsapp-chat/package.json
+COPY plugins/fusion-plugin-even-cards/package.json ./plugins/fusion-plugin-even-cards/package.json
+COPY plugins/fusion-plugin-omp-runtime/package.json ./plugins/fusion-plugin-omp-runtime/package.json
+COPY plugins/fusion-plugin-quality/package.json ./plugins/fusion-plugin-quality/package.json
 COPY plugins/fusion-plugin-roadmap/package.json ./plugins/fusion-plugin-roadmap/package.json
 COPY plugins/fusion-plugin-even-realities-glasses/package.json ./plugins/fusion-plugin-even-realities-glasses/package.json
 COPY plugins/fusion-plugin-reports/package.json ./plugins/fusion-plugin-reports/package.json
