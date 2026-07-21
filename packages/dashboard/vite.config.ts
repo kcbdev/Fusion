@@ -180,6 +180,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-quality/src/qa-tab.tsx",
       ),
+      "@fusion-plugin-examples/claude-runtime": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-claude-runtime/src/index.ts",
+      ),
+      "@fusion-plugin-examples/grok-runtime": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-grok-runtime/src/index.ts",
+      ),
       "@fusion-plugin-examples/quality": resolve(
         __dirname,
         "../../plugins/fusion-plugin-quality/src/index.ts",
