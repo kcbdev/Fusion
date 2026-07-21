@@ -363,12 +363,15 @@ describe("PlanningModeModal sequential flow", () => {
     mockFetchAiSession.mockImplementation(async (sessionId: string) => ({
       ...base,
       id: sessionId,
+      updatedAt: new Date(now - (sessionId === "session-1" ? 25_000 : 7_000)).toISOString(),
       status: "generating",
       currentQuestion: null,
       result: JSON.stringify(summaryWithRefinements),
       inputPayload: JSON.stringify({
         generationPurpose: "plan_update",
-        generationStartedAt: new Date(now - (sessionId === "session-1" ? 25_000 : 7_000)).toISOString(),
+        ...(sessionId === "session-1"
+          ? { generationStartedAt: new Date(now - 25_000).toISOString() }
+          : {}),
       }),
     }));
     const props = { isOpen: true, onClose: vi.fn(), onTaskCreated: vi.fn(), onTasksCreated: vi.fn(), tasks: mockTasks, projectId: "project-1" };
@@ -397,8 +400,39 @@ describe("PlanningModeModal sequential flow", () => {
 
     await waitFor(() => expect(mockStopPlanningGeneration).toHaveBeenCalledWith("session-1", "project-1"));
     expect(await screen.findByText("What should change?")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Type your answer here...")).toHaveValue("Preserve drafts");
+    await waitFor(() => expect(screen.getByPlaceholderText("Type your answer here...")).toHaveValue("Preserve drafts"));
     expect(screen.queryByText(/Generation stopped by user/i)).toBeNull();
+
+    const stoppedStreamHandlers = mockConnectPlanningStream.mock.calls[0]?.[2];
+    mockRespondToPlanning.mockResolvedValue({
+      currentQuestion: { id: "q-next", type: "text", question: "What comes next?" },
+      summary: summaryWithRefinements,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith(
+      "session-1",
+      { "q-prior": "Preserve drafts" },
+      "project-1",
+    ));
+    expect(await screen.findByText("What comes next?")).toBeInTheDocument();
+    expect(mockConnectPlanningStream).toHaveBeenCalledTimes(2);
+
+    stoppedStreamHandlers?.onError?.("Stream error");
+    await Promise.resolve();
+    expect(mockConnectPlanningStream).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Stream error")).toBeNull();
+  });
+  it("can restart initial planning after stopping its first generation", async () => {
+    render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-1" />);
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), { target: { value: "Build secure accounts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
+    await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(await screen.findByLabelText("What do you want to build?")).toHaveValue("Build secure accounts");
+    fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
+
+    await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledTimes(2));
   });
   it("renders exactly one write-your-own choice for normalized select questions", async () => {
     mockFetchAiSession.mockResolvedValue({

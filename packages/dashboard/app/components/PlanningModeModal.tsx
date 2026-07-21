@@ -440,6 +440,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [newSessionFocusSignal, setNewSessionFocusSignal] = useState(0);
   const modalRef = useRef<HTMLDivElement>(null);
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
+  const streamConnectionEpochRef = useRef(0);
   const currentSessionIdRef = useRef<string | null>(null);
   const viewRef = useRef<ViewState>({ type: "initial" });
   /*
@@ -1053,13 +1054,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   const connectToPlanningStream = useCallback(
     (sessionId: string) => {
+      const streamEpoch = ++streamConnectionEpochRef.current;
       streamConnectionRef.current?.close();
       // Guard handlers against late events from a connection the user has
       // already navigated away from (e.g. clicked "New Session" while the
       // previous SSE flushed a buffered question). currentSessionIdRef is
       // cleared by resetDetailState and reassigned by handleStartPlanning /
       // loadSession before each connectToPlanningStream call.
-      const isStaleEvent = () => currentSessionIdRef.current !== sessionId;
+      const isStaleEvent = () => currentSessionIdRef.current !== sessionId
+        || streamConnectionEpochRef.current !== streamEpoch;
 
       const connection = connectPlanningStream(sessionId, projectId, {
         onThinking: (data) => {
@@ -1149,6 +1152,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           setStreamingOutput("");
         },
         onError: (message) => {
+          if (isStaleEvent()) return;
           const errorMessage = message || t("planning.sessionFailed", "Session failed while contacting the AI.");
 
           // A single transient stream error (e.g. tab was backgrounded long
@@ -1159,6 +1163,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           (async () => {
             try {
               const session = await fetchAiSession(sessionId);
+              if (isStaleEvent()) return;
               if (
                 session &&
                 (session.status === "generating" || session.status === "awaiting_input")
@@ -1169,6 +1174,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             } catch {
               // fall through to error view below
             }
+            if (isStaleEvent()) return;
 
             /*
             FNXC:PlanningRetry 2026-07-15-00:00:
@@ -1203,6 +1209,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           })();
         },
         onComplete: () => {
+          if (isStaleEvent()) return;
           setIsRetrying(false);
           resetPlanningAutoRetryBudget();
           setIsRefiningSummary(false);
@@ -1361,6 +1368,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (!startedPlan || startPlanningInFlightRef.current) return;
     startPlanningInFlightRef.current = true;
 
+    if (draftDebounceRef.current) {
+      clearTimeout(draftDebounceRef.current);
+      draftDebounceRef.current = null;
+    }
+
     setActivePlanPrompt(startedPlan);
     setError(null);
     setStreamingOutput("");
@@ -1383,10 +1395,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
       let draftSessionId = draftSessionIdRef.current;
       if (!draftSessionId) {
-        if (draftDebounceRef.current) {
-          clearTimeout(draftDebounceRef.current);
-          draftDebounceRef.current = null;
-        }
         const draftPromise = draftCreatePromiseRef.current ?? createPlanningDraft(startedPlan, projectId, modelOverride);
         draftCreatePromiseRef.current = draftPromise;
         draftCreateInFlightRef.current = true;
@@ -1551,9 +1559,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // An unavailable payload cannot provide a safe copy target.
         }
         setActivePlanPrompt(typeof inputPayload?.initialPlan === "string" ? inputPayload.initialPlan : "");
-        const persistedGenerationStartedAt = typeof inputPayload?.generationStartedAt === "string"
-          ? Date.parse(inputPayload.generationStartedAt)
-          : Number.NaN;
+        const generationStartedAtSource = typeof inputPayload?.generationStartedAt === "string"
+          ? inputPayload.generationStartedAt
+          : session.updatedAt;
+        const persistedGenerationStartedAt = Date.parse(generationStartedAtSource);
         setGenerationStartTime(
           session.status === "generating" && Number.isFinite(persistedGenerationStartedAt)
             ? persistedGenerationStartedAt
@@ -2268,7 +2277,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setGenerationStartTime(Date.now());
       setView({ type: "loading" });
       setStreamingOutput(""); // Clear old thinking output when entering loading state
+      currentSessionIdRef.current = sessionId;
       liveGenerationSessionIdRef.current = sessionId;
+      if (!streamConnectionRef.current?.isConnected()) {
+        connectToPlanningStream(sessionId);
+      }
 
       try {
         // Submit response. SSE remains the primary live path, while the HTTP payload closes
@@ -2349,7 +2362,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         setView({ type: "question", session: { ...session, summary: runningSummaryRef.current } });
       }
     },
-    [conversationHistory, editingQuestionId, projectId, resetPlanningAutoRetryBudget, view]
+    [connectToPlanningStream, conversationHistory, editingQuestionId, projectId, resetPlanningAutoRetryBudget, view]
   );
 
   const handleStopGeneration = useCallback(async () => {
@@ -2361,14 +2374,19 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     const summary = runningSummaryRef.current;
     const history = conversationHistoryRef.current;
 
+    currentSessionIdRef.current = null;
+    liveGenerationSessionIdRef.current = null;
+    streamConnectionEpochRef.current += 1;
+    streamConnectionRef.current?.close();
+    streamConnectionRef.current = null;
+
     try {
       await stopPlanningGeneration(sessionId, projectId);
     } catch {
       // best-effort; server-side timeout/stop event may have already fired
     }
 
-    streamConnectionRef.current?.close();
-    streamConnectionRef.current = null;
+    startPlanningInFlightRef.current = false;
     setIsRetrying(false);
     setIsAutoRetrying(false);
     setIsRefiningSummary(false);
