@@ -306,7 +306,6 @@ export async function claimPlanningSessionTaskCreation(
   const existing = await getAiSession(handle, sessionId);
   if (!existing || existing.type !== "planning") return null;
   const input = safeJsonParse(existing.inputPayload, {}) as Record<string, unknown>;
-  if (input.validated !== true) return null;
   const inputPayload = { ...input, createClaimStatus: "creating", claimOwnerToken, claimStartedAt, createdTaskId: undefined };
   const rows = await handle.update(schema.project.aiSessions)
     .set({ inputPayload, updatedAt: claimStartedAt })

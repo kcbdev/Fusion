@@ -1163,7 +1163,6 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       } = await import("../planning.js");
 
       let session = await getSession(sessionId);
-      if (session && !session.validated) throw badRequest("Planning session must be validated before creating tasks");
       let summary = summaryOverride ?? getSummary(sessionId);
       let initialPlan = session?.initialPlan;
 
@@ -1177,18 +1176,14 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           throw notFound(`Planning session ${sessionId} not found or expired`);
         }
 
-        const persistedInput = JSON.parse(persistedSession.inputPayload) as { validated?: unknown };
-        if (persistedSession.status !== "complete" || persistedInput.validated !== true) {
-          throw badRequest("Planning session must be validated before creating tasks");
-        }
-
-        if (!persistedSession.result) {
+        const persistedResult = persistedSession.result;
+        if (!summaryOverride && !persistedResult) {
           throw badRequest("Planning session result is not available");
         }
 
         if (!summaryOverride) {
           try {
-            const parsedSummary = JSON.parse(persistedSession.result) as {
+            const parsedSummary = JSON.parse(persistedResult as string) as {
               title?: unknown;
               description?: unknown;
               suggestedSize?: unknown;
@@ -1297,7 +1292,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       */
       /*
       FNXC:PlanningMode 2026-07-20-12:00:
-      FN-8441 hands the validated lean plan to triage as task description plus a plan
+      FN-8441 hands the current lean plan to triage as task description plus a plan
       document. The raw session request remains a separate original-description document.
       */
       const planMd = formatPlanningPlanMd(summary);

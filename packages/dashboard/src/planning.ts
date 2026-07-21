@@ -3329,7 +3329,7 @@ export async function getDurablePlanningSession(sessionId: string): Promise<Sess
   return row?.type === "planning" ? restoreClaimSession(row) : undefined;
 }
 
-/** Atomically claim a validated planning session for its one task creation. */
+/** Atomically claim a planning session for its one task creation. */
 export async function claimPlanningTaskCreation(sessionId: string, ownerToken: string, startedAt: string): Promise<Session | undefined> {
   if (!_aiSessionStore || typeof (_aiSessionStore as unknown as { claimPlanningTaskCreation?: unknown }).claimPlanningTaskCreation !== "function") {
     const session = await getSession(sessionId);

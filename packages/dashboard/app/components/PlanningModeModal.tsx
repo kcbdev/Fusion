@@ -1,7 +1,7 @@
 import "./PlanningModeModal.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useState, useCallback, useEffect, useRef, useMemo, type MouseEvent } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, PlanningQuestion, PlanningSummary, TaskPriority, ThinkingLevel } from "@fusion/core";
@@ -442,6 +442,14 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
   const viewRef = useRef<ViewState>({ type: "initial" });
+  /*
+  FNXC:PlanningMode 2026-07-20-23:52:
+  Mobile touch starts on pointer-down because closing the software keyboard resizes the
+  visual viewport before click, which can move the button and cancel that first click.
+  Keep a synchronous single-flight guard so touch compatibility events and rapid input
+  cannot start two planning sessions.
+  */
+  const startPlanningInFlightRef = useRef(false);
   /*
   FNXC:PlanningRetry 2026-07-15-00:00:
   FN-8332 permits automatic retry only for a generation this mounted Planning
@@ -968,6 +976,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setPlanningModelId(undefined);
     setPlanningThinkingLevel("");
     currentSessionIdRef.current = null;
+    startPlanningInFlightRef.current = false;
   }, [resetPlanningAutoRetryBudget]);
 
   const planningSelectionValue = getModelSelectionValue(planningModelProvider, planningModelId);
@@ -1343,7 +1352,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const handleStartPlanning = useCallback(async (planOverride?: string) => {
     const plan = planOverride ?? initialPlan;
     const startedPlan = plan.trim();
-    if (!startedPlan) return;
+    if (!startedPlan || startPlanningInFlightRef.current) return;
+    startPlanningInFlightRef.current = true;
 
     setActivePlanPrompt(startedPlan);
     setError(null);
@@ -1409,6 +1419,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       connectToPlanningStream(sessionId);
       setResponseHistory([]);
     } catch (err) {
+      startPlanningInFlightRef.current = false;
       draftCreatePromiseRef.current = null;
       draftCreateInFlightRef.current = false;
       setError(getErrorMessage(err) || t("planning.failedStartSession", "Failed to start planning session"));
@@ -2402,7 +2413,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     }
   }, [projectId, refinementInstructions, t, workspaceQuestion]);
 
-  const handleValidatePlan = useCallback(async () => {
+  const handleProceedWithPlan = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const summary = runningSummaryRef.current;
     if (!sessionId || !summary || validateCreateInFlightRef.current) return;
@@ -2410,28 +2421,25 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     validateCreateInFlightRef.current = true;
     setError(null);
     setView({ type: "creating_task", session, summary });
-    let validationCompleted = false;
     try {
-      const validated = await validatePlanningSession(sessionId, projectId);
-      validationCompleted = true;
-      const validatedSummary = normalizePlanningSummary(validated.summary);
-      const task = await createTaskAfterActiveClaim(() => createTaskFromPlanning(sessionId, validatedSummary, projectId, {
+      const task = await createTaskAfterActiveClaim(() => createTaskFromPlanning(sessionId, summary, projectId, {
         ...(workflowId !== undefined ? { workflowId } : {}),
       }));
       clearPlanningActiveSession(projectId);
       setView({ type: "task_created", taskId: task.id, task });
     } catch (err) {
       const errorMessage = getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task");
-      if (validationCompleted) {
-        setView({ type: "create_retry", session, summary, errorMessage });
-      } else {
-        setError(errorMessage);
-        setView({ type: "plan_review", session, summary });
-      }
+      setView({ type: "create_retry", session, summary, errorMessage });
     } finally {
       validateCreateInFlightRef.current = false;
     }
   }, [projectId, t, workflowId, workspaceQuestion]);
+
+  const handleStartPlanningPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (viewportMode !== "mobile" || event.pointerType === "mouse") return;
+    event.preventDefault();
+    void handleStartPlanning();
+  }, [handleStartPlanning, viewportMode]);
 
   const handleRetryCreateTask = useCallback(async () => {
     if (view.type !== "create_retry" || validateCreateInFlightRef.current) return;
@@ -2690,7 +2698,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         >
           {t("planning.refine", "Refine")}
         </button>
-        <button type="button" className="btn btn-primary" onClick={() => void handleValidatePlan()}>{t("planning.proceedWithPlan", "Proceed with plan")}</button>
+        <button type="button" className="btn btn-primary" onClick={() => void handleProceedWithPlan()}>{t("planning.proceedWithPlan", "Proceed with plan")}</button>
       </div>
     </section>
   );
@@ -3063,7 +3071,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               <div className="planning-view-footer">
                 <button
                   className="btn btn-primary planning-start-btn"
-                  onClick={() => handleStartPlanning()}
+                  onPointerDown={handleStartPlanningPointerDown}
+                  onClick={() => void handleStartPlanning()}
                   disabled={!initialPlan.trim()}
                 >
                   <Lightbulb size={16} className="icon-mr-8" />

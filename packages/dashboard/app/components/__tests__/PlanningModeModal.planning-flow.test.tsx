@@ -167,13 +167,13 @@ describe("PlanningModeModal sequential flow", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
 
-    await waitFor(() => expect(mockValidatePlanningSession).toHaveBeenCalledWith("session-1", "project-1"));
     await waitFor(() => expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({ title: mockSummary.title }),
       "project-1",
       {},
     ));
+    expect(mockValidatePlanningSession).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Review your plan" })).toBeNull();
     expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-8442");
     expect(onTaskCreated).toHaveBeenCalledWith({ id: "FN-8442" });
