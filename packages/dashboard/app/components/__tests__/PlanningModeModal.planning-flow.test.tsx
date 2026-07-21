@@ -344,9 +344,6 @@ describe("PlanningModeModal sequential flow", () => {
     fireEvent.change(screen.getByLabelText("Refinement instructions"), { target: { value: "Add migration sequencing and ask about rollout risks." } });
     const applyButton = screen.getByRole("button", { name: "Apply refinement" });
     expect(fireEvent.pointerDown(applyButton, { pointerType: "touch" })).toBe(false);
-    expect(applyButton).toBeInTheDocument();
-    expect(mockRespondToPlanning).not.toHaveBeenCalled();
-    fireEvent.click(applyButton);
     await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith("session-1", { refine: true, focus: "Add migration sequencing and ask about rollout risks." }, "project-1"));
     expect(await screen.findByText("Which migration risk should come first?")).toBeInTheDocument();
   });
@@ -433,6 +430,58 @@ describe("PlanningModeModal sequential flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
 
     await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledTimes(2));
+  });
+  it("can refine a stopped initial plan into the first question", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "generating",
+      currentQuestion: null,
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: JSON.stringify({ generationPurpose: "initial_plan", generationStartedAt: new Date().toISOString() }),
+    });
+    mockRespondToPlanning.mockResolvedValue({
+      currentQuestion: { id: "q-refined", type: "text", question: "Which refined area comes first?" },
+      summary: summaryWithRefinements,
+    });
+    renderSession({});
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Refine" }));
+    fireEvent.change(screen.getByLabelText("Refinement instructions"), { target: { value: "Focus the next questions on rollout." } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply refinement" }));
+
+    await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith(
+      "session-1",
+      { refine: true, focus: "Focus the next questions on rollout." },
+      "project-1",
+    ));
+    expect(await screen.findByText("Which refined area comes first?")).toBeInTheDocument();
+  });
+  it("replaces an active generation when refinement is applied", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "generating",
+      currentQuestion: null,
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: JSON.stringify({ generationPurpose: "plan_update", generationStartedAt: new Date().toISOString() }),
+    });
+    mockRespondToPlanning.mockResolvedValue({
+      currentQuestion: { id: "q-replaced", type: "text", question: "What should the replacement prioritize?" },
+      summary: summaryWithRefinements,
+    });
+    renderSession({});
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refine" }));
+    fireEvent.change(screen.getByLabelText("Refinement instructions"), { target: { value: "Replace the current direction." } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply refinement" }));
+
+    await waitFor(() => expect(mockStopPlanningGeneration).toHaveBeenCalledWith("session-1", "project-1"));
+    await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith(
+      "session-1",
+      { refine: true, focus: "Replace the current direction." },
+      "project-1",
+    ));
+    expect(await screen.findByText("What should the replacement prioritize?")).toBeInTheDocument();
   });
   it("renders exactly one write-your-own choice for normalized select questions", async () => {
     mockFetchAiSession.mockResolvedValue({

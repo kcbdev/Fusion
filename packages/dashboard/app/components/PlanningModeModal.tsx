@@ -2396,6 +2396,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setGenerationStartTime(null);
 
     if (priorQuestion) {
+      currentSessionIdRef.current = sessionId;
       const answered = history.some((entry) => entry.question?.id === priorQuestion.id && entry.response);
       setEditingQuestionId(answered ? priorQuestion.id : null);
       setWorkspaceQuestion(priorQuestion);
@@ -2404,6 +2405,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         session: { sessionId, currentQuestion: priorQuestion, summary },
       });
     } else if (summary) {
+      currentSessionIdRef.current = sessionId;
       setWorkspaceQuestion(null);
       setView({
         type: "plan_review",
@@ -2432,9 +2434,26 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   may finalize during loading or recoverable error states; the server cancels an active turn safely.
   */
   const handleRefineFromPlan = useCallback(async () => {
-    const sessionId = currentSessionIdRef.current;
+    const visibleSessionId = "session" in view ? view.session.sessionId : undefined;
+    const sessionId = currentSessionIdRef.current ?? visibleSessionId;
     const summary = runningSummaryRef.current;
-    if (!sessionId || !summary || !refinementInstructions) return;
+    if (!sessionId || !summary || !refinementInstructions || refineSummaryInFlightRef.current) return;
+    refineSummaryInFlightRef.current = true;
+    if (view.type === "loading") {
+      streamConnectionEpochRef.current += 1;
+      streamConnectionRef.current?.close();
+      streamConnectionRef.current = null;
+      try {
+        await stopPlanningGeneration(sessionId, projectId);
+      } catch {
+        // The turn may have settled between opening the refinement input and applying it.
+      }
+    }
+    currentSessionIdRef.current = sessionId;
+    liveGenerationSessionIdRef.current = sessionId;
+    if (!streamConnectionRef.current?.isConnected()) {
+      connectToPlanningStream(sessionId);
+    }
     setError(null);
     setGenerationActivity("question");
     setIsRefineMenuOpen(false);
@@ -2467,8 +2486,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       } else {
         setView({ type: "plan_review", session: { sessionId, currentQuestion: null, summary }, summary });
       }
+    } finally {
+      refineSummaryInFlightRef.current = false;
     }
-  }, [projectId, refinementInstructions, t, workspaceQuestion]);
+  }, [connectToPlanningStream, projectId, refinementInstructions, t, view, workspaceQuestion]);
 
   const handleProceedWithPlan = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
@@ -2496,6 +2517,18 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (viewportMode !== "mobile" || event.pointerType === "mouse") return;
     event.preventDefault();
   }, [viewportMode]);
+
+  const handleApplyRefinementPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (viewportMode !== "mobile" || event.pointerType === "mouse") return;
+    /*
+    FNXC:PlanningModeMobile 2026-07-21-00:50:
+    Preventing the touch pointer default suppresses the browser's compatibility click. Apply
+    before the keyboard resize can move/remove the popup button; the single-flight guard above
+    makes a browser that still emits click harmless.
+    */
+    event.preventDefault();
+    void handleRefineFromPlan();
+  }, [handleRefineFromPlan, viewportMode]);
 
   const handleRetryCreateTask = useCallback(async () => {
     if (view.type !== "create_retry" || validateCreateInFlightRef.current) return;
@@ -2735,7 +2768,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               >
                 {t("common.cancel", "Cancel")}
               </button>
-              <button type="button" className="btn btn-primary" disabled={!refinementInstructions} onPointerDown={handleMobileKeyboardActionPointerDown} onClick={() => void handleRefineFromPlan()}>
+              <button type="button" className="btn btn-primary" disabled={!refinementInstructions} onPointerDown={handleApplyRefinementPointerDown} onClick={() => void handleRefineFromPlan()}>
                 {t("planning.applyRefinement", "Apply refinement")}
               </button>
             </div>

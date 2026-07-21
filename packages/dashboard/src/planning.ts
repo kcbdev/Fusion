@@ -3102,8 +3102,11 @@ export function stopGeneration(sessionId: string): boolean {
   } else {
     session.currentQuestion = undefined;
     session.editingQuestionId = undefined;
-    void persistSession(session, stoppedPurpose === "initial_plan" ? "draft" : "awaiting_input");
-    if (session.summary && stoppedPurpose !== "initial_plan") {
+    // A stopped initial turn with a usable running plan resumes at plan review; only a turn
+    // stopped before any plan exists returns to the initial draft editor.
+    const hasReviewablePlan = Boolean(session.summary);
+    void persistSession(session, hasReviewablePlan || stoppedPurpose !== "initial_plan" ? "awaiting_input" : "draft");
+    if (session.summary) {
       planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
     }
   }
