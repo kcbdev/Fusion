@@ -60,7 +60,7 @@ ENV NODE_ENV=production
 ENV PORT=4040
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git \
+  && apt-get install -y --no-install-recommends git curl \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
