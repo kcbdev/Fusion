@@ -11,7 +11,7 @@ import type {
   Task,
   TaskReviewData,
 } from "@fusion/core";
-import { api } from "./client.js";
+import { api, ApiRequestError } from "./client.js";
 import type { FetchOptions } from "./client.js";
 import { withProjectId } from "./health.js";
 import { dedupe } from "./dedupe.js";
@@ -207,9 +207,14 @@ export function resolveAgent(shortname: string, projectId?: string): Promise<{ a
 
 /** Fetch employees (agents that report to a given parent agent) */
 export function fetchAgentChildren(agentId: string, projectId?: string): Promise<Agent[]> {
-  return api<Agent[]>(withProjectId(`/agents/${encodeURIComponent(agentId)}/children`, projectId)).catch((err: Error) => {
-    // Return empty array for 404 (agent may have been deleted)
-    if (err.message.includes("not found")) return [];
+  return api<Agent[]>(withProjectId(`/agents/${encodeURIComponent(agentId)}/children`, projectId)).catch((err: unknown) => {
+    /*
+     * FNXC:CodeOrganization 2026-07-20-12:00:
+     * Prefer HTTP status for 404 (agent may have been deleted); keep a
+     * case-insensitive message fallback for non-ApiRequestError throw sites.
+     */
+    if (err instanceof ApiRequestError && err.status === 404) return [];
+    if (err instanceof Error && err.message.toLowerCase().includes("not found")) return [];
     throw err;
   });
 }
