@@ -46,7 +46,7 @@ COPY plugins/fusion-plugin-linear-import/package.json ./plugins/fusion-plugin-li
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN rm -rf plugins/fusion-plugin-claude-runtime
+RUN rm -rf plugins
 RUN pnpm build
 
 FROM node:22-slim AS runner
