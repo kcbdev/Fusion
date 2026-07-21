@@ -32,4 +32,22 @@ describe("Planning Mode plan.md", () => {
       suggestedDependencies: ["FN-12"],
     }));
   });
+
+  it("keeps Markdown-flavored multiline list values as single round-trip items", () => {
+    const formatted = formatPlanningPlanMd({
+      title: "Stable lists",
+      description: "Keep structured plan fields parseable.",
+      proposedChanges: ["Render Markdown\n  - preserve the canonical section"],
+      acceptanceCriteria: ["Review shows **formatted** content\nwithout splitting the criterion"],
+      suggestedSize: "S",
+      suggestedDependencies: [],
+      keyDeliverables: ["A stable\nplan.md"],
+    });
+
+    expect(parsePlanningPlanMd(formatted)).toEqual(expect.objectContaining({
+      proposedChanges: ["Render Markdown - preserve the canonical section"],
+      acceptanceCriteria: ["Review shows **formatted** content without splitting the criterion"],
+      keyDeliverables: ["A stable plan.md"],
+    }));
+  });
 });

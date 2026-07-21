@@ -9,6 +9,7 @@ import {
   DEFAULT_TASK_PRIORITY,
   TASK_PRIORITIES,
   THINKING_LEVELS,
+  formatPlanningPlanMd,
   getErrorMessage,
 } from "@fusion/core";
 import {
@@ -2874,23 +2875,18 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           )}
 
           {view.type === "plan_review" && (
-            <div className="planning-summary" data-testid="planning-plan-review">
-              <div className="planning-view-scroll planning-summary-scroll">
-                <h4>{view.summary.title}</h4>
-                <p>{view.summary.description}</p>
-                {(view.summary.proposedChanges?.length ?? 0) > 0 && (
-                  <section>
-                    <h5>{t("planning.proposedChanges", "What to change")}</h5>
-                    <ul>{view.summary.proposedChanges!.map((item) => <li key={item}>{item}</li>)}</ul>
-                  </section>
-                )}
-                {(view.summary.acceptanceCriteria?.length ?? 0) > 0 && (
-                  <section>
-                    <h5>{t("planning.acceptanceCriteria", "Acceptance criteria")}</h5>
-                    <ul>{view.summary.acceptanceCriteria!.map((item) => <li key={item}>{item}</li>)}</ul>
-                  </section>
-                )}
-                {view.summary.keyDeliverables.length > 0 && <ul>{view.summary.keyDeliverables.map((item) => <li key={item}>{item}</li>)}</ul>}
+            <div className="planning-summary planning-plan-review" data-testid="planning-plan-review">
+              <div
+                className="planning-view-scroll planning-summary-scroll planning-plan-scroll"
+                data-testid="planning-plan-scroll"
+              >
+                <article className="planning-plan-document">
+                  <MailboxMessageContent
+                    className="planning-plan-markdown markdown-body"
+                    content={formatPlanningPlanMd(view.summary)}
+                    testId="planning-plan-markdown"
+                  />
+                </article>
                 <fieldset className="planning-refine-focus" data-testid="planning-refine-focus">
                   <legend>{t("planning.refineFocus", "Focus the next question")}</legend>
                   <div className="planning-radio-group" role="radiogroup">
@@ -2936,17 +2932,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                     )}
                   </div>
                 </fieldset>
-                <div className="planning-summary-actions">
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={refineFocus.trim().length === 0}
-                    onClick={() => void handleRefineFromPlan()}
-                  >
-                    {t("planning.refine", "Refine")}
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={() => void handleValidatePlan()}>{t("planning.validatePlan", "Validate")}</button>
-                </div>
+              </div>
+              <div
+                className="planning-actions planning-summary-actions planning-plan-actions"
+                data-testid="planning-plan-actions"
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={refineFocus.trim().length === 0}
+                  onClick={() => void handleRefineFromPlan()}
+                >
+                  {t("planning.refine", "Refine")}
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => void handleValidatePlan()}>{t("planning.validatePlan", "Validate")}</button>
               </div>
             </div>
           )}

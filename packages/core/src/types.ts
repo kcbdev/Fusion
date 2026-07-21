@@ -5675,6 +5675,25 @@ export interface PlanningSummary {
   suggestedRefinements?: string[];
 }
 
+/*
+FNXC:PlanningMode 2026-07-20-17:15:
+This pure formatter lives on the dashboard's browser-safe core surface so plan review
+and server persistence share one canonical Markdown representation without widening
+the client bundle to Node-only core modules.
+*/
+export function formatPlanningPlanMd(summary: PlanningSummary): string {
+  const normalizeListItem = (item: string) => item.replace(/\s+/g, " ").trim();
+  const list = (items: string[] | undefined) => items && items.length > 0
+    ? items.map((item) => `- ${normalizeListItem(item)}`).join("\n")
+    : "_None_";
+  const proposedChanges = list(summary.proposedChanges);
+  const acceptanceCriteria = list(summary.acceptanceCriteria);
+  const dependencies = list(summary.suggestedDependencies);
+  const deliverables = list(summary.keyDeliverables);
+
+  return `# ${summary.title}\n\n${summary.description}\n\n## What to change\n${proposedChanges}\n\n## Acceptance criteria\n${acceptanceCriteria}\n\n## Size\n${summary.suggestedSize}\n\n## Suggested dependencies\n${dependencies}\n\n## Key deliverables\n${deliverables}\n`;
+}
+
 /** Response from planning endpoints - either a question or the final summary */
 export type PlanningResponse =
   | { type: "question"; data: PlanningQuestion }

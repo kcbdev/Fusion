@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import "./styles.css";
 import i18n from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { PlanningModeModal } from "./components/PlanningModeModal";
@@ -8,12 +9,17 @@ import { NavigationHistoryProvider } from "./hooks/useNavigationHistory";
 
 const summary = {
   title: "Adaptive planning workflow",
-  description: "An evolving plan assembled from the interview answers.",
+  description: "An evolving **operator-ready** plan assembled from the interview answers.",
+  proposedChanges: ["Render the canonical plan as Markdown", "Keep review actions reachable while the plan scrolls"],
+  acceptanceCriteria: ["Markdown structure is visible", "Mobile actions remain at the bottom of the planning pane"],
   suggestedSize: "M",
   priority: "normal",
   suggestedDependencies: [],
-  keyDeliverables: ["Adaptive questions", "Validated task"],
+  keyDeliverables: ["Adaptive questions", "Validated task", "Responsive plan review"],
+  suggestedRefinements: ["Security boundaries", "Rollout strategy", "Failure recovery", "Accessibility", "Observability", "Data migration", "Performance", "Operational readiness", "API compatibility", "Privacy", "Analytics", "Localization", "Offline behavior", "Permissions", "Documentation", "Support readiness"],
 };
+
+const showPlanReview = new URLSearchParams(window.location.search).get("surface") === "plan-review";
 
 const questions = [
   {
@@ -102,10 +108,14 @@ window.fetch = async (input, init = {}) => {
     return json({ currentQuestion: questions[0], summary, history: [] });
   }
   if (url.includes("/planning/planning-browser-e2e/validate") && method === "POST") return json({ summary, validated: true });
-  if (url.includes("/planning/create-task") && method === "POST") return json({ id: "FN-BROWSER", description: summary.description, column: "todo", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  if (url.includes("/planning/create-task") && method === "POST") return json({ task: { id: "FN-BROWSER", description: summary.description, column: "todo", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, alreadyCreated: false });
+  if (showPlanReview && url.includes("/ai-sessions/planning-browser-e2e")) {
+    return json({ id: "planning-browser-e2e", title: summary.title, projectId: "project-browser", status: "awaiting_input", currentQuestion: null, result: JSON.stringify(summary), inputPayload: "{}", conversationHistory: "[]", thinkingOutput: "", updatedAt: new Date().toISOString(), archived: false });
+  }
   if (url.includes("/ai-sessions")) return json({ sessions: [] });
   if (url.includes("/models")) return json({ models: [], favoriteProviders: [], favoriteModels: [] });
   if (url.includes("/settings")) return json({});
+  if (url.includes("/events") || url.includes("/diagnostics/resume-events")) return json({ success: true });
   if (url.includes("/planning/create-draft")) return json({ sessionId: "planning-browser-e2e", title: "Adaptive planning workflow" });
   if (url.includes("/planning/")) return json({ success: true });
   return originalFetch(input, init);
@@ -124,6 +134,7 @@ createRoot(document.getElementById("root")!).render(
         onTasksCreated={() => undefined}
         tasks={[]}
         presentation="embedded"
+        resumeSessionId={showPlanReview ? "planning-browser-e2e" : undefined}
       />
     </ToastProvider>
     </NavigationHistoryProvider>

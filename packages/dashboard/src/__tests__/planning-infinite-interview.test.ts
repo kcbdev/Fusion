@@ -132,6 +132,19 @@ describe("reactive Planning Mode question contract", () => {
     }
   });
 
+  it("asks for an operator-facing plan in Markdown at every plan-writing boundary", () => {
+    const prompts = [
+      PLANNING_SYSTEM_PROMPT,
+      formatInitialRunningPlanRequestForAgent("Build secure accounts"),
+      formatResponseForAgent(FIRST_QUESTION, { scope: "secure" }),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toMatch(/plan in Markdown/i);
+    }
+    expect(prompts.at(-1)).toMatch(/without asking another question/i);
+  });
+
   it("repairs malformed select options and appends one localized Other option", () => {
     const question = normalizePlanningQuestion({
       id: "security",

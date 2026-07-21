@@ -78,7 +78,7 @@ describe.runIf(executablePath)("Planning Mode browser E2E", () => {
     await server.pluginContainer.close();
   }, 10_000);
 
-  it("keeps an adaptive interview open until Validate and then creates a task", async () => {
+  it("keeps the adaptive question and edit-answer loop working", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on("console", (event) => console.log(`[planning-browser-e2e] ${event.text?.() ?? ""}`));
     page.on("pageerror", (event) => console.error(`[planning-browser-e2e] ${event.message ?? ""}`));
@@ -87,8 +87,6 @@ describe.runIf(executablePath)("Planning Mode browser E2E", () => {
     await page.getByLabel("What do you want to build?").fill("Make Planning Mode adaptive");
     await page.getByRole("button", { name: "Start Planning" }).click();
     await expectVisible(page.getByText("Which user outcome matters most?"));
-    await expectVisible(page.getByLabel("Running plan").getByRole("heading", { name: "Adaptive planning workflow" }));
-    await expectVisible(page.getByRole("button", { name: "Validate plan" }));
 
     await page.getByLabel("Speed").check();
     await page.getByRole("button", { name: "Next question" }).click();
@@ -101,15 +99,58 @@ describe.runIf(executablePath)("Planning Mode browser E2E", () => {
     await page.getByLabel("Depth").check();
     await page.getByRole("button", { name: "Next question" }).click();
     await expectVisible(page.getByText("Who should receive this first?"));
-    await expectVisible(page.getByLabel("Running plan").getByRole("heading", { name: "Adaptive planning workflow" }));
-
-    await page.getByRole("button", { name: "Validate plan" }).click();
-    await expectVisible(page.getByRole("button", { name: "Create Single Task" }));
-    await page.getByRole("button", { name: "Create Single Task" }).click();
-    for (let attempt = 0; attempt < 20 && await page.evaluate(() => document.body.dataset.createdTask) !== "FN-BROWSER"; attempt += 1) {
-      await page.waitForTimeout(50);
-    }
-    expect(await page.locator("body").getAttribute("data-created-task")).toBe("FN-BROWSER");
     await page.close();
+  }, 30_000);
+
+  it("keeps the Markdown plan scrollable above a bottom action bar on desktop and mobile", async () => {
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 568 }]) {
+      const page = await browser.newPage({ viewport });
+      await page.goto(`${baseUrl}app/planning-browser-e2e-fixture.html?surface=plan-review`);
+      await expectVisible(page.getByRole("heading", { name: "Adaptive planning workflow" }));
+      await expectVisible(page.getByRole("button", { name: "Validate" }));
+
+      const layout = await page.evaluate(() => {
+        const review = document.querySelector<HTMLElement>("[data-testid='planning-plan-review']")!;
+        const scroll = document.querySelector<HTMLElement>("[data-testid='planning-plan-scroll']")!;
+        const actions = document.querySelector<HTMLElement>("[data-testid='planning-plan-actions']")!;
+        const buttons = [...actions.querySelectorAll<HTMLElement>("button")];
+        const reviewRect = review.getBoundingClientRect();
+        const scrollRect = scroll.getBoundingClientRect();
+        const actionsRect = actions.getBoundingClientRect();
+        return {
+          actionsInsideReview: review.contains(actions),
+          actionsInsideScroll: scroll.contains(actions),
+          actionsAtBottom: Math.abs(reviewRect.bottom - actionsRect.bottom) <= 1,
+          scrollEndsAtActions: Math.abs(scrollRect.bottom - actionsRect.top) <= 1,
+          scrollable: scroll.scrollHeight > scroll.clientHeight,
+          scrollOwnerConfigured: getComputedStyle(scroll).overflowY === "auto",
+          buttonsShareRow: buttons.length === 2 && Math.abs(buttons[0]!.getBoundingClientRect().top - buttons[1]!.getBoundingClientRect().top) <= 1,
+          markdownRendered: Boolean(review.querySelector("h1") && review.querySelector("strong")),
+        };
+      });
+
+      expect(layout).toEqual({
+        actionsInsideReview: true,
+        actionsInsideScroll: false,
+        actionsAtBottom: true,
+        scrollEndsAtActions: true,
+        scrollable: true,
+        scrollOwnerConfigured: true,
+        buttonsShareRow: true,
+        markdownRendered: true,
+      });
+      if (viewport.width > 1024) {
+        await page.getByLabel("Security boundaries").check();
+        await page.getByRole("button", { name: "Refine" }).click();
+        await expectVisible(page.getByText("Who should receive this first?"));
+      } else {
+        await page.getByRole("button", { name: "Validate" }).click();
+        for (let attempt = 0; attempt < 20 && await page.evaluate(() => document.body.dataset.createdTask) !== "FN-BROWSER"; attempt += 1) {
+          await page.waitForTimeout(50);
+        }
+        expect(await page.locator("body").getAttribute("data-created-task")).toBe("FN-BROWSER");
+      }
+      await page.close();
+    }
   }, 30_000);
 });

@@ -1186,7 +1186,7 @@ margins so paragraphs and lists do not create unintended gaps.
 .planning-summary {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-xl);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -1205,7 +1205,72 @@ margins so paragraphs and lists do not create unintended gaps.
 }
 
 .planning-summary-scroll {
-  gap: 20px;
+  gap: var(--space-xl);
+}
+
+/*
+FNXC:PlanningMode 2026-07-20-17:00:
+The review checkpoint renders the same canonical Markdown that Validate persists as
+plan.md. Keep the document and refinement controls inside the sole scroll owner while
+the sibling action row remains reachable at the bottom of bounded desktop and mobile panes.
+*/
+.planning-plan-scroll {
+  align-items: center;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--card) 45%, var(--surface));
+}
+
+.planning-plan-review {
+  gap: 0;
+}
+
+.planning-plan-document,
+.planning-plan-scroll > .planning-refine-focus {
+  width: min(100%, calc(var(--space-2xl) * 24));
+}
+
+.planning-plan-document {
+  padding: var(--space-2xl);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow:
+    0 0 0 var(--btn-border-width) color-mix(in srgb, var(--border) 75%, transparent),
+    var(--shadow-sm);
+}
+
+.planning-plan-markdown {
+  font-size: var(--font-size-sm);
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.planning-plan-markdown h1,
+.planning-plan-markdown h2,
+.planning-plan-markdown h3,
+.planning-plan-markdown h4 {
+  text-wrap: balance;
+}
+
+.planning-plan-markdown h1 {
+  font-size: var(--font-size-lg);
+}
+
+.planning-plan-markdown h2 {
+  margin-top: var(--space-xl);
+  font-size: var(--font-size-base);
+}
+
+.planning-plan-scroll > .planning-refine-focus {
+  padding: var(--space-xl);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.planning-plan-scroll > .planning-refine-focus legend {
+  padding-inline: var(--space-xs);
+  font-size: var(--font-size-sm);
+  text-wrap: balance;
 }
 
 .planning-summary-qa-disclosure {
@@ -1402,12 +1467,46 @@ margins so paragraphs and lists do not create unintended gaps.
   min-width: 0;
 }
 
+.planning-plan-actions {
+  justify-content: flex-end;
+  gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.planning-plan-actions .btn {
+  min-width: calc(var(--space-2xl) * 4);
+}
+
 .planning-summary-actions-right {
   display: flex;
   gap: var(--space-sm);
   align-items: center;
   min-width: 0;
   max-width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .planning-plan-document {
+    padding: var(--space-xl);
+  }
+
+  .planning-plan-scroll > .planning-refine-focus {
+    padding: var(--space-lg);
+  }
+
+  .planning-plan-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg) calc(var(--space-lg) + env(safe-area-inset-bottom));
+  }
+
+  .planning-plan-actions .btn {
+    width: 100%;
+    min-width: 0;
+    min-height: calc(var(--space-2xl) + var(--space-md));
+  }
 }
 
 /*

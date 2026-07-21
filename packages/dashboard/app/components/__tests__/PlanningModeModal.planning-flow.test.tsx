@@ -24,6 +24,7 @@ const base = { id: "session-1", title: "Secure plan", projectId: "project-1", up
 function renderSession(session: Record<string, unknown>) { return render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-1" resumeSessionId="session-1" />); }
 const summaryWithRefinements = {
   ...mockSummary,
+  description: "Build a **reviewed** recovery workflow with an operator [runbook](https://example.com/runbook).",
   proposedChanges: ["Change the authentication API", "Add durable session recovery"],
   acceptanceCriteria: ["Refresh preserves generation", "The plan is reviewable before questions"],
   suggestedRefinements: ["Security boundaries", "Rollout strategy", "Failure recovery", "Accessibility", "Observability"],
@@ -43,7 +44,11 @@ describe("PlanningModeModal sequential flow", () => {
   it("renders plan review after an answered turn without retired interview panes", async () => {
     mockFetchAiSession.mockResolvedValue({ ...base, status: "awaiting_input", currentQuestion: null, result: JSON.stringify(summaryWithRefinements), inputPayload: JSON.stringify({ initialPlan: "Secure accounts" }) });
     renderSession({});
-    expect(await screen.findByTestId("planning-plan-review")).toHaveTextContent("Build authentication system");
+    const planReview = await screen.findByTestId("planning-plan-review");
+    expect(planReview).toHaveTextContent("Build authentication system");
+    expect(screen.getByTestId("planning-plan-markdown").querySelector("h1")).toHaveTextContent("Build authentication system");
+    expect(screen.getByTestId("planning-plan-markdown").querySelector("strong")).toHaveTextContent("reviewed");
+    expect(screen.getByRole("link", { name: "runbook" })).toHaveAttribute("href", "https://example.com/runbook");
     expect(screen.getByText("What to change")).toBeInTheDocument();
     expect(screen.getByText("Change the authentication API")).toBeInTheDocument();
     expect(screen.getByText("Acceptance criteria")).toBeInTheDocument();
@@ -57,6 +62,10 @@ describe("PlanningModeModal sequential flow", () => {
     expect(screen.getByRole("button", { name: "Refine" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Validate" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument();
+    const scrollRegion = screen.getByTestId("planning-plan-scroll");
+    const actionBar = screen.getByTestId("planning-plan-actions");
+    expect(scrollRegion).not.toContainElement(actionBar);
+    expect(planReview).toContainElement(actionBar);
     expect(document.querySelector(".planning-running-plan")).toBeNull();
     expect(document.querySelector(".planning-answered-history")).toBeNull();
   });
@@ -104,6 +113,10 @@ describe("PlanningModeModal sequential flow", () => {
     expect(screen.getByRole("radio", { name: "Security boundaries" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Observability" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Write your own focus" })).toBeInTheDocument();
+    const actionBar = screen.getByTestId("planning-plan-actions");
+    expect(screen.getByTestId("planning-plan-scroll")).not.toContainElement(actionBar);
+    expect(actionBar).toContainElement(screen.getByRole("button", { name: "Refine" }));
+    expect(actionBar).toContainElement(screen.getByRole("button", { name: "Validate" }));
   });
   it("restores a validated unlinked session to create-only retry", async () => {
     mockFetchAiSession.mockResolvedValue({ ...base, status: "complete", currentQuestion: null, result: JSON.stringify(mockSummary), inputPayload: JSON.stringify({ validated: true }) });
