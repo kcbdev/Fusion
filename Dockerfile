@@ -50,7 +50,7 @@ COPY plugins/fusion-plugin-grok-runtime/package.json ./plugins/fusion-plugin-gro
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm build
+RUN FUSION_CLI_FULL_PACKAGE=1 pnpm build
 
 FROM node:22-slim AS runner
 LABEL org.opencontainers.image.source="https://github.com/kcbdev/fusion"
